@@ -231,6 +231,9 @@ export function LoginInput({
         className={cn(
           'absolute box-border appearance-none overflow-hidden whitespace-nowrap outline-none',
           'login-skin-input transition-none',
+          // placeholder 接 token(figma §4.1 定稿值);漏接时被 Tailwind preflight
+          // 默认 placeholder 灰顶替(2026-07-23 用户实测发现)。
+          'placeholder:text-[var(--login-control-placeholder)]',
           // hover 黑 5% 叠层(§2.2 照抄 347:2529;input 无法用伪元素,叠 background-image)
           'hover:enabled:[background-image:linear-gradient(rgba(0,0,0,0.05),rgba(0,0,0,0.05))]',
           'disabled:cursor-not-allowed',

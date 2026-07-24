@@ -11,7 +11,7 @@ import wordmarkPng2x from '@/assets/login/wordmark@2x.png';
 import sloganPng from '@/assets/login/slogan.png';
 import sloganPng2x from '@/assets/login/slogan@2x.png';
 
-import { desktopScale, sloganShiftX } from './loginScale';
+import { brandPlacement, sloganShiftX } from './loginScale';
 import { HERO, LOGIN_COLORS, SLOGAN, STAGE, WORDMARK } from './loginDesignTokens';
 import { useViewportSize } from './LoginStage';
 
@@ -39,7 +39,8 @@ import { useViewportSize } from './LoginStage';
 export function LoginBrandStage() {
   const handoff = useLoginHandoff();
   const { width, height } = useViewportSize();
-  const { scale } = desktopScale(width, height);
+  // 品牌块整体让位(scale+translateY,构图冻结;用户拍板 2026-07-23,design.md §11)
+  const { scale, translateY } = brandPlacement(width, height);
   const sloganShift = sloganShiftX(width, scale);
 
   // 品牌资产推进锚:立绘/字标/Slogan 三图全部 settle(load 或 error 均计,防死锁)。
@@ -111,7 +112,7 @@ export function LoginBrandStage() {
           style={{
             width: STAGE.width,
             height: STAGE.height,
-            transform: `translate(-50%, -50%) scale(${scale})`,
+            transform: `translate(-50%, calc(-50% + ${translateY}px)) scale(${scale})`,
             transformOrigin: '50% 50%',
           }}
         >
