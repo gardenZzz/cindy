@@ -302,11 +302,12 @@ describe('maker:event hot path ordering', () => {
     );
     const costRecordIndex = codexDoneSource.indexOf('void recordTurnSpend(cost);');
     const modelCostRecordIndex = codexDoneSource.indexOf('costUsdDelta: cost,');
-    const messageCostGuardIndex = codexDoneSource.indexOf('if (turnAssistantPersistId)');
+    const schedulerCostRecordIndex = codexDoneSource.indexOf('await recordSchedulerTurnCost({');
     expect(costRecordIndex).toBeGreaterThanOrEqual(0);
     expect(modelCostRecordIndex).toBeGreaterThanOrEqual(0);
     expect(modelCostRecordIndex).toBeGreaterThan(codexDoneSource.indexOf('const pricing = isSubscriptionValue && !isCodexXaiProviderRoute'));
-    expect(messageCostGuardIndex).toBeGreaterThan(costRecordIndex);
+    expect(schedulerCostRecordIndex).toBeGreaterThan(costRecordIndex);
+    expect(codexDoneSource).toContain('clientId: turnAssistantPersistId');
     expect(codexDoneSource).toContain('isEstimate: isSubscriptionValue');
     expect(codexDoneSource).toContain('if (!isRemoteCodexSession &&');
     expect(codexDoneSource).toContain("!model.startsWith(XAI_MODEL_PREFIX) &&");

@@ -5348,6 +5348,7 @@
       "tagManual": "Manual",
       "totalCost": "Cost {{cost}}",
       "totalValue": "Value {{value}}",
+      "costUnavailable": "Cost unavailable",
       "menu": {
         "rename": "Rename",
         "resume": "Resume",
@@ -5387,6 +5388,7 @@
       "sessionValue": "Session value {{value}}",
       "runCost": "Run cost {{cost}}",
       "runValue": "Estimated run value {{value}}",
+      "costUnavailable": "Cost unavailable",
       "legacyCostUnavailable": "Historical cost unavailable",
       "persistentSessionGroup": "Persistent session {{session}} · {{count}} runs",
       "expandRemainingRuns": "Show {{count}} more",
