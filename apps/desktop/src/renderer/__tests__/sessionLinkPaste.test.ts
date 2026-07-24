@@ -1,6 +1,8 @@
 import { describe, expect, it } from 'vitest';
+import type { Editor } from '@tiptap/core';
 
 import {
+  resolveSessionMessageReferencesForSend,
   sanitizeSessionChipTitle,
   pastedSessionChipAttrs,
   serializeSessionChipText,
@@ -71,7 +73,7 @@ describe('serializeSessionChipText', () => {
     ).toBe(SESSION_URL);
   });
 
-  it('keeps resolved message text display-only', () => {
+  it('keeps resolved message text out of the persisted deep-link wire', () => {
     expect(
       serializeSessionChipText({
         kind: 'session',
@@ -89,5 +91,46 @@ describe('summarizeSessionMessageChipLabel', () => {
     expect(summary).toHaveLength(SESSION_MESSAGE_CHIP_LABEL_MAX_CHARS);
     expect(summary.startsWith('first x')).toBe(true);
     expect(summary.endsWith('…')).toBe(true);
+  });
+});
+
+describe('resolveSessionMessageReferencesForSend', () => {
+  it('waits for the full message body and patches semantic attrs before submit serialization', async () => {
+    const chip = {
+      type: { name: 'mentionChip' },
+      attrs: pastedSessionChipAttrs({ href: MESSAGE_URL, label: null }),
+    };
+    const transaction = {
+      setMeta: () => transaction,
+      setNodeMarkup: (_pos: number, _type: unknown, attrs: unknown) => {
+        chip.attrs = attrs as typeof chip.attrs;
+        return transaction;
+      },
+    };
+    const editor = {
+      isDestroyed: false,
+      state: {
+        doc: {
+          descendants: (visit: (node: typeof chip, pos: number) => void) => visit(chip, 1),
+        },
+        tr: transaction,
+      },
+      view: { dispatch: () => undefined },
+    } as unknown as Editor;
+    let release!: (value: string | null) => void;
+    const resolved = new Promise<string | null>((resolve) => {
+      release = resolve;
+    });
+
+    const pending = resolveSessionMessageReferencesForSend(editor, async () => resolved);
+    expect(chip.attrs.agentText).toBeUndefined();
+    release('Full cross-device message body');
+    await pending;
+
+    expect(chip.attrs).toMatchObject({
+      label: 'Full cross-device message body',
+      titled: true,
+      agentText: 'Full cross-device message body',
+    });
   });
 });

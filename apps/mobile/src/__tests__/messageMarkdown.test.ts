@@ -906,6 +906,18 @@ describe('messageMarkdown', () => {
     ]);
   });
 
+  it('keeps session deep links literal inside inline and fenced code', () => {
+    const url = 'cindy://session/session-a?message=message-a';
+    expect(parseMobileMarkdownInlines(`\`${url}\` then ${url}`)).toEqual([
+      { type: 'code', text: url },
+      { type: 'text', text: ' then ' },
+      { type: 'link', text: url, url },
+    ]);
+    expect(parseMobileMarkdown(['```text', url, '```'].join('\n'))).toEqual([
+      { type: 'code', key: 'code:0:0', language: 'text', text: url },
+    ]);
+  });
+
   it('tokenizes bare and explicit project deep links as inline links (review P1)', () => {
     // 桌面端粘贴 chip 化后按 [标题](深链) 发送;不 tokenize 会把整段渲染成
     // 原始 markdown 源码。renderInline 对非 session 深链显示 label 纯文本。

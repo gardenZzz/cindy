@@ -30,6 +30,34 @@ describe('extractPlainText', () => {
     expect(extractPlainText(42)).toBe('');
     expect(extractPlainText(null)).toBe('');
   });
+
+  it('DB user envelope uses semantic projection for quote and message chips', () => {
+    const href = 'cindy://session/session-a?message=message-a';
+    const text = `> <!-- cindy-composer-quote -->\n> selected\n\ninspect ${href}`;
+    const content = {
+      text,
+      quotesEncoded: true,
+      agentReferences: [{
+        kind: 'message',
+        start: text.indexOf(href),
+        end: text.indexOf(href) + href.length,
+        href,
+        sessionId: 'session-a',
+        messageClientId: 'message-a',
+        text: 'Target message body',
+      }],
+    };
+
+    const projected = extractPlainText(JSON.stringify(content));
+    expect(projected).not.toContain('cindy-composer-quote');
+    expect(projected).not.toContain(href);
+    expect(projected).toContain('Target message body');
+  });
+
+  it('DB user envelope preserves a hand-written marker without quotesEncoded', () => {
+    const text = '> <!-- cindy-composer-quote -->\n> hand written';
+    expect(extractPlainText({ text, quotesEncoded: false })).toBe(text);
+  });
 });
 
 describe('buildHandoffText', () => {
@@ -83,6 +111,31 @@ describe('buildHandoffText', () => {
     );
     expect(text).not.toContain('UI_ACTION_TRIGGER');
     expect(text).toContain('正常消息');
+  });
+
+  it('handoff history never exposes product quote markers or private deep-link-only semantics', () => {
+    const href = 'cindy://session/session-a?message=message-a';
+    const text = `> <!-- cindy-composer-quote -->\n> selected\n\ninspect ${href}`;
+    const handoff = buildHandoffText([
+      msg('user', {
+        text,
+        quotesEncoded: true,
+        agentReferences: [{
+          kind: 'message',
+          start: text.indexOf(href),
+          end: text.indexOf(href) + href.length,
+          href,
+          sessionId: 'session-a',
+          messageClientId: 'message-a',
+          text: 'Target message body',
+        }],
+      }),
+      msg('assistant', 'done'),
+    ], opts);
+
+    expect(handoff).not.toContain('cindy-composer-quote');
+    expect(handoff).not.toContain(href);
+    expect(handoff).toContain('Target message body');
   });
 
   it('超长文本被逐条截断,总长受硬上限保护', () => {

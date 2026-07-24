@@ -25,6 +25,7 @@ import {
 import type { CSSProperties, ReactNode } from 'react';
 import { useLocation, useNavigate, useOutletContext, useParams } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
+import type { AgentInputReference } from '@cindy/maker-shared/agent-input-projection';
 import { useProportionalWidth } from '@/hooks/useProportionalWidth';
 import { setBlockExpanded } from '@/hooks/useExpandedBlockMemory';
 import {
@@ -1051,6 +1052,7 @@ export function CCAgentSessionView({
     mentions?: MentionedResource[];
     /** 正文前缀含「选中引用」编码块——补选目录后的派发同样要携带,否则该消息持久化后渲染不出胶囊。 */
     quotesEncoded?: boolean;
+    agentReferences?: AgentInputReference[];
     pastedTextRanges?: PastedTextRange[];
     slashCommandRanges?: SlashCommandRange[];
   } | null>(null);
@@ -1849,6 +1851,7 @@ export function CCAgentSessionView({
           files,
           mentions,
           quotesEncoded,
+          agentReferences,
           pastedTextRanges,
           slashCommandRanges,
         } = pendingSendRef.current;
@@ -1861,9 +1864,10 @@ export function CCAgentSessionView({
           newDir,
           files,
           mentions,
-          quotesEncoded || pastedTextRanges?.length || slashCommandRanges !== undefined
+          quotesEncoded || agentReferences?.length || pastedTextRanges?.length || slashCommandRanges !== undefined
             ? {
                 ...(quotesEncoded ? { quotesEncoded: true } : {}),
+                ...(agentReferences?.length ? { agentReferences } : {}),
                 ...(pastedTextRanges?.length ? { pastedTextRanges } : {}),
                 ...(slashCommandRanges !== undefined ? { slashCommandRanges } : {}),
               }
@@ -2100,6 +2104,7 @@ export function CCAgentSessionView({
       opts?: {
         deliveryMode?: MessageDeliveryMode;
         quotesEncoded?: boolean;
+        agentReferences?: AgentInputReference[];
         pastedTextRanges?: PastedTextRange[];
         slashCommandRanges?: SlashCommandRange[];
       },
@@ -2158,6 +2163,7 @@ export function CCAgentSessionView({
           files,
           mentions,
           ...(opts?.quotesEncoded ? { quotesEncoded: true } : {}),
+          ...(opts?.agentReferences?.length ? { agentReferences: opts.agentReferences } : {}),
           ...(opts?.pastedTextRanges?.length ? { pastedTextRanges: opts.pastedTextRanges } : {}),
           ...(opts?.slashCommandRanges !== undefined
             ? { slashCommandRanges: opts.slashCommandRanges }
@@ -2199,6 +2205,7 @@ export function CCAgentSessionView({
       return dispatch(message, model, effort, permissionMode, session.workingDir, files, mentions, {
         ...orcaLeadVendorOptions,
         ...(opts?.quotesEncoded ? { quotesEncoded: true } : {}),
+        ...(opts?.agentReferences?.length ? { agentReferences: opts.agentReferences } : {}),
         ...(opts?.pastedTextRanges?.length ? { pastedTextRanges: opts.pastedTextRanges } : {}),
         ...(opts?.slashCommandRanges !== undefined
           ? { slashCommandRanges: opts.slashCommandRanges }
@@ -2422,11 +2429,15 @@ export function CCAgentSessionView({
         pending.mentions,
         pending.vendorOptions ||
           pending.quotesEncoded ||
+          pending.agentReferences?.length ||
           pending.pastedTextRanges?.length ||
           pending.slashCommandRanges !== undefined
           ? {
               ...(pending.vendorOptions ? { vendorOptions: pending.vendorOptions } : {}),
               ...(pending.quotesEncoded ? { quotesEncoded: true } : {}),
+              ...(pending.agentReferences?.length
+                ? { agentReferences: pending.agentReferences }
+                : {}),
               ...(pending.pastedTextRanges?.length
                 ? { pastedTextRanges: pending.pastedTextRanges }
                 : {}),

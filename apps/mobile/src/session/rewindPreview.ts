@@ -1,4 +1,5 @@
 import type { ChatQuote } from '@cindy/maker-shared/chat-quotes';
+import type { ComposerDocument } from '@/session/composerDocument';
 
 export interface RewindPreviewPayload {
   canRewind: boolean;
@@ -16,6 +17,7 @@ export type RewindPreviewState =
       draftText: string;
       draftQuotes: readonly ChatQuote[];
       draftOrderedBody?: string;
+      draftDocument?: ComposerDocument;
     }
   | {
       kind: 'default';
@@ -23,6 +25,7 @@ export type RewindPreviewState =
       draftText: string;
       draftQuotes: readonly ChatQuote[];
       draftOrderedBody?: string;
+      draftDocument?: ComposerDocument;
       filesChanged: string[];
       insertions: number;
       deletions: number;
@@ -33,6 +36,7 @@ export type RewindPreviewState =
       draftText: string;
       draftQuotes: readonly ChatQuote[];
       draftOrderedBody?: string;
+      draftDocument?: ComposerDocument;
       note?: string;
     }
   | {
@@ -41,6 +45,7 @@ export type RewindPreviewState =
       draftText: string;
       draftQuotes: readonly ChatQuote[];
       draftOrderedBody?: string;
+      draftDocument?: ComposerDocument;
       errorText: string;
     };
 
@@ -52,8 +57,10 @@ export function buildRewindPreviewState(
   raw: unknown,
   draftQuotes: readonly ChatQuote[] = [],
   draftOrderedBody?: string,
+  draftDocument?: ComposerDocument,
 ): RewindPreviewState {
   const orderedDraft = draftOrderedBody ? { draftOrderedBody } : {};
+  const documentDraft = draftDocument ? { draftDocument } : {};
   const payload = normalizeRewindPreviewPayload(raw);
   if (!payload) {
     return {
@@ -62,6 +69,7 @@ export function buildRewindPreviewState(
       draftText,
       draftQuotes,
       ...orderedDraft,
+      ...documentDraft,
       errorText: '无法读取回退预览结果，请重新同步后再试。',
     };
   }
@@ -74,6 +82,7 @@ export function buildRewindPreviewState(
       draftText,
       draftQuotes,
       ...orderedDraft,
+      ...documentDraft,
       filesChanged: files,
       insertions: payload.insertions ?? 0,
       deletions: payload.deletions ?? 0,
@@ -81,7 +90,7 @@ export function buildRewindPreviewState(
   }
 
   if (payload.canRewind) {
-    return { kind: 'empty', clientId, draftText, draftQuotes, ...orderedDraft };
+    return { kind: 'empty', clientId, draftText, draftQuotes, ...orderedDraft, ...documentDraft };
   }
 
   return {
@@ -90,6 +99,7 @@ export function buildRewindPreviewState(
     draftText,
     draftQuotes,
     ...orderedDraft,
+    ...documentDraft,
     note: payload.error || '没有可回滚的文件，将只截断这条消息之后的对话历史。',
   };
 }

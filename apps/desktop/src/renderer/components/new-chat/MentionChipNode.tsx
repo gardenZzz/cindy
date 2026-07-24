@@ -30,6 +30,9 @@ export interface MentionChipAttrs {
   path: string;
   /** Resolved session/project labels serialize as explicit Markdown labels. */
   titled?: boolean;
+  /** Readable target message body for the agent-facing projection. */
+  agentText?: string;
+  agentTextTruncated?: boolean;
 }
 
 function displayLabel(attrs: MentionChipAttrs): string {
@@ -84,6 +87,8 @@ function MentionChipNodeView({ node, selected }: NodeViewProps) {
       data-label={attrs.label}
       data-path={attrs.path}
       data-titled={attrs.titled ? 'true' : undefined}
+      data-agent-text={attrs.agentText}
+      data-agent-text-truncated={attrs.agentTextTruncated ? 'true' : undefined}
       data-drag-handle=""
       draggable={true}
       contentEditable={false}
@@ -136,6 +141,20 @@ export const MentionChipNode = Node.create<Record<string, never>, Record<string,
         default: false,
         parseHTML: (element) => element.getAttribute('data-titled') === 'true',
         renderHTML: (attrs) => (attrs.titled ? { 'data-titled': 'true' } : {}),
+      },
+      agentText: {
+        default: undefined,
+        parseHTML: (element) => element.getAttribute('data-agent-text'),
+        renderHTML: (attrs) => (
+          typeof attrs.agentText === 'string' ? { 'data-agent-text': attrs.agentText } : {}
+        ),
+      },
+      agentTextTruncated: {
+        default: undefined,
+        parseHTML: (element) => element.getAttribute('data-agent-text-truncated') === 'true',
+        renderHTML: (attrs) => (
+          attrs.agentTextTruncated ? { 'data-agent-text-truncated': 'true' } : {}
+        ),
       },
     };
   },

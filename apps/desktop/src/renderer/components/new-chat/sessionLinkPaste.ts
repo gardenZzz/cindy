@@ -8,7 +8,8 @@
  *   - 整段会话裸 URL → 先显示短会话 ID 占位(titled=false),随后
  *     `resolveSessionChipTitles` 异步查到标题后原地 patch 节点 attrs;
  *   - 消息锚点始终忽略会话标题/markdown label,异步读取目标消息正文,
- *     发送时仍只序列化原始深链,不把正文复制进当前消息。
+ *     wire text 仍序列化原始深链，同时把有上限的完整正文放进结构化
+ *     agent reference metadata；compact label 只负责 UI 展示。
  *     (addToHistory:false,不污染撤销栈)——先占位再增量刷新,不产生
  *     空白帧 / 跳变(设计规范规则 7)。
  *
@@ -18,13 +19,14 @@
  * ASCII 方括号会破坏 markdown 链接语法,清洗为空格。
  */
 import type { Editor } from '@tiptap/core';
+import { boundAgentReferenceText } from '@cindy/maker-shared/agent-input-projection';
 
 import { parseSessionDeepLinkHref } from '@/lib/deepLink';
 import { shortSessionId } from '@/lib/sessionId';
 
 import type { MentionChipAttrs } from './MentionChipNode';
 
-/** Draft / DOM attrs only keep a compact message summary; full text lives in tooltip state. */
+/** Visible chip labels stay compact; the full bounded body is separate semantic metadata. */
 export const SESSION_MESSAGE_CHIP_LABEL_MAX_CHARS = 240;
 
 export function summarizeSessionMessageChipLabel(text: string): string {
@@ -101,6 +103,90 @@ export async function resolvePastedSessionTitle(sessionId: string): Promise<stri
   return remote?.title?.trim() || null;
 }
 
+const pendingMessageResolutions = new WeakMap<Editor, Map<string, Promise<void>>>();
+
+function patchResolvedMessageChip(editor: Editor, path: string, value: string): void {
+  const display = summarizeSessionMessageChipLabel(value);
+  if (!display || editor.isDestroyed) return;
+  const agentText = boundAgentReferenceText(value);
+  const tr = editor.state.tr;
+  let changed = false;
+  editor.state.doc.descendants((node, pos) => {
+    if (node.type.name !== 'mentionChip') return;
+    const attrs = node.attrs as MentionChipAttrs;
+    if (attrs.kind !== 'session' || attrs.path !== path) return;
+    tr.setNodeMarkup(pos, undefined, {
+      ...attrs,
+      label: display,
+      titled: true,
+      agentText: agentText.text,
+      ...(agentText.truncated ? { agentTextTruncated: true } : {}),
+    });
+    changed = true;
+  });
+  if (!changed) return;
+  tr.setMeta('addToHistory', false);
+  editor.view.dispatch(tr);
+}
+
+function resolveMessageChip(
+  editor: Editor,
+  path: string,
+  target: NonNullable<ReturnType<typeof parseSessionDeepLinkHref>>,
+  resolveMessageText: (sessionId: string, clientId: string) => Promise<string | null>,
+): Promise<void> {
+  let editorPending = pendingMessageResolutions.get(editor);
+  if (!editorPending) {
+    editorPending = new Map();
+    pendingMessageResolutions.set(editor, editorPending);
+  }
+  const existing = editorPending.get(path);
+  if (existing) return existing;
+
+  const pending = resolveMessageText(target.sessionId, target.messageClientId!)
+    .then((value) => {
+      if (value) patchResolvedMessageChip(editor, path, value);
+    })
+    .catch(() => {
+      // Keep the short-id placeholder when the target is unavailable.
+    })
+    .finally(() => {
+      editorPending?.delete(path);
+      if (editorPending?.size === 0) pendingMessageResolutions.delete(editor);
+    });
+  editorPending.set(path, pending);
+  return pending;
+}
+
+/**
+ * Resolve every message chip that still lacks a bounded semantic body.
+ * Sending awaits this so a fast submit cannot outrun cross-device hydration.
+ */
+export async function resolveSessionMessageReferencesForSend(
+  editor: Editor,
+  resolveMessageText: (
+    sessionId: string,
+    clientId: string,
+  ) => Promise<string | null> = resolvePastedSessionMessageText,
+): Promise<void> {
+  const pendingTargets = new Map<
+    string,
+    NonNullable<ReturnType<typeof parseSessionDeepLinkHref>>
+  >();
+  editor.state.doc.descendants((node) => {
+    if (node.type.name !== 'mentionChip') return;
+    const attrs = node.attrs as MentionChipAttrs;
+    if (attrs.kind !== 'session' || attrs.agentText) return;
+    const target = parseSessionDeepLinkHref(attrs.path);
+    if (target?.messageClientId) pendingTargets.set(attrs.path, target);
+  });
+  await Promise.all(
+    [...pendingTargets].map(([path, target]) => (
+      resolveMessageChip(editor, path, target, resolveMessageText)
+    )),
+  );
+}
+
 /**
  * 扫描编辑器里所有未解析标题(titled=false)的 session chip,异步查标题后
  * 原地 patch 节点 attrs。要点:
@@ -118,6 +204,7 @@ export function resolveSessionChipTitles(
     clientId: string,
   ) => Promise<string | null> = resolvePastedSessionMessageText,
 ): void {
+  void resolveSessionMessageReferencesForSend(editor, resolveMessageText);
   const pendingTargets = new Map<
     string,
     NonNullable<ReturnType<typeof parseSessionDeepLinkHref>>
@@ -127,19 +214,12 @@ export function resolveSessionChipTitles(
     const attrs = node.attrs as MentionChipAttrs;
     if (attrs.kind !== 'session' || attrs.titled) return;
     const target = parseSessionDeepLinkHref(attrs.path);
-    if (target) pendingTargets.set(attrs.path, target);
+    if (target && !target.messageClientId) pendingTargets.set(attrs.path, target);
   });
   for (const [path, target] of pendingTargets) {
-    const resolved = target.messageClientId
-      ? resolveMessageText(target.sessionId, target.messageClientId)
-      : resolveTitle(target.sessionId);
-    void resolved
+    void resolveTitle(target.sessionId)
       .then((value) => {
-        const display = target.messageClientId
-          ? summarizeSessionMessageChipLabel(value ?? '')
-          : value
-            ? sanitizeSessionChipTitle(value)
-            : '';
+        const display = value ? sanitizeSessionChipTitle(value) : '';
         if (!display || editor.isDestroyed) return;
         const tr = editor.state.tr;
         let changed = false;
@@ -148,7 +228,11 @@ export function resolveSessionChipTitles(
           const attrs = node.attrs as MentionChipAttrs;
           if (attrs.kind !== 'session' || attrs.titled) return;
           if (attrs.path !== path) return;
-          tr.setNodeMarkup(pos, undefined, { ...attrs, label: display, titled: true });
+          tr.setNodeMarkup(pos, undefined, {
+            ...attrs,
+            label: display,
+            titled: true,
+          });
           changed = true;
         });
         if (!changed) return;

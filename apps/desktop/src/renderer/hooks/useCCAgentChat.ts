@@ -48,6 +48,7 @@ import {
 import type { ChatDisplaySnapshot } from '@/components/chat/ChatDisplaySnapshotContext';
 import type { AttachedFile, MentionedResource } from '@/lib/fileTypes';
 import type { PastedTextRange, SlashCommandRange } from '@/lib/imageRef';
+import type { AgentInputReference } from '@cindy/maker-shared/agent-input-projection';
 import { createLogger } from '@/lib/logger';
 
 const log = createLogger('UseCCAgentChat');
@@ -115,6 +116,7 @@ interface UseCCAgentChatReturn {
     opts?: {
       vendorOptions?: Record<string, unknown>;
       quotesEncoded?: boolean;
+      agentReferences?: AgentInputReference[];
       pastedTextRanges?: PastedTextRange[];
       slashCommandRanges?: SlashCommandRange[];
     },
@@ -137,6 +139,7 @@ interface UseCCAgentChatReturn {
     opts?: {
       vendorOptions?: Record<string, unknown>;
       quotesEncoded?: boolean;
+      agentReferences?: AgentInputReference[];
       pastedTextRanges?: PastedTextRange[];
       slashCommandRanges?: SlashCommandRange[];
     },
@@ -368,6 +371,7 @@ export function useCCAgentChat(
       opts?: {
         vendorOptions?: Record<string, unknown>;
         quotesEncoded?: boolean;
+        agentReferences?: AgentInputReference[];
         pastedTextRanges?: PastedTextRange[];
         slashCommandRanges?: SlashCommandRange[];
       },
@@ -421,6 +425,7 @@ export function useCCAgentChat(
       opts?: {
         vendorOptions?: Record<string, unknown>;
         quotesEncoded?: boolean;
+        agentReferences?: AgentInputReference[];
         pastedTextRanges?: PastedTextRange[];
         slashCommandRanges?: SlashCommandRange[];
       },

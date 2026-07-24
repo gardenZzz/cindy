@@ -78,6 +78,51 @@ describe('composerDraftStore', () => {
     await clearComposerDrafts();
   });
 
+  it('persists the semantic document so atom order survives remounts', async () => {
+    const {
+      __testing,
+      flushComposerDraftWrites,
+      readComposerDocumentDraft,
+      readComposerDocumentDraftSync,
+      saveComposerDocumentDraft,
+    } = await import('@/session/composerDraftStore');
+    const document = {
+      version: 1 as const,
+      nodes: [
+        { type: 'quote' as const, quote: { text: 'selected' } },
+        { type: 'text' as const, text: 'reply' },
+      ],
+    };
+
+    saveComposerDocumentDraft('s1', document);
+    expect(readComposerDocumentDraftSync('s1')).toEqual(document);
+    await flushComposerDraftWrites('s1');
+    expect(JSON.parse(store.get(__testing.documentStorageKeyForSession('s1')) ?? '')).toEqual(document);
+    await expect(readComposerDocumentDraft('s1')).resolves.toEqual(document);
+  });
+
+  it('does not let a stale document read replace a newer semantic draft', async () => {
+    const asyncStorage = (await import('@react-native-async-storage/async-storage')).default;
+    const {
+      readComposerDocumentDraft,
+      readComposerDocumentDraftSync,
+      saveComposerDocumentDraft,
+    } = await import('@/session/composerDraftStore');
+    let resolveGetItem!: (value: string | null) => void;
+    vi.mocked(asyncStorage.getItem).mockImplementationOnce(() => new Promise((resolve) => {
+      resolveGetItem = resolve;
+    }));
+    const oldDocument = { version: 1, nodes: [{ type: 'text', text: 'old' }] };
+    const newDocument = { version: 1 as const, nodes: [{ type: 'text' as const, text: 'new' }] };
+
+    const readPromise = readComposerDocumentDraft('s1');
+    saveComposerDocumentDraft('s1', newDocument);
+    resolveGetItem(JSON.stringify(oldDocument));
+
+    await expect(readPromise).resolves.toEqual(newDocument);
+    expect(readComposerDocumentDraftSync('s1')).toEqual(newDocument);
+  });
+
   it('clears empty drafts and ignores missing session ids', async () => {
     const {
       consumeComposerDraft,
@@ -114,6 +159,28 @@ describe('composerDraftStore', () => {
 
     expect(vi.mocked(asyncStorage.setItem)).toHaveBeenCalledTimes(1);
     expect(store.get(__testing.storageKeyForSession('s1'))).toBe('rewrite');
+  });
+
+  it('debounces semantic document writes while keeping memory current', async () => {
+    vi.useFakeTimers();
+    const asyncStorage = (await import('@react-native-async-storage/async-storage')).default;
+    const {
+      __testing,
+      readComposerDocumentDraftSync,
+      saveComposerDocumentDraft,
+    } = await import('@/session/composerDraftStore');
+    const first = { version: 1 as const, nodes: [{ type: 'text' as const, text: 'r' }] };
+    const latest = { version: 1 as const, nodes: [{ type: 'text' as const, text: 'rewrite' }] };
+
+    saveComposerDocumentDraft('s1', first);
+    saveComposerDocumentDraft('s1', latest);
+
+    expect(readComposerDocumentDraftSync('s1')).toEqual(latest);
+    expect(vi.mocked(asyncStorage.setItem)).not.toHaveBeenCalled();
+    await vi.advanceTimersByTimeAsync(__testing.persistDebounceMs);
+
+    expect(vi.mocked(asyncStorage.setItem)).toHaveBeenCalledTimes(1);
+    expect(JSON.parse(store.get(__testing.documentStorageKeyForSession('s1')) ?? '')).toEqual(latest);
   });
 
   it('does not let a stale async read overwrite a newer memory draft', async () => {

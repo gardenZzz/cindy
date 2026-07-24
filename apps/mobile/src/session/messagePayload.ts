@@ -45,6 +45,7 @@ export {
   buildFilePayload,
   buildMermaidPayload,
   buildPayloadToolDiff,
+  buildTextPayload,
   extractPayloadToolResultMedia,
   formatDiffPayload,
   formatDiffPayloadRows,

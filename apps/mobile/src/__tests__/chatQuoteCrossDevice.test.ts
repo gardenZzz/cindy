@@ -21,22 +21,25 @@ describe('mobile cross-device quote wiring', () => {
   it('propagates quote metadata through direct and attachment-outbox sends', () => {
     const source = readFileSync(resolve(process.cwd(), 'app/sessions/[sessionId].tsx'), 'utf8');
 
-    expect(source).toContain('quotesEncoded: quotesAtSend.length > 0');
+    expect(source).toContain('quotesEncoded: quotesEncodedAtSend');
+    expect(source).toContain('pastedTextRanges: pastedTextRangesAtSend');
+    expect(source).toContain('slashCommandRanges: slashCommandRangesAtSend');
     expect(source).toContain('quotesEncoded: item.quotesEncoded');
     expect(source).toContain('restoreOutboxItemsToDraft([item])');
-    expect(source).toContain('setOrderedQuoteDraft(draftSessionId, recovery.quotes');
+    expect(source).toContain('saveComposerDocumentDraft(\n        draftSessionId,\n        recovery.document,');
     expect(source).toContain('createQueueEditTextState(item)');
-    expect(source).toContain('resolveQueueEditTextSubmission(queueEditAtSendStart.textState, visibleDraft)');
+    expect(source).toContain('resolveQueueEditTextSubmission(queueEditAtSendStart.textState, documentAtSend)');
+    expect(source).toContain('applyComposerDocument(textState.document, { persist: false })');
     expect(source).toContain('quotesEncoded: queueEditPreservesEncodedQuotes');
   });
 
   it('restores structured quote drafts for mobile fork and rewind actions', () => {
     const source = readFileSync(resolve(process.cwd(), 'app/sessions/[sessionId].tsx'), 'utf8');
 
-    expect(source).toContain('saveComposerDraft(forked.id, draft?.text);');
-    expect(source).toContain('setOrderedQuoteDraft(forked.id, draft.quotes');
-    expect(source).toContain('setOrderedQuoteDraft(sessionId, state.draftQuotes');
-    expect(source).toContain('resolveOrderedQuoteDraft(sessionId, visibleDraft, quotesAtSend)');
+    expect(source).toContain('const forkDocument = draft?.document ?? migrateLegacyComposerDraft(');
+    expect(source).toContain('saveComposerDocumentDraft(forked.id, forkDocument);');
+    expect(source).toContain('applyComposerDocument(state.draftDocument ?? migrateLegacyComposerDraft(');
+    expect(source).toContain('serializeComposerDocument(documentAtSend)');
   });
 
   it('strips private markers from queued and outbox raw-text bubbles', () => {

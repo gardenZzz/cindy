@@ -55,6 +55,14 @@
       "./plugins/with-wechat-opensdk-modulemap",
       "./plugins/with-android-splash-no-icon",
       [
+        "expo-build-properties",
+        {
+          "ios": {
+            "buildReactNativeFromSource": true
+          }
+        }
+      ],
+      [
         "expo-splash-screen",
         {
           "backgroundColor": "#DF0C27",

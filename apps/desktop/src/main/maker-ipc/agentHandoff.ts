@@ -11,6 +11,8 @@
  *    pending 状态可从 DB 确定性重建(无额外状态列)。
  */
 
+import { projectPersistedAgentFacingUserText } from '@cindy/maker-shared/agent-input-projection';
+
 /** DB 层引擎标识(sessions.agent_kind / messages.agent_kind 的值域)。 */
 export type DbAgentKind = 'cc' | 'codex';
 
@@ -135,7 +137,9 @@ export function extractPlainText(content: unknown): string {
   }
   if (content && typeof content === 'object') {
     const c = content as Record<string, unknown>;
-    if (typeof c.text === 'string') return c.text;
+    if (typeof c.text === 'string') {
+      return projectPersistedAgentFacingUserText(c) ?? c.text;
+    }
     if (typeof c.message === 'string') return c.message;
   }
   return '';

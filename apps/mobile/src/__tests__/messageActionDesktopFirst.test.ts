@@ -10,19 +10,18 @@ describe('mobile message actions desktop-first surface', () => {
     expect(source).toContain('const MESSAGE_CONTROL_HIT_SLOP = { bottom: 10, left: 10, right: 10, top: 10 };');
     expect(source).toContain('buildMessageActionBarPresentation');
     expect(sharedSource).toContain("input.canCopy ? 'copy' : null");
-    expect(sharedSource).toContain("input.canFork ? 'fork' : null");
-    expect(sharedSource).toContain("input.canDelete ? 'delete' : null");
+    expect(sharedSource).toContain("input.hasMoreActions ? 'more' : null");
     expect(sharedSource).toContain("input.hasTime ? 'time' : null");
     expect(sharedSource).toContain("input.hasTurnCost ? 'cost' : null");
-    expect(sharedSource).toContain("input.hasTime ? 'time' : null");
-    expect(sharedSource).toContain("input.canRewind ? 'rewind' : null");
+    expect(source).toContain('<MessageActionSheet');
+    expect(source).toContain('buildMobileMessageMenu({');
     expect(source).toContain("&& (item.message.kind === 'user' || item.message.kind === 'assistant')");
     expect(source).toContain('&& actions.isSessionStreaming !== true');
     expect(source).toContain('hitSlop={MESSAGE_CONTROL_HIT_SLOP}');
     expect(source).toContain('buttonSize={actionBar.buttonSize}');
     expect(source).toContain('iconSize={actionBar.iconSize}');
-    expect(source).toContain("return id === 'copy' || id === 'delete' || id === 'rewind' || id === 'fork';");
-    expect(source).toContain("if (id === 'delete') return 'message.deleteButton';");
+    expect(source).toContain("return id === 'copy';");
+    expect(source).toContain('testID="message.moreButton"');
     expect(source).toContain('{ height: buttonSize, width: buttonSize }');
     expect(source).toContain('height: 24');
     expect(source).toContain('width: 24');
@@ -45,6 +44,23 @@ describe('mobile message actions desktop-first surface', () => {
     expect(source).toContain("? { ...item, message: { ...item.message, kind: 'system' as const } }");
     expect(source).toContain(
       '<MessageBubble item={hookSourceUserItem ?? systemCardUserItem ?? item} actions={actions} />',
+    );
+  });
+
+  it('only exposes the More menu on a completed turn boundary', () => {
+    const source = readFileSync(resolve(process.cwd(), 'src/session/MessageRenderer.tsx'), 'utf8');
+
+    expect(source).toContain(
+      'const canCopyLink = !!(showCompletedActionBar && clientId && actions.onCopyMessageLink);',
+    );
+    expect(source).toContain(
+      'const canAddToChat = !!(showCompletedActionBar && clientId && actions.onAddMessageToComposer);',
+    );
+    expect(source).not.toContain(
+      'const canCopyLink = !!(canUseCompletedActions && clientId && actions.onCopyMessageLink);',
+    );
+    expect(source).not.toContain(
+      'const canAddToChat = !!(canUseCompletedActions && clientId && actions.onAddMessageToComposer);',
     );
   });
 

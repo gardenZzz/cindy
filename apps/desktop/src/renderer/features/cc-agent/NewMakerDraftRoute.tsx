@@ -115,6 +115,7 @@ import {
 import type { Effort, PermissionMode } from '@/lib/userPreferences.types';
 import type { AttachedFile, MentionedResource } from '@/lib/fileTypes';
 import type { PastedTextRange, SlashCommandRange } from '@/lib/imageRef';
+import type { AgentInputReference } from '@cindy/maker-shared/agent-input-projection';
 import { toast } from '@/lib/toast';
 import { cn } from '@/lib/utils';
 import { InvisibleWindowDragStrip } from '@/components/layout/windowDrag';
@@ -1156,6 +1157,7 @@ export function NewMakerDraftRoute() {
       opts?: {
         providerId?: string | null;
         quotesEncoded?: boolean;
+        agentReferences?: AgentInputReference[];
         pastedTextRanges?: PastedTextRange[];
         slashCommandRanges?: SlashCommandRange[];
         onAccepted?: () => void;
@@ -1306,6 +1308,7 @@ export function NewMakerDraftRoute() {
               files: rehydratedFiles,
               mentions,
               ...(opts?.quotesEncoded ? { quotesEncoded: true } : {}),
+              ...(opts?.agentReferences?.length ? { agentReferences: opts.agentReferences } : {}),
               ...(opts?.pastedTextRanges?.length
                 ? { pastedTextRanges: opts.pastedTextRanges }
                 : {}),
@@ -1521,6 +1524,9 @@ export function NewMakerDraftRoute() {
                   mentions,
                   {
                     ...(opts?.quotesEncoded ? { quotesEncoded: true } : {}),
+                    ...(opts?.agentReferences?.length
+                      ? { agentReferences: opts.agentReferences }
+                      : {}),
                     ...(opts?.pastedTextRanges?.length
                       ? { pastedTextRanges: opts.pastedTextRanges }
                       : {}),
@@ -1621,6 +1627,7 @@ export function NewMakerDraftRoute() {
             files: rehydratedFiles,
             mentions,
             ...(opts?.quotesEncoded ? { quotesEncoded: true } : {}),
+            ...(opts?.agentReferences?.length ? { agentReferences: opts.agentReferences } : {}),
             ...(opts?.pastedTextRanges?.length ? { pastedTextRanges: opts.pastedTextRanges } : {}),
             ...(opts?.slashCommandRanges !== undefined
               ? { slashCommandRanges: opts.slashCommandRanges }

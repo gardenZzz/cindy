@@ -45,6 +45,7 @@ import type {
   MessageAutomationOrigin,
 } from '@/lib/ccAgent.types';
 import type { PastedTextRange, SlashCommandRange } from '@/lib/imageRef';
+import type { AgentInputReference } from '../../../shared/agentInputQueue';
 import type { PersistedSessionReferenceMetadata } from '../../../shared/sessionReferenceMetadata';
 import { buildRewindDraftAttachments } from '@/lib/rewindDraftAttachments';
 import {
@@ -128,6 +129,8 @@ interface UserMessageProps {
   sessionReferences?: PersistedSessionReferenceMetadata[];
   /** chat-text-quote:content 开头 blockquote 为引用功能产出(胶囊化渲染判据)。 */
   quotesEncoded?: boolean;
+  /** Hidden semantic reference ranges; preserved only while visible text is unchanged. */
+  agentReferences?: AgentInputReference[];
   pastedTextRanges?: PastedTextRange[];
   slashCommandRanges?: SlashCommandRange[];
   images?: UserImageItem[];
@@ -656,6 +659,7 @@ export function UserMessage({
   content,
   sessionReferences,
   quotesEncoded,
+  agentReferences,
   pastedTextRanges,
   slashCommandRanges,
   images,
@@ -1179,6 +1183,7 @@ export function UserMessage({
                 files={files}
                 workingDir={workingDir}
                 quotesEncoded={quotesEncoded}
+                agentReferences={agentReferences}
                 pastedTextRanges={pastedTextRanges}
                 slashCommandRanges={slashCommandRanges}
                 sessionRunning={sessionRunning}
@@ -1194,6 +1199,9 @@ export function UserMessage({
                           submission.text,
                           {
                             ...(submission.quotesEncoded ? { quotesEncoded: true } : {}),
+                            ...(submission.agentReferences?.length
+                              ? { agentReferences: submission.agentReferences }
+                              : {}),
                             ...(submission.pastedTextRanges?.length
                               ? { pastedTextRanges: submission.pastedTextRanges }
                               : {}),

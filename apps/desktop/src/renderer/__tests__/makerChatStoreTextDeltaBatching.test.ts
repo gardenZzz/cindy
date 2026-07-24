@@ -56,7 +56,30 @@ vi.mock('@/lib/logger', () => ({
 }));
 
 vi.mock('@/lib/imageRef', () => ({
-  parseUserContent: vi.fn((c: string) => ({ text: c, images: [], files: [] })),
+  parseUserContent: vi.fn((content: unknown) => {
+    let value = content;
+    if (typeof content === 'string' && content.startsWith('{')) {
+      try {
+        value = JSON.parse(content);
+      } catch {
+        // Plain user text that merely starts with "{" remains plain text.
+      }
+    }
+    if (value && typeof value === 'object' && !Array.isArray(value)) {
+      const record = value as Record<string, unknown>;
+      if (typeof record.text === 'string') {
+        return {
+          text: record.text,
+          images: Array.isArray(record.images) ? record.images : [],
+          files: Array.isArray(record.files) ? record.files : [],
+          ...(Array.isArray(record.agentReferences)
+            ? { agentReferences: record.agentReferences }
+            : {}),
+        };
+      }
+    }
+    return { text: String(content), images: [], files: [] };
+  }),
   stringifyUserContent: vi.fn((text: string, images = [], files = []) =>
     JSON.stringify({ text, images, files }),
   ),
@@ -902,7 +925,14 @@ describe('makerChatStore text delta batching', () => {
     );
   });
 
-  it('preserves paste and slash metadata when retrying remote authentication', async () => {
+  it('preserves semantic references, paste and slash metadata when retrying remote authentication', async () => {
+    const agentReferences = [{
+      kind: 'session' as const,
+      start: 0,
+      end: 5,
+      href: 'cindy://session/source',
+      sessionId: 'source',
+    }];
     vi.mocked(sessionService.get).mockResolvedValue({
       agentKind: 'codex',
       remoteHostId: 'remote-host',
@@ -929,6 +959,7 @@ describe('makerChatStore text delta batching', () => {
       undefined,
       undefined,
       {
+        agentReferences,
         pastedTextRanges: [{ start: 0, end: 5, display: 'retry' }],
         slashCommandRanges: [],
       },
@@ -948,10 +979,43 @@ describe('makerChatStore text delta batching', () => {
     await flushPromises();
 
     const retried = input.enqueue.mock.calls[0]?.[1];
+    expect(retried?.chatMessage.agentReferences).toEqual(agentReferences);
     expect(retried?.chatMessage.pastedTextRanges).toEqual([
       { start: 0, end: 5, display: 'retry' },
     ]);
     expect(retried?.chatMessage.slashCommandRanges).toEqual([]);
+  });
+
+  it('restores semantic reference metadata from persisted user messages', () => {
+    const agentReferences = [{
+      kind: 'message' as const,
+      start: 4,
+      end: 44,
+      href: 'cindy://session/source?message=message-1',
+      sessionId: 'source',
+      messageClientId: 'message-1',
+      text: 'referenced body',
+    }];
+    const [mapped] = makerChatStore.__mapServerMessagesForTest([
+      {
+        id: 'row-user-reference',
+        clientId: 'user-reference',
+        sessionId: SESSION_ID,
+        role: 'user',
+        content: JSON.stringify({
+          text: 'see cindy://session/source?message=message-1',
+          agentReferences,
+        }),
+        toolUseId: null,
+        agentMeta: null,
+        createdAt: '2026-07-24T00:00:00.000Z',
+      } satisfies Message,
+    ]);
+
+    expect(mapped).toEqual(expect.objectContaining({
+      content: 'see cindy://session/source?message=message-1',
+      agentReferences,
+    }));
   });
 
   it('uses the main projection to preserve a pre-dispatch message in the queue', async () => {

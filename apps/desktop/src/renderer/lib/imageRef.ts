@@ -18,6 +18,10 @@ import {
   parsePersistedSessionReferenceMetadata,
   type PersistedSessionReferenceMetadata,
 } from '../../shared/sessionReferenceMetadata';
+import {
+  readAgentInputReferences,
+  type AgentInputReference,
+} from '@cindy/maker-shared/agent-input-projection';
 
 export interface ImageRef {
   /** Custom-protocol URL: 'xdt-image://{sessionId}/{filename}'. */
@@ -89,6 +93,8 @@ export interface UserMessageContent {
    * the history renderer must not fall back to its legacy line-start heuristic.
    */
   slashCommandRanges?: SlashCommandRange[];
+  /** Hidden semantic projection metadata; message bubbles still render `text`. */
+  agentReferences?: AgentInputReference[];
 }
 
 /**
@@ -159,6 +165,7 @@ export function parseUserContent(content: unknown): UserMessageContent {
       const sessionReferences = parsePersistedSessionReferenceMetadata(obj.sessionReferences);
       const pastedTextRanges = coercePastedTextRanges(obj.pastedTextRanges, obj.text);
       const slashCommandRanges = coerceSlashCommandRanges(obj.slashCommandRanges, obj.text);
+      const agentReferences = readAgentInputReferences(obj.agentReferences, obj.text);
       return {
         text: obj.text,
         images,
@@ -167,6 +174,7 @@ export function parseUserContent(content: unknown): UserMessageContent {
         ...(obj.quotesEncoded === true ? { quotesEncoded: true } : {}),
         ...(pastedTextRanges.length > 0 ? { pastedTextRanges } : {}),
         ...(slashCommandRanges !== null ? { slashCommandRanges } : {}),
+        ...(agentReferences.length > 0 ? { agentReferences } : {}),
       };
     }
     // Truly unknown object shape — preserve old defensive stringify behaviour.
@@ -325,6 +333,7 @@ export function stringifyUserContent(
   pastedTextRangesOrSessionReferences: PastedTextRange[] | PersistedSessionReferenceMetadata[] = [],
   slashCommandRanges?: SlashCommandRange[],
   sessionReferences: PersistedSessionReferenceMetadata[] = [],
+  agentReferences: AgentInputReference[] = [],
 ): string {
   const fifthArgIsSessionReferences =
     pastedTextRangesOrSessionReferences.length > 0 &&
@@ -347,5 +356,6 @@ export function stringifyUserContent(
     ...(resolvedSessionReferences.length > 0
       ? { sessionReferences: resolvedSessionReferences }
       : {}),
+    ...(agentReferences.length > 0 ? { agentReferences } : {}),
   });
 }

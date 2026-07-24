@@ -3369,6 +3369,7 @@ const MessageItem = memo(function MessageItem({
           content={message.content}
           sessionReferences={message.sessionReferences}
           quotesEncoded={message.quotesEncoded}
+          agentReferences={message.agentReferences}
           pastedTextRanges={message.pastedTextRanges}
           slashCommandRanges={message.slashCommandRanges}
           images={message.images}

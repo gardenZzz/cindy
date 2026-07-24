@@ -2164,14 +2164,19 @@ export function useRemoteSessions(): RemoteSession[] {
   return useSyncExternalStore(remoteSessionStore.subscribe, remoteSessionStore.getSessions);
 }
 
+/** Subscribe to one session's message mirror without triggering cache hydration side effects. */
+export function useRemoteSessionMessages(sessionId: string): RemoteMessage[] {
+  return useSyncExternalStore(
+    remoteSessionStore.subscribe,
+    () => remoteSessionStore.getMessages(sessionId),
+  );
+}
+
 // 本地「最近消息」缓存持久化的去抖间隔:消息流式更新很频繁,只在静默一小段后落盘一次。
 const SESSION_MESSAGE_CACHE_PERSIST_DEBOUNCE_MS = 600;
 
 export function useSessionMessages(sessionId: string, deviceId?: string): RemoteMessage[] {
-  const messages = useSyncExternalStore(
-    remoteSessionStore.subscribe,
-    () => remoteSessionStore.getMessages(sessionId),
-  );
+  const messages = useRemoteSessionMessages(sessionId);
   useSessionMessageCacheSync(sessionId, deviceId, messages);
   return messages;
 }

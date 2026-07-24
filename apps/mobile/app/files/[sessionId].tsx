@@ -417,7 +417,11 @@ export default function RemoteFileBrowserScreen() {
         queueComposerAttachment(sessionId, attachment);
         router.navigate({
           pathname: '/sessions/[sessionId]',
-          params: { sessionId, deviceId },
+          params: {
+            sessionId,
+            deviceId,
+            focusComposerRequestKey: String(Date.now()),
+          },
         });
         return;
       }
@@ -425,7 +429,12 @@ export default function RemoteFileBrowserScreen() {
     const merged = mergePathIntoComposerDraft(sessionId, item.relPath, item.kind);
     router.navigate({
       pathname: '/sessions/[sessionId]',
-      params: { sessionId, deviceId, draft: merged },
+      params: {
+        sessionId,
+        deviceId,
+        draft: merged,
+        focusComposerRequestKey: String(Date.now()),
+      },
     });
   }, [absolutePathOf, deviceId, router, sessionId]);
 
@@ -518,7 +527,11 @@ export default function RemoteFileBrowserScreen() {
       setLightbox(null);
       router.navigate({
         pathname: '/sessions/[sessionId]',
-        params: { sessionId, deviceId },
+        params: {
+          sessionId,
+          deviceId,
+          focusComposerRequestKey: String(Date.now()),
+        },
       });
     },
   }), [deviceId, router, sessionId]);
@@ -535,7 +548,12 @@ export default function RemoteFileBrowserScreen() {
     const merged = mergePathIntoComposerDraft(sessionId, relPath, 'dir');
     router.navigate({
       pathname: '/sessions/[sessionId]',
-      params: { sessionId, deviceId, draft: merged },
+      params: {
+        sessionId,
+        deviceId,
+        draft: merged,
+        focusComposerRequestKey: String(Date.now()),
+      },
     });
   }, [deviceId, relPath, router, sessionId]);
 

@@ -25,6 +25,14 @@ import {
   parseMobilePersistedSessionReferenceMetadata,
   type MobilePersistedSessionReferenceMetadata,
 } from '@/session/sessionReferences';
+import {
+  readSentPastedTextRanges,
+  readSentSlashCommandRanges,
+} from '@/session/sentMessageAtoms';
+import {
+  readAgentInputReferences,
+  type AgentInputReference,
+} from '@cindy/maker-shared/agent-input-projection';
 
 export type NormalizedRemoteMessageKind =
   | 'user'
@@ -44,6 +52,12 @@ export interface NormalizedRemoteMessage {
   body: string;
   /** user 消息正文包含产品引用编码；驱动跨端 marker/legacy 解析。 */
   quotesEncoded?: boolean;
+  /** user 长文本粘贴原子的精确 wire ranges；正文仍保留完整 Agent payload。 */
+  pastedTextRanges?: Array<{ start: number; end: number; display: string }>;
+  /** user Composer 确认过的 Slash ranges；空数组用于关闭历史启发式。 */
+  slashCommandRanges?: Array<{ start: number; end: number }>;
+  /** user Composer 的结构化语义引用；用于 fork / rewind 恢复同款 chip。 */
+  agentReferences?: AgentInputReference[];
   secondaryBody?: string;
   systemCardData?: Record<string, unknown>;
   systemCardType?: MobileSystemCardType;
@@ -332,6 +346,15 @@ export function normalizeRemoteMessages(messages: readonly RemoteMessage[]): Nor
       attachments: userContent?.attachments,
       ...(userContent?.quotesEncoded === true ? { quotesEncoded: true } : {}),
       sessionReferences: userContent?.sessionReferences,
+      ...(userContent?.pastedTextRanges?.length
+        ? { pastedTextRanges: userContent.pastedTextRanges }
+        : {}),
+      ...(userContent?.slashCommandRanges !== undefined
+        ? { slashCommandRanges: userContent.slashCommandRanges }
+        : {}),
+      ...(userContent?.agentReferences?.length
+        ? { agentReferences: userContent.agentReferences }
+        : {}),
       align: message.role === 'user' && hookSource === undefined ? 'user' : 'agent',
       createdAt: message.createdAt,
       isStreaming: readMessageStreaming(message) || undefined,
@@ -372,6 +395,9 @@ function parseUserContent(content: unknown): {
   attachments: NormalizedAttachment[];
   quotesEncoded: boolean;
   sessionReferences: MobilePersistedSessionReferenceMetadata[];
+  pastedTextRanges?: Array<{ start: number; end: number; display: string }>;
+  slashCommandRanges?: Array<{ start: number; end: number }>;
+  agentReferences?: AgentInputReference[];
 } {
   const parsed = parseMaybeJsonObject(content);
   if (!parsed) {
@@ -383,9 +409,15 @@ function parseUserContent(content: unknown): {
     };
   }
   const text = typeof parsed.text === 'string' ? parsed.text : contentToPreview(content);
+  const pastedTextRanges = readSentPastedTextRanges(parsed.pastedTextRanges, text);
+  const slashCommandRanges = readSentSlashCommandRanges(parsed.slashCommandRanges, text);
+  const agentReferences = readAgentInputReferences(parsed.agentReferences, text);
   return {
     text,
     quotesEncoded: parsed.quotesEncoded === true,
+    ...(pastedTextRanges ? { pastedTextRanges } : {}),
+    ...(slashCommandRanges !== undefined ? { slashCommandRanges } : {}),
+    ...(agentReferences.length > 0 ? { agentReferences } : {}),
     attachments: [
       ...readImageAttachments(parsed.images),
       ...readFileAttachments(parsed.files),
