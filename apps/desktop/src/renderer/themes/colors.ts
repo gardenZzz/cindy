@@ -1539,17 +1539,17 @@ registerColor('ask-badge-bg', {
   dark: 'var(--surface-chip)',
 }, 'Light Gray');
 registerColor('ask-badge-text', {
-  light: 'var(--text-primary-on-dark)',
-  dark: 'var(--text-primary-on-dark)',
-}, 'Near Black');
-registerColor('ask-skip-bg', {
+  light: 'var(--text-primary)',
+  dark: 'var(--text-primary)',
+}, '主文字 — chip/角标文字随主题(勿接 on-dark 槽位,light 会白字压浅底)');
+registerColor('ask-header-chip-bg', {
   light: 'var(--surface-chip)',
   dark: 'var(--surface-chip)',
-}, 'Light Gray');
-registerColor('ask-skip-text', {
-  light: 'var(--text-primary-on-dark)',
-  dark: 'var(--text-primary-on-dark)',
-}, 'Near Black');
+}, 'header chip 底 — 落在卡底上,与选项行上的序号角标(ask-badge-bg)分家,皮肤可各自调档');
+registerColor('ask-option-list-bg', {
+  light: 'var(--surface-elevated)',
+  dark: 'var(--surface-elevated)',
+}, '选项列表面 — 原透明露卡底在 dark 下成一坨深色(2026-07-23 用户实测),给独立列表面');
 registerColor('ask-input-bg', {
   light: 'var(--surface-elevated)',
   dark: 'var(--surface-elevated)',
@@ -1608,16 +1608,6 @@ registerColor('ask-checkbox-checked-icon', {
   light: 'var(--surface-on-card)',
   dark: 'var(--surface-on-card)',
 }, 'Pure White — checkmark');
-
-// Next button — inverted/反色: Light mode = dark bg + white text
-registerColor('ask-next-bg', {
-  light: 'var(--accent-cta-bg)',
-  dark: 'var(--accent-cta-bg)',
-}, 'Near Black');
-registerColor('ask-next-text', {
-  light: 'var(--surface-on-card)',
-  dark: 'var(--surface-on-card)',
-}, 'Pure White');
 
 // Plan Viewer / Plan Action cards (FP-5/FP-6) — Light
 registerColor('plan-card-bg', {
@@ -1747,9 +1737,9 @@ registerColor('plan-bubble-badge-bg', {
   dark: 'var(--surface-chip)',
 }, 'Light Gray chip');
 registerColor('plan-bubble-badge-text', {
-  light: 'var(--text-primary-on-dark)',
-  dark: 'var(--text-primary-on-dark)',
-}, 'Near Black');
+  light: 'var(--text-primary)',
+  dark: 'var(--text-primary)',
+}, '主文字 — badge 文字随主题(勿接 on-dark 槽位)');
 registerColor('plan-bubble-body-text', {
   light: 'var(--text-primary-body-strong)',
   dark: 'var(--text-primary-body-strong)',
