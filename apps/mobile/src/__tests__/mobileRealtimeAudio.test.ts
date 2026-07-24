@@ -42,6 +42,13 @@ describe('mobileRealtimeAudio', () => {
       .rejects.toThrow('realtime microphone PCM capture');
   });
 
+  it('hides voice UI on Android without changing the supported iOS surface', async () => {
+    const { shouldShowMobileVoiceUi } = await import('@/session/mobileRealtimeAudio');
+
+    expect(shouldShowMobileVoiceUi('android')).toBe(false);
+    expect(shouldShowMobileVoiceUi('ios')).toBe(true);
+  });
+
   it('keeps the iOS native realtime recorder wired for interruption cleanup', () => {
     const source = readFileSync(
       resolve(process.cwd(), 'modules/xdt-mobile-realtime-audio/ios/XdtMobileRealtimeAudioModule.swift'),
