@@ -1802,8 +1802,9 @@ function getAgentIslandSoundEventForTransition(
     const prev = previousById.get(session.sessionId);
     if (prev?.phase !== 'error') return 'error';
   }
+  // Visual smart suppression controls unread/reveal state, not configured completion sounds.
   for (const session of next.sessions) {
-    if (!session.attention || session.phase !== 'completed') continue;
+    if (session.phase !== 'completed') continue;
     if (mutedCompletionSessionIds.has(session.sessionId)) continue;
     const prev = previousById.get(session.sessionId);
     if (prev?.phase !== 'completed') return 'complete';
