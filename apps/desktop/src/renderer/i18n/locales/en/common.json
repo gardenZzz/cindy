@@ -3959,7 +3959,8 @@
       "provider": {
         "claude": "Claude Code",
         "codex": "Codex",
-        "workflow": "Workflow"
+        "workflow": "Workflow",
+        "shell": "Background command"
       },
       "status": {
         "running": "Running",
@@ -3967,6 +3968,7 @@
         "failed": "Failed",
         "stopped": "Stopped"
       },
+      "stop": "Stop this task",
       "tokens": "{{count}} tokens",
       "toolUses_one": "{{count}} tool use",
       "toolUses_other": "{{count}} tool uses",
@@ -4050,8 +4052,11 @@
     },
     "backgroundActivity": {
       "status": "Background subtasks running, still consuming model usage…",
+      "bashStatus_one": "{{count}} background task running…",
+      "bashStatus_other": "{{count}} background tasks running…",
       "stopAll": "Stop all",
       "stopAllTitle": "Shut down this session's background process and stop all background subtasks (the session stays usable)",
+      "stopBashTitle": "Stop the background tasks still running in this session (keeps the session process)",
       "stopping": "Stopping…"
     },
     "interruptedBanner": {

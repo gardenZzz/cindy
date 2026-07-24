@@ -3958,7 +3958,8 @@
       "provider": {
         "claude": "Claude Code",
         "codex": "Codex",
-        "workflow": "Workflow"
+        "workflow": "Workflow",
+        "shell": "后台命令"
       },
       "status": {
         "running": "运行中",
@@ -3966,6 +3967,7 @@
         "failed": "失败",
         "stopped": "已停止"
       },
+      "stop": "停止该任务",
       "tokens": "{{count}} tokens",
       "toolUses_one": "{{count}} 次工具调用",
       "toolUses_other": "{{count}} 次工具调用",
@@ -4049,8 +4051,11 @@
     },
     "backgroundActivity": {
       "status": "后台子任务运行中，模型用量仍在消耗…",
+      "bashStatus_one": "后台任务运行中（{{count}} 个）…",
+      "bashStatus_other": "后台任务运行中（{{count}} 个）…",
       "stopAll": "全部停止",
       "stopAllTitle": "关闭该会话的后台进程，停止全部后台子任务（会话可继续使用）",
+      "stopBashTitle": "停止该会话仍在运行的后台任务（不关闭会话进程）",
       "stopping": "停止中…"
     },
     "interruptedBanner": {

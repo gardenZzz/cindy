@@ -7324,6 +7324,42 @@ export const makerChatStore = {
   setAskUserDraft,
   setTitleUpdateCallback,
   syncActiveTurnsFromMain,
+  /**
+   * 后台任务快照水合:把 main 的 listSessionBackgroundTasks 结果补进 taskUpdates。
+   * 只补「store 里完全没见过」的任务 —— 事件流是唯一实时源,快照可能落后于刚到
+   * 的终态事件,已存在的条目(无论何状态)绝不用快照的 running 覆盖复活。
+   * 消费方:useBackgroundBashTasks(会话挂载 / reloadMessages 清空 taskUpdates 后)。
+   */
+  seedBackgroundTaskSnapshots: (
+    sessionId: string,
+    tasks: Array<{ taskId: string; taskType?: string; toolUseId?: string; title?: string }>,
+  ): void => {
+    if (!tasks.length) return;
+    setState(sessionId, (s) => {
+      let next = s;
+      for (const t of tasks) {
+        if (!t || typeof t.taskId !== 'string' || !t.taskId) continue;
+        const seen =
+          next.taskUpdates?.has(t.taskId) ||
+          (t.toolUseId ? next.taskUpdates?.has(t.toolUseId) : false);
+        if (seen) continue;
+        next = handleStreamEvent(next, {
+          sessionId,
+          type: 'agent_task_update',
+          source: 'claude-code',
+          data: {
+            provider: 'claude-code',
+            taskId: t.taskId,
+            status: 'running',
+            ...(t.taskType ? { taskType: t.taskType } : {}),
+            ...(t.toolUseId ? { parentToolUseId: t.toolUseId } : {}),
+            ...(t.title ? { title: t.title } : {}),
+          },
+        } as CCAgentStreamEvent);
+      }
+      return next;
+    });
+  },
   /** Exposed for tests only. */
   __teardownGlobalListeners,
   /** Exposed for tests only: 把 stream event 打进真实 store(驱动 getRunningSnapshot 等)。 */
