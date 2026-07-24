@@ -2815,11 +2815,10 @@
   "legacyMigration": {
     "title": "Migrate data from the previous version",
     "description": "Data from a previous version was found on this device. Your chat history and media files will be migrated to the new data location. If the old app is still running, please quit it completely first, and keep {{appName}} open during the migration. Note: authorized third-party keys and credentials cannot be migrated — after the migration you will need to re-authorize or re-enter them in Settings.",
-    "confirm": "OK",
+    "confirm": "Continue",
     "migrating": "Migrating data, please wait…",
     "failedTitle": "Migration incomplete",
-    "failedDescription": "The data migration could not be completed this time. You can keep using {{appName}} — it will retry automatically the next time you sign in.",
-    "continue": "Continue"
+    "failedDescription": "The data migration could not be completed this time. You can keep using {{appName}} — it will retry automatically the next time you sign in."
   },
   "splash": {
     "tips": {
