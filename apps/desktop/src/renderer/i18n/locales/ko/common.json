@@ -6917,7 +6917,7 @@
     "sidebar": "크레딧 및 요금제",
     "settings": {
       "title": "사용량 및 결제",
-      "subtitle": "현재 구독을 확인하거나 서버에서 제공하는 구독 상품과 크레딧을 구매할 수 있습니다.",
+      "subtitle": "사용 가능한 크레딧과 현재 요금제를 확인하거나 필요할 때 크레딧을 구매할 수 있습니다.",
       "loading": "구독 상태를 불러오는 중…",
       "subscriptionCard": {
         "title": "현재 요금제",
@@ -6926,13 +6926,18 @@
         "unnamedPlan": "구독 요금제",
         "unavailable": "구독 상태를 불러올 수 없습니다. 새로고침 후 다시 시도하세요.",
         "action": "요금제 보기",
-        "changeAction": "플랜 변경"
+        "changeAction": "요금제 변경",
+        "purchaseAnother": "새 구독 구매",
+        "priceInterval": "{{price}} / {{interval}}",
+        "includedCredits": "매{{interval}} {{amount}} 크레딧 포함",
+        "renewsAt": "다음 갱신일 {{date}}",
+        "endsAt": "{{date}}에 요금제 종료"
       },
       "topupCard": {
         "title": "크레딧",
         "description": "사용량 기반 모델과 기능을 위한 크레딧을 구매합니다.",
         "cardTitle": "필요할 때 크레딧 구매",
-        "cardDescription": "구매 가능한 크레딧 상품은 서버에서 설정됩니다.",
+        "cardDescription": "필요할 때 사용 가능한 크레딧을 추가할 수 있습니다. 최종 금액은 결제 페이지에서 확인하세요.",
         "action": "크레딧 구매"
       }
     },
@@ -7037,6 +7042,31 @@
     "confirm": {
       "channel": "{{provider}}로 결제"
     },
+    "confirmActions": {
+      "back": "내용 다시 보기",
+      "purchaseTopupTitle": "크레딧을 구매할까요?",
+      "purchaseTopupDescription": "{{product}} · {{amount}} · {{provider}}로 결제",
+      "purchaseTopup": "크레딧 구매",
+      "purchaseSubscriptionTitle": "{{plan}}을(를) 구매할까요?",
+      "purchaseSubscriptionDescription": "{{price}} / {{interval}} · {{provider}}로 결제",
+      "purchaseSubscription": "요금제 구매",
+      "quotePlanChangeTitle": "요금제 변경 견적을 받을까요?",
+      "quotePlanChangeDescription": "{{current}} → {{target}}. 다음 단계에서 실제 차액과 적용 시점을 확인할 수 있습니다.",
+      "quotePlanChange": "변경 견적 받기",
+      "confirmPlanChangeTitle": "요금제 변경을 확정할까요?",
+      "confirmPlanChangeDescription": "{{target}} · {{impact}}",
+      "confirmPlanChange": "요금제 변경 확정",
+      "cancelPaymentTitle": "이 결제를 취소할까요?",
+      "cancelPaymentDescription": "{{amount}} 결제가 취소됩니다. 계속하려면 새 결제를 만들어야 합니다.",
+      "cancelPayment": "이 결제 취소",
+      "cancelPlanChangeTitle": "요금제 변경을 취소할까요?",
+      "cancelPlanChangeDescription": "대상 요금제: {{target}}. 취소해도 현재 요금제는 유지됩니다.",
+      "cancelPlanChange": "요금제 변경 취소",
+      "retryPaymentTitle": "이 결제를 다시 시도할까요?",
+      "retryPaymentDescription": "{{amount}} 결제를 기존 멱등 요청으로 다시 시도합니다.",
+      "retryUnknownPaymentDescription": "이 결제를 기존 멱등 요청으로 다시 시도합니다.",
+      "retryPayment": "이 결제 다시 시도"
+    },
     "paymentActions": {
       "QR_CODE": "QR 코드 결제",
       "REDIRECT": "결제 페이지 열기"
@@ -7095,6 +7125,7 @@
       "targetTitle": "구독 플랜 변경",
       "targetDescription": "플랜 변경은 현재 결제 수단을 그대로 사용합니다. 최종 금액과 적용 시점은 다음 단계에서 확인합니다.",
       "targetDescriptionWithCurrent": "현재 플랜: {{plan}}. 변경은 현재 결제 수단을 그대로 사용하며, 최종 금액과 적용 시점은 다음 단계에서 확인합니다.",
+      "serverDecisionHint": "금액과 적용 시점은 다음 견적에서 확정됩니다",
       "upgradeBadge": "업그레이드",
       "downgradeBadge": "다운그레이드",
       "emptyTitle": "전환 가능한 플랜이 없습니다",

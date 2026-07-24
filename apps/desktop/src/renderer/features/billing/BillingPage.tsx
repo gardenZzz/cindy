@@ -12,6 +12,7 @@ import {
 } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 
+import { useConfirmDialog } from '@/components/ui/confirm-dialog-provider';
 import { Spinner } from '@/components/ui/spinner';
 import { useAuth } from '@/contexts/AuthContext';
 import { cn } from '@/lib/utils';
@@ -21,6 +22,7 @@ import type {
   BillingCatalogOffer,
   BillingCatalogProduct,
   BillingPendingPlanChange,
+  BillingPaymentOrder,
   BillingPurchaseOption,
   BillingSubscription,
 } from '../../../shared/billing';
@@ -55,6 +57,15 @@ type SupportedPurchaseOption = BillingPurchaseOption & {
 
 type PurchaseKind = BillingCatalogProduct['kind'];
 type BalanceIssue = 'NOT_PROVISIONED' | 'NOT_SUPPORTED' | 'UNAVAILABLE' | null;
+type CurrentPlanFacts = {
+  name: string;
+  status: BillingSubscription['status'];
+  price: string | null;
+  interval: BillingCatalogOffer['interval'];
+  includedCredits: string | null;
+  periodEndAt: string | null;
+  cancelAtPeriodEnd: boolean;
+};
 
 const SUPPORTED_BILLING_PROVIDERS = new Set<SupportedBillingProvider>(['alipay', 'stripe']);
 const SUPPORTED_PAYMENT_ACTIONS = new Set<BillingPurchaseOption['paymentAction']>([
@@ -65,15 +76,6 @@ const SUPPORTED_SUBSCRIPTION_CAPABILITIES = new Set<BillingPurchaseOption['capab
   'MERCHANT_INITIATED_MANDATE',
   'PROVIDER_MANAGED_SUBSCRIPTION',
 ]);
-
-const SUBSCRIPTION_PURCHASE_BLOCKING_STATUSES: BillingSubscription['status'][] = [
-  'INCOMPLETE',
-  'TRIALING',
-  'ACTIVE',
-  'PAST_DUE',
-  'UNPAID',
-  'PAUSED',
-];
 
 function decimalParts(value: string): { value: bigint; scale: number } | null {
   const match = /^(0|[1-9]\d{0,14})(?:\.(\d{1,9}))?$/.exec(value.trim());
@@ -126,6 +128,17 @@ function formatLedgerTimestamp(value: string): string {
   }
 }
 
+function formatBillingDate(value: string | null): string | null {
+  if (!value) return null;
+  const timestamp = Date.parse(value);
+  if (!Number.isFinite(timestamp)) return null;
+  try {
+    return new Intl.DateTimeFormat(undefined, { dateStyle: 'medium' }).format(timestamp);
+  } catch {
+    return null;
+  }
+}
+
 function isCustomTopup(offer: BillingCatalogOffer): boolean {
   return offer.amount === null && offer.minAmount !== null && offer.maxAmount !== null;
 }
@@ -174,6 +187,7 @@ export function BillingPage() {
 
 export function BillingSettingsSection({ accountId }: { accountId: string | null }) {
   const { t } = useTranslation();
+  const { confirm } = useConfirmDialog();
   const [catalog, setCatalog] = useState<BillingCatalog | null>(null);
   const [catalogError, setCatalogError] = useState(false);
   const [loadingCatalog, setLoadingCatalog] = useState(true);
@@ -295,12 +309,7 @@ export function BillingSettingsSection({ accountId }: { accountId: string | null
             : [],
         })),
       )
-      .filter(({ purchaseOptions }) => purchaseOptions.length > 0)
-      .sort((left, right) => {
-        const productOrder = left.product.sortOrder - right.product.sortOrder;
-        if (productOrder !== 0) return productOrder;
-        return left.offer.code.localeCompare(right.offer.code);
-      });
+      .filter(({ purchaseOptions }) => purchaseOptions.length > 0);
   }, [catalog]);
 
   const subscriptionOffers = useMemo(
@@ -362,17 +371,10 @@ export function BillingSettingsSection({ accountId }: { accountId: string | null
     return null;
   }, [customAmount, selected, t]);
 
-  const subscriptionPurchaseBlocked =
-    currentSubscription !== null &&
-    SUBSCRIPTION_PURCHASE_BLOCKING_STATUSES.includes(currentSubscription.status);
   const canCheckout =
     !checkout.recovering &&
     selected !== null &&
     selectedOption !== null &&
-    !(
-      selected.product.kind === 'SUBSCRIPTION' &&
-      (loadingSubscription || subscriptionError || subscriptionPurchaseBlocked)
-    ) &&
     (!isCustomTopup(selected.offer) || (customAmount.length > 0 && amountError === null));
 
   const planNameOf = useCallback(
@@ -390,36 +392,31 @@ export function BillingSettingsSection({ accountId }: { accountId: string | null
 
   const currentPlan = currentSubscription?.effectivePlan ?? null;
   const pendingPlanChange = currentSubscription?.pendingPlanChange ?? null;
-  const planChangeable =
-    currentSubscription?.status === 'ACTIVE' &&
-    !currentSubscription.cancelAtPeriodEnd &&
-    currentPlan?.offer.interval === 'MONTH';
+  const currentPlanFacts = useMemo(() => {
+    if (!currentSubscription) return null;
+    const plan = currentSubscription.effectivePlan;
+    return {
+      name: planNameOf(plan?.product.code) ?? t('billing.settings.subscriptionCard.unnamedPlan'),
+      status: currentSubscription.status,
+      price: plan ? formatMoney(plan.terms.amount, plan.terms.currency) : null,
+      interval: plan?.offer.interval ?? null,
+      includedCredits: plan?.terms.creditAmount ?? null,
+      periodEndAt: formatBillingDate(currentSubscription.currentPeriodEndAt),
+      cancelAtPeriodEnd: currentSubscription.cancelAtPeriodEnd,
+    };
+  }, [currentSubscription, planNameOf, t]);
 
-  // UI candidates only. The quote is the authority on whether a target is
-  // actually reachable; this filter just avoids offering obviously invalid
-  // targets (other interval, same level, or another provider's offers).
+  // The server quote owns reachability and direction. The renderer only removes
+  // the exact current offer because selecting it cannot express a change.
   const planChangeCandidates = useMemo<PlanChangeCandidate[]>(() => {
-    if (!planChangeable || !currentPlan) return [];
-    const currentProvider = currentSubscription?.provider ?? null;
+    if (!currentSubscription) return [];
     return subscriptionOffers
-      .filter(
-        ({ product, offer }) =>
-          offer.interval === currentPlan.offer.interval &&
-          offer.code !== currentPlan.offer.code &&
-          product.level !== null &&
-          product.level !== currentPlan.product.level &&
-          (currentProvider === null ||
-            offer.purchaseOptions.some((option) => option.provider === currentProvider)),
-      )
+      .filter(({ offer }) => offer.code !== currentPlan?.offer.code)
       .map(({ product, offer }) => ({
         product,
         offer,
-        direction:
-          (product.level ?? 0) > currentPlan.product.level
-            ? ('UPGRADE' as const)
-            : ('DOWNGRADE' as const),
       }));
-  }, [subscriptionOffers, planChangeable, currentPlan, currentSubscription?.provider]);
+  }, [currentPlan?.offer.code, currentSubscription, subscriptionOffers]);
 
   const openPurchaseDialog = (kind: PurchaseKind) => {
     resetSelection();
@@ -437,8 +434,41 @@ export function BillingSettingsSection({ accountId }: { accountId: string | null
     setCustomAmount('');
   };
 
-  const submit = () => {
+  const submit = async () => {
     if (!selected || !selectedOption || !canCheckout) return;
+    const amount = formatMoney(
+      isCustomTopup(selected.offer) ? customAmount.trim() : selected.offer.amount!,
+      selected.offer.currency,
+    );
+    const accepted =
+      selected.product.kind === 'CREDIT_TOPUP'
+        ? await confirm({
+            title: t('billing.confirmActions.purchaseTopupTitle'),
+            description: t('billing.confirmActions.purchaseTopupDescription', {
+              product: selected.product.name,
+              amount,
+              provider: providerLabel(selectedOption.provider, t),
+            }),
+            confirmText: t('billing.confirmActions.purchaseTopup'),
+            cancelText: t('billing.confirmActions.back'),
+            autoFocusConfirm: true,
+          })
+        : await confirm({
+            title: t('billing.confirmActions.purchaseSubscriptionTitle', {
+              plan: selected.product.name,
+            }),
+            description: t('billing.confirmActions.purchaseSubscriptionDescription', {
+              price: amount,
+              interval: selected.offer.interval
+                ? t(`billing.intervals.${selected.offer.interval}`)
+                : '',
+              provider: providerLabel(selectedOption.provider, t),
+            }),
+            confirmText: t('billing.confirmActions.purchaseSubscription'),
+            cancelText: t('billing.confirmActions.back'),
+            autoFocusConfirm: true,
+          });
+    if (!accepted) return;
     setSubscriptionDialogOpen(false);
     setTopupDialogOpen(false);
     if (selected.product.kind === 'CREDIT_TOPUP') {
@@ -473,8 +503,19 @@ export function BillingSettingsSection({ accountId }: { accountId: string | null
     }
   };
 
-  const selectPlanChangeTarget = (candidate: PlanChangeCandidate) => {
+  const selectPlanChangeTarget = async (candidate: PlanChangeCandidate) => {
     if (candidate.offer.interval === null) return;
+    const accepted = await confirm({
+      title: t('billing.confirmActions.quotePlanChangeTitle'),
+      description: t('billing.confirmActions.quotePlanChangeDescription', {
+        current: currentPlanName ?? t('billing.settings.subscriptionCard.unnamedPlan'),
+        target: candidate.product.name,
+      }),
+      confirmText: t('billing.confirmActions.quotePlanChange'),
+      cancelText: t('billing.confirmActions.back'),
+      autoFocusConfirm: true,
+    });
+    if (!accepted) return;
     setPlanChangeTargetOpen(false);
     void planChange.startQuote(candidate.offer.code, {
       product: { code: candidate.product.code, level: candidate.product.level ?? 0 },
@@ -485,6 +526,20 @@ export function BillingSettingsSection({ accountId }: { accountId: string | null
         creditAmount: candidate.offer.creditAmount ?? '0',
       },
     });
+  };
+
+  const cancelPendingPlanChange = async (pending: BillingPendingPlanChange) => {
+    const accepted = await confirm({
+      title: t('billing.confirmActions.cancelPlanChangeTitle'),
+      description: t('billing.confirmActions.cancelPlanChangeDescription', {
+        target:
+          planNameOf(pending.targetPlan?.product.code) ??
+          t('billing.settings.subscriptionCard.unnamedPlan'),
+      }),
+      confirmText: t('billing.confirmActions.cancelPlanChange'),
+      cancelText: t('billing.confirmActions.back'),
+    });
+    if (accepted) await planChange.cancelChange(pending.planChangeId);
   };
 
   const closePlanChangeStatus = () => {
@@ -523,7 +578,18 @@ export function BillingSettingsSection({ accountId }: { accountId: string | null
           </button>
         </div>
 
-        <div className="mt-8 overflow-hidden rounded-xl border border-[var(--border-default)] bg-[var(--surface-elevated)]">
+        {!checkout.recovering &&
+          (checkout.recoverables.topups.length > 0 ||
+            checkout.recoverables.subscription !== null) && (
+            <BillingRecoveryNotice
+              topups={checkout.recoverables.topups}
+              subscription={checkout.recoverables.subscription}
+              onResumeTopup={checkout.resumeTopup}
+              onResumeSubscription={checkout.resumeSubscription}
+            />
+          )}
+
+        <div className="mt-5 overflow-hidden rounded-xl border border-[var(--border-default)] bg-[var(--surface-elevated)]">
           <BillingUsageSummary
             usage={creditUsage}
             balance={balance}
@@ -531,89 +597,26 @@ export function BillingSettingsSection({ accountId }: { accountId: string | null
             loading={loadingBalance}
             detailsUnavailable={usageDetailsUnavailable}
           />
-          <div className="border-t border-[var(--border-default)]">
-            <BillingSummaryRow
-              label={t('billing.settings.subscriptionCard.title')}
-              title={
-                currentPlanName ??
-                (currentSubscription
-                  ? t('billing.settings.subscriptionCard.unnamedPlan')
-                  : t('billing.settings.subscriptionCard.emptyTitle'))
-              }
-              description={
-                loadingSubscription
-                  ? t('billing.settings.loading')
-                  : subscriptionError
-                    ? t('billing.settings.subscriptionCard.unavailable')
-                    : currentSubscription
-                      ? t(`billing.subscriptionStatus.${currentSubscription.status}`)
-                      : t('billing.settings.subscriptionCard.empty')
-              }
-              loading={loadingSubscription}
-              disabled={loadingSubscription || subscriptionError}
-              actionLabel={
-                planChangeable
-                  ? t('billing.settings.subscriptionCard.changeAction')
-                  : t('billing.settings.subscriptionCard.action')
-              }
-              onAction={() => {
-                if (planChangeable) openPlanChange();
-                else openPurchaseDialog('SUBSCRIPTION');
-              }}
-            />
-            {pendingPlanChange && (
-              <PendingPlanChangeBanner
-                pending={pendingPlanChange}
-                targetName={planNameOf(pendingPlanChange.targetPlan?.product.code)}
-                onResume={() => planChange.resumePending(pendingPlanChange)}
-                onUndo={() => void planChange.cancelChange(pendingPlanChange.planChangeId)}
-              />
-            )}
-          </div>
-          <div className="border-t border-[var(--border-default)]">
-            <BillingSummaryRow
-              label={t('billing.settings.topupCard.title')}
-              title={t('billing.settings.topupCard.cardTitle')}
-              description={t('billing.settings.topupCard.cardDescription')}
-              actionLabel={t('billing.settings.topupCard.action')}
-              onAction={() => openPurchaseDialog('CREDIT_TOPUP')}
-            />
-          </div>
         </div>
 
-        {!checkout.recovering &&
-          (checkout.recoverables.topups.length > 0 ||
-            checkout.recoverables.subscription !== null) && (
-            <div className="mt-5 rounded-xl border border-[var(--border-default)] px-5 py-4">
-              <p className="text-sm font-medium">{t('billing.recovery.title')}</p>
-              <p className="mt-1 text-12 text-[var(--text-secondary)]">
-                {t('billing.recovery.description')}
-              </p>
-              <div className="mt-3 flex flex-wrap gap-2">
-                {checkout.recoverables.topups.map((order) => (
-                  <button
-                    key={order.orderId}
-                    type="button"
-                    onClick={() => checkout.resumeTopup(order)}
-                    className="rounded-full border border-[var(--border-default)] px-3 py-1.5 text-12 font-medium hover:bg-[var(--surface-hover-soft)]"
-                  >
-                    {t('billing.recovery.continueTopup', {
-                      amount: formatMoney(order.amount, order.currency),
-                    })}
-                  </button>
-                ))}
-                {checkout.recoverables.subscription && (
-                  <button
-                    type="button"
-                    onClick={() => checkout.resumeSubscription(checkout.recoverables.subscription!)}
-                    className="rounded-full border border-[var(--border-default)] px-3 py-1.5 text-12 font-medium hover:bg-[var(--surface-hover-soft)]"
-                  >
-                    {t('billing.recovery.continueSubscription')}
-                  </button>
-                )}
-              </div>
-            </div>
-          )}
+        <div className="mt-4 grid grid-cols-1 gap-4 lg:grid-cols-2">
+          <SubscriptionOverviewCard
+            facts={currentPlanFacts}
+            loading={loadingSubscription}
+            error={subscriptionError}
+            pendingPlanChange={pendingPlanChange}
+            pendingTargetName={planNameOf(pendingPlanChange?.targetPlan?.product.code)}
+            onChangePlan={openPlanChange}
+            onPurchase={() => openPurchaseDialog('SUBSCRIPTION')}
+            onResumePending={() => {
+              if (pendingPlanChange) planChange.resumePending(pendingPlanChange);
+            }}
+            onCancelPending={() => {
+              if (pendingPlanChange) void cancelPendingPlanChange(pendingPlanChange);
+            }}
+          />
+          <TopupOverviewCard onPurchase={() => openPurchaseDialog('CREDIT_TOPUP')} />
+        </div>
       </div>
 
       <BillingOfferDialog
@@ -626,14 +629,13 @@ export function BillingSettingsSection({ accountId }: { accountId: string | null
         selectedPurchaseOptionId={selectedPurchaseOptionId}
         customAmount={customAmount}
         amountError={amountError}
-        subscriptionPurchaseBlocked={subscriptionPurchaseBlocked}
         canCheckout={canCheckout}
         onClose={closeSubscriptionDialog}
         onRetry={() => void loadBillingState()}
         onSelectOffer={selectOffer}
         onSelectPurchaseOption={setSelectedPurchaseOptionId}
         onCustomAmountChange={setCustomAmount}
-        onSubmit={submit}
+        onSubmit={() => void submit()}
       />
 
       <BillingOfferDialog
@@ -646,14 +648,13 @@ export function BillingSettingsSection({ accountId }: { accountId: string | null
         selectedPurchaseOptionId={selectedPurchaseOptionId}
         customAmount={customAmount}
         amountError={amountError}
-        subscriptionPurchaseBlocked={false}
         canCheckout={canCheckout}
         onClose={closeTopupDialog}
         onRetry={() => void loadBillingState()}
         onSelectOffer={selectOffer}
         onSelectPurchaseOption={setSelectedPurchaseOptionId}
         onCustomAmountChange={setCustomAmount}
-        onSubmit={submit}
+        onSubmit={() => void submit()}
       />
 
       <BillingCheckoutDialog
@@ -684,6 +685,196 @@ export function BillingSettingsSection({ accountId }: { accountId: string | null
         }}
       />
     </>
+  );
+}
+
+function BillingRecoveryNotice({
+  topups,
+  subscription,
+  onResumeTopup,
+  onResumeSubscription,
+}: {
+  topups: BillingPaymentOrder[];
+  subscription: BillingSubscription | null;
+  onResumeTopup: (order: BillingPaymentOrder) => void;
+  onResumeSubscription: (subscription: BillingSubscription) => void;
+}) {
+  const { t } = useTranslation();
+  return (
+    <section className="mt-5 rounded-xl border border-[var(--border-default)] bg-[var(--surface-elevated)] px-5 py-4">
+      <p className="text-sm font-medium text-[var(--text-primary)]">
+        {t('billing.recovery.title')}
+      </p>
+      <p className="mt-1 text-12 text-[var(--text-secondary)]">
+        {t('billing.recovery.description')}
+      </p>
+      <div className="mt-3 flex flex-wrap gap-2">
+        {topups.map((order) => (
+          <button
+            key={order.orderId}
+            type="button"
+            onClick={() => onResumeTopup(order)}
+            className="select-none rounded-full border border-[var(--border-default)] px-3 py-1.5 text-12 font-medium transition-colors hover:bg-[var(--surface-hover-soft)]"
+          >
+            {t('billing.recovery.continueTopup', {
+              amount: formatMoney(order.amount, order.currency),
+            })}
+          </button>
+        ))}
+        {subscription && (
+          <button
+            type="button"
+            onClick={() => onResumeSubscription(subscription)}
+            className="select-none rounded-full border border-[var(--border-default)] px-3 py-1.5 text-12 font-medium transition-colors hover:bg-[var(--surface-hover-soft)]"
+          >
+            {t('billing.recovery.continueSubscription')}
+          </button>
+        )}
+      </div>
+    </section>
+  );
+}
+
+function SubscriptionOverviewCard({
+  facts,
+  loading,
+  error,
+  pendingPlanChange,
+  pendingTargetName,
+  onChangePlan,
+  onPurchase,
+  onResumePending,
+  onCancelPending,
+}: {
+  facts: CurrentPlanFacts | null;
+  loading: boolean;
+  error: boolean;
+  pendingPlanChange: BillingPendingPlanChange | null;
+  pendingTargetName: string | null;
+  onChangePlan: () => void;
+  onPurchase: () => void;
+  onResumePending: () => void;
+  onCancelPending: () => void;
+}) {
+  const { t } = useTranslation();
+  const showPeriodDate =
+    facts?.periodEndAt &&
+    (facts.cancelAtPeriodEnd || facts.status === 'ACTIVE' || facts.status === 'TRIALING');
+
+  return (
+    <section className="flex min-h-[220px] flex-col rounded-xl border border-[var(--border-default)] bg-[var(--surface-elevated)] p-5">
+      <p className="text-11 font-medium text-[var(--text-tertiary)]">
+        {t('billing.settings.subscriptionCard.title')}
+      </p>
+      <div className="mt-3 min-h-0 flex-1">
+        {loading ? (
+          <Spinner size={15} />
+        ) : error ? (
+          <p className="text-12 leading-5 text-[var(--text-secondary)]">
+            {t('billing.settings.subscriptionCard.unavailable')}
+          </p>
+        ) : facts ? (
+          <>
+            <div className="flex flex-wrap items-center gap-2">
+              <h3 className="text-16 font-medium text-[var(--text-primary)]">{facts.name}</h3>
+              <span className="select-none rounded-full bg-[var(--surface-chip)] px-2.5 py-1 text-10 font-medium text-[var(--text-secondary)]">
+                {t(`billing.subscriptionStatus.${facts.status}`)}
+              </span>
+            </div>
+            {facts.price && facts.interval && (
+              <p className="mt-3 text-13 text-[var(--text-primary)]">
+                {t('billing.settings.subscriptionCard.priceInterval', {
+                  price: facts.price,
+                  interval: t(`billing.intervals.${facts.interval}`),
+                })}
+              </p>
+            )}
+            {facts.includedCredits && facts.interval && (
+              <p className="mt-1 text-12 text-[var(--text-secondary)]">
+                {t('billing.settings.subscriptionCard.includedCredits', {
+                  amount: facts.includedCredits,
+                  interval: t(`billing.intervals.${facts.interval}`),
+                })}
+              </p>
+            )}
+            {showPeriodDate && (
+              <p className="mt-3 text-12 text-[var(--text-secondary)]">
+                {facts.cancelAtPeriodEnd
+                  ? t('billing.settings.subscriptionCard.endsAt', {
+                      date: facts.periodEndAt,
+                    })
+                  : t('billing.settings.subscriptionCard.renewsAt', {
+                      date: facts.periodEndAt,
+                    })}
+              </p>
+            )}
+          </>
+        ) : (
+          <>
+            <h3 className="text-16 font-medium text-[var(--text-primary)]">
+              {t('billing.settings.subscriptionCard.emptyTitle')}
+            </h3>
+            <p className="mt-2 text-12 leading-5 text-[var(--text-secondary)]">
+              {t('billing.settings.subscriptionCard.empty')}
+            </p>
+          </>
+        )}
+      </div>
+      <div className="mt-5 flex flex-wrap gap-2">
+        {facts && (
+          <button
+            type="button"
+            onClick={onChangePlan}
+            className="h-8 select-none rounded-full border border-[var(--border-default)] px-3.5 text-12 font-medium text-[var(--text-primary)] transition-colors hover:bg-[var(--surface-hover-soft)]"
+          >
+            {t('billing.settings.subscriptionCard.changeAction')}
+          </button>
+        )}
+        <button
+          type="button"
+          onClick={onPurchase}
+          className="h-8 select-none rounded-full border border-[var(--border-default)] px-3.5 text-12 font-medium text-[var(--text-primary)] transition-colors hover:bg-[var(--surface-hover-soft)]"
+        >
+          {facts
+            ? t('billing.settings.subscriptionCard.purchaseAnother')
+            : t('billing.settings.subscriptionCard.action')}
+        </button>
+      </div>
+      {pendingPlanChange && (
+        <PendingPlanChangeBanner
+          pending={pendingPlanChange}
+          targetName={pendingTargetName}
+          onResume={onResumePending}
+          onUndo={onCancelPending}
+        />
+      )}
+    </section>
+  );
+}
+
+function TopupOverviewCard({ onPurchase }: { onPurchase: () => void }) {
+  const { t } = useTranslation();
+  return (
+    <section className="flex min-h-[220px] flex-col rounded-xl border border-[var(--border-default)] bg-[var(--surface-elevated)] p-5">
+      <p className="text-11 font-medium text-[var(--text-tertiary)]">
+        {t('billing.settings.topupCard.title')}
+      </p>
+      <div className="mt-3 flex-1">
+        <h3 className="text-16 font-medium text-[var(--text-primary)]">
+          {t('billing.settings.topupCard.cardTitle')}
+        </h3>
+        <p className="mt-2 max-w-[420px] text-12 leading-5 text-[var(--text-secondary)]">
+          {t('billing.settings.topupCard.cardDescription')}
+        </p>
+      </div>
+      <button
+        type="button"
+        onClick={onPurchase}
+        className="mt-5 h-8 w-fit select-none rounded-full border border-[var(--border-default)] px-3.5 text-12 font-medium text-[var(--text-primary)] transition-colors hover:bg-[var(--surface-hover-soft)]"
+      >
+        {t('billing.settings.topupCard.action')}
+      </button>
+    </section>
   );
 }
 
@@ -722,13 +913,13 @@ function PendingPlanChangeBanner({
             name: targetName ?? t('billing.settings.subscriptionCard.unnamedPlan'),
           });
   return (
-    <div className="flex items-center gap-4 border-t border-[var(--border-default)] bg-[var(--surface-chip)] px-5 py-3">
+    <div className="mt-5 flex flex-wrap items-center gap-3 rounded-xl border border-[var(--border-default)] bg-[var(--surface-chip)] px-4 py-3">
       <p className="min-w-0 flex-1 text-12 leading-5 text-[var(--text-secondary)]">{label}</p>
       {pending.status === 'SCHEDULED' ? (
         <button
           type="button"
           onClick={onUndo}
-          className="h-8 shrink-0 rounded-full border border-[var(--border-default)] px-3.5 text-12 font-medium text-[var(--text-primary)] transition-colors hover:bg-[var(--surface-hover-soft)]"
+          className="h-8 shrink-0 select-none rounded-full border border-[var(--border-default)] px-3.5 text-12 font-medium text-[var(--text-primary)] transition-colors hover:bg-[var(--surface-hover-soft)]"
         >
           {t('billing.planChange.undo')}
         </button>
@@ -736,7 +927,7 @@ function PendingPlanChangeBanner({
         <button
           type="button"
           onClick={onResume}
-          className="h-8 shrink-0 rounded-full border border-[var(--border-default)] px-3.5 text-12 font-medium text-[var(--text-primary)] transition-colors hover:bg-[var(--surface-hover-soft)]"
+          className="h-8 shrink-0 select-none rounded-full border border-[var(--border-default)] px-3.5 text-12 font-medium text-[var(--text-primary)] transition-colors hover:bg-[var(--surface-hover-soft)]"
         >
           {t('billing.planChange.resume')}
         </button>
@@ -790,14 +981,9 @@ function BillingUsageSummary({
         : t('billing.balance.unavailable');
 
   return (
-    <section
-      className="px-5 py-5"
-      aria-labelledby="billing-balance-title"
-      aria-live="polite"
-      aria-busy={loading}
-    >
+    <section aria-labelledby="billing-balance-title" aria-live="polite" aria-busy={loading}>
       {loading ? (
-        <div className="flex h-[118px] items-center px-5">
+        <div className="flex h-[118px] items-center px-5 py-5">
           <Spinner size={15} />
         </div>
       ) : usage ? (
@@ -1052,44 +1238,6 @@ function GrantAmount({
   );
 }
 
-function BillingSummaryRow({
-  label,
-  title,
-  description,
-  loading = false,
-  disabled = false,
-  actionLabel,
-  onAction,
-}: {
-  label: string;
-  title: string;
-  description: string;
-  loading?: boolean;
-  disabled?: boolean;
-  actionLabel: string;
-  onAction: () => void;
-}) {
-  return (
-    <div className="flex min-h-[112px] items-center gap-6 px-5 py-4">
-      <div className="min-w-0 flex-1">
-        <p className="text-11 font-medium text-[var(--text-tertiary)]">{label}</p>
-        <p className="mt-1 text-sm font-medium text-[var(--text-primary)]">{title}</p>
-        <div className="mt-1 min-h-5 text-12 leading-5 text-[var(--text-secondary)]">
-          {loading ? <Spinner size={13} /> : description}
-        </div>
-      </div>
-      <button
-        type="button"
-        onClick={onAction}
-        disabled={disabled}
-        className="h-8 shrink-0 rounded-full border border-[var(--border-default)] px-4 text-12 font-medium text-[var(--text-primary)] transition-colors hover:bg-[var(--surface-hover-soft)] disabled:cursor-not-allowed disabled:opacity-40"
-      >
-        {actionLabel}
-      </button>
-    </div>
-  );
-}
-
 function BillingOfferDialog({
   open,
   kind,
@@ -1100,7 +1248,6 @@ function BillingOfferDialog({
   selectedPurchaseOptionId,
   customAmount,
   amountError,
-  subscriptionPurchaseBlocked,
   canCheckout,
   onClose,
   onRetry,
@@ -1118,7 +1265,6 @@ function BillingOfferDialog({
   selectedPurchaseOptionId: string | null;
   customAmount: string;
   amountError: string | null;
-  subscriptionPurchaseBlocked: boolean;
   canCheckout: boolean;
   onClose: () => void;
   onRetry: () => void;
@@ -1298,12 +1444,6 @@ function BillingOfferDialog({
                             })}
                         </p>
                       </label>
-                    )}
-
-                    {kind === 'SUBSCRIPTION' && subscriptionPurchaseBlocked && (
-                      <p className="mt-5 rounded-lg bg-[var(--surface-chip)] px-4 py-3 text-12 leading-5 text-[var(--text-secondary)]">
-                        {t('billing.currentSubscription.purchaseBlocked')}
-                      </p>
                     )}
                   </div>
                 )}

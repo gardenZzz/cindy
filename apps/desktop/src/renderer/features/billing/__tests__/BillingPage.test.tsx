@@ -2,7 +2,9 @@
 
 import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
+import type { BillingPaymentOrder, BillingSubscription } from '../../../../shared/billing';
 
+const confirm = vi.hoisted(() => vi.fn());
 const checkout = {
   state: {
     open: false,
@@ -13,7 +15,10 @@ const checkout = {
     subscription: null,
     error: false,
   },
-  recoverables: { topups: [], subscription: null },
+  recoverables: {
+    topups: [] as BillingPaymentOrder[],
+    subscription: null as BillingSubscription | null,
+  },
   recovering: false,
   startTopup: vi.fn(),
   startSubscription: vi.fn(),
@@ -44,6 +49,9 @@ vi.mock('@/features/feature-context', () => ({
 vi.mock('@/contexts/AuthContext', () => ({
   useAuth: () => ({ dataOwnerId: 'account-fixture' }),
 }));
+vi.mock('@/components/ui/confirm-dialog-provider', () => ({
+  useConfirmDialog: () => ({ confirm }),
+}));
 vi.mock('../useBillingCheckout', () => ({
   useBillingCheckout: () => checkout,
 }));
@@ -52,6 +60,10 @@ vi.mock('qrcode', () => ({
 }));
 
 import { BillingPage } from '../BillingPage';
+
+beforeEach(() => {
+  confirm.mockReset().mockResolvedValue(true);
+});
 
 describe('BillingPage remote catalog rendering', () => {
   beforeEach(() => {
@@ -67,6 +79,10 @@ describe('BillingPage remote catalog rendering', () => {
     checkout.startTopup.mockClear();
     checkout.startSubscription.mockClear();
     checkout.close.mockClear();
+    checkout.resumeTopup.mockClear();
+    checkout.resumeSubscription.mockClear();
+    checkout.recoverables.topups = [];
+    checkout.recoverables.subscription = null;
     checkout.recovering = false;
     Object.defineProperty(window, 'electronAPI', {
       configurable: true,
@@ -287,6 +303,111 @@ describe('BillingPage remote catalog rendering', () => {
     expect(screen.getByText('billing.usage.detailsUnavailable')).toBeTruthy();
   });
 
+  it('shows current plan price, included credits, status, and renewal date', async () => {
+    window.electronAPI.billing.getCurrentSubscription = vi.fn(async () => ({
+      subscription: {
+        subscriptionId: 'subscription_fixture',
+        status: 'ACTIVE' as const,
+        currentPeriodStartAt: '2026-07-01T00:00:00.000Z',
+        currentPeriodEndAt: '2026-08-01T00:00:00.000Z',
+        entitlementValidUntil: '2026-08-02T00:00:00.000Z',
+        cancelAtPeriodEnd: false,
+        effectivePlan: {
+          version: 1 as const,
+          product: { code: 'plus', kind: 'SUBSCRIPTION' as const, level: 1 },
+          offer: { code: 'plus_month', interval: 'MONTH' as const },
+          terms: { amount: '9', currency: 'usd', creditAmount: '100', rolloverCap: '0' },
+          capturedAt: '2026-07-01T00:00:00.000Z',
+        },
+        purchaseAttemptId: null,
+        paymentAction: null,
+      },
+    }));
+
+    render(<BillingPage />);
+
+    expect(await screen.findByText('Configured subscription')).toBeTruthy();
+    expect(screen.getByText('billing.subscriptionStatus.ACTIVE')).toBeTruthy();
+    expect(
+      screen.getByText((text) =>
+        text.startsWith('billing.settings.subscriptionCard.priceInterval'),
+      ),
+    ).toBeTruthy();
+    expect(
+      screen.getByText((text) =>
+        text.startsWith('billing.settings.subscriptionCard.includedCredits'),
+      ),
+    ).toBeTruthy();
+    expect(
+      screen.getByText((text) => text.startsWith('billing.settings.subscriptionCard.renewsAt')),
+    ).toBeTruthy();
+    expect(screen.getByText('billing.settings.subscriptionCard.changeAction')).toBeTruthy();
+    expect(screen.getByText('billing.settings.subscriptionCard.purchaseAnother')).toBeTruthy();
+  });
+
+  it('shows an end date for period-end cancellation and omits invalid dates', async () => {
+    const subscription = {
+      subscriptionId: 'subscription_fixture',
+      status: 'ACTIVE' as const,
+      currentPeriodStartAt: null,
+      currentPeriodEndAt: '2026-08-01T00:00:00.000Z',
+      entitlementValidUntil: null,
+      cancelAtPeriodEnd: true,
+      effectivePlan: null,
+      purchaseAttemptId: null,
+      paymentAction: null,
+    };
+    window.electronAPI.billing.getCurrentSubscription = vi
+      .fn()
+      .mockResolvedValueOnce({ subscription })
+      .mockResolvedValueOnce({
+        subscription: { ...subscription, currentPeriodEndAt: 'not-a-date' },
+      });
+
+    render(<BillingPage />);
+    expect(
+      await screen.findByText((text) =>
+        text.startsWith('billing.settings.subscriptionCard.endsAt'),
+      ),
+    ).toBeTruthy();
+
+    fireEvent.click(screen.getByText('billing.actions.refreshCatalog'));
+    await waitFor(() =>
+      expect(
+        screen.queryByText((text) => text.startsWith('billing.settings.subscriptionCard.endsAt')),
+      ).toBeNull(),
+    );
+    expect(
+      screen.queryByText((text) => text.startsWith('billing.settings.subscriptionCard.renewsAt')),
+    ).toBeNull();
+  });
+
+  it('places recoverable checkout actions before the balance overview', async () => {
+    const order = {
+      orderId: 'order_pending',
+      productCode: 'credit_topup',
+      offerCode: 'credit_topup_custom',
+      amount: '10',
+      currency: 'cny',
+      status: 'PENDING' as const,
+      fulfillmentStatus: 'NOT_STARTED' as const,
+      paymentAction: null,
+      createdAt: '2026-07-24T00:00:00.000Z',
+      updatedAt: '2026-07-24T00:00:00.000Z',
+    };
+    checkout.recoverables.topups = [order];
+
+    render(<BillingPage />);
+
+    const recovery = screen.getByText('billing.recovery.title');
+    const balanceTitle = await screen.findByText('billing.balance.title');
+    expect(recovery.compareDocumentPosition(balanceTitle) & Node.DOCUMENT_POSITION_FOLLOWING).toBe(
+      Node.DOCUMENT_POSITION_FOLLOWING,
+    );
+    fireEvent.click(screen.getByText((text) => text.startsWith('billing.recovery.continueTopup')));
+    expect(checkout.resumeTopup).toHaveBeenCalledWith(order);
+  });
+
   it('shows usage progress and each promotional grant with its own state and expiry', async () => {
     window.electronAPI.billing.getCreditUsage = vi.fn(async () => ({
       available: '66',
@@ -436,10 +557,44 @@ describe('BillingPage remote catalog rendering', () => {
     expect(screen.queryByText('alipay')).toBeNull();
     fireEvent.click(screen.getByText('stripe').closest('button')!);
     fireEvent.click(screen.getByText('billing.actions.pay'));
-    expect(checkout.startSubscription).toHaveBeenCalledWith({
-      offerCode: 'plus_month',
-      purchaseOptionId: 'listing_stripe',
+    await waitFor(() =>
+      expect(checkout.startSubscription).toHaveBeenCalledWith({
+        offerCode: 'plus_month',
+        purchaseOptionId: 'listing_stripe',
+      }),
+    );
+    expect(confirm).toHaveBeenCalledWith(
+      expect.objectContaining({
+        confirmText: 'billing.confirmActions.purchaseSubscription',
+        autoFocusConfirm: true,
+      }),
+    );
+  });
+
+  it('does not create a top-up when its confirmation is canceled', async () => {
+    confirm.mockResolvedValue(false);
+    render(<BillingPage />);
+
+    fireEvent.click(screen.getByText('billing.settings.topupCard.action'));
+    fireEvent.click((await screen.findByText('Configured top-up')).closest('button')!);
+    fireEvent.click((await screen.findByText('alipay')).closest('button')!);
+    fireEvent.change(screen.getByPlaceholderText('billing.amount.placeholder'), {
+      target: { value: '10' },
     });
+    fireEvent.click(screen.getByText('billing.actions.pay'));
+
+    await waitFor(() => expect(confirm).toHaveBeenCalledTimes(1));
+    expect(checkout.startTopup).not.toHaveBeenCalled();
+    expect(screen.getByText('Configured top-up')).toBeTruthy();
+  });
+
+  it('does not confirm read-only refresh actions', async () => {
+    render(<BillingPage />);
+    await screen.findByText('billing.balance.title');
+
+    fireEvent.click(screen.getByText('billing.actions.refreshCatalog'));
+    await waitFor(() => expect(window.electronAPI.billing.getCatalog).toHaveBeenCalledTimes(2));
+    expect(confirm).not.toHaveBeenCalled();
   });
 
   it('keeps checkout disabled until startup recovery finishes', async () => {
@@ -463,7 +618,7 @@ describe('BillingPage remote catalog rendering', () => {
     expect(pay).toHaveProperty('disabled', false);
   });
 
-  it('does not create a second subscription while one is still live', async () => {
+  it('keeps new subscription purchase available while one is still live', async () => {
     window.electronAPI.billing.getCurrentSubscription = vi.fn(async () => ({
       subscription: {
         subscriptionId: 'subscription_fixture',
@@ -479,22 +634,25 @@ describe('BillingPage remote catalog rendering', () => {
     }));
 
     render(<BillingPage />);
-    const viewPlans = screen
-      .getByText('billing.settings.subscriptionCard.action')
-      .closest('button')!;
-    await waitFor(() => expect(viewPlans).toHaveProperty('disabled', false));
-    fireEvent.click(viewPlans);
+    const purchaseAnother = await screen.findByText(
+      'billing.settings.subscriptionCard.purchaseAnother',
+    );
+    fireEvent.click(purchaseAnother);
     fireEvent.click((await screen.findByText('Configured subscription')).closest('button')!);
     fireEvent.click((await screen.findByText('stripe')).closest('button')!);
 
-    expect(screen.getByText('billing.actions.pay').closest('button')).toHaveProperty(
-      'disabled',
-      true,
+    const pay = screen.getByText('billing.actions.pay').closest('button')!;
+    expect(pay).toHaveProperty('disabled', false);
+    fireEvent.click(pay);
+    await waitFor(() =>
+      expect(checkout.startSubscription).toHaveBeenCalledWith({
+        offerCode: 'plus_month',
+        purchaseOptionId: 'listing_stripe',
+      }),
     );
-    expect(screen.getByText('billing.currentSubscription.purchaseBlocked')).toBeTruthy();
   });
 
-  it('fails closed for subscription purchases when subscription status is unavailable', async () => {
+  it('keeps subscription purchases available when subscription status is unavailable', async () => {
     window.electronAPI.billing.getCurrentSubscription = vi.fn(async () => {
       throw new Error('subscription status unavailable');
     });
@@ -504,7 +662,7 @@ describe('BillingPage remote catalog rendering', () => {
     expect(await screen.findByText('billing.settings.subscriptionCard.unavailable')).toBeTruthy();
     expect(
       screen.getByText('billing.settings.subscriptionCard.action').closest('button'),
-    ).toHaveProperty('disabled', true);
+    ).toHaveProperty('disabled', false);
     expect(screen.getByText('billing.settings.topupCard.action').closest('button')).toHaveProperty(
       'disabled',
       false,
@@ -556,7 +714,7 @@ describe('BillingPage remote catalog rendering', () => {
     expect(screen.queryByText('Configured subscription')).toBeNull();
     expect(
       screen.getByText('billing.settings.subscriptionCard.action').closest('button'),
-    ).toHaveProperty('disabled', true);
+    ).toHaveProperty('disabled', false);
   });
 
   it('renders multiple remote subscription offers as independent choices', async () => {
@@ -806,6 +964,9 @@ describe('BillingPage plan change', () => {
 
   beforeEach(() => {
     localStorage.clear();
+    checkout.recoverables.topups = [];
+    checkout.recoverables.subscription = null;
+    checkout.recovering = false;
     Object.assign(checkout.state, {
       open: false,
       kind: null,
@@ -820,7 +981,7 @@ describe('BillingPage plan change', () => {
     });
   });
 
-  it('offers plan change for an active subscription with same-provider candidates only', async () => {
+  it('offers cross-provider plan targets and lets the server decide', async () => {
     const billing = install(billingMocks());
     billing.quotePlanChange.mockResolvedValue({
       planChangeId: 'plan_change_1',
@@ -838,12 +999,18 @@ describe('BillingPage plan change', () => {
 
     await screen.findByText('billing.planChange.targetTitle');
     expect(screen.getByText('Max plan')).toBeTruthy();
-    expect(screen.queryByText('Alipay-only Max')).toBeNull();
+    expect(screen.getByText('Alipay-only Max')).toBeTruthy();
     // The current plan renders in the summary card but must not be a candidate.
-    expect(screen.getByText('billing.planChange.upgradeBadge')).toBeTruthy();
+    expect(screen.getAllByText('billing.planChange.serverDecisionHint')).toHaveLength(2);
 
     fireEvent.click(screen.getByText('Max plan'));
     await screen.findByText('billing.planChange.quoteTitle');
+    expect(confirm).toHaveBeenCalledWith(
+      expect.objectContaining({
+        confirmText: 'billing.confirmActions.quotePlanChange',
+        autoFocusConfirm: true,
+      }),
+    );
     expect(billing.quotePlanChange).toHaveBeenCalledTimes(1);
     expect(billing.quotePlanChange).toHaveBeenCalledWith({
       targetOfferCode: 'max_month',
@@ -865,12 +1032,18 @@ describe('BillingPage plan change', () => {
     });
     fireEvent.click(screen.getByText('billing.planChange.confirm'));
     await screen.findByText('billing.planChange.appliedTitle');
+    expect(confirm).toHaveBeenLastCalledWith(
+      expect.objectContaining({
+        confirmText: 'billing.confirmActions.confirmPlanChange',
+        autoFocusConfirm: true,
+      }),
+    );
     // APPLIED refreshes subscription, catalog, and balance exactly once more.
     await waitFor(() => expect(billing.getBalance).toHaveBeenCalledTimes(2));
     expect(billing.getCurrentSubscription).toHaveBeenCalledTimes(2);
   });
 
-  it('does not expose plan change for yearly subscriptions while server v1 is monthly-only', async () => {
+  it('offers plan change for yearly subscriptions and lets the server decide', async () => {
     const billing = billingMocks();
     billing.getCurrentSubscription = vi.fn(async () => ({
       subscription: activeSubscription(null, 'YEAR'),
@@ -880,8 +1053,9 @@ describe('BillingPage plan change', () => {
     render(<BillingPage />);
 
     await screen.findByText('Plus plan');
-    expect(screen.queryByText('billing.settings.subscriptionCard.changeAction')).toBeNull();
-    expect(screen.getByText('billing.settings.subscriptionCard.action')).toBeTruthy();
+    fireEvent.click(screen.getByText('billing.settings.subscriptionCard.changeAction'));
+    expect(await screen.findByText('Max plan')).toBeTruthy();
+    expect(screen.getByText('Alipay-only Max')).toBeTruthy();
     expect(billing.quotePlanChange).not.toHaveBeenCalled();
   });
 
@@ -922,6 +1096,11 @@ describe('BillingPage plan change', () => {
     fireEvent.click(screen.getByText('billing.planChange.undo'));
     await waitFor(() =>
       expect(billing.cancelPlanChange).toHaveBeenCalledWith({ planChangeId: 'plan_change_down' }),
+    );
+    expect(confirm).toHaveBeenCalledWith(
+      expect.objectContaining({
+        confirmText: 'billing.confirmActions.cancelPlanChange',
+      }),
     );
     // The canceled settle re-syncs the subscription projection for the banner.
     await waitFor(() => expect(billing.getCurrentSubscription).toHaveBeenCalledTimes(2));
