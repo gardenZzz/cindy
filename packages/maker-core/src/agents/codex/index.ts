@@ -104,6 +104,9 @@ import {
   type AskForApproval,
   type ApprovalsReviewer,
   type ApprovalDecision,
+  type ItemGuardianApprovalReviewCompletedNotification,
+  type ItemGuardianApprovalReviewStartedNotification,
+  type GuardianWarningNotification,
   type CodexModelListResponse,
   type CommandExecutionRequestApprovalParams,
   type CommandExecutionRequestApprovalResponse,
@@ -2472,6 +2475,7 @@ export class CodexAgent extends BaseAgent {
       forcePrompt?: boolean;
     }
     const pendingApprovals = new Map<string, PendingEntry>();
+    const seenGuardianReviewIds = new Set<string>();
     const userInputBroker = new CodexInteractionBroker<ToolRequestUserInputResponse>();
     const dynamicToolBroker = new CodexInteractionBroker<DynamicToolCallResponse>();
     const activeToolContexts = new Map<string, ActiveToolContext>();
@@ -3539,6 +3543,97 @@ export class CodexAgent extends BaseAgent {
       flushDeferredTerminalTurnCompletionsIfIdle();
     }
 
+    const GUARDIAN_REVIEW_FAILURE_PREFIX = 'Automatic approval review failed:';
+
+    const emitGuardianUnavailable = (params: ItemGuardianApprovalReviewCompletedNotification): void => {
+      const timedOut = params.review.status === 'timedOut';
+      eventQueue.push({
+        type: 'error',
+        data: {
+          // Renderer uses reason for localized copy. Keep an English fallback for
+          // non-renderer consumers while always stating the blocked action + downgrade.
+          message: timedOut
+            ? 'Codex automatic approval review timed out. The action was blocked and this session is switching to Ask mode.'
+            : 'Codex automatic approval review failed. The action was blocked and this session is switching to Ask mode.',
+          isTerminal: false,
+          reason: 'codex-auto-review-unavailable',
+          reviewId: params.reviewId,
+          reviewRationale: params.review.rationale,
+        },
+        source: 'codex',
+      });
+    };
+
+    /**
+     * Close the race between a Guardian failure notification and the async host
+     * persistence coordinator. The current action is already blocked; changing the
+     * local mode synchronously ensures a message sent immediately afterwards starts
+     * in Ask instead of launching another auto_review turn that is then interrupted.
+     */
+    const switchAutoRuntimeToAskImmediately = (): boolean => {
+      if (mutablePermissionMode !== 'auto') return false;
+      dismissAllPending('permission_mode_changed_to_ask', 'deny');
+      mutablePermissionMode = 'ask';
+      if (!closed && turnLaunchedUnattended) {
+        if (currentTurnId !== null) {
+          void interruptTurnForPermissionTighten(currentTurnId);
+        } else if (isTurnStartPending) {
+          pendingTightenInterrupt = true;
+        }
+      }
+      return true;
+    };
+
+    const notifyAutoPermissionClassifierUnavailable = (
+      params: ItemGuardianApprovalReviewCompletedNotification,
+    ): void => {
+      if (!switchAutoRuntimeToAskImmediately() || typeof opts.sessionId !== 'string') return;
+      const notify = this.deps.onAutoPermissionClassifierUnavailable;
+      if (!notify) return;
+      const status = params.review.status === 'timedOut' ? 408 : 500;
+      queueMicrotask(() => {
+        try {
+          notify({
+            sessionId: opts.sessionId as string,
+            agentKind: 'codex',
+            status,
+          });
+        } catch (error) {
+          log.warn('Codex Auto fallback notification threw', {
+            reviewId: params.reviewId,
+            error: String(error),
+          });
+        }
+      });
+    };
+
+    const handleGuardianReviewCompleted = (params: ItemGuardianApprovalReviewCompletedNotification): void => {
+      if (seenGuardianReviewIds.has(params.reviewId)) return;
+      seenGuardianReviewIds.add(params.reviewId);
+      const rationale = params.review.rationale?.trim();
+      const failedClosedBecauseReviewerUnavailable =
+        params.review.status === 'denied' &&
+        rationale?.startsWith(GUARDIAN_REVIEW_FAILURE_PREFIX) === true;
+      if (params.review.status === 'timedOut' || failedClosedBecauseReviewerUnavailable) {
+        emitGuardianUnavailable(params);
+        notifyAutoPermissionClassifierUnavailable(params);
+        return;
+      }
+      if (params.review.status === 'denied') {
+        // Match Claude Auto: a real classifier verdict is authoritative. Codex has
+        // already blocked the action and returned the denial to the model; do not
+        // weaken Auto by offering a user override prompt.
+        log.info('Codex automatic approval review denied action', {
+          reviewId: params.reviewId,
+          turnId: params.turnId,
+          targetItemId: params.targetItemId,
+          actionType: params.action.type,
+          riskLevel: params.review.riskLevel,
+          rationale: params.review.rationale,
+        });
+      }
+    };
+
     // ── subscribeThread: notification 路由 + approval handlers ─────────────
     const handlers: ThreadEventHandlers = {
       threadStarted: (params) => {
@@ -3694,6 +3789,24 @@ export class CodexAgent extends BaseAgent {
             fastMode: isFastServiceTier(mutableServiceTier),
           });
         }
+      },
+      autoApprovalReviewStarted: (params: ItemGuardianApprovalReviewStartedNotification) => {
+        if (shouldIgnoreStaleTurnEvent(params.turnId)) return;
+        log.debug('Codex automatic approval review started', {
+          reviewId: params.reviewId,
+          turnId: params.turnId,
+          targetItemId: params.targetItemId,
+          actionType: params.action.type,
+        });
+      },
+      autoApprovalReviewCompleted: (params) => {
+        if (shouldIgnoreStaleTurnEvent(params.turnId)) return;
+        handleGuardianReviewCompleted(params);
+      },
+      guardianWarning: (params: GuardianWarningNotification) => {
+        // The completed review carries the actionable denial/timeout details. Keep the
+        // warning for diagnostics to avoid rendering a duplicate error card.
+        log.warn('Codex Guardian warning', { threadId: params.threadId, message: params.message });
       },
       error: (params) => {
         if (shouldIgnoreStaleTurnEvent(params.turnId)) return;
