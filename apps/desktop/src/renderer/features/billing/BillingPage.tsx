@@ -294,6 +294,13 @@ export function BillingSettingsSection({ accountId }: { accountId: string | null
     [loadBillingState, loadSubscription],
   );
   const planChange = usePlanChange(accountId, handlePlanChangeSettled);
+  const hasRecoverableFailedIntent =
+    !checkout.state.open &&
+    checkout.state.phase === 'FAILED' &&
+    checkout.state.error &&
+    checkout.state.intent !== null &&
+    checkout.state.order === null &&
+    checkout.state.subscription === null;
 
   const offers = useMemo<PurchasableOffer[]>(() => {
     if (!catalog) return [];
@@ -580,12 +587,15 @@ export function BillingSettingsSection({ accountId }: { accountId: string | null
 
         {!checkout.recovering &&
           (checkout.recoverables.topups.length > 0 ||
-            checkout.recoverables.subscription !== null) && (
+            checkout.recoverables.subscription !== null ||
+            hasRecoverableFailedIntent) && (
             <BillingRecoveryNotice
               topups={checkout.recoverables.topups}
               subscription={checkout.recoverables.subscription}
+              failedIntent={hasRecoverableFailedIntent}
               onResumeTopup={checkout.resumeTopup}
               onResumeSubscription={checkout.resumeSubscription}
+              onResumeFailed={checkout.resumeFailed}
             />
           )}
 
@@ -691,13 +701,17 @@ export function BillingSettingsSection({ accountId }: { accountId: string | null
 function BillingRecoveryNotice({
   topups,
   subscription,
+  failedIntent,
   onResumeTopup,
   onResumeSubscription,
+  onResumeFailed,
 }: {
   topups: BillingPaymentOrder[];
   subscription: BillingSubscription | null;
+  failedIntent: boolean;
   onResumeTopup: (order: BillingPaymentOrder) => void;
   onResumeSubscription: (subscription: BillingSubscription) => void;
+  onResumeFailed: () => void;
 }) {
   const { t } = useTranslation();
   return (
@@ -728,6 +742,15 @@ function BillingRecoveryNotice({
             className="select-none rounded-full border border-[var(--border-default)] px-3 py-1.5 text-12 font-medium transition-colors hover:bg-[var(--surface-hover-soft)]"
           >
             {t('billing.recovery.continueSubscription')}
+          </button>
+        )}
+        {failedIntent && (
+          <button
+            type="button"
+            onClick={onResumeFailed}
+            className="select-none rounded-full border border-[var(--border-default)] px-3 py-1.5 text-12 font-medium transition-colors hover:bg-[var(--surface-hover-soft)]"
+          >
+            {t('billing.recovery.continueFailed')}
           </button>
         )}
       </div>
