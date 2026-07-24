@@ -2309,6 +2309,7 @@
         "meta": "Version {{version}}. Installs locally and can be uninstalled anytime.",
         "metaWithAuthor": "By {{author}} · Version {{version}}. Installs locally and can be uninstalled anytime.",
         "enableNow": "Enable right after install",
+        "enableNowOpenTab": "Enable and open its tab right after install",
         "expandDescription": "Show Full Description",
         "collapseDescription": "Hide Full Description"
       },
