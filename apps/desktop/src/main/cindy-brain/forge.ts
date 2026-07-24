@@ -677,7 +677,10 @@ my-ghost/
   "cindy": { "image": ["generate", "edit"] },   // 声明了 cindy 槽时必写:能力详单,见下
   "panel": { "title": "面板标题", "html": "panel.html", "position": "right",
              "minWidth": 240, "defaultFraction": 0.24 },
-  // panel.position:相对主聊天窗的停靠位,right(缺省)/ left;top/bottom 暂未支持(排期中)
+  // panel.position:面板显示形态。right(缺省)/ left = 停靠主聊天窗两侧;
+  // "tab" = 右侧栏页签(与文件/审查/终端同一容器,每会话至多一个,用户从
+  // 空态列表或「+」菜单打开;此形态没有拖缝宽度,声明 minWidth /
+  // defaultFraction 会被拒装,请移除)。top/bottom 暂未支持(排期中)
   "settingsHtml": "settings.html",  // 可选:设置页「自定义设置区」自绘界面(见 §4.8;声明了用户填的凭证时必填——凭证收单界面,见 §4.7)
   "settingsHeight": 360             // 可选:固定高度 px(160–800);缺省 = 随内容自适应(矮内容真收矮,高至 800);内容会动态增减时才声明,避免抖动
 }
@@ -2034,6 +2037,12 @@ if (!opened.ok) console.warn(opened.errorCode, opened.message);
 
 ## 5. 面板(panel.html/css/js)
 
+- 显示形态由 \`panel.position\` 决定:\`right\`(缺省)/ \`left\` = 停靠主聊天窗两侧
+  的常驻面板;\`"tab"\` = 右侧栏页签——与文件/审查/终端同一容器,每会话至多
+  一个页签,由用户从右侧栏空态列表或「+」菜单打开(不随装入自动弹出)。页签
+  形态没有拖缝宽度语义,声明 \`minWidth\` / \`defaultFraction\` 会被拒装。两种形态
+  的面板代码完全一样(同一 panel.html,供片/主题/媒体规则不变),只是宿主容器
+  不同;页签形态请把界面做成自适应宽度;
 - 与电子脑同源,用 \`BroadcastChannel('<自定名>')\` 通信(电子脑发,面板收);
 - 取自己的媒体:\`cindy-ghost://<id>/media/<指纹><后缀>\`(主机查账验归属,别人的图 404);
 - 重启回放:\`fetch('cindy-ghost://<id>/gallery')\` 返回本意识作品清单 \`[{src, caption}]\`;

@@ -253,24 +253,26 @@ export const GHOST_LAUNCH_MODES = ['on-demand', 'resident'] as const;
 export type GhostLaunchMode = (typeof GHOST_LAUNCH_MODES)[number];
 
 /**
- * 面板停靠位置(相对主聊天窗)。当前布局引擎支持 left / right;
+ * 面板显示形态(相对主聊天窗)。left / right = 顶层布局树停靠 pane;
+ * 'tab' = 不进布局树,作为右侧栏(right-tabs)里的每会话单例页签
+ * (2026-07-24 定案,注册链路见 renderer/cindy-brain/ghostTabPlugins.tsx)。
  * top / bottom 需要嵌套上下分割(树操作/拖缝/卸载查找全链路),排期中——
  * 校验层先收词并明确拒绝,不静默降级(规则 9)。
  */
-export const GHOST_PANEL_POSITIONS = ['left', 'right'] as const;
+export const GHOST_PANEL_POSITIONS = ['left', 'right', 'tab'] as const;
 export type GhostPanelPosition = (typeof GHOST_PANEL_POSITIONS)[number];
 
 /** 面板声明(五个卡槽中的「面板」槽,一段意识至多一块)。 */
 export interface GhostPanelDecl {
   /** 面板标准头(PanelChrome)标题;缺省用意识 name。 */
   title?: string;
-  /** 停靠位置(相对主聊天窗);缺省 = right(2026-07-12 Lizi 定案)。 */
+  /** 显示形态:left / right 停靠,或 'tab' 右侧栏页签;缺省 = right(2026-07-12 Lizi 定案)。 */
   position?: GhostPanelPosition;
   /** 面板界面入口(安装目录内相对路径,意识自绘)。 */
   html: string;
-  /** 面板最小宽度(px),布局引擎拖缝时的下限。 */
+  /** 面板最小宽度(px),布局引擎拖缝时的下限。仅停靠形态有效,'tab' 时禁用。 */
   minWidth?: number;
-  /** 装入布局时的初始宽度占比(与 layoutTree 的 fraction 同语义)。 */
+  /** 装入布局时的初始宽度占比(与 layoutTree 的 fraction 同语义)。仅停靠形态有效,'tab' 时禁用。 */
   defaultFraction?: number;
 }
 
@@ -1241,7 +1243,7 @@ export function ghostPermissionItems(manifest: GhostManifest): GhostPermissionIt
     items.push({
       key: `panel:${position}`,
       kind: 'panel',
-      labelKey: position === 'left' ? 'panelLeft' : 'panelRight',
+      labelKey: position === 'left' ? 'panelLeft' : position === 'tab' ? 'panelTab' : 'panelRight',
       labelArgs: { title: manifest.panel.title ?? manifest.name },
     });
   }
@@ -1389,11 +1391,13 @@ export function ghostWebviewEntryPaths(manifest: GhostManifest): string[] {
  * 装入带面板的意识后,把面板停进布局树(main 侧随 install 调用)。
  * - 树上已有同 kind 的 pane(重装)→ 返回 null:不动树,位置记忆保留、原位复活;
  * - 意识没声明面板 → null;
+ * - position:'tab' → null:页签形态不进布局树,由右侧栏页签(ghostTabPlugins)承载;
  * - 否则停在聊天区右侧(index 1),宽度占比/最小宽取清单声明。
  * 卸下时**不做**逆操作 —— 树数据保留正是"重装复活"的记忆来源(§6 规则 5)。
  */
 export function layoutWithGhostPanel(layout: Layout, manifest: GhostManifest): Layout | null {
   if (!manifest.panel) return null;
+  if (manifest.panel.position === 'tab') return null;
   const kind = ghostPanelKind(manifest.id);
   if (findSplitChildByPanelKind(layout, kind)) return null;
   // 停靠位置(相对主聊天窗):按 chat-main 的实际下标定插入点,不写死
@@ -1505,10 +1509,17 @@ export function validateGhostManifest(raw: unknown): ManifestValidation {
     if (p.position !== undefined) {
       if (p.position === 'top' || p.position === 'bottom') {
         // 收词但明确拒绝(规则 9 不静默降级):上下停靠等布局引擎嵌套分割就绪后开放。
-        return { ok: false, reason: 'panel.position 的 top / bottom 暂未支持(排期中),当前可用:left / right' };
+        return { ok: false, reason: 'panel.position 的 top / bottom 暂未支持(排期中),当前可用:left / right / tab' };
       }
       if (!(GHOST_PANEL_POSITIONS as readonly string[]).includes(p.position as string)) {
         return { ok: false, reason: `panel.position 必须是 ${GHOST_PANEL_POSITIONS.join(' / ')}` };
+      }
+      // 页签形态没有拖缝宽度语义:收词明确拒绝而非静默忽略(规则 9)。
+      if (p.position === 'tab' && (p.minWidth !== undefined || p.defaultFraction !== undefined)) {
+        return {
+          ok: false,
+          reason: "panel.minWidth / panel.defaultFraction 仅停靠形态(left / right)有效,position:'tab' 时请移除",
+        };
       }
     }
     panel = {

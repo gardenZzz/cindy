@@ -2296,6 +2296,7 @@
         "command": "聊天指令 ${{command}}",
         "panelRight": "面板「{{title}}」· 停靠主聊天区右侧",
         "panelLeft": "面板「{{title}}」· 停靠主聊天区左侧",
+        "panelTab": "面板「{{title}}」· 右侧栏页签",
         "code": "可执行代码",
         "codeDetail": "在独立沙箱中运行,无法访问你的文件与网络。",
         "resident": "常驻运行(生效后即启动,不调用也保持后台进程)",
@@ -3023,7 +3024,8 @@
       "menu": {
         "addLabel": "添加标签",
         "comingSoon": "即将支持",
-        "alreadyOpen": "已打开"
+        "alreadyOpen": "已打开",
+        "pluginGroup": "插件"
       },
       "kinds": {
         "fileBrowser": "文件浏览器",
@@ -3031,7 +3033,8 @@
         "terminal": "终端",
         "review": "审查",
         "collaboration": "协同",
-        "unknown": "未知标签页"
+        "unknown": "未知标签页",
+        "ghostPanel": "插件面板"
       },
       "controls": {
         "maximizeAria": "最大化侧栏",
@@ -3056,6 +3059,9 @@
         "browserSub": "Browser",
         "openTerminal": "打开终端",
         "terminalSub": "Terminal",
+        "pluginSub": "Plugin",
+        "pluginGroup": "插件面板",
+        "pluginGroupSub": "{{count}} 个插件",
         "addMoreHint": "可通过顶部 + 按钮选择更多面板类型"
       },
       "placeholderHint": "{{kind}} — 内容将在后续阶段加入"
