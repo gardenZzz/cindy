@@ -327,8 +327,10 @@ export function NewMakerDraftRoute() {
   const { t } = useTranslation();
   const draft = useNewMakerDraft();
   const navigate = useNavigate();
-  // minWidth=640:自适应内容列在大屏封顶 1220(hook 内 MAX),小屏兜一个体面下限
-  // (与对话页的 max 对称);窄于下限时 hook 自动回落成"填满容器",不溢出。
+  // 首参 914=内容封顶宽(→ inputWidth 封顶 934):大屏留出左右呼吸空间,不再顶满全宽;
+  // 与进行中对话页(CCAgentSessionView 同传 914)一致,发送首条消息时输入框宽度不跳变。
+  // minWidth=640:小屏兜一个体面下限(与对话页对称);窄于下限时 hook 自动回落成
+  // "填满容器",不溢出。
   const { containerRef, inputWidth } = useProportionalWidth(914, { minWidth: 640 });
   // The available rail can shrink when either sidebar opens while the
   // viewport itself remains wide. Keep the draft layout responsive to that
@@ -2074,8 +2076,9 @@ export function NewMakerDraftRoute() {
             <div
               className="relative flex w-full flex-col items-start"
               // 与进行中对话页同源:内容列宽度跟随 useProportionalWidth 算出的
-              // inputWidth(封顶 1220px),不再死锁 800——大屏自适应变宽,且发送后
-              // 同一个 ChatInput 无宽度跳变。inputWidth 由 useLayoutEffect 同步量出
+              // inputWidth(封顶 914+20=934px,见 hook 首参),不再死锁 800——大屏留出
+              // 左右呼吸空间、窄屏自适应收窄,且发送后同一个 ChatInput 无宽度跳变。
+              // inputWidth 由 useLayoutEffect 同步量出
               // (paint 前已就绪);极端未量到(0)时回落旧默认 800,不放大到全宽。
               style={{ maxWidth: inputWidth || 800 }}
             >
@@ -2275,15 +2278,11 @@ export function NewMakerDraftRoute() {
                     <ConnectProviderCard />
                   </div>
                 )}
-                {/* 输入框跟随 inputWidth 变宽后,快捷入口只有 4 项,若也铺满全宽
-                    会被撑成又宽又空的短卡。这里把卡片区封顶在 800px、左对齐(与输入框
-                    左缘齐),保持每张卡当前的紧凑比例;输入框仍独立用满可用宽度。 */}
+                {/* 快捷入口与输入框同宽:左右两缘都与上方 ChatInput 对齐(父列已封顶
+                    inputWidth)。此前封顶 800px 会在宽窗口下右缘短一截,视觉上没对齐
+                    (2026-07-24 用户反馈)。 */}
                 {!showProviderOnboardingCard && (
-                  <div
-                    data-testid="create-agent-quick-starts"
-                    className="mt-[42px] w-full"
-                    style={{ maxWidth: 800 }}
-                  >
+                  <div data-testid="create-agent-quick-starts" className="mt-[42px] w-full">
                     {/* 标题字号 12→14px(DESIGN §3 Caption),与卡片间距 16→10px 收近
                         (DESIGN §5 间距档)——用户改稿 2026-07-22。 */}
                     <div className="mb-2.5 px-0.5">
