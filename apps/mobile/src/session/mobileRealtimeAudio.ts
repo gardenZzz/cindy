@@ -66,6 +66,7 @@ export function isMobileRealtimeAudioAvailable(): boolean {
 export function shouldShowMobileVoiceUi(
   platform: string,
 ): boolean {
+  if (isE2eMockRealtimeAudioEnabled()) return true;
   return platform !== 'android';
 }
 
