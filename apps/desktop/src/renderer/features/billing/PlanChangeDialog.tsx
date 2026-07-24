@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import * as Dialog from '@radix-ui/react-dialog';
 import * as QRCode from 'qrcode';
 import {
@@ -192,6 +192,7 @@ export function PlanChangeStatusDialog({
 }) {
   const { t } = useTranslation();
   const { confirm } = useConfirmDialog();
+  const confirmationPendingRef = useRef(false);
   const change = state.planChange;
   const action: BillingPaymentAction | null = change?.paymentAction ?? null;
   const [qrDataUrl, setQrDataUrl] = useState<string | null>(null);
@@ -256,6 +257,18 @@ export function PlanChangeStatusDialog({
     state.phase === 'CANCELED' ||
     state.phase === 'FAILED' ||
     state.phase === 'EXPIRED';
+  const confirmOnce = useCallback(
+    async (options: Parameters<typeof confirm>[0]) => {
+      if (confirmationPendingRef.current) return false;
+      confirmationPendingRef.current = true;
+      try {
+        return await confirm(options);
+      } finally {
+        confirmationPendingRef.current = false;
+      }
+    },
+    [confirm],
+  );
   const confirmPlanChange = async () => {
     if (!change) return;
     const impact =
@@ -266,7 +279,7 @@ export function PlanChangeStatusDialog({
         : t('billing.planChange.downgradeAt', {
             date: formatEffectiveDate(change.effectiveAt),
           });
-    const accepted = await confirm({
+    const accepted = await confirmOnce({
       title: t('billing.confirmActions.confirmPlanChangeTitle'),
       description: t('billing.confirmActions.confirmPlanChangeDescription', {
         target: targetName ?? t('billing.settings.subscriptionCard.unnamedPlan'),
@@ -279,7 +292,7 @@ export function PlanChangeStatusDialog({
     if (accepted) onConfirm();
   };
   const abandonPlanChange = async () => {
-    const accepted = await confirm({
+    const accepted = await confirmOnce({
       title: t('billing.confirmActions.cancelPlanChangeTitle'),
       description: t('billing.confirmActions.cancelPlanChangeDescription', {
         target: targetName ?? t('billing.settings.subscriptionCard.unnamedPlan'),

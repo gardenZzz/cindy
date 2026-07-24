@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import * as Dialog from '@radix-ui/react-dialog';
 import * as QRCode from 'qrcode';
 import { Check, CircleAlert, ExternalLink, LoaderCircle, RotateCcw, X } from 'lucide-react';
@@ -32,6 +32,7 @@ export function BillingCheckoutDialog({
 }: BillingCheckoutDialogProps) {
   const { t } = useTranslation();
   const { confirm } = useConfirmDialog();
+  const confirmationPendingRef = useRef(false);
   const action = actionOf(state);
   const [qrDataUrl, setQrDataUrl] = useState<string | null>(null);
   const [remainingSeconds, setRemainingSeconds] = useState<number | null>(null);
@@ -93,9 +94,21 @@ export function BillingCheckoutDialog({
     state.kind === 'TOPUP' &&
     state.order !== null &&
     (state.order.status === 'CREATED' || state.order.status === 'PENDING');
+  const confirmOnce = useCallback(
+    async (options: Parameters<typeof confirm>[0]) => {
+      if (confirmationPendingRef.current) return false;
+      confirmationPendingRef.current = true;
+      try {
+        return await confirm(options);
+      } finally {
+        confirmationPendingRef.current = false;
+      }
+    },
+    [confirm],
+  );
   const confirmCancel = async () => {
     if (!state.order) return;
-    const accepted = await confirm({
+    const accepted = await confirmOnce({
       title: t('billing.confirmActions.cancelPaymentTitle'),
       description: t('billing.confirmActions.cancelPaymentDescription', {
         amount: formatMoney(state.order.amount, state.order.currency),
@@ -106,7 +119,7 @@ export function BillingCheckoutDialog({
     if (accepted) onCancel();
   };
   const confirmRetry = async () => {
-    const accepted = await confirm({
+    const accepted = await confirmOnce({
       title: t('billing.confirmActions.retryPaymentTitle'),
       description: state.order
         ? t('billing.confirmActions.retryPaymentDescription', {
