@@ -1291,7 +1291,7 @@
         "stepConnect": "Connect",
         "stepModels": "Choose models",
         "searchPlaceholder": "Search providers…",
-        "groupSubscription": "Subscription sign-in · recommended, no API key",
+        "groupSubscription": "Subscription sign-in · recommended",
         "groupApiKey": "API key providers · presets update with the catalog",
         "groupCustom": "Custom",
         "metaOAuth": "Subscription (OAuth)",
@@ -1316,7 +1316,14 @@
         "next": "Next",
         "back": "← Back",
         "finish": "Finish",
-        "cancel": "Cancel"
+        "cancel": "Cancel",
+        "useApiKey": "Use an API key instead",
+        "metaOAuthOrApi": "Subscription (OAuth) · API key"
+      },
+      "xdSignin": {
+        "badge": "Recommended",
+        "desc": "Sign in to Cindy to enable the official Cindy AI service — all models work out of the box, no keys to manage.",
+        "cta": "Sign in to Cindy"
       }
     },
     "experimental": {
@@ -3898,6 +3905,31 @@
       "editTitle": "Edit Pasted Text",
       "cancelEdit": "Cancel Editing",
       "saveEdit": "Save Text"
+    }
+  },
+  "onboarding": {
+    "connectProvider": {
+      "title": "Connect a model provider to get started",
+      "desc": "No models are available yet. Connect a provider to start chatting.",
+      "recommendedLabel": "Recommended",
+      "cindy": {
+        "title": "Cindy AI",
+        "desc": "Official service · all models · works with Claude Code and Codex",
+        "loginTitle": "Sign in to Cindy",
+        "loginDesc": "Sign in to enable the official Cindy AI service with access to all models"
+      },
+      "othersToggle": "Other providers ({{count}})",
+      "presetSub": "Paste an API key to connect",
+      "dismiss": "Maybe later",
+      "haveApiKey": "I have an API key",
+      "banner": {
+        "text": "No models available — connect a provider to start chatting.",
+        "connectCta": "Connect a provider",
+        "loginCta": "Sign in to Cindy",
+        "dismissAria": "Dismiss"
+      },
+      "detectedLabel": "Detected",
+      "oauthSub": "Opens a verification page in your browser — connects automatically"
     }
   },
   "voiceInputOverlay": {
