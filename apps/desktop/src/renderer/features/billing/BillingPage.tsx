@@ -188,6 +188,7 @@ export function BillingPage() {
 export function BillingSettingsSection({ accountId }: { accountId: string | null }) {
   const { t } = useTranslation();
   const { confirm } = useConfirmDialog();
+  const confirmationPendingRef = useRef(false);
   const [catalog, setCatalog] = useState<BillingCatalog | null>(null);
   const [catalogError, setCatalogError] = useState(false);
   const [loadingCatalog, setLoadingCatalog] = useState(true);
@@ -301,6 +302,18 @@ export function BillingSettingsSection({ accountId }: { accountId: string | null
     checkout.state.intent !== null &&
     checkout.state.order === null &&
     checkout.state.subscription === null;
+  const confirmOnce = useCallback(
+    async (options: Parameters<typeof confirm>[0]) => {
+      if (confirmationPendingRef.current) return false;
+      confirmationPendingRef.current = true;
+      try {
+        return await confirm(options);
+      } finally {
+        confirmationPendingRef.current = false;
+      }
+    },
+    [confirm],
+  );
 
   const offers = useMemo<PurchasableOffer[]>(() => {
     if (!catalog) return [];
@@ -449,7 +462,7 @@ export function BillingSettingsSection({ accountId }: { accountId: string | null
     );
     const accepted =
       selected.product.kind === 'CREDIT_TOPUP'
-        ? await confirm({
+        ? await confirmOnce({
             title: t('billing.confirmActions.purchaseTopupTitle'),
             description: t('billing.confirmActions.purchaseTopupDescription', {
               product: selected.product.name,
@@ -460,7 +473,7 @@ export function BillingSettingsSection({ accountId }: { accountId: string | null
             cancelText: t('billing.confirmActions.back'),
             autoFocusConfirm: true,
           })
-        : await confirm({
+        : await confirmOnce({
             title: t('billing.confirmActions.purchaseSubscriptionTitle', {
               plan: selected.product.name,
             }),
@@ -512,7 +525,7 @@ export function BillingSettingsSection({ accountId }: { accountId: string | null
 
   const selectPlanChangeTarget = async (candidate: PlanChangeCandidate) => {
     if (candidate.offer.interval === null) return;
-    const accepted = await confirm({
+    const accepted = await confirmOnce({
       title: t('billing.confirmActions.quotePlanChangeTitle'),
       description: t('billing.confirmActions.quotePlanChangeDescription', {
         current: currentPlanName ?? t('billing.settings.subscriptionCard.unnamedPlan'),
@@ -536,7 +549,7 @@ export function BillingSettingsSection({ accountId }: { accountId: string | null
   };
 
   const cancelPendingPlanChange = async (pending: BillingPendingPlanChange) => {
-    const accepted = await confirm({
+    const accepted = await confirmOnce({
       title: t('billing.confirmActions.cancelPlanChangeTitle'),
       description: t('billing.confirmActions.cancelPlanChangeDescription', {
         target:

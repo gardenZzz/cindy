@@ -624,6 +624,32 @@ describe('BillingPage remote catalog rendering', () => {
     expect(screen.getByText('Configured top-up')).toBeTruthy();
   });
 
+  it('queues only one confirmation when the payment action is double-clicked', async () => {
+    let acceptConfirmation: ((value: boolean) => void) | null = null;
+    confirm.mockReturnValue(
+      new Promise<boolean>((resolve) => {
+        acceptConfirmation = resolve;
+      }),
+    );
+    render(<BillingPage />);
+
+    fireEvent.click(screen.getByText('billing.settings.topupCard.action'));
+    fireEvent.click((await screen.findByText('Configured top-up')).closest('button')!);
+    fireEvent.click((await screen.findByText('alipay')).closest('button')!);
+    fireEvent.change(screen.getByPlaceholderText('billing.amount.placeholder'), {
+      target: { value: '10' },
+    });
+    const pay = screen.getByText('billing.actions.pay');
+    fireEvent.click(pay);
+    fireEvent.click(pay);
+
+    expect(confirm).toHaveBeenCalledTimes(1);
+    expect(checkout.startTopup).not.toHaveBeenCalled();
+
+    acceptConfirmation!(true);
+    await waitFor(() => expect(checkout.startTopup).toHaveBeenCalledTimes(1));
+  });
+
   it('does not confirm read-only refresh actions', async () => {
     render(<BillingPage />);
     await screen.findByText('billing.balance.title');
