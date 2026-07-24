@@ -3958,7 +3958,8 @@
       "provider": {
         "claude": "Claude Code",
         "codex": "Codex",
-        "workflow": "Workflow"
+        "workflow": "Workflow",
+        "shell": "バックグラウンドコマンド"
       },
       "status": {
         "running": "実行中",
@@ -3966,6 +3967,7 @@
         "failed": "失敗",
         "stopped": "停止済み"
       },
+      "stop": "このタスクを停止",
       "tokens": "{{count}} tokens",
       "toolUses_one": "{{count}} 回のツール使用",
       "toolUses_other": "{{count}} 回のツール使用",
@@ -4049,8 +4051,11 @@
     },
     "backgroundActivity": {
       "status": "バックグラウンドのサブタスクが実行中、モデル使用量を消費しています…",
+      "bashStatus_one": "バックグラウンドタスク実行中（{{count}} 件）…",
+      "bashStatus_other": "バックグラウンドタスク実行中（{{count}} 件）…",
       "stopAll": "すべて停止",
       "stopAllTitle": "このセッションのバックグラウンドプロセスを終了し、すべてのサブタスクを停止します（セッションは引き続き使用できます）",
+      "stopBashTitle": "このセッションで実行中のバックグラウンドタスクを停止します（セッションのプロセスは終了しません）",
       "stopping": "停止中…"
     },
     "interruptedBanner": {

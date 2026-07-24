@@ -326,6 +326,7 @@ import { agentHandoffPending } from './agentHandoffPendingSingleton.js';
 import { type MakerSessionCreateOpts, withCreateSessionStderr } from './sessionRequest.js';
 import { persistAndHydrateSessionProvider } from './sessionProviderBootstrap.js';
 import { registerMakerSessionSendHandler } from './sessionSendHandler.js';
+import { registerStopAgentTaskHandler } from './stopAgentTaskHandler.js';
 import { registerStopSessionBackgroundTasksHandler } from './stopSessionBackgroundTasksHandler.js';
 import { registerProviderHandlers } from './providerHandlers.js';
 import { createLocalCliScanDeps, scanLocalCliAuth } from './localCliDetect.js';
@@ -2975,6 +2976,20 @@ export function registerMakerIpc(maker: Maker, options: RegisterMakerIpcOptions 
     clearBackgroundActivity: clearClaudeSessionBackgroundActivity,
     noteSessionReset: (sessionId) => silentStopAutoResumeGuard.noteSessionReset(sessionId),
     notifyGoalStop: (sessionId) => goalStopObserver?.(sessionId),
+  });
+
+  // 单个后台任务的精确停止(消息流任务卡 / 状态栏停止按钮)。只停指定 taskId,
+  // 当前 turn 与其他后台任务不受影响 —— 与上面的会话级止损入口互补。
+  registerStopAgentTaskHandler(createElectronIpcHandlerRegistry(), {
+    getLiveSession: (sessionId) => maker.getSession(sessionId) ?? undefined,
+  });
+
+  // 会话仍在运行的后台任务快照(只读)。renderer 挂载 / reloadMessages 清空
+  // taskUpdates 后据此补回存量任务(实时增量仍走 agent_task_update 事件流)。
+  ipcMain.handle(MAKER_INVOKE.LIST_SESSION_BACKGROUND_TASKS, (_e, sessionId: unknown) => {
+    if (typeof sessionId !== 'string') throwIpcError('INVALID_PARAMS', 'sessionId required');
+    const live = maker.getSession(sessionId);
+    return { tasks: live ? live.listBackgroundTasks() : [] };
   });
 
   // workflow 逐 agent 进度树(只读)。从活跃会话拿 workDir + sdkSessionId → 推导 Claude Code
