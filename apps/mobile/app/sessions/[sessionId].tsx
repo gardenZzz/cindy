@@ -77,7 +77,6 @@ import { useRemoteSyncTask } from '@/device-link/remoteSyncTask';
 import { useMobileMakerTransport } from '@/device-link/useMobileMakerTransport';
 import { createMobileMakerTransport } from '@/device-link/mobileMakerTransport';
 import { startFocusedTopicSubscription } from '@/device-link/focusedTopicSubscription';
-import { useObserve } from '@/observability/observe';
 import { InteractionPanel, type MobilePlanViewerState } from '@/session/InteractionPanel';
 import { MessageRenderer, type MobileMessageDraft } from '@/session/MessageRenderer';
 import { ComposerRichInput, type ComposerRichInputHandle } from '@/session/ComposerRichInput';
@@ -660,11 +659,6 @@ export default function SessionScreen() {
   const makerTurnRunning = useSessionMakerTurnRunning(sessionId);
   const remoteSessionRunStatus = useSessionRunStatus(sessionId);
   const taskUpdates = useSessionTaskUpdates(sessionId);
-  // EAS Observe:会话消息首次渲染即标记可交互(覆盖冷启 deep-link;markInteractive 每 route 仅记首次)。
-  const { markInteractive } = useObserve();
-  useEffect(() => {
-    if (messages.length > 0) markInteractive();
-  }, [messages.length, markInteractive]);
   const [draft, setDraft] = useState('');
   const [composerDocument, setComposerDocumentState] = useState<ComposerDocument>(emptyComposerDocument);
   const [composerDraftHydrated, setComposerDraftHydrated] = useState(false);
