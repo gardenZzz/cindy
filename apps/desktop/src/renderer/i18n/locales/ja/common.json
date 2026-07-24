@@ -2296,6 +2296,7 @@
         "command": "チャット指令 ${{command}}",
         "panelRight": "パネル「{{title}}」· チャットの右側にドッキング",
         "panelLeft": "パネル「{{title}}」· チャットの左側にドッキング",
+        "panelTab": "パネル「{{title}}」· 右サイドバーのタブ",
         "code": "実行コード",
         "codeDetail": "独立したサンドボックスで実行され、ファイルやネットワークにはアクセスできません。",
         "resident": "常駐実行(有効化すると起動し、呼び出されなくてもバックグラウンドプロセスを維持)",
@@ -3023,7 +3024,8 @@
       "menu": {
         "addLabel": "タブを追加",
         "comingSoon": "近日対応",
-        "alreadyOpen": "開いています"
+        "alreadyOpen": "開いています",
+        "pluginGroup": "プラグイン"
       },
       "kinds": {
         "fileBrowser": "ファイルブラウザ",
@@ -3031,7 +3033,8 @@
         "terminal": "ターミナル",
         "review": "レビュー",
         "collaboration": "コラボ",
-        "unknown": "不明なタブ"
+        "unknown": "不明なタブ",
+        "ghostPanel": "プラグインパネル"
       },
       "controls": {
         "maximizeAria": "サイドバーを最大化",
@@ -3056,6 +3059,9 @@
         "browserSub": "Browser",
         "openTerminal": "ターミナルを開く",
         "terminalSub": "Terminal",
+        "pluginSub": "Plugin",
+        "pluginGroup": "プラグインパネル",
+        "pluginGroupSub": "{{count}} 個のプラグイン",
         "addMoreHint": "上部の + ボタンからほかのパネルタイプを選択できます"
       },
       "placeholderHint": "{{kind}} — コンテンツは後続フェーズで追加されます"
