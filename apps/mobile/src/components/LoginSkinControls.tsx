@@ -461,7 +461,8 @@ export function LoginPanel({
   );
 }
 
-/** 标题块(figma §5.1:标题 y=31 h=38 32 Bold 居中;副标题 x=41 y=75 w=599 20 Regular 居中)。 */
+/** 标题块(figma §5.1:标题 y=31 h=38 32 Bold 居中;副标题 @(70,75) 540 宽 ≤2 行
+ *  顶对齐 20 Regular——2026-07-24 拍板,原单行 599@41 作废,见 DESIGN.md §16.2)。 */
 export function LoginTitleBlock({
   title,
   subtitle,
@@ -478,7 +479,7 @@ export function LoginTitleBlock({
         {title}
       </Text>
       {subtitle != null ? (
-        <Text numberOfLines={1} style={styles.subtitle}>
+        <Text numberOfLines={LOGIN_SUBTITLE.maxLines} style={styles.subtitle}>
           {subtitle}
         </Text>
       ) : null}
@@ -1110,14 +1111,24 @@ export function LoginTextLinkSlot({
   children,
   top,
   tone = 'placeholder',
+  align = 'center',
 }: {
   children: ReactNode;
   top?: number;
   tone?: 'placeholder' | 'secondary';
+  /** align="top":说明/提示类顶对齐 ≤2 行槽,槽高=行高×2(DESIGN.md §16.2,与桌面 SSO_ORG_HINT 同构);"center":与倒计时/重发同位垂直居中。 */
+  align?: 'center' | 'top';
 }) {
   const styles = useThemedStyles(makeStyles);
   return (
-    <View pointerEvents="none" style={[styles.textLinkSlotBox, top != null && { top }]}>
+    <View
+      pointerEvents="none"
+      style={[
+        styles.textLinkSlotBox,
+        top != null && { top },
+        align === 'top' && styles.textLinkSlotBoxTop,
+      ]}
+    >
       <Text
         numberOfLines={2}
         style={[
@@ -1330,6 +1341,8 @@ const makeStyles = (colors: ThemeColors) =>
     fontSize: LOGIN_SUBTITLE.font,
     fontWeight: fontWeight.regular,
     left: LOGIN_SUBTITLE.x,
+    // 显式行高:两行槽高 = 行高 × maxLines,折行只向下伸展(§16.2 折行分级 2)
+    lineHeight: LOGIN_SUBTITLE.height,
     // 同查:不设固定 height(设计 h=23 仅几何参考),盒随字形,descender 不受裁切
     position: 'absolute',
     textAlign: 'center',
@@ -1535,6 +1548,11 @@ const makeStyles = (colors: ThemeColors) =>
     top: LOGIN_TEXT_LINK.y,
     width: LOGIN_TEXT_LINK.width,
   },
+  // 顶对齐变体:说明/提示类 ≤2 行,槽高=行高×2,折行只向下伸展(DESIGN.md §16.2)
+  textLinkSlotBoxTop: {
+    height: LOGIN_TEXT_LINK.lineHeight * 2,
+    justifyContent: 'flex-start',
+  },
   resendLinkText: {
     color: colors.login.linkText,
     fontSize: LOGIN_TEXT_LINK.font,
@@ -1544,6 +1562,8 @@ const makeStyles = (colors: ThemeColors) =>
   textLinkSlotText: {
     fontSize: LOGIN_TEXT_LINK.font,
     fontWeight: fontWeight.regular,
+    // 显式行高:两行(numberOfLines=2)共 46 ≤ 槽高 50,不再依赖平台默认行高
+    lineHeight: LOGIN_TEXT_LINK.lineHeight,
     textAlign: 'center',
     width: LOGIN_TEXT_LINK.width,
   },

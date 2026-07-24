@@ -2819,7 +2819,7 @@
     },
     "ssoOrgTitle": "企業 SSO サインイン",
     "ssoOrgSubtitle": "企業 ID、組織 slug、または確認済みドメインを入力してシングルサインオンに進みます",
-    "ssoOrgPlaceholder": "企業 ID、組織 slug、または確認済みドメイン",
+    "ssoOrgPlaceholder": "企業 ID、slug、またはドメイン",
     "ssoOrgHint": "企業のログイン識別子が不明な場合は、管理者にお問い合わせください",
     "ssoOrgDetected": "「{{org}}」のシングルサインオン方法を選択してください",
     "ssoVerificationTitle": "企業 ID を確認",
