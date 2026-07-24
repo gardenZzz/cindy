@@ -1,9 +1,8 @@
 // @vitest-environment jsdom
 
-import { fireEvent, render, screen, waitFor } from '@testing-library/react';
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { fireEvent, render, screen } from '@testing-library/react';
+import { describe, expect, it, vi } from 'vitest';
 
-const confirm = vi.hoisted(() => vi.fn());
 vi.mock('react-i18next', () => ({
   useTranslation: () => ({
     t: (key: string, params?: Record<string, string>) =>
@@ -12,9 +11,6 @@ vi.mock('react-i18next', () => ({
 }));
 vi.mock('qrcode', () => ({
   toDataURL: vi.fn(async () => 'data:image/png;base64,fixture'),
-}));
-vi.mock('@/components/ui/confirm-dialog-provider', () => ({
-  useConfirmDialog: () => ({ confirm }),
 }));
 
 import { PlanChangeStatusDialog } from '../PlanChangeDialog';
@@ -42,10 +38,6 @@ function quoteReadyState(overrides: Partial<PlanChangeState> = {}): PlanChangeSt
 }
 
 describe('PlanChangeStatusDialog stale snapshot handling', () => {
-  beforeEach(() => {
-    confirm.mockReset().mockResolvedValue(true);
-  });
-
   it('lets a fresh quote be confirmed or abandoned', () => {
     render(
       <PlanChangeStatusDialog
@@ -110,48 +102,5 @@ describe('PlanChangeStatusDialog stale snapshot handling', () => {
 
     fireEvent.click(screen.getByText('billing.actions.refresh'));
     expect(onRefresh).toHaveBeenCalledTimes(1);
-  });
-
-  it('does not submit the final change until confirmation is accepted', async () => {
-    const onConfirm = vi.fn();
-    render(
-      <PlanChangeStatusDialog
-        state={quoteReadyState()}
-        targetName="Plus"
-        onClose={vi.fn()}
-        onConfirm={onConfirm}
-        onRefresh={vi.fn()}
-        onAbandon={vi.fn()}
-      />,
-    );
-
-    fireEvent.click(screen.getByText('billing.planChange.confirm'));
-    expect(onConfirm).not.toHaveBeenCalled();
-    await waitFor(() => expect(onConfirm).toHaveBeenCalledTimes(1));
-    expect(confirm).toHaveBeenCalledWith(
-      expect.objectContaining({
-        confirmText: 'billing.confirmActions.confirmPlanChange',
-        autoFocusConfirm: true,
-      }),
-    );
-  });
-
-  it('keeps the quote when cancel-plan-change confirmation is declined', async () => {
-    confirm.mockResolvedValue(false);
-    const onAbandon = vi.fn();
-    render(
-      <PlanChangeStatusDialog
-        state={quoteReadyState()}
-        targetName="Plus"
-        onClose={vi.fn()}
-        onConfirm={vi.fn()}
-        onRefresh={vi.fn()}
-        onAbandon={onAbandon}
-      />,
-    );
-
-    fireEvent.click(screen.getByText('billing.planChange.abandon'));
-    await waitFor(() => expect(confirm).toHaveBeenCalledTimes(1));
-    expect(onAbandon).not.toHaveBeenCalled();
   });
 });

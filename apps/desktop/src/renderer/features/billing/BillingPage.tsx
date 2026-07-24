@@ -12,7 +12,6 @@ import {
 } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 
-import { useConfirmDialog } from '@/components/ui/confirm-dialog-provider';
 import { Spinner } from '@/components/ui/spinner';
 import { useAuth } from '@/contexts/AuthContext';
 import { cn } from '@/lib/utils';
@@ -76,6 +75,15 @@ const SUPPORTED_SUBSCRIPTION_CAPABILITIES = new Set<BillingPurchaseOption['capab
   'MERCHANT_INITIATED_MANDATE',
   'PROVIDER_MANAGED_SUBSCRIPTION',
 ]);
+
+const SUBSCRIPTION_PURCHASE_BLOCKING_STATUSES: BillingSubscription['status'][] = [
+  'INCOMPLETE',
+  'TRIALING',
+  'ACTIVE',
+  'PAST_DUE',
+  'UNPAID',
+  'PAUSED',
+];
 
 function decimalParts(value: string): { value: bigint; scale: number } | null {
   const match = /^(0|[1-9]\d{0,14})(?:\.(\d{1,9}))?$/.exec(value.trim());
@@ -187,8 +195,6 @@ export function BillingPage() {
 
 export function BillingSettingsSection({ accountId }: { accountId: string | null }) {
   const { t } = useTranslation();
-  const { confirm } = useConfirmDialog();
-  const confirmationPendingRef = useRef(false);
   const [catalog, setCatalog] = useState<BillingCatalog | null>(null);
   const [catalogError, setCatalogError] = useState(false);
   const [loadingCatalog, setLoadingCatalog] = useState(true);
@@ -302,18 +308,6 @@ export function BillingSettingsSection({ accountId }: { accountId: string | null
     checkout.state.intent !== null &&
     checkout.state.order === null &&
     checkout.state.subscription === null;
-  const confirmOnce = useCallback(
-    async (options: Parameters<typeof confirm>[0]) => {
-      if (confirmationPendingRef.current) return false;
-      confirmationPendingRef.current = true;
-      try {
-        return await confirm(options);
-      } finally {
-        confirmationPendingRef.current = false;
-      }
-    },
-    [confirm],
-  );
 
   const offers = useMemo<PurchasableOffer[]>(() => {
     if (!catalog) return [];
@@ -391,10 +385,17 @@ export function BillingSettingsSection({ accountId }: { accountId: string | null
     return null;
   }, [customAmount, selected, t]);
 
+  const subscriptionPurchaseBlocked =
+    currentSubscription !== null &&
+    SUBSCRIPTION_PURCHASE_BLOCKING_STATUSES.includes(currentSubscription.status);
   const canCheckout =
     !checkout.recovering &&
     selected !== null &&
     selectedOption !== null &&
+    !(
+      selected.product.kind === 'SUBSCRIPTION' &&
+      (loadingSubscription || subscriptionError || subscriptionPurchaseBlocked)
+    ) &&
     (!isCustomTopup(selected.offer) || (customAmount.length > 0 && amountError === null));
 
   const planNameOf = useCallback(
@@ -412,6 +413,10 @@ export function BillingSettingsSection({ accountId }: { accountId: string | null
 
   const currentPlan = currentSubscription?.effectivePlan ?? null;
   const pendingPlanChange = currentSubscription?.pendingPlanChange ?? null;
+  const planChangeable =
+    currentSubscription?.status === 'ACTIVE' &&
+    !currentSubscription.cancelAtPeriodEnd &&
+    currentPlan?.offer.interval === 'MONTH';
   const currentPlanFacts = useMemo(() => {
     if (!currentSubscription) return null;
     const plan = currentSubscription.effectivePlan;
@@ -426,17 +431,31 @@ export function BillingSettingsSection({ accountId }: { accountId: string | null
     };
   }, [currentSubscription, planNameOf, t]);
 
-  // The server quote owns reachability and direction. The renderer only removes
-  // the exact current offer because selecting it cannot express a change.
+  // UI candidates only. The quote is the authority on whether a target is
+  // actually reachable; this filter just avoids offering obviously invalid
+  // targets (other interval, same level, or another provider's offers).
   const planChangeCandidates = useMemo<PlanChangeCandidate[]>(() => {
-    if (!currentSubscription) return [];
+    if (!planChangeable || !currentPlan) return [];
+    const currentProvider = currentSubscription?.provider ?? null;
     return subscriptionOffers
-      .filter(({ offer }) => offer.code !== currentPlan?.offer.code)
+      .filter(
+        ({ product, offer }) =>
+          offer.interval === currentPlan.offer.interval &&
+          offer.code !== currentPlan.offer.code &&
+          product.level !== null &&
+          product.level !== currentPlan.product.level &&
+          (currentProvider === null ||
+            offer.purchaseOptions.some((option) => option.provider === currentProvider)),
+      )
       .map(({ product, offer }) => ({
         product,
         offer,
+        direction:
+          (product.level ?? 0) > currentPlan.product.level
+            ? ('UPGRADE' as const)
+            : ('DOWNGRADE' as const),
       }));
-  }, [currentPlan?.offer.code, currentSubscription, subscriptionOffers]);
+  }, [subscriptionOffers, planChangeable, currentPlan, currentSubscription?.provider]);
 
   const openPurchaseDialog = (kind: PurchaseKind) => {
     resetSelection();
@@ -454,41 +473,8 @@ export function BillingSettingsSection({ accountId }: { accountId: string | null
     setCustomAmount('');
   };
 
-  const submit = async () => {
+  const submit = () => {
     if (!selected || !selectedOption || !canCheckout) return;
-    const amount = formatMoney(
-      isCustomTopup(selected.offer) ? customAmount.trim() : selected.offer.amount!,
-      selected.offer.currency,
-    );
-    const accepted =
-      selected.product.kind === 'CREDIT_TOPUP'
-        ? await confirmOnce({
-            title: t('billing.confirmActions.purchaseTopupTitle'),
-            description: t('billing.confirmActions.purchaseTopupDescription', {
-              product: selected.product.name,
-              amount,
-              provider: providerLabel(selectedOption.provider, t),
-            }),
-            confirmText: t('billing.confirmActions.purchaseTopup'),
-            cancelText: t('billing.confirmActions.back'),
-            autoFocusConfirm: true,
-          })
-        : await confirmOnce({
-            title: t('billing.confirmActions.purchaseSubscriptionTitle', {
-              plan: selected.product.name,
-            }),
-            description: t('billing.confirmActions.purchaseSubscriptionDescription', {
-              price: amount,
-              interval: selected.offer.interval
-                ? t(`billing.intervals.${selected.offer.interval}`)
-                : '',
-              provider: providerLabel(selectedOption.provider, t),
-            }),
-            confirmText: t('billing.confirmActions.purchaseSubscription'),
-            cancelText: t('billing.confirmActions.back'),
-            autoFocusConfirm: true,
-          });
-    if (!accepted) return;
     setSubscriptionDialogOpen(false);
     setTopupDialogOpen(false);
     if (selected.product.kind === 'CREDIT_TOPUP') {
@@ -523,19 +509,8 @@ export function BillingSettingsSection({ accountId }: { accountId: string | null
     }
   };
 
-  const selectPlanChangeTarget = async (candidate: PlanChangeCandidate) => {
+  const selectPlanChangeTarget = (candidate: PlanChangeCandidate) => {
     if (candidate.offer.interval === null) return;
-    const accepted = await confirmOnce({
-      title: t('billing.confirmActions.quotePlanChangeTitle'),
-      description: t('billing.confirmActions.quotePlanChangeDescription', {
-        current: currentPlanName ?? t('billing.settings.subscriptionCard.unnamedPlan'),
-        target: candidate.product.name,
-      }),
-      confirmText: t('billing.confirmActions.quotePlanChange'),
-      cancelText: t('billing.confirmActions.back'),
-      autoFocusConfirm: true,
-    });
-    if (!accepted) return;
     setPlanChangeTargetOpen(false);
     void planChange.startQuote(candidate.offer.code, {
       product: { code: candidate.product.code, level: candidate.product.level ?? 0 },
@@ -546,20 +521,6 @@ export function BillingSettingsSection({ accountId }: { accountId: string | null
         creditAmount: candidate.offer.creditAmount ?? '0',
       },
     });
-  };
-
-  const cancelPendingPlanChange = async (pending: BillingPendingPlanChange) => {
-    const accepted = await confirmOnce({
-      title: t('billing.confirmActions.cancelPlanChangeTitle'),
-      description: t('billing.confirmActions.cancelPlanChangeDescription', {
-        target:
-          planNameOf(pending.targetPlan?.product.code) ??
-          t('billing.settings.subscriptionCard.unnamedPlan'),
-      }),
-      confirmText: t('billing.confirmActions.cancelPlanChange'),
-      cancelText: t('billing.confirmActions.back'),
-    });
-    if (accepted) await planChange.cancelChange(pending.planChangeId);
   };
 
   const closePlanChangeStatus = () => {
@@ -627,6 +588,8 @@ export function BillingSettingsSection({ accountId }: { accountId: string | null
             facts={currentPlanFacts}
             loading={loadingSubscription}
             error={subscriptionError}
+            planChangeable={planChangeable}
+            actionDisabled={loadingSubscription || subscriptionError}
             pendingPlanChange={pendingPlanChange}
             pendingTargetName={planNameOf(pendingPlanChange?.targetPlan?.product.code)}
             onChangePlan={openPlanChange}
@@ -635,7 +598,7 @@ export function BillingSettingsSection({ accountId }: { accountId: string | null
               if (pendingPlanChange) planChange.resumePending(pendingPlanChange);
             }}
             onCancelPending={() => {
-              if (pendingPlanChange) void cancelPendingPlanChange(pendingPlanChange);
+              if (pendingPlanChange) void planChange.cancelChange(pendingPlanChange.planChangeId);
             }}
           />
           <TopupOverviewCard onPurchase={() => openPurchaseDialog('CREDIT_TOPUP')} />
@@ -652,13 +615,14 @@ export function BillingSettingsSection({ accountId }: { accountId: string | null
         selectedPurchaseOptionId={selectedPurchaseOptionId}
         customAmount={customAmount}
         amountError={amountError}
+        subscriptionPurchaseBlocked={subscriptionPurchaseBlocked}
         canCheckout={canCheckout}
         onClose={closeSubscriptionDialog}
         onRetry={() => void loadBillingState()}
         onSelectOffer={selectOffer}
         onSelectPurchaseOption={setSelectedPurchaseOptionId}
         onCustomAmountChange={setCustomAmount}
-        onSubmit={() => void submit()}
+        onSubmit={submit}
       />
 
       <BillingOfferDialog
@@ -671,13 +635,14 @@ export function BillingSettingsSection({ accountId }: { accountId: string | null
         selectedPurchaseOptionId={selectedPurchaseOptionId}
         customAmount={customAmount}
         amountError={amountError}
+        subscriptionPurchaseBlocked={false}
         canCheckout={canCheckout}
         onClose={closeTopupDialog}
         onRetry={() => void loadBillingState()}
         onSelectOffer={selectOffer}
         onSelectPurchaseOption={setSelectedPurchaseOptionId}
         onCustomAmountChange={setCustomAmount}
-        onSubmit={() => void submit()}
+        onSubmit={submit}
       />
 
       <BillingCheckoutDialog
@@ -775,6 +740,8 @@ function SubscriptionOverviewCard({
   facts,
   loading,
   error,
+  planChangeable,
+  actionDisabled,
   pendingPlanChange,
   pendingTargetName,
   onChangePlan,
@@ -785,6 +752,8 @@ function SubscriptionOverviewCard({
   facts: CurrentPlanFacts | null;
   loading: boolean;
   error: boolean;
+  planChangeable: boolean;
+  actionDisabled: boolean;
   pendingPlanChange: BillingPendingPlanChange | null;
   pendingTargetName: string | null;
   onChangePlan: () => void;
@@ -857,22 +826,14 @@ function SubscriptionOverviewCard({
         )}
       </div>
       <div className="mt-5 flex flex-wrap gap-2">
-        {facts && (
-          <button
-            type="button"
-            onClick={onChangePlan}
-            className="h-8 select-none rounded-full border border-[var(--border-default)] px-3.5 text-12 font-medium text-[var(--text-primary)] transition-colors hover:bg-[var(--surface-hover-soft)]"
-          >
-            {t('billing.settings.subscriptionCard.changeAction')}
-          </button>
-        )}
         <button
           type="button"
-          onClick={onPurchase}
-          className="h-8 select-none rounded-full border border-[var(--border-default)] px-3.5 text-12 font-medium text-[var(--text-primary)] transition-colors hover:bg-[var(--surface-hover-soft)]"
+          onClick={planChangeable ? onChangePlan : onPurchase}
+          disabled={actionDisabled}
+          className="h-8 select-none rounded-full border border-[var(--border-default)] px-3.5 text-12 font-medium text-[var(--text-primary)] transition-colors hover:bg-[var(--surface-hover-soft)] disabled:cursor-not-allowed disabled:opacity-40"
         >
-          {facts
-            ? t('billing.settings.subscriptionCard.purchaseAnother')
+          {planChangeable
+            ? t('billing.settings.subscriptionCard.changeAction')
             : t('billing.settings.subscriptionCard.action')}
         </button>
       </div>
@@ -1284,6 +1245,7 @@ function BillingOfferDialog({
   selectedPurchaseOptionId,
   customAmount,
   amountError,
+  subscriptionPurchaseBlocked,
   canCheckout,
   onClose,
   onRetry,
@@ -1301,6 +1263,7 @@ function BillingOfferDialog({
   selectedPurchaseOptionId: string | null;
   customAmount: string;
   amountError: string | null;
+  subscriptionPurchaseBlocked: boolean;
   canCheckout: boolean;
   onClose: () => void;
   onRetry: () => void;
@@ -1480,6 +1443,12 @@ function BillingOfferDialog({
                             })}
                         </p>
                       </label>
+                    )}
+
+                    {kind === 'SUBSCRIPTION' && subscriptionPurchaseBlocked && (
+                      <p className="mt-5 rounded-lg bg-[var(--surface-chip)] px-4 py-3 text-12 leading-5 text-[var(--text-secondary)]">
+                        {t('billing.currentSubscription.purchaseBlocked')}
+                      </p>
                     )}
                   </div>
                 )}

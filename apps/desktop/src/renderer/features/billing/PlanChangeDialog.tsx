@@ -1,7 +1,9 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import * as Dialog from '@radix-ui/react-dialog';
 import * as QRCode from 'qrcode';
 import {
+  ArrowDownRight,
+  ArrowUpRight,
   Check,
   CircleAlert,
   ExternalLink,
@@ -12,7 +14,6 @@ import {
 } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 
-import { useConfirmDialog } from '@/components/ui/confirm-dialog-provider';
 import { Spinner } from '@/components/ui/spinner';
 import { cn } from '@/lib/utils';
 import type {
@@ -30,6 +31,8 @@ import type { PlanChangeState } from './usePlanChange';
 export type PlanChangeCandidate = {
   product: BillingCatalogProduct;
   offer: BillingCatalogOffer;
+  /** UI hint only; the server quote is the authority on the change type. */
+  direction: 'UPGRADE' | 'DOWNGRADE';
 };
 
 function formatEffectiveDate(iso: string): string {
@@ -109,6 +112,8 @@ export function PlanChangeTargetDialog({
             ) : (
               <div className="space-y-2.5">
                 {candidates.map((candidate) => {
+                  const DirectionIcon =
+                    candidate.direction === 'UPGRADE' ? ArrowUpRight : ArrowDownRight;
                   return (
                     <button
                       key={candidate.offer.code}
@@ -126,7 +131,10 @@ export function PlanChangeTargetDialog({
                           {candidate.product.name}
                         </p>
                         <p className="mt-1 inline-flex items-center gap-1 text-11 text-[var(--text-tertiary)]">
-                          {t('billing.planChange.serverDecisionHint')}
+                          <DirectionIcon size={12} />
+                          {candidate.direction === 'UPGRADE'
+                            ? t('billing.planChange.upgradeBadge')
+                            : t('billing.planChange.downgradeBadge')}
                         </p>
                       </div>
                       <div className="shrink-0 text-right">
@@ -191,8 +199,6 @@ export function PlanChangeStatusDialog({
   onAbandon: () => void;
 }) {
   const { t } = useTranslation();
-  const { confirm } = useConfirmDialog();
-  const confirmationPendingRef = useRef(false);
   const change = state.planChange;
   const action: BillingPaymentAction | null = change?.paymentAction ?? null;
   const [qrDataUrl, setQrDataUrl] = useState<string | null>(null);
@@ -257,59 +263,14 @@ export function PlanChangeStatusDialog({
     state.phase === 'CANCELED' ||
     state.phase === 'FAILED' ||
     state.phase === 'EXPIRED';
-  const confirmOnce = useCallback(
-    async (options: Parameters<typeof confirm>[0]) => {
-      if (confirmationPendingRef.current) return false;
-      confirmationPendingRef.current = true;
-      try {
-        return await confirm(options);
-      } finally {
-        confirmationPendingRef.current = false;
-      }
-    },
-    [confirm],
-  );
-  const confirmPlanChange = async () => {
-    if (!change) return;
-    const impact =
-      change.changeType === 'UPGRADE'
-        ? quotedAmount
-          ? t('billing.planChange.upgradeDueNow', { amount: quotedAmount })
-          : t('billing.planChange.upgradeNoAmount')
-        : t('billing.planChange.downgradeAt', {
-            date: formatEffectiveDate(change.effectiveAt),
-          });
-    const accepted = await confirmOnce({
-      title: t('billing.confirmActions.confirmPlanChangeTitle'),
-      description: t('billing.confirmActions.confirmPlanChangeDescription', {
-        target: targetName ?? t('billing.settings.subscriptionCard.unnamedPlan'),
-        impact,
-      }),
-      confirmText: t('billing.confirmActions.confirmPlanChange'),
-      cancelText: t('billing.confirmActions.back'),
-      autoFocusConfirm: true,
-    });
-    if (accepted) onConfirm();
-  };
-  const abandonPlanChange = async () => {
-    const accepted = await confirmOnce({
-      title: t('billing.confirmActions.cancelPlanChangeTitle'),
-      description: t('billing.confirmActions.cancelPlanChangeDescription', {
-        target: targetName ?? t('billing.settings.subscriptionCard.unnamedPlan'),
-      }),
-      confirmText: t('billing.confirmActions.cancelPlanChange'),
-      cancelText: t('billing.confirmActions.back'),
-    });
-    if (accepted) onAbandon();
-  };
 
   return (
     <Dialog.Root open={state.open} onOpenChange={(open) => !open && !busy && onClose()}>
       <Dialog.Portal>
-        <Dialog.Overlay className="fixed inset-0 z-[9990] bg-[var(--overlay-modal)]" />
+        <Dialog.Overlay className="fixed inset-0 z-[10000] bg-[var(--overlay-modal)]" />
         <Dialog.Content
           className={cn(
-            'fixed left-1/2 top-1/2 z-[9991] w-[calc(100vw-40px)] max-w-[600px]',
+            'fixed left-1/2 top-1/2 z-[10001] w-[calc(100vw-40px)] max-w-[600px]',
             '-translate-x-1/2 -translate-y-1/2 overflow-hidden rounded-xl',
             'border border-[var(--border-default)] bg-[var(--surface-elevated)]',
             'text-[var(--text-primary)] focus:outline-none',
@@ -492,7 +453,7 @@ export function PlanChangeStatusDialog({
               {state.phase === 'QUOTE_READY' && change?.status === 'QUOTED' && !state.stale && (
                 <button
                   type="button"
-                  onClick={() => void abandonPlanChange()}
+                  onClick={onAbandon}
                   className="h-9 rounded-full px-3 text-12 text-[var(--text-secondary)] transition-colors hover:bg-[var(--surface-hover-soft)]"
                 >
                   {t('billing.planChange.abandon')}
@@ -517,7 +478,7 @@ export function PlanChangeStatusDialog({
               {state.phase === 'QUOTE_READY' && change?.status === 'QUOTED' && !state.stale && (
                 <button
                   type="button"
-                  onClick={() => void confirmPlanChange()}
+                  onClick={onConfirm}
                   className="inline-flex h-9 items-center gap-2 rounded-full bg-[var(--text-primary)] px-5 text-13 font-medium text-[var(--surface)]"
                 >
                   {t('billing.planChange.confirm')}

@@ -6938,7 +6938,6 @@
         "unavailable": "Subscription status is temporarily unavailable. Refresh to try again.",
         "action": "View plans",
         "changeAction": "Change plan",
-        "purchaseAnother": "Buy new subscription",
         "priceInterval": "{{price}} / {{interval}}",
         "includedCredits": "Includes {{amount}} credits per {{interval}}",
         "renewsAt": "Renews {{date}}",
@@ -7053,31 +7052,6 @@
     "confirm": {
       "channel": "Pay with {{provider}}"
     },
-    "confirmActions": {
-      "back": "Back to Review",
-      "purchaseTopupTitle": "Buy Credits?",
-      "purchaseTopupDescription": "{{product}} · {{amount}} · Pay with {{provider}}",
-      "purchaseTopup": "Buy Credits",
-      "purchaseSubscriptionTitle": "Buy {{plan}}?",
-      "purchaseSubscriptionDescription": "{{price}} / {{interval}} · Pay with {{provider}}",
-      "purchaseSubscription": "Buy Plan",
-      "quotePlanChangeTitle": "Get a Plan Change Quote?",
-      "quotePlanChangeDescription": "{{current}} → {{target}}. The next step shows the actual price difference and effective time.",
-      "quotePlanChange": "Get Change Quote",
-      "confirmPlanChangeTitle": "Apply This Plan Change?",
-      "confirmPlanChangeDescription": "{{target}} · {{impact}}",
-      "confirmPlanChange": "Apply Plan Change",
-      "cancelPaymentTitle": "Cancel This Payment?",
-      "cancelPaymentDescription": "The {{amount}} payment will be canceled. You will need to create a new payment.",
-      "cancelPayment": "Cancel Payment",
-      "cancelPlanChangeTitle": "Cancel This Plan Change?",
-      "cancelPlanChangeDescription": "Target plan: {{target}}. Your current plan remains unchanged.",
-      "cancelPlanChange": "Cancel Plan Change",
-      "retryPaymentTitle": "Retry This Payment?",
-      "retryPaymentDescription": "The {{amount}} payment will retry with the original idempotent intent.",
-      "retryUnknownPaymentDescription": "This payment will retry with the original idempotent intent.",
-      "retryPayment": "Retry Payment"
-    },
     "paymentActions": {
       "QR_CODE": "Scan to pay",
       "REDIRECT": "Open payment page"
@@ -7137,7 +7111,6 @@
       "targetTitle": "Change subscription plan",
       "targetDescription": "Plan changes keep your current payment method. The final price and effective time are confirmed on the next step.",
       "targetDescriptionWithCurrent": "Current plan: {{plan}}. Plan changes keep your current payment method; the final price and effective time are confirmed on the next step.",
-      "serverDecisionHint": "Price and timing are confirmed by the next quote",
       "upgradeBadge": "Upgrade",
       "downgradeBadge": "Downgrade",
       "emptyTitle": "No plans available to switch to",
