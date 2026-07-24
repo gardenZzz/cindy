@@ -556,6 +556,7 @@
       },
       "copyUserId": {
         "action": "사용자 ID 복사",
+        "display": "ID: {{id}}",
         "success": "사용자 ID를 복사했습니다",
         "failed": "사용자 ID를 복사하지 못했습니다"
       },
