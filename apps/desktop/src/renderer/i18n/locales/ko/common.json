@@ -2268,11 +2268,7 @@
         "metaWithAuthor": "제작자 {{author}} · 버전 {{version}}. 로컬에 설치되며 언제든 제거할 수 있습니다.",
         "enableNow": "설치 후 바로 활성화",
         "expandDescription": "전체 소개 보기",
-        "collapseDescription": "소개 접기",
-        "nodeRiskTitle": "로컬 Node 프로그램 실행을 허용할까요?",
-        "nodeRiskDescription": "고위험 권한입니다. 플러그인의 Node 프로그램은 사용자 계정과 같은 로컬 권한으로 접근 가능한 파일을 읽거나 바꾸고, 네트워크를 사용하며, 다른 프로그램을 시작할 수 있습니다. 브라우저 샌드박스로 격리할 수 없습니다. 신뢰하는 출처의 플러그인만 설치하세요.",
-        "nodeRiskConfirm": "위험을 이해하고 계속",
-        "nodeRiskCancel": "설치 취소"
+        "collapseDescription": "소개 접기"
       },
       "trust": {
         "official": "Cindy 공식 플러그인",

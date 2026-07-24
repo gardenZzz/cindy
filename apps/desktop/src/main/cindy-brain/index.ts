@@ -65,7 +65,6 @@ import { reclaimLoopbackPort } from './portReclaim.js';
 import { GhostConnectionManager } from './ghostConnections.js';
 import { t } from '../i18n.js';
 import { assertTrustedAppRendererEvent } from '../security/trustedAppRenderer.js';
-import { requestNodeInstallAuthorization } from './nodeInstallAuthorization.js';
 import {
   FILO_GOOGLE_GHOST_ID,
   migrateFiloGoogleAccounts,
@@ -2537,9 +2536,8 @@ export function registerGhostIpc(): void {
     }
     rejectReservedGhostId(probe.manifest.id);
     rejectUnauthorizedTokenBroker(probe.manifest);
-    if (!(await requestNodeInstallAuthorization(event.sender, probe.manifest, 'install'))) {
-      return { canceled: true };
-    }
+    // Node 高风险提示在 renderer 装入确认卡的权限清单里如实展示;
+    // 2026-07-24 Lizi 定案:不再追加 Main 原生二次确认弹窗。
     const enable = installOpts.enable === true;
     return {
       ghost: await installAndDock(manager, lizFilePath, {
@@ -2572,9 +2570,6 @@ export function registerGhostIpc(): void {
     }
     rejectReservedGhostId(inspected.manifest.id);
     rejectUnauthorizedTokenBroker(inspected.manifest);
-    if (!(await requestNodeInstallAuthorization(event.sender, inspected.manifest, 'update'))) {
-      return { canceled: true };
-    }
     const previousGhost = manager.list().find((g) => g.manifest.id === inspected.manifest.id);
     runtime.stop(inspected.manifest.id);
     getGhostNodeRuntimeBroker().stop(inspected.manifest.id);
