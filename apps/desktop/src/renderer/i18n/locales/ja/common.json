@@ -6927,7 +6927,6 @@
         "unavailable": "サブスクリプションの状態を取得できません。更新してもう一度お試しください。",
         "action": "プランを見る",
         "changeAction": "プランを変更",
-        "purchaseAnother": "新しいサブスクリプションを購入",
         "priceInterval": "{{price}} / {{interval}}",
         "includedCredits": "毎{{interval}} {{amount}} クレジットを付与",
         "renewsAt": "次回更新日: {{date}}",
@@ -7042,31 +7041,6 @@
     "confirm": {
       "channel": "{{provider}}で支払う"
     },
-    "confirmActions": {
-      "back": "内容を確認",
-      "purchaseTopupTitle": "クレジットを購入しますか？",
-      "purchaseTopupDescription": "{{product}} · {{amount}} · {{provider}}で支払う",
-      "purchaseTopup": "クレジットを購入",
-      "purchaseSubscriptionTitle": "{{plan}}を購入しますか？",
-      "purchaseSubscriptionDescription": "{{price}} / {{interval}} · {{provider}}で支払う",
-      "purchaseSubscription": "プランを購入",
-      "quotePlanChangeTitle": "プラン変更の見積もりを取得しますか？",
-      "quotePlanChangeDescription": "{{current}} → {{target}}。次のステップで実際の差額と適用時期を表示します。",
-      "quotePlanChange": "変更見積もりを取得",
-      "confirmPlanChangeTitle": "プラン変更を確定しますか？",
-      "confirmPlanChangeDescription": "{{target}} · {{impact}}",
-      "confirmPlanChange": "プラン変更を確定",
-      "cancelPaymentTitle": "この支払いをキャンセルしますか？",
-      "cancelPaymentDescription": "{{amount}}の支払いをキャンセルします。続行するには新しい支払いの作成が必要です。",
-      "cancelPayment": "この支払いをキャンセル",
-      "cancelPlanChangeTitle": "プラン変更を取り消しますか？",
-      "cancelPlanChangeDescription": "変更先プラン: {{target}}。取り消しても現在のプランは変わりません。",
-      "cancelPlanChange": "プラン変更を取り消す",
-      "retryPaymentTitle": "この支払いを再試行しますか？",
-      "retryPaymentDescription": "{{amount}}の支払いを元の冪等な処理で再試行します。",
-      "retryUnknownPaymentDescription": "この支払いを元の冪等な処理で再試行します。",
-      "retryPayment": "この支払いを再試行"
-    },
     "paymentActions": {
       "QR_CODE": "QRコードで支払う",
       "REDIRECT": "支払いページを開く"
@@ -7126,7 +7100,6 @@
       "targetTitle": "サブスクリプションプランの変更",
       "targetDescription": "プラン変更は現在の支払い方法を引き継ぎます。最終的な金額と適用時期は次のステップで確認します。",
       "targetDescriptionWithCurrent": "現在のプラン:{{plan}}。変更は現在の支払い方法を引き継ぎ、最終的な金額と適用時期は次のステップで確認します。",
-      "serverDecisionHint": "金額と適用時期は次の見積もりで確定します",
       "upgradeBadge": "アップグレード",
       "downgradeBadge": "ダウングレード",
       "emptyTitle": "切り替え可能なプランがありません",

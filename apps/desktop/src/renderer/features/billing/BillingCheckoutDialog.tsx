@@ -1,14 +1,12 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import * as Dialog from '@radix-ui/react-dialog';
 import * as QRCode from 'qrcode';
 import { Check, CircleAlert, ExternalLink, LoaderCircle, RotateCcw, X } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 
-import { useConfirmDialog } from '@/components/ui/confirm-dialog-provider';
 import { Spinner } from '@/components/ui/spinner';
 import { cn } from '@/lib/utils';
 import { billingApi } from './api';
-import { formatBillingAmount as formatMoney } from './money';
 import type { BillingCheckoutState } from './useBillingCheckout';
 
 interface BillingCheckoutDialogProps {
@@ -31,8 +29,6 @@ export function BillingCheckoutDialog({
   onCancel,
 }: BillingCheckoutDialogProps) {
   const { t } = useTranslation();
-  const { confirm } = useConfirmDialog();
-  const confirmationPendingRef = useRef(false);
   const action = actionOf(state);
   const [qrDataUrl, setQrDataUrl] = useState<string | null>(null);
   const [remainingSeconds, setRemainingSeconds] = useState<number | null>(null);
@@ -94,44 +90,6 @@ export function BillingCheckoutDialog({
     state.kind === 'TOPUP' &&
     state.order !== null &&
     (state.order.status === 'CREATED' || state.order.status === 'PENDING');
-  const confirmOnce = useCallback(
-    async (options: Parameters<typeof confirm>[0]) => {
-      if (confirmationPendingRef.current) return false;
-      confirmationPendingRef.current = true;
-      try {
-        return await confirm(options);
-      } finally {
-        confirmationPendingRef.current = false;
-      }
-    },
-    [confirm],
-  );
-  const confirmCancel = async () => {
-    if (!state.order) return;
-    const accepted = await confirmOnce({
-      title: t('billing.confirmActions.cancelPaymentTitle'),
-      description: t('billing.confirmActions.cancelPaymentDescription', {
-        amount: formatMoney(state.order.amount, state.order.currency),
-      }),
-      confirmText: t('billing.confirmActions.cancelPayment'),
-      cancelText: t('billing.confirmActions.back'),
-    });
-    if (accepted) onCancel();
-  };
-  const confirmRetry = async () => {
-    const accepted = await confirmOnce({
-      title: t('billing.confirmActions.retryPaymentTitle'),
-      description: state.order
-        ? t('billing.confirmActions.retryPaymentDescription', {
-            amount: formatMoney(state.order.amount, state.order.currency),
-          })
-        : t('billing.confirmActions.retryUnknownPaymentDescription'),
-      confirmText: t('billing.confirmActions.retryPayment'),
-      cancelText: t('billing.confirmActions.back'),
-      autoFocusConfirm: true,
-    });
-    if (accepted) onRetry();
-  };
 
   return (
     <Dialog.Root
@@ -139,10 +97,10 @@ export function BillingCheckoutDialog({
       onOpenChange={(open) => !open && state.phase !== 'CREATING' && onClose()}
     >
       <Dialog.Portal>
-        <Dialog.Overlay className="fixed inset-0 z-[9990] bg-[var(--overlay-modal)]" />
+        <Dialog.Overlay className="fixed inset-0 z-[10000] bg-[var(--overlay-modal)]" />
         <Dialog.Content
           className={cn(
-            'fixed left-1/2 top-1/2 z-[9991] w-[calc(100vw-40px)] max-w-[620px]',
+            'fixed left-1/2 top-1/2 z-[10001] w-[calc(100vw-40px)] max-w-[620px]',
             '-translate-x-1/2 -translate-y-1/2 overflow-hidden rounded-xl',
             'border border-[var(--border-default)] bg-[var(--surface-elevated)]',
             'text-[var(--text-primary)] focus:outline-none',
@@ -277,7 +235,7 @@ export function BillingCheckoutDialog({
               {canCancel && (
                 <button
                   type="button"
-                  onClick={() => void confirmCancel()}
+                  onClick={onCancel}
                   className="h-9 rounded-full px-3 text-12 text-[var(--text-secondary)] transition-colors hover:bg-[var(--surface-hover-soft)]"
                 >
                   {t('billing.actions.cancelPayment')}
@@ -298,7 +256,7 @@ export function BillingCheckoutDialog({
               {(state.phase === 'FAILED' || state.phase === 'EXPIRED') && canRetry && (
                 <button
                   type="button"
-                  onClick={() => void confirmRetry()}
+                  onClick={onRetry}
                   className="inline-flex h-9 items-center gap-2 rounded-full bg-[var(--text-primary)] px-4 text-12 font-medium text-[var(--surface)]"
                 >
                   <RotateCcw size={14} />

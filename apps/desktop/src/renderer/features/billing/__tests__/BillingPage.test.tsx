@@ -4,7 +4,6 @@ import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { BillingPaymentOrder, BillingSubscription } from '../../../../shared/billing';
 
-const confirm = vi.hoisted(() => vi.fn());
 const checkout = {
   state: {
     open: false,
@@ -50,9 +49,6 @@ vi.mock('@/features/feature-context', () => ({
 vi.mock('@/contexts/AuthContext', () => ({
   useAuth: () => ({ dataOwnerId: 'account-fixture' }),
 }));
-vi.mock('@/components/ui/confirm-dialog-provider', () => ({
-  useConfirmDialog: () => ({ confirm }),
-}));
 vi.mock('../useBillingCheckout', () => ({
   useBillingCheckout: () => checkout,
 }));
@@ -61,10 +57,6 @@ vi.mock('qrcode', () => ({
 }));
 
 import { BillingPage } from '../BillingPage';
-
-beforeEach(() => {
-  confirm.mockReset().mockResolvedValue(true);
-});
 
 describe('BillingPage remote catalog rendering', () => {
   beforeEach(() => {
@@ -344,7 +336,6 @@ describe('BillingPage remote catalog rendering', () => {
       screen.getByText((text) => text.startsWith('billing.settings.subscriptionCard.renewsAt')),
     ).toBeTruthy();
     expect(screen.getByText('billing.settings.subscriptionCard.changeAction')).toBeTruthy();
-    expect(screen.getByText('billing.settings.subscriptionCard.purchaseAnother')).toBeTruthy();
   });
 
   it('shows an end date for period-end cancellation and omits invalid dates', async () => {
@@ -593,70 +584,10 @@ describe('BillingPage remote catalog rendering', () => {
     expect(screen.queryByText('alipay')).toBeNull();
     fireEvent.click(screen.getByText('stripe').closest('button')!);
     fireEvent.click(screen.getByText('billing.actions.pay'));
-    await waitFor(() =>
-      expect(checkout.startSubscription).toHaveBeenCalledWith({
-        offerCode: 'plus_month',
-        purchaseOptionId: 'listing_stripe',
-      }),
-    );
-    expect(confirm).toHaveBeenCalledWith(
-      expect.objectContaining({
-        confirmText: 'billing.confirmActions.purchaseSubscription',
-        autoFocusConfirm: true,
-      }),
-    );
-  });
-
-  it('does not create a top-up when its confirmation is canceled', async () => {
-    confirm.mockResolvedValue(false);
-    render(<BillingPage />);
-
-    fireEvent.click(screen.getByText('billing.settings.topupCard.action'));
-    fireEvent.click((await screen.findByText('Configured top-up')).closest('button')!);
-    fireEvent.click((await screen.findByText('alipay')).closest('button')!);
-    fireEvent.change(screen.getByPlaceholderText('billing.amount.placeholder'), {
-      target: { value: '10' },
+    expect(checkout.startSubscription).toHaveBeenCalledWith({
+      offerCode: 'plus_month',
+      purchaseOptionId: 'listing_stripe',
     });
-    fireEvent.click(screen.getByText('billing.actions.pay'));
-
-    await waitFor(() => expect(confirm).toHaveBeenCalledTimes(1));
-    expect(checkout.startTopup).not.toHaveBeenCalled();
-    expect(screen.getByText('Configured top-up')).toBeTruthy();
-  });
-
-  it('queues only one confirmation when the payment action is double-clicked', async () => {
-    let acceptConfirmation: ((value: boolean) => void) | null = null;
-    confirm.mockReturnValue(
-      new Promise<boolean>((resolve) => {
-        acceptConfirmation = resolve;
-      }),
-    );
-    render(<BillingPage />);
-
-    fireEvent.click(screen.getByText('billing.settings.topupCard.action'));
-    fireEvent.click((await screen.findByText('Configured top-up')).closest('button')!);
-    fireEvent.click((await screen.findByText('alipay')).closest('button')!);
-    fireEvent.change(screen.getByPlaceholderText('billing.amount.placeholder'), {
-      target: { value: '10' },
-    });
-    const pay = screen.getByText('billing.actions.pay');
-    fireEvent.click(pay);
-    fireEvent.click(pay);
-
-    expect(confirm).toHaveBeenCalledTimes(1);
-    expect(checkout.startTopup).not.toHaveBeenCalled();
-
-    acceptConfirmation!(true);
-    await waitFor(() => expect(checkout.startTopup).toHaveBeenCalledTimes(1));
-  });
-
-  it('does not confirm read-only refresh actions', async () => {
-    render(<BillingPage />);
-    await screen.findByText('billing.balance.title');
-
-    fireEvent.click(screen.getByText('billing.actions.refreshCatalog'));
-    await waitFor(() => expect(window.electronAPI.billing.getCatalog).toHaveBeenCalledTimes(2));
-    expect(confirm).not.toHaveBeenCalled();
   });
 
   it('keeps checkout disabled until startup recovery finishes', async () => {
@@ -680,7 +611,7 @@ describe('BillingPage remote catalog rendering', () => {
     expect(pay).toHaveProperty('disabled', false);
   });
 
-  it('keeps new subscription purchase available while one is still live', async () => {
+  it('does not create a second subscription while one is still live', async () => {
     window.electronAPI.billing.getCurrentSubscription = vi.fn(async () => ({
       subscription: {
         subscriptionId: 'subscription_fixture',
@@ -696,25 +627,18 @@ describe('BillingPage remote catalog rendering', () => {
     }));
 
     render(<BillingPage />);
-    const purchaseAnother = await screen.findByText(
-      'billing.settings.subscriptionCard.purchaseAnother',
-    );
-    fireEvent.click(purchaseAnother);
+    fireEvent.click(await screen.findByText('billing.settings.subscriptionCard.action'));
     fireEvent.click((await screen.findByText('Configured subscription')).closest('button')!);
     fireEvent.click((await screen.findByText('stripe')).closest('button')!);
 
     const pay = screen.getByText('billing.actions.pay').closest('button')!;
-    expect(pay).toHaveProperty('disabled', false);
+    expect(pay).toHaveProperty('disabled', true);
+    expect(screen.getByText('billing.currentSubscription.purchaseBlocked')).toBeTruthy();
     fireEvent.click(pay);
-    await waitFor(() =>
-      expect(checkout.startSubscription).toHaveBeenCalledWith({
-        offerCode: 'plus_month',
-        purchaseOptionId: 'listing_stripe',
-      }),
-    );
+    expect(checkout.startSubscription).not.toHaveBeenCalled();
   });
 
-  it('keeps subscription purchases available when subscription status is unavailable', async () => {
+  it('keeps subscription purchases disabled when subscription status is unavailable', async () => {
     window.electronAPI.billing.getCurrentSubscription = vi.fn(async () => {
       throw new Error('subscription status unavailable');
     });
@@ -724,7 +648,7 @@ describe('BillingPage remote catalog rendering', () => {
     expect(await screen.findByText('billing.settings.subscriptionCard.unavailable')).toBeTruthy();
     expect(
       screen.getByText('billing.settings.subscriptionCard.action').closest('button'),
-    ).toHaveProperty('disabled', false);
+    ).toHaveProperty('disabled', true);
     expect(screen.getByText('billing.settings.topupCard.action').closest('button')).toHaveProperty(
       'disabled',
       false,
@@ -776,7 +700,7 @@ describe('BillingPage remote catalog rendering', () => {
     expect(screen.queryByText('Configured subscription')).toBeNull();
     expect(
       screen.getByText('billing.settings.subscriptionCard.action').closest('button'),
-    ).toHaveProperty('disabled', false);
+    ).toHaveProperty('disabled', true);
   });
 
   it('renders multiple remote subscription offers as independent choices', async () => {
@@ -1043,7 +967,7 @@ describe('BillingPage plan change', () => {
     });
   });
 
-  it('offers cross-provider plan targets and lets the server decide', async () => {
+  it('offers plan change for an active subscription with same-provider candidates only', async () => {
     const billing = install(billingMocks());
     billing.quotePlanChange.mockResolvedValue({
       planChangeId: 'plan_change_1',
@@ -1061,18 +985,12 @@ describe('BillingPage plan change', () => {
 
     await screen.findByText('billing.planChange.targetTitle');
     expect(screen.getByText('Max plan')).toBeTruthy();
-    expect(screen.getByText('Alipay-only Max')).toBeTruthy();
+    expect(screen.queryByText('Alipay-only Max')).toBeNull();
     // The current plan renders in the summary card but must not be a candidate.
-    expect(screen.getAllByText('billing.planChange.serverDecisionHint')).toHaveLength(2);
+    expect(screen.getByText('billing.planChange.upgradeBadge')).toBeTruthy();
 
     fireEvent.click(screen.getByText('Max plan'));
     await screen.findByText('billing.planChange.quoteTitle');
-    expect(confirm).toHaveBeenCalledWith(
-      expect.objectContaining({
-        confirmText: 'billing.confirmActions.quotePlanChange',
-        autoFocusConfirm: true,
-      }),
-    );
     expect(billing.quotePlanChange).toHaveBeenCalledTimes(1);
     expect(billing.quotePlanChange).toHaveBeenCalledWith({
       targetOfferCode: 'max_month',
@@ -1094,18 +1012,12 @@ describe('BillingPage plan change', () => {
     });
     fireEvent.click(screen.getByText('billing.planChange.confirm'));
     await screen.findByText('billing.planChange.appliedTitle');
-    expect(confirm).toHaveBeenLastCalledWith(
-      expect.objectContaining({
-        confirmText: 'billing.confirmActions.confirmPlanChange',
-        autoFocusConfirm: true,
-      }),
-    );
     // APPLIED refreshes subscription, catalog, and balance exactly once more.
     await waitFor(() => expect(billing.getBalance).toHaveBeenCalledTimes(2));
     expect(billing.getCurrentSubscription).toHaveBeenCalledTimes(2);
   });
 
-  it('offers plan change for yearly subscriptions and lets the server decide', async () => {
+  it('does not expose plan change for yearly subscriptions while server v1 is monthly-only', async () => {
     const billing = billingMocks();
     billing.getCurrentSubscription = vi.fn(async () => ({
       subscription: activeSubscription(null, 'YEAR'),
@@ -1115,9 +1027,8 @@ describe('BillingPage plan change', () => {
     render(<BillingPage />);
 
     await screen.findByText('Plus plan');
-    fireEvent.click(screen.getByText('billing.settings.subscriptionCard.changeAction'));
-    expect(await screen.findByText('Max plan')).toBeTruthy();
-    expect(screen.getByText('Alipay-only Max')).toBeTruthy();
+    expect(screen.queryByText('billing.settings.subscriptionCard.changeAction')).toBeNull();
+    expect(screen.getByText('billing.settings.subscriptionCard.action')).toBeTruthy();
     expect(billing.quotePlanChange).not.toHaveBeenCalled();
   });
 
@@ -1158,11 +1069,6 @@ describe('BillingPage plan change', () => {
     fireEvent.click(screen.getByText('billing.planChange.undo'));
     await waitFor(() =>
       expect(billing.cancelPlanChange).toHaveBeenCalledWith({ planChangeId: 'plan_change_down' }),
-    );
-    expect(confirm).toHaveBeenCalledWith(
-      expect.objectContaining({
-        confirmText: 'billing.confirmActions.cancelPlanChange',
-      }),
     );
     // The canceled settle re-syncs the subscription projection for the banner.
     await waitFor(() => expect(billing.getCurrentSubscription).toHaveBeenCalledTimes(2));
