@@ -2063,12 +2063,14 @@
       },
       "tips": {
         "cindy": "Cindy is the official shared bot — no credentials needed. Connect Slack and just @Cindy to hand off tasks.",
-        "personal": "Personal bots connect to Feishu / Discord with your own credentials — the bot is fully yours, but you create the app and fill in its config yourself."
+        "personal": "Personal bots connect to Feishu / Discord with your own credentials — the bot is fully yours, but you create the app and fill in its config yourself.",
+        "personalFeishuOnly": "Personal bots connect to Feishu with your own credentials — the bot is fully yours, but you create the app and fill in its config yourself."
       },
       "defaults": {
         "title": "New Conversation Configuration",
         "description": "New conversations started from Feishu, Slack, or Discord use this agent and model configuration. Changes apply only to new conversations; send /new in an existing Discord DM to apply them.",
         "localDescription": "New conversations started from Feishu or Discord use this agent and model configuration. Changes apply only to new conversations; send /new in an existing Discord DM to apply them.",
+        "feishuOnlyDescription": "New conversations started from Feishu use this agent and model configuration. Changes apply only to new conversations.",
         "agentLabel": "Agent",
         "modelLabel": "Model Configuration",
         "loading": "Loading new conversation configuration…",

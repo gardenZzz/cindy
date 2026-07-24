@@ -2062,12 +2062,14 @@
       },
       "tips": {
         "cindy": "Cindy は公式提供の共有ボットです。認証情報の申請は不要で、Slack を連携して @Cindy にメンションするだけでタスクを任せられます。",
-        "personal": "個人ボットは自分で申請した認証情報で Feishu / Discord に接続します。ボットは完全に自分専用ですが、アプリの作成と設定の入力が必要です。"
+        "personal": "個人ボットは自分で申請した認証情報で Feishu / Discord に接続します。ボットは完全に自分専用ですが、アプリの作成と設定の入力が必要です。",
+        "personalFeishuOnly": "個人ボットは自分で申請した認証情報で Feishu に接続します。ボットは完全に自分専用ですが、アプリの作成と設定の入力が必要です。"
       },
       "defaults": {
         "title": "新規会話設定",
         "description": "Feishu、Slack、または Discord から開始する新規会話では、この Agent とモデル設定を使用します。変更は新規会話にのみ適用されます。既存の Discord DM に適用するには /new を送信してください。",
         "localDescription": "Feishu または Discord から開始する新規会話では、この Agent とモデル設定を使用します。変更は新規会話にのみ適用されます。既存の Discord DM に適用するには /new を送信してください。",
+        "feishuOnlyDescription": "Feishu から開始する新規会話では、この Agent とモデル設定を使用します。変更は新規会話にのみ適用されます。",
         "agentLabel": "Agent",
         "modelLabel": "モデル設定",
         "loading": "新規会話設定を読み込み中…",

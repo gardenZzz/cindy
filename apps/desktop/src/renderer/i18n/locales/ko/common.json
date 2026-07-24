@@ -2062,12 +2062,14 @@
       },
       "tips": {
         "cindy": "Cindy는 공식 제공 공유 봇입니다. 자격 증명을 신청할 필요 없이 Slack을 연결하고 @Cindy를 멘션하면 바로 작업을 맡길 수 있습니다.",
-        "personal": "개인 봇은 직접 발급한 자격 증명으로 Feishu / Discord에 연결합니다. 봇은 온전히 내 전용이지만, 앱 생성과 설정 입력은 직접 해야 합니다."
+        "personal": "개인 봇은 직접 발급한 자격 증명으로 Feishu / Discord에 연결합니다. 봇은 온전히 내 전용이지만, 앱 생성과 설정 입력은 직접 해야 합니다.",
+        "personalFeishuOnly": "개인 봇은 직접 발급한 자격 증명으로 Feishu에 연결합니다. 봇은 온전히 내 전용이지만, 앱 생성과 설정 입력은 직접 해야 합니다."
       },
       "defaults": {
         "title": "새 대화 설정",
         "description": "Feishu, Slack 또는 Discord에서 시작하는 새 대화는 이 Agent와 모델 설정을 사용합니다. 변경 사항은 새 대화에만 적용되며, 기존 Discord DM에서 적용하려면 /new를 보내세요.",
         "localDescription": "Feishu 또는 Discord에서 시작하는 새 대화는 이 Agent와 모델 설정을 사용합니다. 변경 사항은 새 대화에만 적용되며, 기존 Discord DM에서 적용하려면 /new를 보내세요.",
+        "feishuOnlyDescription": "Feishu에서 시작하는 새 대화는 이 Agent와 모델 설정을 사용합니다. 변경 사항은 새 대화에만 적용됩니다.",
         "agentLabel": "Agent",
         "modelLabel": "모델 설정",
         "loading": "새 대화 설정을 불러오는 중…",
