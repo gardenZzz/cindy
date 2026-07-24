@@ -22,20 +22,43 @@
 </p>
 
 
-Cindy runs locally on your own machine, uses your files and logged-in apps, and
-is powered by Claude Code and Codex as
-its underlying agent engines. It can drive your browser, computer, and phone,
-coordinate multiple agents as a team, and dispatch tasks from IM and schedules.
+Cindy is an open-source AI agent that works out of the box. She brings multiple
+harnesses, models and tools into one agent that finishes real work in your
+projects and apps. Ready from day one, yours to shape over time.
+
+Cindy runs locally on your own machine, using your real files and logged-in
+apps. The first supported harnesses are **Claude Code** and **Codex** — more are
+being added, and a native harness is in the works. Models and harnesses mix
+freely and can switch mid-task while your workspace, memory, skills and tools
+stay continuous; one task can even be planned, executed in parallel, and
+reviewed by agents on different harness × model combos. She can drive your
+browser, computer and phone, and take work from IM and schedules.
 
 This repository is the open-source **client** for Cindy — the desktop and mobile
 apps plus their shared packages, organized as a pnpm monorepo.
 
-The client is free to use, and its source code is open under Apache-2.0. The
-official model service is billed against your usage credit and deducted
-transparently as you go. You can also use your own API keys. See the
-[international site](https://cindy.app/#pricing) or the
+The client is free to use, and its source code is open under Apache-2.0. Bring
+models your way: sign in to the official Cindy service (usage deducted
+transparently), authorize the **Claude Code / Codex Coding Plan** you already
+pay for and keep using it inside Cindy — no duplicate bill — connect your own
+API keys, or use local models.
+See the [international site](https://cindy.app/#pricing) or the
 [Mainland China site](https://cindy.cn/#pricing) for service details, pricing,
 and downloads.
+
+## Yours to shape
+
+Open source means more than visible — it means changeable:
+
+- **Memory** — correct her once and she does it right from then on, shared across harnesses.
+- **Skills** — teach a way of working once and reuse it everywhere; handing them to your team is in the making.
+- **Automation** — recurring work schedules itself, runs itself, reports back.
+- **MCP** — wire your internal tools and business systems into her reach.
+- **Plugins** — reshape features, UI and interactions, shared through an open marketplace *(in the making)*.
+- **Source** — audit, fork, extend, and contribute improvements back under Apache-2.0.
+
+Ready out of the box, never boxed in — start with
+[`CONTRIBUTING.en.md`](CONTRIBUTING.en.md) and build Cindy with us.
 
 ## What's in this repo
 
