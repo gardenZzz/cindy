@@ -556,6 +556,7 @@
       },
       "copyUserId": {
         "action": "Copy user ID",
+        "display": "ID: {{id}}",
         "success": "User ID copied",
         "failed": "Failed to copy user ID"
       },
