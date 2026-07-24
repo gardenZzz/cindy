@@ -27,8 +27,11 @@
 - 协议定义以 `cindy-protocol` submodule 为准；desktop 通过 `@cindy/slack-hook-protocol`
   消费，device-link 复用 `@cindy/device-link-protocol` 的 relay 层定义。客户端重连、IPC
   allowlist 与隧道 payload 留在 `packages/device-link`，不在客户端另造一套协议。
-- `makecindy/cindy-protocol` 以新历史公开；父仓当前锁定的 `436a45f` 由公开 tag
-  `client-baseline-436a45f` 保持可拉取。升级父仓指针前不要删除这个兼容 tag。
+- `makecindy/cindy-protocol` 以新历史公开；父仓锁定的 submodule commit 必须始终
+  可从公开仓拉取——合入协议仓 `main`，或打 `client-baseline-<sha>` tag，不允许只
+  停在 feature 分支上（分支删除会让 gitlink 失效）。当前锁定的 `4468730` 已在协议
+  仓 `main` 上；历史 tag `client-baseline-436a45f` 仍可能被旧 checkout 依赖，不要
+  删除。
 - **升级 submodule 指针前必须确认服务端同步升级**，避免两端 wire protocol 漂移。协议是
   跨仓契约，单端先行会让线上连接对不上。
 
