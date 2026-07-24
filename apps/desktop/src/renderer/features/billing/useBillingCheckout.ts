@@ -40,6 +40,8 @@ export type BillingRecoverables = {
   subscription: BillingSubscription | null;
 };
 
+type CheckoutPresentation = 'VISIBLE' | 'BACKGROUND';
+
 const INITIAL_STATE: BillingCheckoutState = {
   open: false,
   kind: null,
@@ -123,7 +125,11 @@ export function useBillingCheckout(accountId: string | null) {
   stateRef.current = state;
 
   const applyOrder = useCallback(
-    (order: BillingPaymentOrder, intent: BillingCheckoutIntentV1 | null) => {
+    (
+      order: BillingPaymentOrder,
+      intent: BillingCheckoutIntentV1 | null,
+      presentation: CheckoutPresentation = 'VISIBLE',
+    ) => {
       const nextIntent =
         intent?.kind === 'TOPUP' && intent.orderId !== order.orderId
           ? { ...intent, orderId: order.orderId }
@@ -139,7 +145,7 @@ export function useBillingCheckout(accountId: string | null) {
           : current.topups.filter((item) => item.orderId !== order.orderId),
       }));
       setState({
-        open: true,
+        open: presentation === 'VISIBLE',
         kind: 'TOPUP',
         phase,
         intent: nextIntent,
@@ -152,7 +158,11 @@ export function useBillingCheckout(accountId: string | null) {
   );
 
   const applySubscription = useCallback(
-    (subscription: BillingSubscription, intent: BillingCheckoutIntentV1 | null) => {
+    (
+      subscription: BillingSubscription,
+      intent: BillingCheckoutIntentV1 | null,
+      presentation: CheckoutPresentation = 'VISIBLE',
+    ) => {
       if (intent?.kind === 'SUBSCRIPTION' && !matchesSubscriptionIntent(subscription, intent))
         return false;
       const nextIntent =
@@ -172,7 +182,7 @@ export function useBillingCheckout(accountId: string | null) {
         subscription: subscription.status === 'INCOMPLETE' ? subscription : null,
       }));
       setState({
-        open: true,
+        open: presentation === 'VISIBLE',
         kind: 'SUBSCRIPTION',
         phase,
         intent: nextIntent,
@@ -185,9 +195,14 @@ export function useBillingCheckout(accountId: string | null) {
     [accountId],
   );
 
-  const failCurrentOperation = useCallback(() => {
+  const failCurrentOperation = useCallback((presentation: CheckoutPresentation = 'VISIBLE') => {
     if (!mountedRef.current) return;
-    setState((current) => ({ ...current, phase: 'FAILED', error: true }));
+    setState((current) => ({
+      ...current,
+      open: presentation === 'VISIBLE',
+      phase: 'FAILED',
+      error: true,
+    }));
   }, []);
 
   const withRequestLock = useCallback(async (request: () => Promise<void>) => {
@@ -479,7 +494,7 @@ export function useBillingCheckout(accountId: string | null) {
 
         if (!intent) return;
         setState({
-          open: true,
+          open: false,
           kind: intent.kind === 'SUBSCRIPTION' ? 'SUBSCRIPTION' : 'TOPUP',
           phase: 'CREATING',
           intent,
@@ -498,12 +513,16 @@ export function useBillingCheckout(accountId: string | null) {
               (intent.orderId
                 ? await billingApi.getOrder(intent.orderId)
                 : await billingApi.createTopup(intent.request, intent.idempotencyKey));
-            applyOrder(order, intent);
+            applyOrder(order, intent, 'BACKGROUND');
             return;
           }
 
           if (intent.kind === 'TOPUP_RETRY') {
-            applyOrder(await billingApi.retryTopup(intent.orderId, intent.idempotencyKey), intent);
+            applyOrder(
+              await billingApi.retryTopup(intent.orderId, intent.idempotencyKey),
+              intent,
+              'BACKGROUND',
+            );
             return;
           }
 
@@ -512,7 +531,7 @@ export function useBillingCheckout(accountId: string | null) {
             !intent.purchaseAttemptId &&
             subscriptionResult.status === 'rejected'
           ) {
-            failCurrentOperation();
+            failCurrentOperation('BACKGROUND');
             return;
           }
           const currentSubscription =
@@ -524,9 +543,11 @@ export function useBillingCheckout(accountId: string | null) {
             : intent.subscriptionId
               ? currentSubscription
               : await billingApi.createSubscription(intent.request, intent.idempotencyKey);
-          if (!subscription || !applySubscription(subscription, intent)) failCurrentOperation();
+          if (!subscription || !applySubscription(subscription, intent, 'BACKGROUND')) {
+            failCurrentOperation('BACKGROUND');
+          }
         } catch {
-          failCurrentOperation();
+          failCurrentOperation('BACKGROUND');
         }
       } finally {
         inFlightRef.current = false;

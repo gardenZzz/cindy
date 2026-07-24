@@ -6917,7 +6917,7 @@
     "sidebar": "点数与订阅",
     "settings": {
       "title": "使用情况和计费",
-      "subtitle": "查看当前订阅，或按需购买由服务端提供的订阅套餐和点数。",
+      "subtitle": "查看可用额度与当前套餐，或按需购买点数。",
       "loading": "正在获取订阅状态…",
       "subscriptionCard": {
         "title": "当前套餐",
@@ -6926,13 +6926,18 @@
         "unnamedPlan": "订阅套餐",
         "unavailable": "暂时无法获取订阅状态，请刷新后重试。",
         "action": "查看套餐",
-        "changeAction": "更改套餐"
+        "changeAction": "更改套餐",
+        "purchaseAnother": "购买新订阅",
+        "priceInterval": "{{price}} / {{interval}}",
+        "includedCredits": "每{{interval}}包含 {{amount}} 点数",
+        "renewsAt": "下次续费 {{date}}",
+        "endsAt": "套餐将于 {{date}} 结束"
       },
       "topupCard": {
         "title": "点数",
         "description": "购买点数，为按量使用的模型和功能充值。",
         "cardTitle": "按需购买点数",
-        "cardDescription": "可购买的点数商品由服务端配置。",
+        "cardDescription": "按需补充可用额度，购买金额以结算页为准。",
         "action": "购买点数"
       }
     },
@@ -7037,6 +7042,31 @@
     "confirm": {
       "channel": "通过 {{provider}} 支付"
     },
+    "confirmActions": {
+      "back": "返回检查",
+      "purchaseTopupTitle": "购买点数？",
+      "purchaseTopupDescription": "{{product}} · {{amount}} · 通过 {{provider}} 支付",
+      "purchaseTopup": "确认购买点数",
+      "purchaseSubscriptionTitle": "购买 {{plan}}？",
+      "purchaseSubscriptionDescription": "{{price}} / {{interval}} · 通过 {{provider}} 支付",
+      "purchaseSubscription": "确认购买套餐",
+      "quotePlanChangeTitle": "获取套餐变更报价？",
+      "quotePlanChangeDescription": "{{current}} → {{target}}。下一步将显示实际差价和生效时间。",
+      "quotePlanChange": "获取变更报价",
+      "confirmPlanChangeTitle": "确认套餐变更？",
+      "confirmPlanChangeDescription": "{{target}} · {{impact}}",
+      "confirmPlanChange": "确认套餐变更",
+      "cancelPaymentTitle": "取消本次支付？",
+      "cancelPaymentDescription": "{{amount}} 的支付将被取消，之后需要重新创建支付。",
+      "cancelPayment": "取消本次支付",
+      "cancelPlanChangeTitle": "撤销套餐变更？",
+      "cancelPlanChangeDescription": "目标套餐：{{target}}。撤销后当前套餐保持不变。",
+      "cancelPlanChange": "撤销套餐变更",
+      "retryPaymentTitle": "重试本次支付？",
+      "retryPaymentDescription": "{{amount}} 的支付将复用原幂等意图重试。",
+      "retryUnknownPaymentDescription": "本次支付将复用原幂等意图重试。",
+      "retryPayment": "重试本次支付"
+    },
     "paymentActions": {
       "QR_CODE": "扫码支付",
       "REDIRECT": "跳转支付页面"
@@ -7095,6 +7125,7 @@
       "targetTitle": "更改订阅套餐",
       "targetDescription": "套餐变更沿用当前支付方式，最终价格与生效时间以下一步确认为准。",
       "targetDescriptionWithCurrent": "当前套餐：{{plan}}。变更沿用当前支付方式，最终价格与生效时间以下一步确认为准。",
+      "serverDecisionHint": "价格与生效方式以下一步报价为准",
       "upgradeBadge": "升级",
       "downgradeBadge": "降级",
       "emptyTitle": "暂无可切换的套餐",
