@@ -239,7 +239,10 @@ export function startImOrchestrators(): void {
     if (!identity) {
       return { ok: true, alreadyDetached: true };
     }
-    await executeDetach(identity, 'desktop-revoke');
+    const detached = await executeDetach(identity, 'desktop-revoke');
+    if (!detached.wasAttached) {
+      return { ok: true, alreadyDetached: true };
+    }
     // 通知对应的 IM 用户 — 渠道注册表驱动, 用各渠道自己的文案包。
     const orchestrator = getImOrchestrator(identity.channel);
     if (orchestrator) {

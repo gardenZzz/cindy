@@ -18,6 +18,8 @@ export type DbTxName =
   | 'sessions.setStatus'
   | 'session.agentSwitchFallback'
   | 'message.delete'
+  | 'im.deleteBindings'
+  | 'im.replaceBinding'
   | 'session.importShare';
 
 export interface CodexImportMessagesArgs {
@@ -331,6 +333,29 @@ export interface SessionImportShareArgs {
   }>;
 }
 
+/**
+ * Atomically replace every persisted owner of a desktop session with one IM
+ * identity. The same identity may already point at another session.
+ */
+export interface ImReplaceBindingArgs {
+  channel: string;
+  botContextId: string;
+  userId: string;
+  scopeKey: string;
+  targetSessionId: string;
+  attachedAt: number;
+  attachedViaCardMessageId: string | null;
+}
+
+export interface ImDeleteBindingsArgs {
+  identities: Array<{
+    channel: string;
+    botContextId: string;
+    userId: string;
+    scopeKey: string;
+  }>;
+}
+
 export type DbTxArgsByName = {
   'codex.importMessages': CodexImportMessagesArgs;
   'claude.importMessages': ClaudeImportMessagesArgs;
@@ -351,6 +376,8 @@ export type DbTxArgsByName = {
   'sessions.setStatus': SessionsSetStatusArgs;
   'session.agentSwitchFallback': SessionAgentSwitchFallbackArgs;
   'message.delete': MessageDeleteArgs;
+  'im.deleteBindings': ImDeleteBindingsArgs;
+  'im.replaceBinding': ImReplaceBindingArgs;
   'session.importShare': SessionImportShareArgs;
 };
 
@@ -374,5 +401,7 @@ export type DbTxResultByName = {
   'sessions.setStatus': SessionsSetStatusResultItem[];
   'session.agentSwitchFallback': undefined;
   'message.delete': MessageDeleteResult;
+  'im.deleteBindings': undefined;
+  'im.replaceBinding': undefined;
   'session.importShare': { messageCount: number };
 };

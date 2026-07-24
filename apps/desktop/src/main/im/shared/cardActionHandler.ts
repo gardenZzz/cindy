@@ -53,7 +53,7 @@ import {
 } from './controlProjects';
 import { exitControl } from './controlState';
 import { startThreadControlFlow } from './controlFlow';
-import { bindingStore, executeDetach } from '../binding';
+import { bindingStore, executeDetach, type BindingAttachResult } from '../binding';
 import { generateTakeoverSummary } from './sessionSummary';
 import { broadcastSessionCreated } from './sessionBroadcast';
 import type { IdentityKey } from '@cindy/im';
@@ -129,9 +129,10 @@ export function createCardActionHandler(
       scopeKey: string;
       card: { title: string; body: string };
     },
-  ): Promise<boolean> {
+  ): Promise<BindingAttachResult | null> {
+    let attachResult: BindingAttachResult;
     try {
-      await bindingStore.attach(
+      attachResult = await bindingStore.attachWithResult(
         {
           channel,
           botContextId: args.botContextId,
@@ -152,7 +153,7 @@ export function createCardActionHandler(
       } catch {
         /* swallow */
       }
-      return false;
+      return null;
     }
     try {
       await im.updateInteractiveCard(args.anchorMessageId, {
@@ -164,7 +165,7 @@ export function createCardActionHandler(
       const msg = err instanceof Error ? err.message : String(err);
       log.warn(`anchor card morph failed (non-fatal): ${msg}`);
     }
-    return true;
+    return attachResult;
   }
 
   /**
@@ -181,7 +182,11 @@ export function createCardActionHandler(
       sessionId: string;
       card: { title: string; body: string };
     },
-  ): Promise<{ scopeKey: string; rootMessageId: string } | null> {
+  ): Promise<{
+    scopeKey: string;
+    rootMessageId: string;
+    displaced: BindingAttachResult['displaced'];
+  } | null> {
     if (!threadUi || !im.threadKeyForMessage) return null;
     let rootMessageId: string;
     try {
@@ -203,8 +208,9 @@ export function createCardActionHandler(
       return null;
     }
     const scopeKey = im.threadKeyForMessage(rootMessageId);
+    let attachResult: BindingAttachResult;
     try {
-      await bindingStore.attach(
+      attachResult = await bindingStore.attachWithResult(
         { channel, botContextId: args.botContextId, userId: args.userId, scopeKey },
         args.sessionId,
         { attachedViaCardMessageId: rootMessageId },
@@ -223,7 +229,7 @@ export function createCardActionHandler(
       }
       return null;
     }
-    return { scopeKey, rootMessageId };
+    return { scopeKey, rootMessageId, displaced: attachResult.displaced };
   }
 
   async function handleModelPick(im: ChannelIM, event: IMCardActionEvent): Promise<void> {
@@ -574,46 +580,6 @@ export function createCardActionHandler(
     // 顶层发"已接管"root 卡 → 卡 ts 即 scopeKey → attach(identity+scope) →
     // brief 总结发进该 thread → picker 卡 patch 为 resolved。
     if (threadScoped && threadUi) {
-      // 该 desktop session 已被某个 thread 接管 → 中断旧接管, 由新 thread 替换:
-      // 先 executeDetach(旧 identity) 把 binding/in-process state 清干净(否则
-      // 旧 thread 的 forward 项还指着同一 session, 双 thread 同时路由), 再把旧
-      // 锚点/root 卡收口成"已转移"。detach 失败必须中止 — 不能在双路由风险下
-      // 继续 attach。
-      const existing = bindingStore.findByTarget(sessionId);
-      if (existing) {
-        const oldAnchorId = bindingStore.getAttachCardMessageId(existing);
-        try {
-          await executeDetach(existing, `${channel}-slash`);
-        } catch (err) {
-          const msg = err instanceof Error ? err.message : String(err);
-          log.error(`session-pick replace: detach old binding failed: ${msg}`);
-          exitControl(botContextId, event.senderId);
-          try {
-            await im.updateInteractiveCard(
-              event.messageId,
-              cards.buildResolvedCard(ui.cards.control.attachFailed(msg)),
-            );
-          } catch {
-            /* swallow */
-          }
-          return;
-        }
-        // 旧锚点卡收口 — 仅同渠道(跨渠道的旧卡片这个 im 实例 patch 不动);
-        // 旧锚点就是本次锚点(同 thread 重复选)时跳过, 后面 morph 会覆盖。
-        const anchorIdInPayload = String(event.payload.anchorMessageId ?? '');
-        if (oldAnchorId && existing.channel === channel && oldAnchorId !== anchorIdInPayload) {
-          try {
-            await im.updateInteractiveCard(
-              oldAnchorId,
-              cards.buildResolvedCard(threadUi.takeoverReplaced(sessionTitle)),
-            );
-          } catch (err) {
-            const msg = err instanceof Error ? err.message : String(err);
-            log.warn(`session-pick replace: old anchor patch failed (non-fatal): ${msg}`);
-          }
-        }
-      }
-
       try {
         await im.patchMarkdownCard(
           event.messageId,
@@ -625,10 +591,13 @@ export function createCardActionHandler(
       }
 
       const anchorMessageId = String(event.payload.anchorMessageId ?? '');
-      let established: { scopeKey: string } | null = null;
+      let established: {
+        scopeKey: string;
+        displaced: BindingAttachResult['displaced'];
+      } | null = null;
       if (anchorMessageId && event.scopeKey) {
         // 锚点流程: 选择卡就在锚点 thread 里, scopeKey = 锚点 ts
-        const ok = await bindTakeoverToAnchor(im, {
+        const attachResult = await bindTakeoverToAnchor(im, {
           botContextId,
           userId: event.senderId,
           sessionId,
@@ -636,7 +605,9 @@ export function createCardActionHandler(
           scopeKey: event.scopeKey,
           card: threadUi.takeoverCard(sessionTitle, displayName),
         });
-        established = ok ? { scopeKey: event.scopeKey } : null;
+        established = attachResult
+          ? { scopeKey: event.scopeKey, displaced: attachResult.displaced }
+          : null;
       } else {
         established = await establishThreadTakeover(im, {
           botContextId,
@@ -656,6 +627,28 @@ export function createCardActionHandler(
           /* swallow */
         }
         return;
+      }
+
+      // New binding is committed now. Only after that point may the old root
+      // card claim its takeover was replaced. Cross-channel cards cannot be
+      // patched through this adapter, and the current anchor is morphed below.
+      const anchorIdInPayload = String(event.payload.anchorMessageId ?? '');
+      const displacedAnchorId = established.displaced?.attachedViaCardMessageId;
+      if (
+        established.displaced &&
+        displacedAnchorId &&
+        established.displaced.identity.channel === channel &&
+        displacedAnchorId !== anchorIdInPayload
+      ) {
+        try {
+          await im.updateInteractiveCard(
+            displacedAnchorId,
+            cards.buildResolvedCard(threadUi.takeoverReplaced(sessionTitle)),
+          );
+        } catch (err) {
+          const msg = err instanceof Error ? err.message : String(err);
+          log.warn(`session-pick replace: old anchor patch failed (non-fatal): ${msg}`);
+        }
       }
 
       // picker 卡收口(顶层) — root 卡才是这次接管的"家"

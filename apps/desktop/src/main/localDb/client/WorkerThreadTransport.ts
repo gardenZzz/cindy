@@ -306,11 +306,70 @@ function dispatchTx(readyDb, payload) {
       return sessionAgentSwitchFallback(readyDb, request.args);
     case 'message.delete':
       return messageDelete(readyDb, request.args);
+    case 'im.deleteBindings':
+      return imDeleteBindings(readyDb, request.args);
+    case 'im.replaceBinding':
+      return imReplaceBinding(readyDb, request.args);
     case 'session.importShare':
       return sessionImportShare(readyDb, request.args);
     default:
       throw Object.assign(new Error('unknown tx: ' + name), { code: 'UNKNOWN_TX' });
   }
+}
+
+// ⚠️ 与 worker/opHandlers/tx.ts 的 imDeleteBindings 保持一致。
+function imDeleteBindings(readyDb, args) {
+  const payload = asRecord(args, 'im.deleteBindings args');
+  const identities = expectArray(payload.identities, 'identities').map((raw, index) => {
+    const identity = asRecord(raw, 'identities.' + index);
+    return {
+      channel: expectString(identity.channel, 'identities.' + index + '.channel'),
+      botContextId: expectString(identity.botContextId, 'identities.' + index + '.botContextId'),
+      userId: expectString(identity.userId, 'identities.' + index + '.userId'),
+      scopeKey: expectString(identity.scopeKey, 'identities.' + index + '.scopeKey'),
+    };
+  });
+  const deleteBinding = readyDb.prepare(
+    'DELETE FROM im_bindings WHERE channel = ? AND bot_context_id = ? AND user_id = ? AND scope_key = ?',
+  );
+  return readyDb.transaction(() => {
+    for (const identity of identities) {
+      deleteBinding.run(
+        identity.channel,
+        identity.botContextId,
+        identity.userId,
+        identity.scopeKey,
+      );
+    }
+  })();
+}
+
+// ⚠️ 与 worker/opHandlers/tx.ts 的 imReplaceBinding 保持一致。
+function imReplaceBinding(readyDb, args) {
+  const payload = asRecord(args, 'im.replaceBinding args');
+  const channel = expectString(payload.channel, 'channel');
+  const botContextId = expectString(payload.botContextId, 'botContextId');
+  const userId = expectString(payload.userId, 'userId');
+  const scopeKey = expectString(payload.scopeKey, 'scopeKey');
+  const targetSessionId = expectString(payload.targetSessionId, 'targetSessionId');
+  const attachedAt = expectNumber(payload.attachedAt, 'attachedAt');
+  const attachedViaCardMessageId = nullableString(payload.attachedViaCardMessageId);
+  return readyDb.transaction(() => {
+    readyDb.prepare(
+      'DELETE FROM im_bindings WHERE target_session_id = ? OR (channel = ? AND bot_context_id = ? AND user_id = ? AND scope_key = ?)',
+    ).run(targetSessionId, channel, botContextId, userId, scopeKey);
+    readyDb.prepare(
+      'INSERT INTO im_bindings (channel, bot_context_id, user_id, scope_key, target_session_id, attached_at, attached_via_card_message_id) VALUES (?, ?, ?, ?, ?, ?, ?)',
+    ).run(
+      channel,
+      botContextId,
+      userId,
+      scopeKey,
+      targetSessionId,
+      attachedAt,
+      attachedViaCardMessageId,
+    );
+  })();
 }
 
 // ⚠️ 与 worker/opHandlers/tx.ts 的同名事务保持一致。

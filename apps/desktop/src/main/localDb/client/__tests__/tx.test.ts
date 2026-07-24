@@ -88,6 +88,17 @@ CREATE TABLE messages (
   rewind_at INTEGER,
   UNIQUE(session_id, client_id)
 );
+CREATE TABLE im_bindings (
+  channel TEXT NOT NULL,
+  bot_context_id TEXT NOT NULL,
+  user_id TEXT NOT NULL,
+  scope_key TEXT NOT NULL DEFAULT '',
+  target_session_id TEXT NOT NULL REFERENCES sessions(id) ON DELETE CASCADE,
+  attached_at INTEGER NOT NULL,
+  attached_via_card_message_id TEXT,
+  PRIMARY KEY(channel, bot_context_id, user_id, scope_key)
+);
+CREATE INDEX idx_im_bindings_target ON im_bindings(target_session_id);
 CREATE TABLE embedding_jobs (
   rowid INTEGER PRIMARY KEY AUTOINCREMENT,
   source TEXT NOT NULL,
@@ -857,6 +868,197 @@ describe('db worker tx handlers', () => {
       })).rejects.toMatchObject({ code: 'NOT_FOUND' });
       await expect(client.queryOne('SELECT sdk_session_id FROM sessions WHERE id = ?', ['s1']))
         .resolves.toEqual({ sdk_session_id: 'old-native' });
+    });
+  });
+
+  it('im.replaceBinding atomically replaces the target owner and the identity old target', async () => {
+    await withClient(async (client) => {
+      await seedSession(client, 'desktop-target');
+      await seedSession(client, 'discord-old-target');
+      await client.exec(
+        `INSERT INTO im_bindings (
+          channel, bot_context_id, user_id, scope_key, target_session_id,
+          attached_at, attached_via_card_message_id
+        ) VALUES (?, ?, ?, ?, ?, ?, ?), (?, ?, ?, ?, ?, ?, ?)`,
+        [
+          'feishu',
+          'feishu-bot',
+          'ou_old',
+          '',
+          'desktop-target',
+          100,
+          'feishu-card',
+          'discord',
+          'discord-bot',
+          '123456',
+          '',
+          'discord-old-target',
+          150,
+          'discord-old-card',
+        ],
+      );
+
+      await client.tx('im.replaceBinding', {
+        channel: 'discord',
+        botContextId: 'discord-bot',
+        userId: '123456',
+        scopeKey: '',
+        targetSessionId: 'desktop-target',
+        attachedAt: 200,
+        attachedViaCardMessageId: 'discord-card',
+      });
+
+      await expect(
+        client.query(
+          `SELECT channel, bot_context_id, user_id, scope_key, target_session_id,
+                  attached_at, attached_via_card_message_id
+           FROM im_bindings`,
+        ),
+      ).resolves.toEqual([
+        {
+          channel: 'discord',
+          bot_context_id: 'discord-bot',
+          user_id: '123456',
+          scope_key: '',
+          target_session_id: 'desktop-target',
+          attached_at: 200,
+          attached_via_card_message_id: 'discord-card',
+        },
+      ]);
+    });
+  });
+
+  it('im.replaceBinding restores the previous owner when the new insert fails', async () => {
+    await withClient(async (client) => {
+      await seedSession(client, 'desktop-target');
+      await client.exec(
+        `INSERT INTO im_bindings (
+          channel, bot_context_id, user_id, scope_key, target_session_id,
+          attached_at, attached_via_card_message_id
+        ) VALUES (?, ?, ?, ?, ?, ?, ?)`,
+        ['feishu', 'feishu-bot', 'ou_old', '', 'desktop-target', 100, 'feishu-card'],
+      );
+      await client.exec(
+        `CREATE TRIGGER reject_discord_binding
+         BEFORE INSERT ON im_bindings
+         WHEN NEW.channel = 'discord'
+         BEGIN
+           SELECT RAISE(ABORT, 'simulated binding insert failure');
+         END`,
+      );
+
+      await expect(
+        client.tx('im.replaceBinding', {
+          channel: 'discord',
+          botContextId: 'discord-bot',
+          userId: '123456',
+          scopeKey: '',
+          targetSessionId: 'desktop-target',
+          attachedAt: 200,
+          attachedViaCardMessageId: 'discord-card',
+        }),
+      ).rejects.toThrow('simulated binding insert failure');
+
+      await expect(
+        client.query(
+          `SELECT channel, bot_context_id, user_id, scope_key, target_session_id,
+                  attached_at, attached_via_card_message_id
+           FROM im_bindings`,
+        ),
+      ).resolves.toEqual([
+        {
+          channel: 'feishu',
+          bot_context_id: 'feishu-bot',
+          user_id: 'ou_old',
+          scope_key: '',
+          target_session_id: 'desktop-target',
+          attached_at: 100,
+          attached_via_card_message_id: 'feishu-card',
+        },
+      ]);
+    });
+  });
+
+  it('im.deleteBindings rolls back every startup cleanup when a later delete fails', async () => {
+    await withClient(async (client) => {
+      await seedSession(client, 'desktop-target');
+      await client.exec(
+        `INSERT INTO im_bindings (
+          channel, bot_context_id, user_id, scope_key, target_session_id,
+          attached_at, attached_via_card_message_id
+        ) VALUES (?, ?, ?, ?, ?, ?, ?), (?, ?, ?, ?, ?, ?, ?)`,
+        [
+          'feishu',
+          'feishu-bot',
+          'ou_old',
+          '',
+          'desktop-target',
+          100,
+          'feishu-card',
+          'discord',
+          'discord-bot',
+          '123456',
+          '',
+          'desktop-target',
+          150,
+          'discord-card',
+        ],
+      );
+      await client.exec(
+        `CREATE TRIGGER reject_discord_binding_delete
+         BEFORE DELETE ON im_bindings
+         WHEN OLD.channel = 'discord'
+         BEGIN
+           SELECT RAISE(ABORT, 'simulated binding delete failure');
+         END`,
+      );
+
+      await expect(
+        client.tx('im.deleteBindings', {
+          identities: [
+            {
+              channel: 'feishu',
+              botContextId: 'feishu-bot',
+              userId: 'ou_old',
+              scopeKey: '',
+            },
+            {
+              channel: 'discord',
+              botContextId: 'discord-bot',
+              userId: '123456',
+              scopeKey: '',
+            },
+          ],
+        }),
+      ).rejects.toThrow('simulated binding delete failure');
+
+      await expect(
+        client.query(
+          `SELECT channel, bot_context_id, user_id, scope_key, target_session_id,
+                  attached_at, attached_via_card_message_id
+           FROM im_bindings
+           ORDER BY attached_at`,
+        ),
+      ).resolves.toEqual([
+        {
+          channel: 'feishu',
+          bot_context_id: 'feishu-bot',
+          user_id: 'ou_old',
+          scope_key: '',
+          target_session_id: 'desktop-target',
+          attached_at: 100,
+          attached_via_card_message_id: 'feishu-card',
+        },
+        {
+          channel: 'discord',
+          bot_context_id: 'discord-bot',
+          user_id: '123456',
+          scope_key: '',
+          target_session_id: 'desktop-target',
+          attached_at: 150,
+          attached_via_card_message_id: 'discord-card',
+        },
+      ]);
     });
   });
 

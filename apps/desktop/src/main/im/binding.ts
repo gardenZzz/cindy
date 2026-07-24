@@ -25,7 +25,7 @@
  * 保证两边一致。
  */
 
-import { and, eq } from 'drizzle-orm';
+import { eq } from 'drizzle-orm';
 
 import type {
   BindingChangeEvent,
@@ -46,7 +46,14 @@ function keyOf(id: IdentityKey): string {
   return [id.channel, id.botContextId, id.userId, id.scopeKey ?? ''].join('\u0000');
 }
 
-class SqliteBindingStore implements BindingStore<string> {
+export interface BindingAttachResult {
+  displaced: {
+    identity: IdentityKey;
+    attachedViaCardMessageId: string | null;
+  } | null;
+}
+
+export class SqliteBindingStore implements BindingStore<string> {
   /** identity-key (string) → desktop sessionId */
   private readonly forward = new Map<string, string>();
   /** desktop sessionId → identity (反向索引, 给"收回"按钮反查用) */
@@ -59,31 +66,88 @@ class SqliteBindingStore implements BindingStore<string> {
   private readonly attachCardIds = new Map<string, string>();
   private readonly listeners = new Set<BindingChangeListener<string>>();
   private preloaded = false;
+  /** Serialize persisted writes with their matching in-memory index updates. */
+  private mutationQueue: Promise<void> = Promise.resolve();
 
-  async preload(): Promise<void> {
-    if (this.preloaded) return;
-    // 走 DbClient async 代理: MR2.2 后 main 侧 _drizzle 在 worker takeover
-    // 时被释放, getDrizzle() 会抛 'localDb not ready'。代理把 query 转发给
-    // worker 内的真 better-sqlite3 实例, await 已经是 await Promise(原 await
-    // sync value 是 no-op, 现在变成真 async, 调用形态不变)。
-    const db = getDbClient().drizzle;
-    const rows = await db.select().from(imBindings);
-    for (const row of rows) {
-      const id: IdentityKey = {
-        channel: row.channel,
-        botContextId: row.botContextId,
-        userId: row.userId,
-        // '' = 无 scope(feishu);非空 = slack thread root ts
-        ...(row.scopeKey ? { scopeKey: row.scopeKey } : {}),
-      };
-      this.forward.set(keyOf(id), row.targetSessionId);
-      this.reverse.set(row.targetSessionId, id);
-      if (row.attachedViaCardMessageId) {
-        this.attachCardIds.set(keyOf(id), row.attachedViaCardMessageId);
+  preload(): Promise<void> {
+    return this.enqueueMutation(async () => {
+      if (this.preloaded) return;
+      // 走 DbClient async 代理: MR2.2 后 main 侧 _drizzle 在 worker takeover
+      // 时被释放, getDrizzle() 会抛 'localDb not ready'。代理把 query 转发给
+      // worker 内的真 better-sqlite3 实例, await 已经是 await Promise(原 await
+      // sync value 是 no-op, 现在变成真 async, 调用形态不变)。
+      const dbClient = getDbClient();
+      const rows = await dbClient.drizzle.select().from(imBindings);
+      const winnersByTarget = new Map<
+        string,
+        { identity: IdentityKey; attachedAt: number; cardMessageId: string | null }
+      >();
+      const staleIdentities: IdentityKey[] = [];
+
+      for (const row of rows) {
+        const id: IdentityKey = {
+          channel: row.channel,
+          botContextId: row.botContextId,
+          userId: row.userId,
+          // '' = 无 scope(feishu);非空 = slack thread root ts
+          ...(row.scopeKey ? { scopeKey: row.scopeKey } : {}),
+        };
+
+        // Older builds allowed multiple identities to point at one desktop
+        // session even though the session has only one interaction listener.
+        // Recover deterministically by keeping the most recent takeover and
+        // deleting stale rows before opening the ingress gate.
+        const existing = winnersByTarget.get(row.targetSessionId);
+        const candidateWins =
+          !existing ||
+          row.attachedAt > existing.attachedAt ||
+          (row.attachedAt === existing.attachedAt && keyOf(id) > keyOf(existing.identity));
+        if (candidateWins) {
+          if (existing) staleIdentities.push(existing.identity);
+          winnersByTarget.set(row.targetSessionId, {
+            identity: id,
+            attachedAt: row.attachedAt,
+            cardMessageId: row.attachedViaCardMessageId,
+          });
+        } else {
+          staleIdentities.push(id);
+        }
       }
-    }
-    this.preloaded = true;
-    log.info(`preload loaded ${rows.length} im_bindings`);
+
+      // Publish a complete winner snapshot before the best-effort persisted
+      // repair. If cleanup fails, initialization may continue, but ingress
+      // still routes through the deterministic winners instead of an empty
+      // runtime index. A later preload retry rebuilds these maps from its
+      // freshly selected snapshot before attempting cleanup again.
+      this.forward.clear();
+      this.reverse.clear();
+      this.attachCardIds.clear();
+      for (const [sessionId, winner] of winnersByTarget) {
+        const k = keyOf(winner.identity);
+        this.forward.set(k, sessionId);
+        this.reverse.set(sessionId, winner.identity);
+        if (winner.cardMessageId) {
+          this.attachCardIds.set(k, winner.cardMessageId);
+        }
+      }
+      if (staleIdentities.length > 0) {
+        await dbClient.tx('im.deleteBindings', {
+          identities: staleIdentities.map((identity) => ({
+            channel: identity.channel,
+            botContextId: identity.botContextId,
+            userId: identity.userId,
+            scopeKey: identity.scopeKey ?? '',
+          })),
+        });
+      }
+      this.preloaded = true;
+      log.info(
+        `preload loaded ${winnersByTarget.size} im_bindings` +
+          (staleIdentities.length > 0
+            ? ` (removed ${staleIdentities.length} stale takeover(s))`
+            : ''),
+      );
+    });
   }
 
   /**
@@ -140,93 +204,138 @@ class SqliteBindingStore implements BindingStore<string> {
     return out;
   }
 
-  async attach(
+  attach(
     identity: IdentityKey,
     value: string,
     options?: { attachedViaCardMessageId?: string },
   ): Promise<void> {
-    const now = Date.now();
-    const db = getDbClient().drizzle;
-
-    // INSERT OR REPLACE 语义: drizzle 没有内置, 走"先 delete 同主键再 insert"
-    // 在事务里, 等价于 last-write-wins。同一 identity 的旧 binding (可能 attach
-    // 在不同 sessionId 上) 被覆盖 — 反向索引也要清理旧 sessionId。
-    const oldSessionId = this.forward.get(keyOf(identity));
-    await db
-      .delete(imBindings)
-      .where(
-        and(
-          eq(imBindings.channel, identity.channel),
-          eq(imBindings.botContextId, identity.botContextId),
-          eq(imBindings.userId, identity.userId),
-          eq(imBindings.scopeKey, identity.scopeKey ?? ''),
-        ),
-      );
-    await db.insert(imBindings).values({
-      channel: identity.channel,
-      botContextId: identity.botContextId,
-      userId: identity.userId,
-      scopeKey: identity.scopeKey ?? '',
-      targetSessionId: value,
-      attachedAt: now,
-      attachedViaCardMessageId: options?.attachedViaCardMessageId ?? null,
-    });
-
-    // 持久化成功后再更新内存
-    if (oldSessionId && oldSessionId !== value) {
-      this.reverse.delete(oldSessionId);
-    }
-    this.forward.set(keyOf(identity), value);
-    this.reverse.set(value, identity);
-    if (options?.attachedViaCardMessageId) {
-      this.attachCardIds.set(keyOf(identity), options.attachedViaCardMessageId);
-    } else {
-      this.attachCardIds.delete(keyOf(identity));
-    }
-
-    log.info(
-      `attach channel=${identity.channel} bot=...${identity.botContextId.slice(-6)} ` +
-        `user=...${identity.userId.slice(-8)} → session=...${value.slice(-8)}` +
-        (oldSessionId && oldSessionId !== value
-          ? ` (replaced old session=...${oldSessionId.slice(-8)})`
-          : ''),
-    );
-    // prevValue 给 listener 区分"新 attach"vs"同 identity 切换 target"用,
-    // 后者 channel cleanup 需要先清理旧 session 上挂的 hook。
-    this.emit({ identity, value, prevValue: oldSessionId ?? null });
+    return this.attachWithResult(identity, value, options).then(() => undefined);
   }
 
-  async detach(identity: IdentityKey): Promise<void> {
-    const k = keyOf(identity);
-    const oldSessionId = this.forward.get(k);
-    if (!oldSessionId) {
-      log.debug(
-        `detach noop (not attached) channel=${identity.channel} user=...${identity.userId.slice(-8)}`,
-      );
-      return;
-    }
-    const db = getDbClient().drizzle;
-    await db
-      .delete(imBindings)
-      .where(
-        and(
-          eq(imBindings.channel, identity.channel),
-          eq(imBindings.botContextId, identity.botContextId),
-          eq(imBindings.userId, identity.userId),
-          eq(imBindings.scopeKey, identity.scopeKey ?? ''),
-        ),
-      );
-    this.forward.delete(k);
-    this.reverse.delete(oldSessionId);
-    this.attachCardIds.delete(k);
+  /**
+   * Same mutation as attach(), plus the target owner actually displaced from
+   * inside the serialized operation. Card cleanup callers must use this result
+   * instead of a pre-attach reverse-index snapshot.
+   */
+  attachWithResult(
+    identity: IdentityKey,
+    value: string,
+    options?: { attachedViaCardMessageId?: string },
+  ): Promise<BindingAttachResult> {
+    return this.enqueueMutation(async () => {
+      const now = Date.now();
+      const dbClient = getDbClient();
+      const identityKey = keyOf(identity);
+      const displacedIdentity = this.reverse.get(value);
+      const displaced =
+        displacedIdentity !== undefined && keyOf(displacedIdentity) !== identityKey
+        ? {
+            identity: displacedIdentity,
+            attachedViaCardMessageId:
+              this.attachCardIds.get(keyOf(displacedIdentity)) ?? null,
+          }
+        : null;
 
-    log.info(
-      `detach channel=${identity.channel} bot=...${identity.botContextId.slice(-6)} ` +
-        `user=...${identity.userId.slice(-8)} (was session=...${oldSessionId.slice(-8)})`,
-    );
-    // prevValue 必须带上 — channel cleanup (e.g. detachFeishuFromSession) 需要
-    // 它来定位 in-process state 是哪个 session 的; 否则就得反向 import。
-    this.emit({ identity, value: null, prevValue: oldSessionId });
+      // 同一 identity 的旧 target 与同一 target 的旧 identity 必须在一个 worker
+      // transaction 里替换。新 INSERT 失败时 SQLite 会恢复旧 binding；因此内存
+      // 索引和 interaction listener 也仍保持旧接管，不会出现两边都失效的窗口。
+      const oldSessionId = this.forward.get(identityKey);
+      await dbClient.tx('im.replaceBinding', {
+        channel: identity.channel,
+        botContextId: identity.botContextId,
+        userId: identity.userId,
+        scopeKey: identity.scopeKey ?? '',
+        targetSessionId: value,
+        attachedAt: now,
+        attachedViaCardMessageId: options?.attachedViaCardMessageId ?? null,
+      });
+
+      // 持久化成功后再更新内存
+      if (oldSessionId && oldSessionId !== value) {
+        const reverseIdentity = this.reverse.get(oldSessionId);
+        if (reverseIdentity && keyOf(reverseIdentity) === identityKey) {
+          this.reverse.delete(oldSessionId);
+        }
+      }
+      if (displaced) {
+        const displacedKey = keyOf(displaced.identity);
+        this.forward.delete(displacedKey);
+        this.attachCardIds.delete(displacedKey);
+      }
+      this.forward.set(identityKey, value);
+      this.reverse.set(value, identity);
+      if (options?.attachedViaCardMessageId) {
+        this.attachCardIds.set(identityKey, options.attachedViaCardMessageId);
+      } else {
+        this.attachCardIds.delete(identityKey);
+      }
+
+      log.info(
+        `attach channel=${identity.channel} bot=...${identity.botContextId.slice(-6)} ` +
+          `user=...${identity.userId.slice(-8)} → session=...${value.slice(-8)}` +
+          (oldSessionId && oldSessionId !== value
+            ? ` (replaced old session=...${oldSessionId.slice(-8)})`
+            : ''),
+      );
+      // prevValue 给 listener 区分"新 attach"vs"同 identity 切换 target"用,
+      // 后者 channel cleanup 需要先清理旧 session 上挂的 hook。
+      if (displaced) {
+        this.emit({ identity: displaced.identity, value: null, prevValue: value });
+      }
+      this.emit({ identity, value, prevValue: oldSessionId ?? null });
+      return { displaced };
+    });
+  }
+
+  detach(identity: IdentityKey): Promise<void> {
+    return this.detachIfTarget(identity).then(() => undefined);
+  }
+
+  /**
+   * Detach only while the identity still owns the expected target. Persisted
+   * deletion is target-wide so stale duplicate owners left by a failed preload
+   * repair cannot resurrect after the visible winner is revoked.
+   */
+  detachIfTarget(
+    identity: IdentityKey,
+    expectedTargetSessionId?: string,
+  ): Promise<boolean> {
+    return this.enqueueMutation(async () => {
+      const k = keyOf(identity);
+      const oldSessionId = this.forward.get(k);
+      if (!oldSessionId) {
+        log.debug(
+          `detach noop (not attached) channel=${identity.channel} user=...${identity.userId.slice(-8)}`,
+        );
+        return false;
+      }
+      if (expectedTargetSessionId && oldSessionId !== expectedTargetSessionId) {
+        log.debug(
+          `detach noop (target changed) channel=${identity.channel} ` +
+            `expected=...${expectedTargetSessionId.slice(-8)} actual=...${oldSessionId.slice(-8)}`,
+        );
+        return false;
+      }
+      const db = getDbClient().drizzle;
+      await db
+        .delete(imBindings)
+        .where(eq(imBindings.targetSessionId, oldSessionId));
+      this.forward.delete(k);
+      const reverseIdentity = this.reverse.get(oldSessionId);
+      if (reverseIdentity && keyOf(reverseIdentity) === k) {
+        this.reverse.delete(oldSessionId);
+      }
+      this.attachCardIds.delete(k);
+
+      log.info(
+        `detach channel=${identity.channel} bot=...${identity.botContextId.slice(-6)} ` +
+          `user=...${identity.userId.slice(-8)} (was session=...${oldSessionId.slice(-8)})`,
+      );
+      // prevValue 必须带上 — channel cleanup (e.g. detachFeishuFromSession) 需要
+      // 它来定位 in-process state 是哪个 session 的; 否则就得反向 import。
+      this.emit({ identity, value: null, prevValue: oldSessionId });
+      return true;
+    });
   }
 
   onChange(listener: BindingChangeListener<string>): () => void {
@@ -245,6 +354,15 @@ class SqliteBindingStore implements BindingStore<string> {
         log.warn(`binding onChange listener threw (non-fatal): ${msg}`);
       }
     }
+  }
+
+  private enqueueMutation<T>(operation: () => Promise<T>): Promise<T> {
+    const result = this.mutationQueue.then(operation, operation);
+    this.mutationQueue = result.then(
+      () => undefined,
+      () => undefined,
+    );
+    return result;
   }
 }
 
@@ -292,7 +410,10 @@ export async function executeDetach(
   }
 
   try {
-    await bindingStore.detach(identity);
+    const detached = await bindingStore.detachIfTarget(identity, targetSessionId);
+    if (!detached) {
+      return { wasAttached: false, targetSessionId: null };
+    }
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
     log.error(`executeDetach: bindingStore.detach failed: ${msg}`);
