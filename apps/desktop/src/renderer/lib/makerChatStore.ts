@@ -2322,7 +2322,9 @@ export function handleStreamEvent(
             ? i18n.t('logic.errors.turnFailed')
             : reason === 'silent-stop-exhausted'
               ? i18n.t('logic.errors.silentStopExhausted')
-              : decodeRemoteErrorMessage(safeErrMsg);
+              : reason === 'codex-auto-review-unavailable'
+                ? i18n.t('logic.errors.codexAutoReviewUnavailable')
+                : decodeRemoteErrorMessage(safeErrMsg);
       const isTerminalError = isTerminalErrorData(event.data);
       if (!isTerminalError) {
         return {
