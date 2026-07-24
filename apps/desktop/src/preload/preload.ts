@@ -769,12 +769,12 @@ contextBridge.exposeInMainWorld('electronAPI', {
     install: (
       lizFilePath: string,
       opts: { enable?: boolean; expectedPackageSha256: string },
-    ): Promise<{ ghost: unknown } | { canceled: true }> =>
+    ): Promise<{ ghost: unknown }> =>
       ipcRenderer.invoke('ghosts:install', lizFilePath, opts),
     update: (
       lizFilePath: string,
       opts: { expectedPackageSha256: string },
-    ): Promise<{ ghost: unknown } | { canceled: true }> =>
+    ): Promise<{ ghost: unknown }> =>
       ipcRenderer.invoke('ghosts:update', lizFilePath, opts),
     cindyPrefsSync: (
       id: string,
@@ -855,6 +855,21 @@ contextBridge.exposeInMainWorld('electronAPI', {
       ipcRenderer.invoke('ghosts:dev-runtime', action, id),
   },
 
+  pluginMarket: {
+    snapshot: (): Promise<import('../shared/pluginMarket').PluginMarketSnapshot> =>
+      ipcRenderer.invoke('plugin-market:snapshot'),
+    detail: (
+      pluginId: string,
+    ): Promise<import('../shared/pluginMarket').PluginMarketDetail> =>
+      ipcRenderer.invoke('plugin-market:detail', pluginId),
+    install: (
+      pluginId: string,
+      options?: { allowPermissionExpansion?: boolean },
+    ): Promise<{ ghost: import('../shared/ghost').InstalledGhost }> =>
+      ipcRenderer.invoke('plugin-market:install', pluginId, options),
+    uninstall: (pluginId: string): Promise<{ ok: true }> =>
+      ipcRenderer.invoke('plugin-market:uninstall', pluginId),
+  },
   voiceInput: {
     prewarm: (payload?: { sourceLanguage?: string; refinementEnabled?: boolean }): Promise<{ ok: true }> =>
       ipcRenderer.invoke('voice-input:prewarm', payload),

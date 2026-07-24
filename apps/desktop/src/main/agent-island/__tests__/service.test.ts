@@ -1,3 +1,6 @@
+import { homedir } from 'node:os';
+import path from 'node:path';
+
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { BrowserWindow } from 'electron';
 import { SESSION_ACTIVITY_CHANNEL } from '@cindy/device-link';
@@ -24,6 +27,11 @@ import { markAppContentWindow } from '../../windowFocusClassifier.js';
 import type { AgentIslandService } from '../service.js';
 
 const REMOTE_DAEMON_CLOSED_REASON = 'remote_daemon_closed';
+
+// 受保护目录检测按 path.join(homedir(), ...) 的字面量匹配;测试消息必须用同一
+// 拼法,否则在 Windows 开发机上分隔符对不上,darwin mock 下的用例会失真。
+const protectedFolderFile = (kind: 'Desktop' | 'Documents', file: string): string =>
+  path.join(homedir(), kind, file);
 
 function handleInteractionRequestForTest(
   service: AgentIslandService,
@@ -1483,7 +1491,7 @@ describe('AgentIslandService native publishing', () => {
         source: 'claude-code',
         data: {
           toolUseId: 'tool-1',
-          fullText: `EPERM: operation not permitted, open '${process.env.HOME}/Desktop/blocked.txt'`,
+          fullText: `EPERM: operation not permitted, open '${protectedFolderFile('Desktop', 'blocked.txt')}'`,
         },
       };
 
@@ -1523,7 +1531,7 @@ describe('AgentIslandService native publishing', () => {
           source: 'claude-code',
           data: {
             toolUseId: 'tool-1',
-            fullText: `EPERM: operation not permitted, open '${process.env.HOME}/Documents/blocked.txt'`,
+            fullText: `EPERM: operation not permitted, open '${protectedFolderFile('Documents', 'blocked.txt')}'`,
             isError: true,
           },
         },
@@ -1557,7 +1565,7 @@ describe('AgentIslandService native publishing', () => {
           source: 'codex',
           data: {
             toolUseId: 'tool-1',
-            fullText: `Log excerpt: EPERM under '${process.env.HOME}/Desktop/blocked.txt'`,
+            fullText: `Log excerpt: EPERM under '${protectedFolderFile('Desktop', 'blocked.txt')}'`,
             isError: false,
           },
         },
@@ -1587,7 +1595,7 @@ describe('AgentIslandService native publishing', () => {
           source: 'claude-code',
           data: {
             toolUseId: 'tool-1',
-            fullText: `EPERM: operation not permitted, open '${process.env.HOME}/Desktop/blocked.txt'`,
+            fullText: `EPERM: operation not permitted, open '${protectedFolderFile('Desktop', 'blocked.txt')}'`,
             isError: true,
           },
         },

@@ -180,11 +180,57 @@ describe('BillingPage remote catalog rendering', () => {
                 ],
               },
               {
+                code: 'coming_soon',
+                name: 'Coming soon top-up',
+                kind: 'CREDIT_TOPUP',
+                level: null,
+                sortOrder: 4,
+                offers: [
+                  {
+                    code: 'coming_soon_offer',
+                    salesState: 'COMING_SOON',
+                    purchasable: false,
+                    unavailableReason: 'OFFER_COMING_SOON',
+                    interval: null,
+                    currency: 'cny',
+                    amount: '30',
+                    minAmount: null,
+                    maxAmount: null,
+                    creditAmount: '30',
+                    rolloverCap: null,
+                    purchaseOptions: [],
+                  },
+                ],
+              },
+              {
+                code: 'no_available_channel',
+                name: 'No-channel top-up',
+                kind: 'CREDIT_TOPUP',
+                level: null,
+                sortOrder: 5,
+                offers: [
+                  {
+                    code: 'no_available_channel_offer',
+                    salesState: 'AVAILABLE',
+                    purchasable: false,
+                    unavailableReason: 'NO_AVAILABLE_PAYMENT_CHANNEL',
+                    interval: null,
+                    currency: 'cny',
+                    amount: '40',
+                    minAmount: null,
+                    maxAmount: null,
+                    creditAmount: '40',
+                    rolloverCap: null,
+                    purchaseOptions: [],
+                  },
+                ],
+              },
+              {
                 code: 'hidden',
                 name: 'Unconfigured offer',
                 kind: 'CREDIT_TOPUP',
                 level: null,
-                sortOrder: 4,
+                sortOrder: 6,
                 offers: [
                   {
                     code: 'hidden_offer',
@@ -204,7 +250,7 @@ describe('BillingPage remote catalog rendering', () => {
                 name: 'Legacy offer without channel projection',
                 kind: 'CREDIT_TOPUP',
                 level: null,
-                sortOrder: 5,
+                sortOrder: 7,
                 offers: [
                   {
                     code: 'legacy_offer',
@@ -223,7 +269,7 @@ describe('BillingPage remote catalog rendering', () => {
                 name: 'Unsupported payment action',
                 kind: 'CREDIT_TOPUP',
                 level: null,
-                sortOrder: 6,
+                sortOrder: 8,
                 offers: [
                   {
                     code: 'unsupported_action_offer',
@@ -250,7 +296,7 @@ describe('BillingPage remote catalog rendering', () => {
                 name: 'Unsupported payment capability',
                 kind: 'CREDIT_TOPUP',
                 level: null,
-                sortOrder: 7,
+                sortOrder: 9,
                 offers: [
                   {
                     code: 'unsupported_capability_offer',
@@ -540,7 +586,7 @@ describe('BillingPage remote catalog rendering', () => {
     );
   });
 
-  it('shows only configured offers and only the selected offer channels', async () => {
+  it('shows server-visible unavailable offers and only enables purchasable offers', async () => {
     render(<BillingPage />);
 
     expect(screen.getByText('billing.settings.subscriptionCard.action')).toBeTruthy();
@@ -550,6 +596,18 @@ describe('BillingPage remote catalog rendering', () => {
 
     fireEvent.click(screen.getByText('billing.settings.topupCard.action'));
     await screen.findByText('Configured top-up');
+    expect(screen.getByText('Coming soon top-up').closest('button')).toHaveProperty(
+      'disabled',
+      true,
+    );
+    expect(screen.getByText('No-channel top-up').closest('button')).toHaveProperty(
+      'disabled',
+      true,
+    );
+    expect(screen.getByText('billing.catalog.unavailableReasons.OFFER_COMING_SOON')).toBeTruthy();
+    expect(
+      screen.getByText('billing.catalog.unavailableReasons.NO_AVAILABLE_PAYMENT_CHANNEL'),
+    ).toBeTruthy();
     expect(screen.queryByText('Unknown-provider offer')).toBeNull();
     expect(screen.queryByText('Unconfigured offer')).toBeNull();
     expect(screen.queryByText('Legacy offer without channel projection')).toBeNull();
@@ -897,6 +955,29 @@ describe('BillingPage plan change', () => {
           },
         ],
       },
+      {
+        code: 'future_max',
+        name: 'Coming soon Max',
+        kind: 'SUBSCRIPTION' as const,
+        level: 3,
+        sortOrder: 4,
+        offers: [
+          {
+            code: 'future_max_month',
+            salesState: 'COMING_SOON' as const,
+            purchasable: false,
+            unavailableReason: 'OFFER_COMING_SOON' as const,
+            interval: 'MONTH' as const,
+            currency: 'usd',
+            amount: '30',
+            minAmount: null,
+            maxAmount: null,
+            creditAmount: '500',
+            rolloverCap: '0',
+            purchaseOptions: [],
+          },
+        ],
+      },
     ],
   };
 
@@ -986,6 +1067,7 @@ describe('BillingPage plan change', () => {
     await screen.findByText('billing.planChange.targetTitle');
     expect(screen.getByText('Max plan')).toBeTruthy();
     expect(screen.queryByText('Alipay-only Max')).toBeNull();
+    expect(screen.queryByText('Coming soon Max')).toBeNull();
     // The current plan renders in the summary card but must not be a candidate.
     expect(screen.getByText('billing.planChange.upgradeBadge')).toBeTruthy();
 
