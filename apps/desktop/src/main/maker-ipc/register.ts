@@ -216,7 +216,11 @@ import {
   recordSessionTurnSpend,
   recordSessionTurnTokens,
 } from '../sessionSpendBroadcaster.js';
-import { codexUsageToTokens, recordTurnCostOnMessage } from '../turnCostBroadcaster.js';
+import {
+  codexUsageToTokens,
+  recordSchedulerTurnCost,
+  recordTurnCostOnMessage,
+} from '../turnCostBroadcaster.js';
 import { recordModelMismatchOnMessage } from '../modelMismatchBroadcaster.js';
 import { detectClaudeModelMismatch } from '../../shared/modelMismatch.js';
 import { triggerClaudeAccountUsageRefresh } from '../usage/claudeAccountUsage.js';
@@ -257,6 +261,7 @@ import type {
 import { runAcceptedCallback } from './acceptedCallbackRunner.js';
 import { createElectronIpcHandlerRegistry } from './electronIpcRegistry.js';
 import { refreshCodexMcpEnvironment } from './codexMcpRefresh.js';
+import { broadcastSchedulerChanged } from './schedule.js';
 import { validateExtraDirs } from './extraDirsValidator.js';
 import { prepareHandoffWorktree, shouldRecycleHandoffWorktreeOnFailure } from './handoffWorktree.js';
 import { registerProjectPluginPolicyHandlers } from './projectPluginPolicyHandlers.js';
@@ -2836,16 +2841,17 @@ export function wireSessionToIpc(session: ReturnType<Maker['getSession']>): void
                 void recordTurnSpend(cost);
                 void recordSessionTurnSpend(session.id, cost);
               }
-              if (turnAssistantPersistId) {
-                await recordTurnCostOnMessage({
-                  sessionId: session.id,
-                  clientId: turnAssistantPersistId,
-                  costUsd: cost,
-                  isEstimate: isSubscriptionValue,
-                  turnUsageDetails,
-                  turnOrigin: event.turnOrigin,
-                });
-              }
+            }
+            if (cost != null) {
+              const changedScheduleId = await recordSchedulerTurnCost({
+                sessionId: session.id,
+                clientId: turnAssistantPersistId,
+                costUsd: cost,
+                isEstimate: isSubscriptionValue,
+                turnUsageDetails,
+                turnOrigin: event.turnOrigin,
+              });
+              if (changedScheduleId) broadcastSchedulerChanged(changedScheduleId);
             }
           } catch {
             // token row 已在价格请求前落库;价格失败只影响 API cost / message cost。

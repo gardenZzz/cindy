@@ -5338,6 +5338,7 @@
       "tagManual": "手動",
       "totalCost": "コスト {{cost}}",
       "totalValue": "価値 {{value}}",
+      "costUnavailable": "コストを取得できません",
       "menu": {
         "rename": "名前を変更",
         "resume": "再開",
@@ -5377,6 +5378,7 @@
       "sessionValue": "セッション価値 {{value}}",
       "runCost": "実行コスト {{cost}}",
       "runValue": "実行の推定価値 {{value}}",
+      "costUnavailable": "コストを取得できません",
       "legacyCostUnavailable": "過去のコストは実行別に分割できません",
       "persistentSessionGroup": "継続セッション {{session}} · {{count}} 回の実行",
       "expandRemainingRuns": "残り {{count}} 回を表示",

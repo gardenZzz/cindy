@@ -5338,6 +5338,7 @@
       "tagManual": "手动",
       "totalCost": "开销 {{cost}}",
       "totalValue": "价值 {{value}}",
+      "costUnavailable": "费用不可用",
       "menu": {
         "rename": "重命名",
         "resume": "恢复",
@@ -5377,6 +5378,7 @@
       "sessionValue": "会话价值 {{value}}",
       "runCost": "本次开销 {{cost}}",
       "runValue": "本次估算价值 {{value}}",
+      "costUnavailable": "费用不可用",
       "legacyCostUnavailable": "历史费用无法拆分",
       "persistentSessionGroup": "持续会话 {{session}} · {{count}} 次运行",
       "expandRemainingRuns": "展开另外 {{count}} 次",
