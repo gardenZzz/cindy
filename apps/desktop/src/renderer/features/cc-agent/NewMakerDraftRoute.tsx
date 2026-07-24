@@ -2278,15 +2278,11 @@ export function NewMakerDraftRoute() {
                     <ConnectProviderCard />
                   </div>
                 )}
-                {/* 输入框跟随 inputWidth 变宽后,快捷入口只有 4 项,若也铺满全宽
-                    会被撑成又宽又空的短卡。这里把卡片区封顶在 800px、左对齐(与输入框
-                    左缘齐),保持每张卡当前的紧凑比例;输入框仍独立用满可用宽度。 */}
+                {/* 快捷入口与输入框同宽:左右两缘都与上方 ChatInput 对齐(父列已封顶
+                    inputWidth)。此前封顶 800px 会在宽窗口下右缘短一截,视觉上没对齐
+                    (2026-07-24 用户反馈)。 */}
                 {!showProviderOnboardingCard && (
-                  <div
-                    data-testid="create-agent-quick-starts"
-                    className="mt-[42px] w-full"
-                    style={{ maxWidth: 800 }}
-                  >
+                  <div data-testid="create-agent-quick-starts" className="mt-[42px] w-full">
                     {/* 标题字号 12→14px(DESIGN §3 Caption),与卡片间距 16→10px 收近
                         (DESIGN §5 间距档)——用户改稿 2026-07-22。 */}
                     <div className="mb-2.5 px-0.5">
