@@ -28,6 +28,7 @@ import { PassThrough } from 'node:stream';
 
 import type { GhostNodeChildToWorkerMessage } from '../../shared/ghost.js';
 import { GHOST_NODE_CHILD_MODE_FLAG } from '../../shared/ghost.js';
+import { installVirtualStdin } from './nodeRuntimeVirtualStdin.js';
 
 interface ParentPortLike {
   postMessage(message: unknown): void;
@@ -52,12 +53,9 @@ if (
   throw new Error('Node 插件工作进程入口不合法');
 }
 
-const virtualStdin = new PassThrough();
-Object.defineProperty(process, 'stdin', {
-  configurable: true,
-  enumerable: true,
-  value: virtualStdin,
-});
+// Windows 上 Electron 把 process.stdin 钉成不可配置 getter,不能整体替换;
+// 替换或原地复活的分支收敛在 installVirtualStdin 里。
+const virtualStdin = installVirtualStdin(process);
 
 /* ── spawnEntry 窄接口(仅普通 worker 模式;子进程模式不给,树深恒为 1)── */
 
@@ -184,12 +182,12 @@ parentPort.on('message', (event) => {
   const data = event.data;
   if (!isRecord(data)) return;
   if (data.type === 'stdin' && typeof data.chunk === 'string') {
-    if (Buffer.byteLength(data.chunk, 'utf8') <= 1024 * 1024) virtualStdin.write(data.chunk);
+    if (Buffer.byteLength(data.chunk, 'utf8') <= 1024 * 1024) virtualStdin.feed(data.chunk);
     return;
   }
   // 子进程原样模式的字节口(base64,防多字节字符被 chunk 边界切坏)。
   if (data.type === 'stdin-b64' && typeof data.chunk === 'string') {
-    if (data.chunk.length <= 2 * 1024 * 1024) virtualStdin.write(Buffer.from(data.chunk, 'base64'));
+    if (data.chunk.length <= 2 * 1024 * 1024) virtualStdin.feed(Buffer.from(data.chunk, 'base64'));
     return;
   }
   if (data.type === 'stdin-end') {
