@@ -1,11 +1,9 @@
 /**
  * cardActionHandler — control:session-pick 重复接管替换流程(thread 模型)。
  *
- * 语义: 目标 desktop session 已被另一个 thread 接管时, 不再拒绝
- * (旧 alreadyTakenOver), 而是中断旧接管由新 thread 替换:
- *   1. executeDetach(旧 identity) — 失败必须中止(防双 thread 路由同一 session)
- *   2. 旧锚点/root 卡收口为 takeoverReplaced(同渠道才 patch)
- *   3. 新 thread 正常 attach + 锚点卡 morph
+ * 语义: 目标 desktop session 已被另一个 thread 接管时, attach 原子替换
+ * persisted owner；成功后才收口旧锚点并 prewire 新渠道。attach 失败时旧
+ * binding / listener / 锚点都保持原状。
  */
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
@@ -16,8 +14,7 @@ const mocks = vi.hoisted(() => ({
   logger: { info: vi.fn(), warn: vi.fn(), error: vi.fn(), debug: vi.fn() },
   bindingGet: vi.fn(),
   bindingAttach: vi.fn(),
-  bindingFindByTarget: vi.fn(),
-  bindingGetAttachCardMessageId: vi.fn(),
+  bindingAttachWithResult: vi.fn(),
   executeDetach: vi.fn(),
   generateTakeoverSummary: vi.fn(),
   getMaker: vi.fn(),
@@ -63,8 +60,7 @@ vi.mock('../../binding', () => ({
   bindingStore: {
     get: mocks.bindingGet,
     attach: mocks.bindingAttach,
-    findByTarget: mocks.bindingFindByTarget,
-    getAttachCardMessageId: mocks.bindingGetAttachCardMessageId,
+    attachWithResult: mocks.bindingAttachWithResult,
   },
   executeDetach: mocks.executeDetach,
 }));
@@ -169,8 +165,9 @@ function slackThreadUi(): NonNullable<typeof slackUi.thread> {
 async function pressSessionPick(
   im: ChannelIM,
   overrides?: Partial<IMCardActionEvent>,
+  testAdapter: ImChannelAdapter = adapter,
 ): Promise<void> {
-  const attach = createCardActionHandler(adapter, cards, turnRunner);
+  const attach = createCardActionHandler(testAdapter, cards, turnRunner);
   let handler: ((e: IMCardActionEvent) => Promise<void>) | null = null;
   (im.onCardAction as ReturnType<typeof vi.fn>).mockImplementation((cb) => {
     handler = cb;
@@ -199,6 +196,7 @@ beforeEach(() => {
   (resolvePending as ReturnType<typeof vi.fn>).mockReturnValue(false);
   mocks.generateTakeoverSummary.mockResolvedValue('brief');
   mocks.bindingAttach.mockResolvedValue(undefined);
+  mocks.bindingAttachWithResult.mockResolvedValue({ displaced: null });
   mocks.executeDetach.mockResolvedValue({ wasAttached: true, targetSessionId: 'sess-target' });
   mocks.readModelRouteSnapshot.mockResolvedValue(null);
   mocks.readPermissionMode.mockResolvedValue('auto');
@@ -293,21 +291,24 @@ describe('plan_review IM 卡片决策', () => {
 });
 
 describe('control:session-pick 重复接管替换', () => {
-  it('已被旧 thread 接管 → detach 旧 binding + 旧锚点卡收口 + 新 attach 照常', async () => {
+  it('按串行 attach 实际替换的 owner 收口旧锚点', async () => {
     const oldIdentity = {
       channel: 'slack',
       botContextId: 'BOT1',
       userId: 'U_OLD',
       scopeKey: 'anchor-old.ts',
     };
-    mocks.bindingFindByTarget.mockReturnValue(oldIdentity);
-    mocks.bindingGetAttachCardMessageId.mockReturnValue('anchor-old');
+    mocks.bindingAttachWithResult.mockResolvedValueOnce({
+      displaced: {
+        identity: oldIdentity,
+        attachedViaCardMessageId: 'anchor-old',
+      },
+    });
 
     const im = makeIm();
     await pressSessionPick(im);
 
-    // 旧接管被中断
-    expect(mocks.executeDetach).toHaveBeenCalledWith(oldIdentity, 'slack-slash');
+    expect(mocks.executeDetach).not.toHaveBeenCalled();
     // 旧锚点卡收口为 takeoverReplaced
     expect(im.updateInteractiveCard).toHaveBeenCalledWith(
       'anchor-old',
@@ -316,10 +317,18 @@ describe('control:session-pick 重复接管替换', () => {
       }),
     );
     // 新 thread 正常 attach(identity 带新 scopeKey)
-    expect(mocks.bindingAttach).toHaveBeenCalledWith(
+    expect(mocks.bindingAttachWithResult).toHaveBeenCalledWith(
       expect.objectContaining({ userId: 'U_NEW', scopeKey: 'anchor-new.ts' }),
       'sess-target',
       expect.anything(),
+    );
+    const oldAnchorPatchIndex = (
+      im.updateInteractiveCard as ReturnType<typeof vi.fn>
+    ).mock.calls.findIndex(([messageId]) => messageId === 'anchor-old');
+    expect(mocks.bindingAttachWithResult.mock.invocationCallOrder[0]).toBeLessThan(
+      (im.updateInteractiveCard as ReturnType<typeof vi.fn>).mock.invocationCallOrder[
+        oldAnchorPatchIndex
+      ]!,
     );
     // 新锚点卡 morph 成已接管(带 🚪 按钮)
     expect(im.updateInteractiveCard).toHaveBeenCalledWith(
@@ -330,23 +339,18 @@ describe('control:session-pick 重复接管替换', () => {
     );
   });
 
-  it('detach 旧 binding 失败 → 中止, 不 attach(防双 thread 路由)', async () => {
-    mocks.bindingFindByTarget.mockReturnValue({
-      channel: 'slack',
-      botContextId: 'BOT1',
-      userId: 'U_OLD',
-      scopeKey: 'anchor-old.ts',
-    });
-    mocks.bindingGetAttachCardMessageId.mockReturnValue('anchor-old');
-    mocks.executeDetach.mockRejectedValue(new Error('db locked'));
+  it('新 thread attach 失败 → 旧 binding/listener/锚点保持不变', async () => {
+    mocks.bindingAttachWithResult.mockRejectedValueOnce(new Error('db locked'));
 
     const im = makeIm();
     await pressSessionPick(im);
 
-    expect(mocks.bindingAttach).not.toHaveBeenCalled();
-    // picker 卡收口为 attachFailed
+    expect(mocks.bindingAttachWithResult).toHaveBeenCalled();
+    expect(mocks.executeDetach).not.toHaveBeenCalled();
+    expect(turnRunner.prewireAttachedSession).not.toHaveBeenCalled();
+    // 新锚点显示写入失败
     expect(im.updateInteractiveCard).toHaveBeenCalledWith(
-      'picker-msg',
+      'anchor-new',
       expect.objectContaining({
         body: slackUi.cards.control.attachFailed('db locked'),
       }),
@@ -355,30 +359,74 @@ describe('control:session-pick 重复接管替换', () => {
     expect(im.updateInteractiveCard).not.toHaveBeenCalledWith('anchor-old', expect.anything());
   });
 
-  it('跨渠道旧 binding(feishu)→ detach 但不 patch 旧卡(本 im 实例 patch 不动)', async () => {
-    mocks.bindingFindByTarget.mockReturnValue({
-      channel: 'feishu',
-      botContextId: 'FBOT',
-      userId: 'ou_old',
+  it('跨渠道旧 binding(feishu)→ 原子替换但不 patch 旧卡(本 im 实例 patch 不动)', async () => {
+    mocks.bindingAttachWithResult.mockResolvedValueOnce({
+      displaced: {
+        identity: {
+          channel: 'feishu',
+          botContextId: 'FBOT',
+          userId: 'ou_old',
+        },
+        attachedViaCardMessageId: 'om_feishu_card',
+      },
     });
-    mocks.bindingGetAttachCardMessageId.mockReturnValue('om_feishu_card');
-
-    const im = makeIm();
-    await pressSessionPick(im);
-
-    expect(mocks.executeDetach).toHaveBeenCalled();
-    expect(im.updateInteractiveCard).not.toHaveBeenCalledWith('om_feishu_card', expect.anything());
-    expect(mocks.bindingAttach).toHaveBeenCalled();
-  });
-
-  it('无旧 binding → 不 detach, 直接 attach', async () => {
-    mocks.bindingFindByTarget.mockReturnValue(null);
 
     const im = makeIm();
     await pressSessionPick(im);
 
     expect(mocks.executeDetach).not.toHaveBeenCalled();
+    expect(im.updateInteractiveCard).not.toHaveBeenCalledWith('om_feishu_card', expect.anything());
+    expect(mocks.bindingAttachWithResult).toHaveBeenCalled();
+  });
+
+  it('Discord 接管普通会话由 attach 原子替换 Feishu，再 prewire Discord', async () => {
+    const discordAdapter = {
+      ...adapter,
+      channel: 'discord',
+      threadScoped: false,
+    } as ImChannelAdapter;
+
+    const im = makeIm();
+    await pressSessionPick(im, undefined, discordAdapter);
+
+    expect(mocks.executeDetach).not.toHaveBeenCalled();
+    expect(mocks.bindingAttach).toHaveBeenCalledWith(
+      expect.objectContaining({ channel: 'discord', userId: 'U_NEW' }),
+      'sess-target',
+      expect.anything(),
+    );
+    expect(turnRunner.prewireAttachedSession).toHaveBeenCalledWith('BOT1', 'U_NEW');
+    expect(mocks.bindingAttach.mock.invocationCallOrder[0]).toBeLessThan(
+      turnRunner.prewireAttachedSession.mock.invocationCallOrder[0]!,
+    );
+  });
+
+  it('普通渠道新 attach 失败时不显式 detach 旧 binding', async () => {
+    mocks.bindingAttach.mockRejectedValueOnce(new Error('db locked'));
+    const discordAdapter = {
+      ...adapter,
+      channel: 'discord',
+      threadScoped: false,
+    } as ImChannelAdapter;
+
+    const im = makeIm();
+    await pressSessionPick(im, undefined, discordAdapter);
+
     expect(mocks.bindingAttach).toHaveBeenCalled();
+    expect(mocks.executeDetach).not.toHaveBeenCalled();
+    expect(turnRunner.prewireAttachedSession).not.toHaveBeenCalled();
+    expect(im.updateInteractiveCard).toHaveBeenCalledWith(
+      'picker-msg',
+      expect.objectContaining({ body: slackUi.cards.control.attachFailed('db locked') }),
+    );
+  });
+
+  it('无旧 binding → 不 detach, 直接 attach', async () => {
+    const im = makeIm();
+    await pressSessionPick(im);
+
+    expect(mocks.executeDetach).not.toHaveBeenCalled();
+    expect(mocks.bindingAttachWithResult).toHaveBeenCalled();
   });
 });
 

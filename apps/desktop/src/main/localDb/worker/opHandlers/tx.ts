@@ -54,11 +54,82 @@ export function tx(db: Database.Database, args: unknown): unknown {
       return sessionAgentSwitchFallback(db, txArgs);
     case 'message.delete':
       return messageDelete(db, txArgs);
+    case 'im.deleteBindings':
+      return imDeleteBindings(db, txArgs);
+    case 'im.replaceBinding':
+      return imReplaceBinding(db, txArgs);
     case 'session.importShare':
       return sessionImportShare(db, txArgs);
     default:
       throw Object.assign(new Error(`unknown tx: ${name}`), { code: 'UNKNOWN_TX' });
   }
+}
+
+/** Remove every stale startup binding as one all-or-nothing repair. */
+function imDeleteBindings(db: Database.Database, args: unknown): void {
+  const payload = asRecord(args, 'im.deleteBindings args');
+  const identities = expectArray(payload.identities, 'identities').map((raw, index) => {
+    const identity = asRecord(raw, `identities.${index}`);
+    return {
+      channel: expectString(identity.channel, `identities.${index}.channel`),
+      botContextId: expectString(identity.botContextId, `identities.${index}.botContextId`),
+      userId: expectString(identity.userId, `identities.${index}.userId`),
+      scopeKey: expectString(identity.scopeKey, `identities.${index}.scopeKey`),
+    };
+  });
+  const deleteBinding = db.prepare(
+    `DELETE FROM im_bindings
+     WHERE channel = ? AND bot_context_id = ? AND user_id = ? AND scope_key = ?`,
+  );
+  const transaction = db.transaction(() => {
+    for (const identity of identities) {
+      deleteBinding.run(
+        identity.channel,
+        identity.botContextId,
+        identity.userId,
+        identity.scopeKey,
+      );
+    }
+  });
+  transaction();
+}
+
+/**
+ * IM takeover replacement must not expose the delete-before-insert gap: if
+ * the insert fails, SQLite restores both the previous target owner and this
+ * identity's previous target.
+ */
+function imReplaceBinding(db: Database.Database, args: unknown): void {
+  const payload = asRecord(args, 'im.replaceBinding args');
+  const channel = expectString(payload.channel, 'channel');
+  const botContextId = expectString(payload.botContextId, 'botContextId');
+  const userId = expectString(payload.userId, 'userId');
+  const scopeKey = expectString(payload.scopeKey, 'scopeKey');
+  const targetSessionId = expectString(payload.targetSessionId, 'targetSessionId');
+  const attachedAt = expectNumber(payload.attachedAt, 'attachedAt');
+  const attachedViaCardMessageId = nullableString(payload.attachedViaCardMessageId);
+  const transaction = db.transaction(() => {
+    db.prepare(
+      `DELETE FROM im_bindings
+       WHERE target_session_id = ?
+          OR (channel = ? AND bot_context_id = ? AND user_id = ? AND scope_key = ?)`,
+    ).run(targetSessionId, channel, botContextId, userId, scopeKey);
+    db.prepare(
+      `INSERT INTO im_bindings (
+        channel, bot_context_id, user_id, scope_key, target_session_id,
+        attached_at, attached_via_card_message_id
+      ) VALUES (?, ?, ?, ?, ?, ?, ?)`,
+    ).run(
+      channel,
+      botContextId,
+      userId,
+      scopeKey,
+      targetSessionId,
+      attachedAt,
+      attachedViaCardMessageId,
+    );
+  });
+  transaction();
 }
 
 /** 清失效停泊 id 与改写交接边界必须同成同败,防止重启后重建出错误 pending。 */

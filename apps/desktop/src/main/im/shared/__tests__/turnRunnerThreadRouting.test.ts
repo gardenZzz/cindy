@@ -108,11 +108,13 @@ import { ui as slackUi } from './threadUiFixture';
 interface SessionHarness {
   session: Session;
   send: ReturnType<typeof vi.fn>;
+  unsubscribe: ReturnType<typeof vi.fn>;
   emit(event: AgentEvent): void;
 }
 
 function makeSessionHarness(sessionId: string): SessionHarness {
   const listeners: Array<(event: AgentEvent) => void> = [];
+  const unsubscribe = vi.fn();
   const send = vi.fn(
     async (
       _message: Parameters<Session['send']>[0],
@@ -129,7 +131,11 @@ function makeSessionHarness(sessionId: string): SessionHarness {
     isTurnRunning: vi.fn(() => false),
     onEvent(listener: (event: AgentEvent) => void) {
       listeners.push(listener);
-      return () => {};
+      return () => {
+        unsubscribe();
+        const index = listeners.indexOf(listener);
+        if (index >= 0) listeners.splice(index, 1);
+      };
     },
     setInteractionListener: vi.fn(),
     close: vi.fn(async () => undefined),
@@ -137,6 +143,7 @@ function makeSessionHarness(sessionId: string): SessionHarness {
   return {
     session,
     send,
+    unsubscribe,
     emit(event: AgentEvent) {
       for (const l of [...listeners]) l(event);
     },
@@ -364,11 +371,69 @@ describe('turnRunner thread = session 路由(slack threadScoped)', () => {
     // 接管路由: 不经 repo 建行, 直接 wire desktop session + IPC fanout
     expect(fakeRepo.createSession).not.toHaveBeenCalled();
     expect(harnesses.get('desktop-sess-1')!.send).toHaveBeenCalledTimes(1);
+    expect(harnesses.get('desktop-sess-1')!.send).toHaveBeenCalledWith(
+      expect.objectContaining({
+        content: expect.stringContaining('<cindy_delivery_context>'),
+      }),
+      expect.anything(),
+    );
     expect(mocks.wireSessionToIpcExternal).toHaveBeenCalledTimes(1);
     // binding 验证走了带 scopeKey 的 identity
     expect(mocks.bindingGet).toHaveBeenCalledWith(
       expect.objectContaining({ channel: 'slack', scopeKey: '300.3' }),
     );
+  });
+
+  it('replacement detach keeps the old listener until its active turn drains', async () => {
+    mocks.bindingGet.mockImplementation(
+      (id: { scopeKey?: string }) =>
+        id.scopeKey === '300.3' || id.scopeKey === '400.4' ? 'desktop-sess-1' : null,
+    );
+    mocks.dbSelect.mockReturnValue({
+      from: () => ({
+        where: () => ({
+          limit: async () => [
+            {
+              id: 'desktop-sess-1',
+              agentKind: 'cc',
+              workingDir: '/tmp/desktop-wd',
+              model: 'claude-opus-4-7',
+              effort: 'xhigh',
+              permissionMode: 'auto',
+              fastMode: false,
+              sdkSessionId: 'sdk-1',
+              title: 'T',
+            },
+          ],
+        }),
+      }),
+    });
+    const stream = streamingHandleStub();
+    mocks.slackIm.startStreamingText.mockResolvedValue(stream);
+    await runTurn('300.3');
+    const harness = harnesses.get('desktop-sess-1')!;
+
+    runner.detachFromSession('desktop-sess-1');
+    expect(harness.unsubscribe).not.toHaveBeenCalled();
+    expect(mocks.installDesktopInteractionListener).not.toHaveBeenCalled();
+    let rewireResolved = false;
+    const rewire = runner.prewireAttachedSession('T1', 'U2', '400.4').then(() => {
+      rewireResolved = true;
+    });
+    await Promise.resolve();
+    expect(rewireResolved).toBe(false);
+
+    harness.emit({ type: 'text', data: { text: 'late output' } } as AgentEvent);
+    await vi.waitFor(() => expect(mocks.slackIm.startStreamingText).toHaveBeenCalled());
+    harness.emit({ type: 'done' } as AgentEvent);
+
+    await vi.waitFor(() => {
+      expect(stream.finalize).toHaveBeenCalledWith('late output');
+      expect(harness.unsubscribe).toHaveBeenCalledOnce();
+      expect(mocks.installDesktopInteractionListener).toHaveBeenCalledWith(harness.session);
+    });
+    await rewire;
+    expect(rewireResolved).toBe(true);
   });
 
   it('新 thread 首条消息: 名片卡先发进 thread, 续聊不再发', async () => {
