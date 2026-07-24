@@ -19,7 +19,10 @@ describe('mobile cross-device quote wiring', () => {
   });
 
   it('propagates quote metadata through direct and attachment-outbox sends', () => {
-    const source = readFileSync(resolve(process.cwd(), 'app/sessions/[sessionId].tsx'), 'utf8');
+    const source = readFileSync(resolve(process.cwd(), 'app/sessions/[sessionId].tsx'), 'utf8').replace(
+      /\r\n/g,
+      '\n',
+    );
 
     expect(source).toContain('quotesEncoded: quotesEncodedAtSend');
     expect(source).toContain('pastedTextRanges: pastedTextRangesAtSend');
