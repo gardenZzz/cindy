@@ -396,7 +396,7 @@ import {
   setRemoteSettingsPersist as setDeviceLinkRemoteSettingsPersist,
 } from '../device-link/dispatch.js';
 import { isDeviceLinkInvoke } from '../device-link/invoke-context.js';
-import { isRemoteWorkingDirAllowed } from '../device-link/remote-workdir-guard.js';
+import { checkRemoteWorkingDir } from '../device-link/remote-workdir-guard.js';
 import { createWorkerTurnStartSequencer } from './workerTurnStartSequencer.js';
 import { createBusinessSessionId } from '../sessionIds.js';
 import { forkSessionAtMessage } from '../maker-orchestration/fork.js';
@@ -2932,9 +2932,9 @@ export function registerMakerIpc(maker: Maker, options: RegisterMakerIpcOptions 
   // 它每 5s 取一次、翻转才上报,让控制端设备列表显示 busy 三态(规则 2:回调注入解耦)。
   setDeviceLinkBusyProbe(() => anySessionInTurn(maker));
 
-  // device-link 参数级收敛:远程 create-session / fork 的 workingDir 必须落在本机已知目录,
-  // 挡掉控制端用任意路径让本机 agent 越权起进程(规则 2:回调注入,allowlist 只挡 channel)。
-  setDeviceLinkRemoteWorkingDirGuard(isRemoteWorkingDirAllowed);
+  // device-link 参数级收敛:远程 create-session 的 workingDir / worktree:create 的 baseRepo
+  // 必须是本机当前可访问的目录,挡掉控制端用任意路径越权起进程或执行 git。
+  setDeviceLinkRemoteWorkingDirGuard(checkRemoteWorkingDir);
 
   // device-link 远程 set-* 持久化回流:控制端远程切 model/effort/permission/fastMode/extraDirs
   // 时,被控端 set-* 只改运行时不落库;这里注入「写被控端 DB + 广播 patched」,让控制端镜像

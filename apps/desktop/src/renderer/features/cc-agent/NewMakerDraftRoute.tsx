@@ -125,6 +125,7 @@ import {
 } from '@/cindy-brain/ghostMediaHandover';
 import { isGlobalDropIntercepted } from '@/lib/globalDropIntercept';
 import { createLogger } from '@/lib/logger';
+import { getRemoteWorkingDirErrorMessage } from './remoteWorkingDirErrors';
 import { matchNavigationCommandName, tryHandleNavigationCommand } from '@/lib/navigationCommands';
 import {
   useAgentCapabilities,
@@ -1253,11 +1254,16 @@ export function NewMakerDraftRoute() {
                 }
                 remoteWorkingDir = resp.meta.path;
               } catch (err) {
-                // 隧道失败(含老被控端 CHANNEL_NOT_ALLOWED)→ unknown 类 toast,回显原始信息。
-                showWorktreeError({
-                  kind: 'unknown',
-                  message: err instanceof Error ? err.message : String(err),
-                });
+                const remoteWorkdirMessage = getRemoteWorkingDirErrorMessage(err, t);
+                if (remoteWorkdirMessage) {
+                  toast.error(remoteWorkdirMessage);
+                } else {
+                  // 隧道失败(含老被控端 CHANNEL_NOT_ALLOWED)仍沿用 worktree 通用错误提示。
+                  showWorktreeError({
+                    kind: 'unknown',
+                    message: err instanceof Error ? err.message : String(err),
+                  });
+                }
                 return;
               } finally {
                 setWtCreating(false);
@@ -1653,7 +1659,9 @@ export function NewMakerDraftRoute() {
           });
         } catch (err) {
           log.error('[draft send]', err);
-          toast.error(t('ccAgent.draft.createSessionFailed'));
+          toast.error(
+            getRemoteWorkingDirErrorMessage(err, t) ?? t('ccAgent.draft.createSessionFailed'),
+          );
         } finally {
           setWtCreating(false);
           sendInFlightRef.current = false;
@@ -1733,7 +1741,11 @@ export function NewMakerDraftRoute() {
               providerId: chatInitialProviderId ?? null,
             }),
           ],
-        );
+        ).catch((err) => {
+          const remoteWorkdirMessage = getRemoteWorkingDirErrorMessage(err, t);
+          if (remoteWorkdirMessage) throw new Error(remoteWorkdirMessage);
+          throw err;
+        });
         const remoteSessionId = (createResult as { sessionId?: string } | null)?.sessionId;
         if (!remoteSessionId) {
           throw new Error(t('ccAgent.draft.createSessionFailed'));
