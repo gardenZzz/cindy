@@ -24,6 +24,7 @@ vi.mock('react-i18next', () => ({
 }));
 
 vi.mock('@/hooks/useCodexAuth', () => ({
+  isChatGptConnectionConnected: () => false,
   useCodexAuth: () => ({
     state: { kind: 'authenticated', authSource: 'oauth' },
     triggerLogin,
