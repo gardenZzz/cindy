@@ -17,7 +17,6 @@ import { canResumePendingConsent, makeConsentStamp, type ConsentStamp } from '@/
 import { isNativeSocialProviderSupported } from '@/auth/nativeSocial';
 import { Text, TextInput } from '@/components/AppText';
 import { MainWindowActionButton } from '@/components/MobilePrimitives';
-import { useObserve } from '@/observability/observe';
 import { useTheme, useThemedStyles, type ThemeColors } from '@/theme';
 import {
   LOGIN_HANDOFF_EASING,
@@ -81,7 +80,6 @@ export default function LoginScreen() {
   // 手动语言 override 恢复/切换时本屏跟着重渲(P2-a:不依赖 auth 重渲兜底)。
   useTranslation();
   const auth = useAuth();
-  const { markInteractive } = useObserve();
   const stage = useLoginSurface();
   const insets = useSafeAreaInsets();
   const handoff = useLoginHandoffOptional();
@@ -283,11 +281,6 @@ export default function LoginScreen() {
     auth.initialized,
     auth.isAuthenticated,
   ]);
-
-  // EAS Observe: the stable login surface is ready before network actions complete.
-  useEffect(() => {
-    if (auth.initialized) markInteractive();
-  }, [auth.initialized, markInteractive]);
 
   const reset = () => {
     auth.clearAuthError();
