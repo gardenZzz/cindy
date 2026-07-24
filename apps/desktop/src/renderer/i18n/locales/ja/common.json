@@ -2268,11 +2268,7 @@
         "metaWithAuthor": "作者 {{author}} · バージョン {{version}}。ローカルにインストールされ、いつでもアンインストールできます。",
         "enableNow": "インストール後すぐに有効化",
         "expandDescription": "紹介全文を表示",
-        "collapseDescription": "紹介を折りたたむ",
-        "nodeRiskTitle": "ローカル Node プログラムの実行を許可しますか？",
-        "nodeRiskDescription": "これは高リスクな権限です。プラグインの Node プログラムはあなたのユーザーアカウントと同じローカル権限を持ち、アクセス可能なファイルの読み書き、ネットワーク利用、他のプログラムの起動ができます。ブラウザーサンドボックスでは隔離できません。信頼できる配布元のプラグインだけをインストールしてください。",
-        "nodeRiskConfirm": "リスクを理解して続行",
-        "nodeRiskCancel": "インストールを中止"
+        "collapseDescription": "紹介を折りたたむ"
       },
       "trust": {
         "official": "Cindy 公式プラグイン",

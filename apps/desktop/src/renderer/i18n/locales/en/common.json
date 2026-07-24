@@ -2269,11 +2269,7 @@
         "metaWithAuthor": "By {{author}} · Version {{version}}. Installs locally and can be uninstalled anytime.",
         "enableNow": "Enable right after install",
         "expandDescription": "Show Full Description",
-        "collapseDescription": "Hide Full Description",
-        "nodeRiskTitle": "Allow a local Node program to run?",
-        "nodeRiskDescription": "This is high risk. The plugin's Node program has the same local permissions as your user account: it can read or change accessible files, use the network, and start other programs. The browser sandbox cannot contain it. Install only plugins from sources you trust.",
-        "nodeRiskConfirm": "I understand, continue",
-        "nodeRiskCancel": "Cancel installation"
+        "collapseDescription": "Hide Full Description"
       },
       "trust": {
         "official": "Official Cindy plugin",
