@@ -2814,11 +2814,10 @@
   "legacyMigration": {
     "title": "迁移旧版本数据",
     "description": "检测到本机存有旧版本的数据。历史会话和媒体文件将迁移到新的数据位置。若旧版应用正在运行，请先完全退出它；迁移期间请保持 {{appName}} 打开。注意：已授权的第三方密钥与凭证无法随数据迁移，迁移完成后需要在设置中重新授权或重新填写。",
-    "confirm": "确定",
+    "confirm": "继续",
     "migrating": "正在迁移数据，请稍候…",
     "failedTitle": "迁移未完成",
-    "failedDescription": "本次数据迁移未能完成。你可以继续使用 {{appName}}，下次登录时会自动重试。",
-    "continue": "继续"
+    "failedDescription": "本次数据迁移未能完成。你可以继续使用 {{appName}}，下次登录时会自动重试。"
   },
   "splash": {
     "tips": {
