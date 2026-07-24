@@ -7094,7 +7094,8 @@
       "title": "未完了の支払いがあります",
       "description": "前回の支払いを続け、最新状態をサーバーで確認できます。",
       "continueTopup": "{{amount}}の支払いを続ける",
-      "continueSubscription": "サブスクリプションの支払いを続ける"
+      "continueSubscription": "サブスクリプションの支払いを続ける",
+      "continueFailed": "中断した支払いを続ける"
     },
     "checkout": {
       "creatingTitle": "支払いを作成中",

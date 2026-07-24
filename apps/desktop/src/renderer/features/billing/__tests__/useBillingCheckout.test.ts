@@ -453,6 +453,14 @@ describe('billing checkout phase projection', () => {
       error: true,
     });
     expect(readBillingCheckoutIntent(ACCOUNT_ID)).toEqual(intent);
+
+    act(() => result.current.resumeFailed());
+    expect(result.current.state).toMatchObject({
+      open: true,
+      phase: 'FAILED',
+      intent,
+      error: true,
+    });
     expect(readBillingCheckoutIntent(ACCOUNT_ID)).toEqual(intent);
   });
 

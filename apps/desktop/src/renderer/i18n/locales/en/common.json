@@ -6937,8 +6937,8 @@
         "unnamedPlan": "Subscription plan",
         "unavailable": "Subscription status is temporarily unavailable. Refresh to try again.",
         "action": "View plans",
-        "changeAction": "Change Plan",
-        "purchaseAnother": "Buy New Subscription",
+        "changeAction": "Change plan",
+        "purchaseAnother": "Buy new subscription",
         "priceInterval": "{{price}} / {{interval}}",
         "includedCredits": "Includes {{amount}} credits per {{interval}}",
         "renewsAt": "Renews {{date}}",
@@ -7105,7 +7105,8 @@
       "title": "Unfinished payment found",
       "description": "Continue the previous payment and confirm its latest state with the server.",
       "continueTopup": "Continue {{amount}} payment",
-      "continueSubscription": "Continue subscription payment"
+      "continueSubscription": "Continue subscription payment",
+      "continueFailed": "Continue interrupted payment"
     },
     "checkout": {
       "creatingTitle": "Creating payment",

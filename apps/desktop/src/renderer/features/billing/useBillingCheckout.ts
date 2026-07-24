@@ -461,6 +461,22 @@ export function useBillingCheckout(accountId: string | null) {
     [applySubscription],
   );
 
+  const resumeFailed = useCallback(() => {
+    setState((current) => {
+      if (
+        current.open ||
+        current.phase !== 'FAILED' ||
+        !current.error ||
+        !current.intent ||
+        current.order ||
+        current.subscription
+      ) {
+        return current;
+      }
+      return { ...current, open: true };
+    });
+  }, []);
+
   useEffect(() => {
     mountedRef.current = true;
     if (!accountId) {
@@ -589,6 +605,7 @@ export function useBillingCheckout(accountId: string | null) {
     close,
     resumeTopup,
     resumeSubscription,
+    resumeFailed,
   };
 }
 

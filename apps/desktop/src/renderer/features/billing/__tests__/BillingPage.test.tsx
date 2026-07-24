@@ -28,6 +28,7 @@ const checkout = {
   close: vi.fn(),
   resumeTopup: vi.fn(),
   resumeSubscription: vi.fn(),
+  resumeFailed: vi.fn(),
 };
 
 vi.mock('react-i18next', () => ({
@@ -81,6 +82,7 @@ describe('BillingPage remote catalog rendering', () => {
     checkout.close.mockClear();
     checkout.resumeTopup.mockClear();
     checkout.resumeSubscription.mockClear();
+    checkout.resumeFailed.mockClear();
     checkout.recoverables.topups = [];
     checkout.recoverables.subscription = null;
     checkout.recovering = false;
@@ -406,6 +408,40 @@ describe('BillingPage remote catalog rendering', () => {
     );
     fireEvent.click(screen.getByText((text) => text.startsWith('billing.recovery.continueTopup')));
     expect(checkout.resumeTopup).toHaveBeenCalledWith(order);
+  });
+
+  it('offers a user-initiated retry entry after background recovery fails', async () => {
+    Object.assign(checkout.state, {
+      open: false,
+      kind: 'TOPUP',
+      phase: 'FAILED',
+      intent: {
+        version: 1,
+        kind: 'TOPUP',
+        idempotencyKey: 'desktop:topup:uncertain',
+        request: {
+          offerCode: 'credit_topup_custom',
+          amount: '10',
+          purchaseOptionId: 'listing_alipay',
+        },
+        orderId: null,
+        createdAt: '2026-07-24T00:00:00.000Z',
+      },
+      order: null,
+      subscription: null,
+      error: true,
+    });
+
+    render(<BillingPage />);
+
+    const resume = screen.getByText('billing.recovery.continueFailed');
+    const balanceTitle = await screen.findByText('billing.balance.title');
+    expect(resume.compareDocumentPosition(balanceTitle) & Node.DOCUMENT_POSITION_FOLLOWING).toBe(
+      Node.DOCUMENT_POSITION_FOLLOWING,
+    );
+    fireEvent.click(resume);
+    expect(checkout.resumeFailed).toHaveBeenCalledTimes(1);
+    expect(checkout.retry).not.toHaveBeenCalled();
   });
 
   it('shows usage progress and each promotional grant with its own state and expiry', async () => {

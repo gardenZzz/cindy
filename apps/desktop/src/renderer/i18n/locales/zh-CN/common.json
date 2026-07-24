@@ -7094,7 +7094,8 @@
       "title": "发现未完成的支付",
       "description": "你可以继续上次的支付，状态将从服务端重新确认。",
       "continueTopup": "继续支付 {{amount}}",
-      "continueSubscription": "继续订阅支付"
+      "continueSubscription": "继续订阅支付",
+      "continueFailed": "继续未完成的支付"
     },
     "checkout": {
       "creatingTitle": "正在创建支付",
