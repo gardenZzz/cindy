@@ -144,4 +144,28 @@ describe('extractText — messages.content JSON → 纯文本', () => {
     expect(extractText(undefined, 'assistant')).toBe('');
     expect(extractText(JSON.stringify({ noText: 1 }), 'user')).toBe('');
   });
+
+  it('标题素材使用 semantic projection，保留 raw wire 但不暴露 quote marker / 私有深链', () => {
+    const href = 'cindy://session/session-a?message=message-a';
+    const text = `> <!-- cindy-composer-quote -->\n> selected\n\ninspect ${href}`;
+    const raw = JSON.stringify({
+      text,
+      quotesEncoded: true,
+      agentReferences: [{
+        kind: 'message',
+        start: text.indexOf(href),
+        end: text.indexOf(href) + href.length,
+        href,
+        sessionId: 'session-a',
+        messageClientId: 'message-a',
+        text: 'Target message body',
+      }],
+    });
+
+    const projected = extractText(raw, 'user');
+    expect(projected).not.toContain('cindy-composer-quote');
+    expect(projected).not.toContain(href);
+    expect(projected).toContain('Target message body');
+    expect(JSON.parse(raw)).toMatchObject({ text, quotesEncoded: true });
+  });
 });

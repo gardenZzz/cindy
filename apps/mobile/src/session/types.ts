@@ -1,4 +1,5 @@
 import type { MobileSessionAgentSwitchIntent } from '@cindy/maker-shared/device-link-contract';
+import type { AgentInputReference } from '@cindy/maker-shared/agent-input-projection';
 
 export type RemoteSessionStatus = 'active' | 'archived' | 'deleted';
 export type RemoteMessageRole =
@@ -154,6 +155,7 @@ export interface QueuedRemoteMessage {
   text: string;
   persistedContent: string;
   files?: RemoteSerializedAttachment[];
+  agentReferences?: AgentInputReference[];
   model: string;
   effort: string;
   permissionMode: string;
@@ -188,6 +190,8 @@ export interface QueuedRemoteMessage {
     files?: RemoteFileRef[];
     images?: RemoteImageRef[];
     quotesEncoded?: boolean;
+    pastedTextRanges?: Array<{ start: number; end: number; display: string }>;
+    slashCommandRanges?: Array<{ start: number; end: number }>;
     isStreaming?: boolean;
     createdAt: string;
   };

@@ -44,6 +44,12 @@ export interface MobileLocalAttachmentUploadCandidate {
   >>>;
   /** resolve 阶段已完成优化编码(如 HEIC 转码+缩边),跳过 preprocess 防二次有损。 */
   skipPreprocess?: boolean;
+  /**
+   * 仅由明确拥有输入文件的调用方提供(当前是 WebView 粘贴落盘):
+   * controller 会把 resolve / preprocess 生成的同任务临时 uri 一并交回清理。
+   * 系统相册、相机与文件选择器的 uri 不设置此钩子,避免误删宿主管理的文件。
+   */
+  cleanupLocalUris?: (uris: readonly string[]) => Promise<void>;
   /** 宿主侧溯源 id(相册 asset.id → attachment 映射用),管线不消费。 */
   sourceId?: string;
   /**
@@ -108,7 +114,9 @@ export interface MobileLocalAttachmentUploadDeps {
     candidate: MobileLocalAttachmentUploadCandidate,
     uploadedUri: string,
     localId: string,
-  ): void;
+    localUris: readonly string[],
+    isActive: () => boolean,
+  ): void | Promise<void>;
   /** 单个失败(宿主展示错误文案);已被移除 / 丢弃的任务不会回调。localId 语义同 onUploaded。 */
   onFailed(error: unknown, localId: string): void;
 }
@@ -198,6 +206,8 @@ interface UploadTask {
   claimed: boolean;
   /** in-flight 取消通道:remove / removeAll / dispose 时 abort,真正断掉 PUT 传输。 */
   abort: AbortController;
+  /** 本任务已接触的自有临时 uri；无 cleanupLocalUris 时只记账、不做删除。 */
+  localUris: Set<string>;
   outcome: Promise<TaskOutcome>;
   resolveOutcome: (outcome: TaskOutcome) => void;
 }
@@ -246,6 +256,15 @@ export function createMobileLocalAttachmentUploadController(
     }
   }
 
+  function cleanupTaskLocalUris(task: UploadTask, keepOriginal: boolean): void {
+    const cleanup = task.candidate.cleanupLocalUris;
+    if (!cleanup) return;
+    const originalUri = task.candidate.uri;
+    const uris = [...task.localUris].filter((uri) => !keepOriginal || uri !== originalUri);
+    task.localUris = keepOriginal ? new Set([originalUri]) : new Set();
+    if (uris.length > 0) void cleanup(uris).catch(() => undefined);
+  }
+
   async function runTask(task: UploadTask): Promise<void> {
     // 先让出一拍:保证任务至少异步落定——pending 帧可见、waitForIdle 统计口径一致,
     // 同步 throw(如已知 size 的超限校验)不会在 enqueue 调用栈里就把任务清掉。
@@ -269,6 +288,7 @@ export function createMobileLocalAttachmentUploadController(
       if (source.resolve) {
         source = { ...source, ...(await source.resolve()) };
       }
+      task.localUris.add(source.uri);
       // 只有图片需要降采样;文件(pdf / office / 文本)与已优化产物原样直传。
       const prepared = source.kind === 'image' && !source.skipPreprocess
         ? await deps.preprocess({
@@ -285,6 +305,7 @@ export function createMobileLocalAttachmentUploadController(
           mimeType: source.mimeType,
           size: source.size,
         };
+      task.localUris.add(prepared.uri);
       const size = prepared.size > 0 ? prepared.size : await deps.statSize(prepared.uri);
       deps.assertSize(size, task.candidate);
       // 取消检查点 2:资产就位 / 降采样(大图慢路径)期间被 X 掉的任务在发起 PUT 前短路
@@ -306,8 +327,22 @@ export function createMobileLocalAttachmentUploadController(
         // 回传就位后的 candidate(kind / sourceId 随 spread 保留):resolve 型任务
         // (相册 ph:// 换址、HEIC / 粘贴转码)实际上传的是 source.uri,宿主的预览
         // 映射要指向这个仍然在世的 file://,而不是可能被系统回收的原始临时文件。
-        deps.onUploaded(attachment, source, prepared.uri, task.localId);
-        outcome = 'uploaded';
+        await deps.onUploaded(
+          attachment,
+          source,
+          prepared.uri,
+          task.localId,
+          [...task.localUris],
+          () => !disposed && !task.discarded,
+        );
+        if (disposed || task.discarded) {
+          // onUploaded 可能为粘贴图片等待持久缩略图；等待期间退屏 / removeAll
+          // 时不能再把附件写回旧页面，且已经上传的 OSS 对象仍须回收。
+          deps.discard(attachment);
+          outcome = 'discarded';
+        } else {
+          outcome = 'uploaded';
+        }
       }
     } catch (err) {
       if (task.discarded) {
@@ -320,8 +355,13 @@ export function createMobileLocalAttachmentUploadController(
       if (outcome === 'failed' && !disposed) {
         // 失败卡保留在托盘(state=failed,可 retry / remove),不再从 map 删除——
         // 弱网下「图直接消失 + 一条 toast」逼用户重新找图重选,原地重试才是对的。
+        // 只保留原始粘贴文件供 retry；本轮 resolve / preprocess 中间产物立即回收。
+        cleanupTaskLocalUris(task, true);
         task.state = 'failed';
       } else {
+        // uploaded 的成功路径由 onUploaded 在把预览换成持久缩略图后清理；
+        // discarded 在这里回收全部自有临时文件。
+        if (outcome === 'discarded') cleanupTaskLocalUris(task, false);
         tasks.delete(task.localId);
       }
       runningCount -= 1;
@@ -345,6 +385,7 @@ export function createMobileLocalAttachmentUploadController(
           discarded: false,
           claimed: false,
           abort: new AbortController(),
+          localUris: new Set([candidate.uri]),
           ...createOutcome(),
         });
       }
@@ -356,9 +397,9 @@ export function createMobileLocalAttachmentUploadController(
       const task = tasks.get(localId);
       if (!task || task.discarded) return;
       if (task.state === 'queued' || task.state === 'failed') {
-        // 还没开跑 / 已失败结算:直接出队,没有任何需要回收的东西
-        // (失败任务没有产出 OSS 对象,outcome 也已落定)。
+        // 还没开跑 / 已失败结算:直接出队；自有粘贴临时文件同步进入回收队列。
         tasks.delete(task.localId);
+        cleanupTaskLocalUris(task, false);
         task.resolveOutcome('discarded');
       } else {
         // 已 in-flight:标记丢弃 + abort 真正断掉传输(PUT 层监听 signal 走
@@ -399,6 +440,7 @@ export function createMobileLocalAttachmentUploadController(
         if (task.claimed) continue;
         if (task.state === 'queued' || task.state === 'failed') {
           tasks.delete(task.localId);
+          cleanupTaskLocalUris(task, false);
         } else {
           task.discarded = true;
           task.abort.abort();
@@ -482,6 +524,7 @@ export function createMobileLocalAttachmentUploadController(
       for (const task of tasks.values()) {
         if (task.state === 'queued' || task.state === 'failed') {
           tasks.delete(task.localId);
+          cleanupTaskLocalUris(task, false);
         } else {
           task.discarded = true;
           task.abort.abort();

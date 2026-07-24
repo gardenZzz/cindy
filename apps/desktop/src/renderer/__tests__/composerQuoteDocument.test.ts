@@ -218,6 +218,7 @@ describe('composerQuoteDocument', () => {
 
     expect(serialized).toEqual({
       text: 'long pasted text',
+      agentReferences: [],
       pastedTextRanges: [{ start: 0, end: 16, display: 'Pasted text (1 line)' }],
       slashCommandRanges: [],
     });
@@ -235,9 +236,40 @@ describe('composerQuoteDocument', () => {
 
     expect(serialized).toEqual({
       text: 'long pasted text',
+      agentReferences: [],
       pastedTextRanges: [{ start: 0, end: 16, display: 'Pasted text (1 line)' }],
       slashCommandRanges: [],
     });
+  });
+
+  it('projects structured reference offsets through block separators and trimming', () => {
+    const href = 'cindy://session/session-a?message=message-a';
+    const serialized = serializeComposerContentBlocksWithRanges([
+      {
+        kind: 'text',
+        text: `  inspect ${href}`,
+        agentReferences: [{
+          kind: 'message',
+          start: 10,
+          end: 10 + href.length,
+          href,
+          sessionId: 'session-a',
+          messageClientId: 'message-a',
+          text: 'Complete target message body',
+        }],
+      },
+    ]);
+
+    expect(serialized.text).toBe(`inspect ${href}`);
+    expect(serialized.agentReferences).toEqual([{
+      kind: 'message',
+      start: 8,
+      end: 8 + href.length,
+      href,
+      sessionId: 'session-a',
+      messageClientId: 'message-a',
+      text: 'Complete target message body',
+    }]);
   });
 
   it('projects decorated slash ranges through trimming and quote separators', () => {

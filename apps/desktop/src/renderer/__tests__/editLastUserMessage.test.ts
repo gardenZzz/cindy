@@ -174,8 +174,15 @@ describe('commitEditAndResend', () => {
     expect(sendArgs[8]).toBeUndefined();
   });
 
-  it('原消息 chip ranges 由编辑框确认未修改后透传到重发 opts', async () => {
+  it('原消息语义引用与 chip ranges 由编辑框确认未修改后透传到重发 opts', async () => {
     const { deps } = makeDeps();
+    const agentReferences = [{
+      kind: 'session' as const,
+      start: 0,
+      end: 11,
+      href: 'cindy://session/source',
+      sessionId: 'source',
+    }];
     const pastedTextRanges = [{ start: 0, end: 11, display: 'Pasted text (1 line)' }];
     await commitEditAndResend(
       {
@@ -183,13 +190,14 @@ describe('commitEditAndResend', () => {
         clientId: CLIENT_ID,
         text: 'pasted body',
         fallbackWorkingDir: '/repo',
+        agentReferences,
         pastedTextRanges,
         slashCommandRanges: [],
       },
       deps,
     );
     const sendArgs = (deps.sendMessage as unknown as Mock).mock.calls[0];
-    expect(sendArgs[8]).toEqual({ pastedTextRanges, slashCommandRanges: [] });
+    expect(sendArgs[8]).toEqual({ agentReferences, pastedTextRanges, slashCommandRanges: [] });
   });
 
   it('session 行 workingDir 为 null 时回落到 fallbackWorkingDir', async () => {

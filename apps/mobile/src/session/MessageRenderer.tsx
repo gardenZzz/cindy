@@ -12,8 +12,10 @@ import {
   CircleDashed,
   CircleStop,
   Copy,
+  Ellipsis,
   ExternalLink,
   File as FileIcon,
+  FileText,
   Layers,
   ListTodo,
   LoaderCircle,
@@ -65,6 +67,19 @@ import { QuoteCapsule } from '@/session/QuoteCapsule';
 import { StreamingStatusText } from '@/session/StreamingStatusText';
 import { useReduceMotionEnabled } from '@/hooks/useReduceMotion';
 import { motionDuration, motionEasing } from '@/theme/tokens';
+import { MessageActionSheet } from '@/session/MessageActionSheet';
+import { buildMobileMessageMenu, type MobileMessageMenuActionId } from '@/session/messageActionMenu';
+import { InlineQuoteChip } from '@/session/InlineQuoteChip';
+import { InlineReferenceChip } from '@/session/InlineReferenceChip';
+import {
+  composerDocumentFromSerializedMessage,
+  type ComposerDocument,
+} from '@/session/composerDocument';
+import {
+  buildVisibleSentInlineTokens,
+  sentInlineTokensDisplayText,
+  type SentInlineToken,
+} from '@/session/sentMessageAtoms';
 import {
   SELECTION_QUOTE_MENU_LABEL,
   SelectionQuoteContext,
@@ -88,6 +103,7 @@ import {
   buildFilePayload,
   buildMediaPayload,
   buildMermaidPayload,
+  buildTextPayload,
   buildToolResultPayload,
   formatDiffPayloadView,
   payloadMediaKindLabel,
@@ -140,6 +156,7 @@ import {
   mobileMarkdownImageUrlForWorkdir,
   mobileMarkdownInlineImageSize,
   parseMobileMarkdown,
+  parseMobileMarkdownInlines,
   type MobileMarkdownBlockGroup,
   type MobileMarkdownInline,
 } from '@/session/messageMarkdown';
@@ -150,6 +167,7 @@ import {
   parseSessionDeepLinkUrl,
   projectDisplayName,
   shortSessionId,
+  type SessionDeepLinkTarget,
 } from '@/session/sessionLinks';
 import {
   formatMobileSessionReferenceMetadata,
@@ -170,7 +188,14 @@ import {
   verifyRemotePathCached,
   type RemotePathVerdict,
 } from '@/session/remotePathVerdict';
-import { useRemoteSessions } from '@/session/remoteSessionStore';
+import {
+  useRemoteSessionMessages,
+  useRemoteSessions,
+} from '@/session/remoteSessionStore';
+import {
+  compactSessionMessageLabel,
+  mobileSessionMessageDisplayText,
+} from '@/session/sessionMessageText';
 import { buildMobileMarkdownTableColumnWidths } from '@/session/messageTableLayout';
 import { buildPayloadHeaderLayout, buildPayloadModalSafeArea } from '@/session/payloadHeaderLayout';
 import { buildPayloadBodyLayout, type PayloadBodyLayout } from '@/session/payloadBodyLayout';
@@ -379,6 +404,7 @@ function MarkdownSelectableSpan(props: ComponentProps<typeof Text>) {
 
 /** Composer-ready user message body with product quotes kept out of raw text. */
 export interface MobileMessageDraft {
+  document: ComposerDocument;
   text: string;
   quotes: readonly ChatQuote[];
   /** marker 不进入可见输入框；未编辑时用这份原文保证 quote / prose 顺序不变。 */
@@ -388,6 +414,8 @@ export interface MobileMessageDraft {
 interface MessageActions {
   /** 长按/操作条「复制消息链接」:复制该消息的会话深链(带 ?message= 锚点)。 */
   onCopyMessageLink?: (clientId: string) => void;
+  /** Insert this message's anchored link as an atom in the active composer. */
+  onAddMessageToComposer?: (clientId: string) => void;
   /**
    * chat-text-quote:选中消息文字 → 系统选择菜单「添加到对话」项的采集回调
    * (会话页写入 chatQuoteStore)。未传时选区采集整体关闭(context 为 null,
@@ -419,6 +447,7 @@ export function MessageRenderer({
   followLatestRequestKey,
   items,
   onCopyMessageLink,
+  onAddMessageToComposer,
   onForkMessage,
   onDeleteMessage,
   onLoadEarlier,
@@ -655,6 +684,7 @@ export function MessageRenderer({
     visibleMessageCount: listData.length,
   });
   const actions: MessageActions & { firstUserMessageClientId?: string } = useMemo(() => ({
+    onAddMessageToComposer,
     onCopyMessageLink,
     onForkMessage,
     onDeleteMessage,
@@ -672,6 +702,7 @@ export function MessageRenderer({
     firstUserMessageClientId,
     isSessionStreaming,
     onCopyMessageLink,
+    onAddMessageToComposer,
     onDeleteMessage,
     onForkMessage,
     onOpenForkOrigin,
@@ -1408,13 +1439,14 @@ function MessageBubble({
   const styles = useThemedStyles(makeStyles);
   const { colors } = useTheme();
   const [copyState, setCopyState] = useState<CopyMessageStatus | 'idle' | 'copying'>('idle');
+  const [actionSheetOpen, setActionSheetOpen] = useState(false);
   // chat-text-quote:只解析持久化 quotesEncoded 明确标记的产品引用消息，避免
   // 把用户手写的 Markdown blockquote 误当产品引用。兼容 desktop 的交错
   // marker 块和 mobile 的前置引用。旧 markerless 消息保持 leading-only，
-  // 避免把正文里的用户 Markdown blockquote 误当产品引用。手机版仍把引用聚合成
-  // 「N 处引用」胶囊,但正文不再泄露内部 marker/source 行。copy / rewind /
-  // fork 额外携带完整 ordered body，在可见草稿未编辑时无损重发。orca 协同
-  // 消息已走 orcaCard 分支,不进本路径。
+  // 避免把正文里的用户 Markdown blockquote 误当产品引用。手机版逐条渲染紧凑
+  // quote chip，正文不泄露内部 marker/source 行；fork / rewind 直接携带完整
+  // ComposerDocument，无损恢复 quote、pasted-text 与 Slash。orca 协同消息已走
+  // orcaCard 分支,不进本路径。
   const quoteSegments = useMemo(
     () => (item.message.kind === 'user'
       && item.message.quotesEncoded === true
@@ -1435,10 +1467,52 @@ function MessageBubble({
   const bubbleBody = messageQuotes.length > 0
     ? joinChatQuoteTextSegments(quoteSegments)
     : item.message.body;
+  const sentInlineTokens = useMemo(
+    () => (item.message.kind === 'user'
+      ? buildVisibleSentInlineTokens(
+          item.message.body,
+          quoteSegments.length > 0
+            ? quoteSegments
+            : item.message.body ? [{ kind: 'text' as const, text: item.message.body }] : [],
+          item.message.pastedTextRanges,
+          item.message.slashCommandRanges,
+        )
+      : []),
+    [
+      item.message.body,
+      item.message.kind,
+      item.message.pastedTextRanges,
+      item.message.slashCommandRanges,
+      quoteSegments,
+    ],
+  );
+  const hasSentInlineAtoms = sentInlineTokens.some((token) => token.kind !== 'text');
+  const rendersSentInlineBody = hasSentInlineAtoms;
+  const displayBubbleBody = hasSentInlineAtoms
+    ? sentInlineTokensDisplayText(sentInlineTokens)
+    : bubbleBody;
+  const composerDraftDocument = useMemo(
+    () => (item.message.kind === 'user'
+      ? composerDocumentFromSerializedMessage(item.message.body, {
+          quotesEncoded: item.message.quotesEncoded,
+          agentReferences: item.message.agentReferences,
+          pastedTextRanges: item.message.pastedTextRanges,
+          slashCommandRanges: item.message.slashCommandRanges,
+        })
+      : null),
+    [
+      item.message.body,
+      item.message.agentReferences,
+      item.message.kind,
+      item.message.pastedTextRanges,
+      item.message.quotesEncoded,
+      item.message.slashCommandRanges,
+    ],
+  );
   const presentation = summarizeMessageBubblePresentation({
     align: item.message.align,
     attachmentCount: item.message.attachments?.length ?? 0,
-    body: bubbleBody,
+    body: displayBubbleBody,
     hasSystemCard: !!item.message.systemCardType,
     isStreaming: item.message.isStreaming,
     kind: item.message.kind,
@@ -1485,7 +1559,8 @@ function MessageBubble({
     && actions.isSessionStreaming !== true
     && (item.message.kind === 'user' || item.message.kind === 'assistant')
   );
-  const canCopyLink = !!(canUseCompletedActions && clientId && actions.onCopyMessageLink);
+  const canCopyLink = !!(showCompletedActionBar && clientId && actions.onCopyMessageLink);
+  const canAddToChat = !!(showCompletedActionBar && clientId && actions.onAddMessageToComposer);
   const contentLayout = useMemo(() => buildMessageContentLayout({
     screenWidth: actions.screenWidth,
   }), [actions.screenWidth]);
@@ -1508,14 +1583,14 @@ function MessageBubble({
   const collapseMeasureEnabled = (isUser || hookSource !== undefined)
     && (item.message.kind === 'user' || hookSource !== undefined)
     && !item.message.systemCardType
-    && !!bubbleBody
-    && mayExceedVisualLineThreshold(bubbleBody, collapseThreshold);
+    && !!displayBubbleBody
+    && mayExceedVisualLineThreshold(displayBubbleBody, collapseThreshold);
   // 实测行数与被测 body 绑定存储:FlatList 复用组件实例时 body 可能原地变化
   // (服务端同步补丁等),旧实测值若不随内容失效,会在下一次 onTextLayout 到达
   // 前产生"过期行数"的错误收起判定;body 不匹配时视为未测量,回落估算兜底。
   const [measuredBody, setMeasuredBody] = useState<{ body: string; lines: number } | null>(null);
   const measuredBodyLines =
-    measuredBody && measuredBody.body === bubbleBody ? measuredBody.lines : null;
+    measuredBody && measuredBody.body === displayBubbleBody ? measuredBody.lines : null;
   const [longMessageExpanded, setLongMessageExpanded] = useState(false);
   // 折叠判定单向闩锁(绑定 body,FlatList 复用换消息时自动失效):测量 Text
   // 的排版宽度跟随气泡宽度,而气泡宽度又随折叠状态变化(展开态的 markdown
@@ -1525,24 +1600,29 @@ function MessageBubble({
   // 收起」的判定只进不出:后续宽度变化跌回阈值以下不再自动展开;用户手动
   // 点「展开」走 longMessageExpanded,不受闩锁影响。
   const [collapseLatchBody, setCollapseLatchBody] = useState<string | null>(null);
-  const collapseLatched = collapseLatchBody === bubbleBody;
+  const collapseLatched = collapseLatchBody === displayBubbleBody;
   const collapseResolved = collapseMeasureEnabled
-    && resolveUserMessageCollapse(bubbleBody, measuredBodyLines, collapseThreshold);
+    && resolveUserMessageCollapse(displayBubbleBody, measuredBodyLines, collapseThreshold);
   useEffect(() => {
-    if (collapseResolved && !collapseLatched) setCollapseLatchBody(bubbleBody);
-  }, [collapseResolved, collapseLatched, bubbleBody]);
+    if (collapseResolved && !collapseLatched) setCollapseLatchBody(displayBubbleBody);
+  }, [collapseResolved, collapseLatched, displayBubbleBody]);
   const shouldCollapseLongMessage = (collapseMeasureEnabled && collapseLatched) || collapseResolved;
   const longMessageCollapsed = shouldCollapseLongMessage && !longMessageExpanded;
-  const actionBar = useMemo(() => buildMessageActionBarPresentation({
-    align: isUser ? 'user' : 'agent',
-    canCopy,
+  const messageMenu = useMemo(() => buildMobileMessageMenu({
+    canAddToChat,
+    canCopyLink,
     canDelete,
     canFork,
     canRewind,
+  }), [canAddToChat, canCopyLink, canDelete, canFork, canRewind]);
+  const actionBar = useMemo(() => buildMessageActionBarPresentation({
+    align: isUser ? 'user' : 'agent',
+    canCopy,
+    hasMoreActions: messageMenu.length > 0,
     hasTime: !!relativeTime,
     hasTurnCost: !!turnCost,
     isStreaming: isStreamingAssistant,
-  }), [canCopy, canDelete, canFork, canRewind, isStreamingAssistant, isUser, relativeTime, turnCost]);
+  }), [canCopy, isStreamingAssistant, isUser, messageMenu.length, relativeTime, turnCost]);
   const hasActions = actionBar.items.length > 0;
   const actionBusy = !!clientId && actions.busyClientId === clientId;
   const disabled = !!actions.busyClientId;
@@ -1552,14 +1632,6 @@ function MessageBubble({
     const timer = setTimeout(() => setCopyState('idle'), 1500);
     return () => clearTimeout(timer);
   }, [copyState]);
-
-  // 复制消息链接的 Check 反馈,独立于 copyState(两个按钮互不串信号)。
-  const [linkCopyState, setLinkCopyState] = useState<'idle' | 'copied'>('idle');
-  useEffect(() => {
-    if (linkCopyState === 'idle') return;
-    const timer = setTimeout(() => setLinkCopyState('idle'), 1500);
-    return () => clearTimeout(timer);
-  }, [linkCopyState]);
 
   const copyMessage = useCallback(() => {
     if (!canCopy || copyState === 'copying') return;
@@ -1573,6 +1645,7 @@ function MessageBubble({
     }
     if (id === 'rewind' && clientId) {
       actions.onPreviewRewind?.(clientId, {
+        document: composerDraftDocument ?? composerDocumentFromSerializedMessage(item.message.body),
         text: bubbleBody,
         quotes: messageQuotes,
         ...(item.message.quotesEncoded === true ? { orderedBody: item.message.body } : {}),
@@ -1584,6 +1657,7 @@ function MessageBubble({
         clientId,
         item.message.kind === 'user'
           ? {
+              document: composerDraftDocument ?? composerDocumentFromSerializedMessage(item.message.body),
               text: bubbleBody,
               quotes: messageQuotes,
               ...(item.message.quotesEncoded === true ? { orderedBody: item.message.body } : {}),
@@ -1599,27 +1673,30 @@ function MessageBubble({
     actions,
     bubbleBody,
     clientId,
+    composerDraftDocument,
     copyMessage,
     item.message.body,
     item.message.kind,
     item.message.quotesEncoded,
     messageQuotes,
   ]);
-  // 时间文本兼任「复制消息链接」入口:点按复制该消息的会话深链(带 ?message=
-  // 锚点),复制成功后短暂换成「链接已复制」。不单独占一个操作按钮位。
+  const selectMenuAction = useCallback((id: MobileMessageMenuActionId) => {
+    if (!clientId) return;
+    if (id === 'fork') return selectControlAction('fork');
+    if (id === 'rewind') return selectControlAction('rewind');
+    if (id === 'delete') return selectControlAction('delete');
+    if (id === 'add-to-chat') return actions.onAddMessageToComposer?.(clientId);
+    actions.onCopyMessageLink?.(clientId);
+  }, [actions, clientId, selectControlAction]);
+  // 时间只展示发送时间；消息锚点复制移入语义明确的 More 菜单。
   const timeText = relativeTime ? (
     <Text
-      accessibilityHint={canCopyLink ? '点按复制消息链接' : undefined}
       accessibilityLabel={absoluteTime ? `发送时间 ${absoluteTime}` : undefined}
       key="time"
-      onPress={canCopyLink && clientId ? () => {
-        actions.onCopyMessageLink?.(clientId);
-        setLinkCopyState('copied');
-      } : undefined}
       style={styles.messageActionMeta}
       testID="message.timeText"
     >
-      {linkCopyState === 'copied' ? '链接已复制' : relativeTime}
+      {relativeTime}
     </Text>
   ) : null;
   const costText = turnCost ? (
@@ -1653,7 +1730,7 @@ function MessageBubble({
     />
   ) : null;
   const hasBubbleContent = !!(
-    item.message.systemCardType || bubbleBody || item.message.secondaryBody
+    item.message.systemCardType || displayBubbleBody || item.message.secondaryBody
   );
   // 气泡是纯 View,不承接任何手势:文本选择走正文原生 Text selectable(长按文字就地选择复制),
   // 气泡上不能挂 Pressable——它会参与触摸协商,干扰正文里表格/代码块横向 ScrollView 的拖动。
@@ -1686,7 +1763,7 @@ function MessageBubble({
           data={item.message.systemCardData}
           type={item.message.systemCardType}
         />
-      ) : bubbleBody ? (
+      ) : displayBubbleBody ? (
         longMessageCollapsed ? (
           // 收起态降级为纯文本(对齐桌面:被裁切的富文本节点不该保留交互),
           // 展开后恢复 MarkdownBody 的完整渲染。文本选择不因收起而丢失:
@@ -1698,8 +1775,18 @@ function MessageBubble({
             style={styles.messageText}
             testID="message.collapsedBody"
           >
-            {bubbleBody}
+            {displayBubbleBody}
           </MarkdownSelectableText>
+        ) : rendersSentInlineBody ? (
+          <SentInlineAtomBody
+            layout={contentLayout}
+            markdownImageCacheKey={item.message.key}
+            onOpenPayload={actions.onOpenPayload}
+            onOpenSessionLink={actions.onOpenSessionLink}
+            selectable={canSelectVisibleText}
+            sessionReferences={item.message.sessionReferences}
+            tokens={sentInlineTokens}
+          />
         ) : (
           <MarkdownBody
             allowIosUITextView={!shouldCollapseLongMessage}
@@ -1734,12 +1821,12 @@ function MessageBubble({
           <Text
             numberOfLines={collapseThreshold + 1}
             onTextLayout={(e) => setMeasuredBody({
-              body: bubbleBody,
+              body: displayBubbleBody,
               lines: e.nativeEvent.lines.length,
             })}
             style={styles.messageText}
           >
-            {bubbleBody}
+            {displayBubbleBody}
           </Text>
         </View>
       ) : null}
@@ -1785,10 +1872,6 @@ function MessageBubble({
           </Text>
         </View>
       ) : null}
-      {messageQuotes.length > 0 ? (
-        // chat-text-quote:气泡上方渲「N 处引用」胶囊(右对齐),点按展开逐条预览。
-        <QuoteCapsule quotes={messageQuotes} testIDPrefix="message.quoteCapsule" variant="bubble" />
-      ) : null}
       {attachmentStripNode}
       {hasBubbleContent || (!attachmentStripNode && messageQuotes.length === 0) ? bubble : null}
       {item.message.kind === 'assistant' && item.message.modelMismatch ? (
@@ -1813,6 +1896,17 @@ function MessageBubble({
             if (id === 'streaming') return <View key="streaming">{streamingStatus}</View>;
             if (id === 'time') return timeText;
             if (id === 'cost') return costText;
+            if (id === 'more') {
+              return (
+                <MessageMoreButton
+                  buttonSize={actionBar.buttonSize}
+                  disabled={disabled || actionBusy}
+                  iconSize={actionBar.iconSize}
+                  key="more"
+                  onPress={() => setActionSheetOpen(true)}
+                />
+              );
+            }
             if (isMessageControlActionId(id)) {
               return (
                 <MessageControlButton
@@ -1830,6 +1924,12 @@ function MessageBubble({
           })}
         </View>
       ) : null}
+      <MessageActionSheet
+        items={messageMenu}
+        onAction={selectMenuAction}
+        onClose={() => setActionSheetOpen(false)}
+        visible={actionSheetOpen}
+      />
     </View>
   );
 }
@@ -2936,6 +3036,80 @@ function OrcaCollabCard({ card, screenWidth }: { card: OrcaCollabCardModel; scre
 // 消息正文统一走原生 markdown 渲染(流式与完成态同一条路径,完成时无"原生→WebView"的切换跳变)。
 // 文本选择 = 完成态消息的各块 Text 原生 selectable:长按文字就地弹系统选择手柄/Copy 菜单,
 // 不跳转界面;整条复制走操作条按钮。选择按块进行(原生 Text 能力边界,跨段选择做不到)。
+/** Sent user atoms stay compact while their full wire text remains copyable/sendable. */
+function SentInlineAtomBody({
+  layout,
+  markdownImageCacheKey,
+  onOpenPayload,
+  onOpenSessionLink,
+  selectable,
+  sessionReferences,
+  tokens,
+}: {
+  layout: MessageContentLayout;
+  markdownImageCacheKey?: string;
+  onOpenPayload?: (payload: MessagePayload) => void;
+  onOpenSessionLink?: (url: string) => void;
+  selectable: boolean;
+  sessionReferences?: readonly MobilePersistedSessionReferenceMetadata[];
+  tokens: readonly SentInlineToken[];
+}) {
+  const { colors } = useTheme();
+  const styles = useThemedStyles(makeStyles);
+  return (
+    <View style={styles.sentInlineAtomBody} testID="message.sentInlineAtoms">
+      {tokens.map((token, index) => {
+        if (token.kind === 'quote') {
+          return (
+            <InlineQuoteChip
+              key={`quote:${token.quote.sourcePath ?? 'chat'}:${index}:${token.quote.text}`}
+              quote={token.quote}
+            />
+          );
+        }
+        if (token.kind === 'pasted') {
+          return (
+            <InlineReferenceChip
+              accessibilityLabel={token.display}
+              icon={<FileText color={colors.textSecondary} size={iconSize.sm} strokeWidth={iconStroke.regular} />}
+              key={`pasted:${index}`}
+              label={token.display}
+              onPress={onOpenPayload
+                ? () => onOpenPayload(buildTextPayload('Pasted text', token.text))
+                : undefined}
+              testID="message.pastedTextChip"
+            />
+          );
+        }
+        if (token.kind === 'slash') {
+          return (
+            <InlineReferenceChip
+              accessibilityLabel={token.text}
+              key={`slash:${index}`}
+              label={token.text}
+              testID="message.slashCommandChip"
+            />
+          );
+        }
+        return token.text ? (
+          <View key={`text:${index}`} style={styles.sentInlineTextChunk}>
+            <MarkdownBody
+              layout={layout}
+              markdownImageCacheKey={markdownImageCacheKey}
+              onOpenPayload={onOpenPayload}
+              onOpenSessionLink={onOpenSessionLink}
+              selectable={selectable}
+              sessionReferences={sessionReferences}
+              streaming={false}
+              text={token.text}
+            />
+          </View>
+        ) : null;
+      })}
+    </View>
+  );
+}
+
 function MarkdownBody({
   allowIosUITextView = true,
   markdownImageCacheKey,
@@ -3443,6 +3617,7 @@ function renderInline(
     /** text_run 合并树里多个块共父,key 需要块级前缀防冲突。 */
     keyPrefix?: string;
     onOpenImage?: (url: string, alt?: string) => void;
+    onOpenPayload?: (payload: MessagePayload) => void;
     onOpenSessionLink?: (url: string) => void;
     sessionReferenceDetails?: Readonly<Record<string, string>>;
     sessionLinkTitles?: Readonly<Record<string, string>>;
@@ -3453,6 +3628,15 @@ function renderInline(
   } = {},
 ): ReactNode {
   const SpanText = ctx.SpanText ?? Text;
+  const openImage = ctx.onOpenImage ?? (ctx.onOpenPayload
+    ? (url: string, alt?: string) => {
+        const title = mobileMarkdownImageTitle(url, alt);
+        ctx.onOpenPayload?.(buildMediaPayload(
+          { kind: 'image', url, title, previewable: isMobileMarkdownImageDirectUrl(url) },
+          title,
+        ));
+      }
+    : undefined);
   const spanKey = (suffix: string) => (ctx.keyPrefix ? `${ctx.keyPrefix}:${suffix}` : suffix);
   switch (inline.type) {
     case 'text':
@@ -3460,25 +3644,18 @@ function renderInline(
     case 'link': {
       const session = parseSessionDeepLinkUrl(inline.url);
       if (session) {
-        // 会话深链 → chip 文案(作者 label / 标题 map / 短 id 降级),app 内跳转;
-        // 绝不落到 Linking.openURL(app 注册的 OS scheme 是 'xdmaker',打不开)。
-        const explicit =
-          inline.text.trim() && inline.text.trim() !== inline.url ? inline.text.trim() : null;
-        const title =
-          explicit
-          ?? ctx.sessionLinkTitles?.[session.sessionId]
-          ?? `会话 ${shortSessionId(session.sessionId)}`;
-        const detail = ctx.sessionReferenceDetails?.[
-          mobileSessionReferenceMetadataKey(session.sessionId, session.messageClientId)
-        ];
         return (
-          <SpanText
+          <MarkdownSessionLinkSpan
+            baseStyle={ctx.baseStyle}
+            inline={inline}
             key={spanKey(`session-link:${index}:${inline.url}`)}
-            onPress={ctx.onOpenSessionLink ? () => ctx.onOpenSessionLink?.(inline.url) : undefined}
-            style={[ctx.baseStyle, styles.markdownLink, styles.sessionLinkChipText]}
-          >
-            {`› ${title}${detail ? ` · ${detail}` : ''}`}
-          </SpanText>
+            onOpenSessionLink={ctx.onOpenSessionLink}
+            session={session}
+            sessionReferenceDetails={ctx.sessionReferenceDetails}
+            sessionLinkTitles={ctx.sessionLinkTitles}
+            SpanText={SpanText}
+            styles={styles}
+          />
         );
       }
       // 非 session 的 Cindy 深链(project 等,双 scheme:cindy 主 + xdt-maker
@@ -3562,7 +3739,7 @@ function renderInline(
         return (
           <SpanText
             key={spanKey(`image:${index}:${inline.url}`)}
-            onPress={ctx.onOpenImage ? () => ctx.onOpenImage?.(inline.url, inline.alt) : undefined}
+            onPress={openImage ? () => openImage(inline.url, inline.alt) : undefined}
             style={[ctx.baseStyle, styles.markdownLink]}
             testID="message.markdownInlineImageChip"
           >
@@ -3577,7 +3754,7 @@ function renderInline(
       return (
         <Text
           key={`image:${index}:${inline.url}`}
-          onPress={ctx.onOpenImage ? () => ctx.onOpenImage?.(inline.url, inline.alt) : undefined}
+          onPress={openImage ? () => openImage(inline.url, inline.alt) : undefined}
           testID="message.markdownInlineImage"
         >
           <View style={size}>
@@ -3592,6 +3769,52 @@ function renderInline(
       );
     }
   }
+}
+
+function MarkdownSessionLinkSpan({
+  baseStyle,
+  inline,
+  onOpenSessionLink,
+  session,
+  sessionReferenceDetails,
+  sessionLinkTitles,
+  SpanText,
+  styles,
+}: {
+  baseStyle?: StyleProp<TextStyle>;
+  inline: Extract<MobileMarkdownInline, { type: 'link' }>;
+  onOpenSessionLink?: (url: string) => void;
+  session: SessionDeepLinkTarget;
+  sessionReferenceDetails?: Readonly<Record<string, string>>;
+  sessionLinkTitles?: Readonly<Record<string, string>>;
+  SpanText: typeof Text;
+  styles: ReturnType<typeof makeStyles>;
+}) {
+  const messages = useRemoteSessionMessages(session.sessionId);
+  const explicit =
+    inline.text.trim() && inline.text.trim() !== inline.url ? inline.text.trim() : null;
+  const targetMessage = session.messageClientId
+    ? messages.find((message) => (
+        message.clientId === session.messageClientId || message.id === session.messageClientId
+      ))
+    : null;
+  const messageLabel = targetMessage ? mobileSessionMessageDisplayText(targetMessage) : null;
+  const title = session.messageClientId
+    ? compactSessionMessageLabel(messageLabel ?? shortSessionId(session.messageClientId))
+    : explicit
+      ?? sessionLinkTitles?.[session.sessionId]
+      ?? `会话 ${shortSessionId(session.sessionId)}`;
+  const detail = sessionReferenceDetails?.[
+    mobileSessionReferenceMetadataKey(session.sessionId, session.messageClientId)
+  ];
+  return (
+    <SpanText
+      onPress={onOpenSessionLink ? () => onOpenSessionLink(inline.url) : undefined}
+      style={[baseStyle, styles.markdownLink, styles.sessionLinkChipText]}
+    >
+      {`${session.messageClientId ? '❝' : '↳'} ${title}${detail ? ` · ${detail}` : ''}`}
+    </SpanText>
+  );
 }
 
 function AttachmentStrip({
@@ -5176,8 +5399,42 @@ function MessageControlButton({
   );
 }
 
-function isMessageControlActionId(id: MessageActionBarItemId): id is MobileMessageControlActionId {
-  return id === 'copy' || id === 'delete' || id === 'rewind' || id === 'fork';
+function MessageMoreButton({
+  buttonSize,
+  disabled,
+  iconSize: size,
+  onPress,
+}: {
+  buttonSize: number;
+  disabled?: boolean;
+  iconSize: number;
+  onPress(): void;
+}) {
+  const { colors } = useTheme();
+  const styles = useThemedStyles(makeStyles);
+  return (
+    <Pressable
+      accessibilityLabel="更多消息操作"
+      accessibilityRole="button"
+      accessibilityState={{ disabled: disabled === true }}
+      disabled={disabled}
+      hitSlop={MESSAGE_CONTROL_HIT_SLOP}
+      onPress={onPress}
+      style={({ pressed }) => [
+        styles.messageIconAction,
+        { height: buttonSize, width: buttonSize },
+        pressed && styles.pressed,
+        disabled && styles.disabled,
+      ]}
+      testID="message.moreButton"
+    >
+      <Ellipsis color={colors.textSecondary} size={size} strokeWidth={iconStroke.regular} />
+    </Pressable>
+  );
+}
+
+function isMessageControlActionId(id: MessageActionBarItemId): id is 'copy' {
+  return id === 'copy';
 }
 
 function messageControlActionLabel(
@@ -5294,6 +5551,18 @@ const makeStyles = (colors: ThemeColors) => StyleSheet.create({
   messageItem: {
     gap: 2,
     width: '100%',
+  },
+  sentInlineAtomBody: {
+    alignItems: 'center',
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: spacing.xs,
+    maxWidth: '100%',
+  },
+  sentInlineTextChunk: {
+    flexBasis: '100%',
+    flexShrink: 1,
+    maxWidth: '100%',
   },
   userMessageItem: {
     alignItems: 'flex-end',

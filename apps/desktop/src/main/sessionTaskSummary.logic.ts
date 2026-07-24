@@ -8,6 +8,7 @@
  * 而非平行实现(避免逻辑漂移)。
  */
 
+import { projectPersistedAgentFacingUserText } from '@cindy/maker-shared/agent-input-projection';
 import { isSyntheticTriggerText } from '../shared/interruptedTurn.js';
 
 /** 输出硬上限(字符)——与 prompt 长档上限相同(≤26 字)。实测模型(haiku/mini)
@@ -82,6 +83,8 @@ export function extractText(raw: string | null | undefined, role: string): strin
   try {
     const parsed: unknown = JSON.parse(raw);
     if (role === 'user' && parsed && typeof parsed === 'object' && 'text' in parsed) {
+      const projected = projectPersistedAgentFacingUserText(parsed);
+      if (projected !== null) return guard(projected);
       const text = (parsed as { text?: unknown }).text;
       return typeof text === 'string' ? guard(text) : '';
     }

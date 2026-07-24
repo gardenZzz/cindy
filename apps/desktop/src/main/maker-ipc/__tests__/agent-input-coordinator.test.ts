@@ -3488,8 +3488,8 @@ describe('AgentInputCoordinator steer transaction', () => {
     const sid = 'steer-ghost-block';
     const first = makeItem('q-1', 'first');
     const second = makeItem('q-2', 'second');
-    h.setScreenUserMessage(async (_sid, queued) =>
-      queued.clientId === 'q-2'
+    h.setScreenUserMessage(async (_sid, agentFacingText) =>
+      agentFacingText === 'second'
         ? { action: 'block', ghostId: 'g-1', ghostName: 'guard', reason: 'nope' }
         : { action: 'allow' },
     );
@@ -3521,8 +3521,8 @@ describe('AgentInputCoordinator steer transaction', () => {
     const sid = 'steer-ghost-rewrite';
     const first = makeItem('q-1', 'first');
     const second = makeItem('q-2', 'second');
-    h.setScreenUserMessage(async (_sid, queued) =>
-      queued.clientId === 'q-2'
+    h.setScreenUserMessage(async (_sid, agentFacingText) =>
+      agentFacingText === 'second'
         ? { action: 'rewrite', ghostId: 'g-1', ghostName: 'guard', text: 'rewritten text' }
         : { action: 'allow' },
     );
@@ -4857,10 +4857,69 @@ describe('AgentInputCoordinator enqueue clientId 幂等去重(弱网重发防线
 });
 
 describe('AgentInputCoordinator 意识拦截钩(订阅槽①,will-user-message)', () => {
+  it('projects quote markers and structured references for Ghost, turn and steer', async () => {
+    const href = 'cindy://session/session-a?message=message-a';
+    const raw = `> <!-- cindy-composer-quote -->\n> selected\n\ninspect ${href}`;
+    const item = makeItem('semantic-turn', raw, {
+      persistedContent: JSON.stringify({ text: raw, quotesEncoded: true }),
+      agentReferences: [{
+        kind: 'message',
+        start: raw.indexOf(href),
+        end: raw.indexOf(href) + href.length,
+        href,
+        sessionId: 'session-a',
+        messageClientId: 'message-a',
+        text: 'Target message body',
+      }],
+      chatMessage: {
+        clientId: 'semantic-turn',
+        role: 'user',
+        content: raw,
+        quotesEncoded: true,
+      },
+    });
+
+    const turn = createHarness();
+    const turnScreen = vi.fn<NonNullable<AgentInputCoordinatorDeps['screenUserMessage']>>(
+      async () => ({ action: 'allow' }) as const,
+    );
+    turn.setScreenUserMessage(turnScreen);
+    turn.coordinator.enqueue('semantic-turn-session', item);
+    await flush();
+
+    const turnScreenText = turnScreen.mock.calls[0]?.[1];
+    expect(turnScreenText).not.toContain('cindy-composer-quote');
+    expect(turnScreenText).not.toContain(href);
+    expect(turnScreenText).toContain('Target message body');
+    const turnText = (turn.sendToAgent.mock.calls[0]?.[1] as { content: string }).content;
+    expect(turnText).toBe(turnScreenText);
+
+    const steer = createHarness();
+    steer.setRunning(true);
+    const steerScreen = vi.fn<NonNullable<AgentInputCoordinatorDeps['screenUserMessage']>>(
+      async () => ({ action: 'allow' }) as const,
+    );
+    steer.setScreenUserMessage(steerScreen);
+    const steerItem = {
+      ...item,
+      clientId: 'semantic-steer',
+      chatMessage: { ...item.chatMessage, clientId: 'semantic-steer' },
+    };
+    expect(await steer.coordinator.steer('semantic-steer-session', steerItem)).toBe(true);
+    await flush();
+
+    const steerScreenText = steerScreen.mock.calls[0]?.[1];
+    expect(steerScreenText).not.toContain('cindy-composer-quote');
+    expect(steerScreenText).not.toContain(href);
+    expect(steerScreenText).toContain('Target message body');
+    const steerText = (steer.steerToAgent.mock.calls[0]?.[1] as { content: string }).content;
+    expect(steerText).toBe(steerScreenText);
+  });
+
   it('block:丢弃排队项(不落库不派发),回调 onUserMessageBlocked,后续消息继续放行', async () => {
     const h = createHarness();
-    h.setScreenUserMessage(async (_sid, item) =>
-      item.text.includes('敏感')
+    h.setScreenUserMessage(async (_sid, agentFacingText) =>
+      agentFacingText.includes('敏感')
         ? { action: 'block', ghostId: 'g1', ghostName: '哨兵', reason: '含敏感词' }
         : { action: 'allow' },
     );
@@ -4988,6 +5047,49 @@ describe('AgentInputCoordinator 意识拦截钩(订阅槽①,will-user-message)'
     });
     const rewrittenItem = h.onUserMessageRewritten.mock.calls[0]?.[1];
     expect(rewrittenItem?.chatMessage.quotesEncoded).toBeUndefined();
+  });
+
+  it('rewrite:clears stale Composer reference offsets from wire and Agent input', async () => {
+    const h = createHarness();
+    const href = 'cindy://session/session-a?message=message-a';
+    const original = `inspect ${href}`;
+    h.setScreenUserMessage(async () => ({
+      action: 'rewrite',
+      ghostId: 'g1',
+      ghostName: '哨兵',
+      text: `rewritten ${href}`,
+    }) as const);
+    const reference = {
+      kind: 'message' as const,
+      start: original.indexOf(href),
+      end: original.length,
+      href,
+      sessionId: 'session-a',
+      messageClientId: 'message-a',
+      text: 'Target message body',
+    };
+    h.coordinator.enqueue('s1', makeItem('c1', original, {
+      persistedContent: JSON.stringify({
+        text: original,
+        agentReferences: [reference],
+      }),
+      agentReferences: [reference],
+    }));
+
+    await flush();
+
+    expect(h.sendToAgent.mock.calls[0]?.[1]).toEqual({
+      type: 'user',
+      content: `rewritten ${href}`,
+    });
+    const persisted = mocks.createMessage.mock.calls.find(
+      (call) => (call[1] as { clientId?: string }).clientId === 'c1',
+    )?.[1] as { content: string };
+    expect(JSON.parse(persisted.content)).toEqual({
+      text: `rewritten ${href}`,
+      slashCommandRanges: [],
+    });
+    expect(h.onUserMessageRewritten.mock.calls[0]?.[1].agentReferences).toBeUndefined();
   });
 });
 

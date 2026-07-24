@@ -8,6 +8,7 @@
  * draft store deterministic and directly testable.
  */
 import type { JSONContent } from '@tiptap/core';
+import type { AgentInputReference } from '../../shared/agentInputQueue';
 import { parseChatQuoteSegments, type ChatQuote, type ChatQuoteSegment } from '@/lib/chatQuotes';
 import type { PastedTextRange, SlashCommandRange } from '@/lib/imageRef';
 
@@ -23,6 +24,8 @@ export interface ComposerQuoteAttrs {
 export interface ComposerSerializedBlock {
   kind: 'text' | 'quote';
   text: string;
+  /** Structured reference offsets relative to this block's text. */
+  agentReferences?: AgentInputReference[];
   /** Ranges are relative to this block's text. */
   pastedTextRanges?: PastedTextRange[];
   /** Ranges are relative to this block's text. */
@@ -211,10 +214,12 @@ export function serializeComposerContentBlocksWithRanges(
   blocks: readonly ComposerSerializedBlock[],
 ): {
   text: string;
+  agentReferences: AgentInputReference[];
   pastedTextRanges: PastedTextRange[];
   slashCommandRanges: SlashCommandRange[];
 } {
   let serialized = '';
+  const agentReferences: AgentInputReference[] = [];
   const pastedTextRanges: PastedTextRange[] = [];
   const slashCommandRanges: SlashCommandRange[] = [];
   let previousKind: ComposerSerializedBlock['kind'] | null = null;
@@ -244,6 +249,13 @@ export function serializeComposerContentBlocksWithRanges(
     serialized += separator;
     const blockStart = serialized.length;
     serialized += block.text;
+    for (const reference of block.agentReferences ?? []) {
+      agentReferences.push({
+        ...reference,
+        start: blockStart + reference.start,
+        end: blockStart + reference.end,
+      });
+    }
     for (const range of block.pastedTextRanges ?? []) {
       pastedTextRanges.push({
         start: blockStart + range.start,
@@ -265,6 +277,12 @@ export function serializeComposerContentBlocksWithRanges(
   const text = serialized.trim();
   return {
     text,
+    agentReferences: agentReferences
+      .map((reference) => {
+        const trimmed = trimRangeToText(reference, leadingTrim, text.length);
+        return trimmed ? { ...reference, ...trimmed } : null;
+      })
+      .filter((reference): reference is AgentInputReference => reference !== null),
     pastedTextRanges: pastedTextRanges
       .map((range) => {
         const trimmed = trimRangeToText(range, leadingTrim, text.length);

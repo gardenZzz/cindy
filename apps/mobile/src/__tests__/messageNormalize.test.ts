@@ -3,6 +3,7 @@ import {
   CONTINUE_AFTER_ERROR_PROMPT,
   UI_ACTION_TRIGGER_PREFIX,
 } from '@cindy/maker-shared/synthetic-trigger';
+import { composerDocumentFromSerializedMessage } from '@/session/composerDocument';
 import { normalizeRemoteMessages } from '@/session/messageNormalize';
 import type { RemoteMessage } from '@/session/types';
 
@@ -213,6 +214,88 @@ describe('normalizeRemoteMessages', () => {
       truncated: true,
     }]);
     expect(invalid.sessionReferences).toEqual([]);
+  });
+
+  it('preserves valid pasted-text and exact slash presentation ranges', () => {
+    const text = '/help before long text after';
+    const [item] = normalizeRemoteMessages([
+      message({
+        id: 'atomic-user',
+        role: 'user',
+        content: JSON.stringify({
+          text,
+          images: [],
+          files: [],
+          pastedTextRanges: [{ start: 13, end: 22, display: 'Pasted text (1 line)' }],
+          slashCommandRanges: [{ start: 0, end: 5 }],
+        }),
+      }),
+    ]);
+
+    expect(item).toMatchObject({
+      pastedTextRanges: [{ start: 13, end: 22, display: 'Pasted text (1 line)' }],
+      slashCommandRanges: [{ start: 0, end: 5 }],
+    });
+  });
+
+  it('preserves message reference semantics when fork or rewind rebuilds the composer', () => {
+    const href = 'cindy://session/session-a?message=message-a';
+    const text = `inspect ${href}`;
+    const reference = {
+      kind: 'message' as const,
+      start: text.indexOf(href),
+      end: text.length,
+      href,
+      sessionId: 'session-a',
+      messageClientId: 'message-a',
+      text: 'Target message body',
+    };
+    const [item] = normalizeRemoteMessages([
+      message({
+        id: 'referenced-user',
+        role: 'user',
+        content: JSON.stringify({
+          text,
+          images: [],
+          files: [],
+          agentReferences: [reference],
+        }),
+      }),
+    ]);
+
+    expect(item.agentReferences).toEqual([reference]);
+    expect(composerDocumentFromSerializedMessage(item.body, {
+      agentReferences: item.agentReferences,
+    }).nodes).toEqual([
+      { type: 'text', text: 'inspect ' },
+      {
+        type: 'session-link',
+        href,
+        label: 'Target message body',
+        messageClientId: 'message-a',
+        titled: true,
+        agentText: 'Target message body',
+      },
+    ]);
+  });
+
+  it('drops malformed atom ranges as whole sets while preserving explicit empty slash metadata', () => {
+    const [item] = normalizeRemoteMessages([
+      message({
+        id: 'malformed-atomic-user',
+        role: 'user',
+        content: {
+          text: 'abcdef',
+          images: [],
+          files: [],
+          pastedTextRanges: [{ start: 1, end: 4, display: 'first' }, { start: 3, end: 5, display: 'overlap' }],
+          slashCommandRanges: [],
+        },
+      }),
+    ]);
+
+    expect(item.pastedTextRanges).toBeUndefined();
+    expect(item.slashCommandRanges).toEqual([]);
   });
 
   it('summarizes tool_use, attaches matching tool_result, and hides standalone tool_result', () => {

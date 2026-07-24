@@ -15,6 +15,7 @@ import {
   replaceOutboxItem,
 } from '@/session/sessionOutbox';
 import type { RemoteSerializedAttachment } from '@/session/types';
+import { serializeComposerDocument } from '@/session/composerDocument';
 
 function attachmentFor(name: string): RemoteSerializedAttachment {
   return {
@@ -89,6 +90,23 @@ describe('buildOutboxItem', () => {
     expect(item.sessionRefs).toEqual(sessionRefs);
     expect(item.sessionRefs).not.toBe(sessionRefs);
   });
+
+  it('keeps structured reference metadata until dispatch', () => {
+    const href = 'cindy://session/session-a?message=message-a';
+    const text = `inspect ${href}`;
+    const reference = {
+      kind: 'message' as const,
+      start: text.indexOf(href),
+      end: text.length,
+      href,
+      sessionId: 'session-a',
+      messageClientId: 'message-a',
+      text: 'Complete target message body',
+    };
+
+    expect(itemWith({ text, agentReferences: [reference] }).agentReferences)
+      .toEqual([reference]);
+  });
 });
 
 describe('recoverOutboxItemsToComposerDraft', () => {
@@ -106,15 +124,17 @@ describe('recoverOutboxItemsToComposerDraft', () => {
     ].join('\n');
     const item = itemWith({ text: encoded, quotesEncoded: true });
 
-    expect(recoverOutboxItemsToComposerDraft([item], {
+    const recovery = recoverOutboxItemsToComposerDraft([item], {
       visibleText: 'new draft',
       encodedBody: 'new draft',
       quotes: [],
-    })).toEqual({
+    });
+    expect(recovery).toMatchObject({
       visibleText: 'reply\n\nmore\n\nnew draft',
       encodedBody: `${encoded}\n\nnew draft`,
       quotes: [{ text: 'selected' }, { text: 'second' }],
     });
+    expect(serializeComposerDocument(recovery.document).text).toBe(`${encoded}\n\nnew draft`);
   });
 
   it('keeps existing quoted draft metadata aligned after outbox recovery', () => {
@@ -131,29 +151,70 @@ describe('recoverOutboxItemsToComposerDraft', () => {
       'existing reply',
     ].join('\n');
 
-    expect(recoverOutboxItemsToComposerDraft(
+    const recovery = recoverOutboxItemsToComposerDraft(
       [itemWith({ text: recoveredEncoded, quotesEncoded: true })],
       {
         visibleText: 'existing reply',
         encodedBody: existingEncoded,
         quotes: [{ text: 'existing quote' }],
       },
-    )).toEqual({
+    );
+    expect(recovery).toMatchObject({
       visibleText: 'recovered reply\n\nexisting reply',
       encodedBody: `${recoveredEncoded}\n\n${existingEncoded}`,
       quotes: [{ text: 'recovered quote' }, { text: 'existing quote' }],
     });
+    expect(serializeComposerDocument(recovery.document).text).toBe(
+      `${recoveredEncoded}\n\n${existingEncoded}`,
+    );
   });
 
   it('keeps markerless legacy parsing leading-only during salvage', () => {
     const encoded = '> old quote\n\nHere:\n> user markdown';
     const item = itemWith({ text: encoded, quotesEncoded: true });
 
-    expect(recoverOutboxItemsToComposerDraft([item])).toEqual({
+    expect(recoverOutboxItemsToComposerDraft([item])).toMatchObject({
       visibleText: 'Here:\n> user markdown',
       encodedBody: encoded,
       quotes: [{ text: 'old quote' }],
     });
+  });
+
+  it('restores pasted-text and slash atoms instead of flattening failed attachment sends', () => {
+    const item = itemWith({
+      text: '/help before long\ntext after',
+      pastedTextRanges: [{ start: 13, end: 22, display: 'Pasted text (2 lines)' }],
+      slashCommandRanges: [{ start: 0, end: 5 }],
+    });
+    const recovery = recoverOutboxItemsToComposerDraft([item]);
+
+    expect(recovery.document.nodes.map((node) => node.type)).toEqual([
+      'text', 'text', 'pasted-text', 'text',
+    ]);
+    expect(serializeComposerDocument(recovery.document)).toMatchObject({
+      pastedTextRanges: [{ start: 13, end: 22, display: 'Pasted text (2 lines)' }],
+      slashCommandRanges: [{ start: 0, end: 5 }],
+    });
+  });
+
+  it('restores message references instead of flattening them to private URIs', () => {
+    const href = 'cindy://session/session-a?message=message-a';
+    const text = `inspect ${href}`;
+    const reference = {
+      kind: 'message' as const,
+      start: text.indexOf(href),
+      end: text.length,
+      href,
+      sessionId: 'session-a',
+      messageClientId: 'message-a',
+      text: 'Complete target message body',
+    };
+    const recovery = recoverOutboxItemsToComposerDraft([
+      itemWith({ text, agentReferences: [reference] }),
+    ]);
+
+    expect(serializeComposerDocument(recovery.document).agentReferences)
+      .toEqual([reference]);
   });
 });
 

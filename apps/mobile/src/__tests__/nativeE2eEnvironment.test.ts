@@ -254,15 +254,17 @@ describe('native e2e environment', () => {
   it('sends the realtime voice draft returned by the controller instead of stale React state', () => {
     const sessionScreen = readFileSync(resolve(process.cwd(), 'app/sessions/[sessionId].tsx'), 'utf8');
 
+    expect(sessionScreen).toContain('const documentBeforeStop = composerDocumentRef.current;');
     expect(sessionScreen).toContain('const latestDraft = await controller.stop();');
-    expect(sessionScreen).toContain('await sendLatest({ draftOverride: latestDraft });');
-    expect(sessionScreen.indexOf('const latestDraft = await controller.stop();')).toBeLessThan(
-      sessionScreen.indexOf('await sendLatest({ draftOverride: latestDraft });'),
+    expect(sessionScreen).toContain('await sendLatest({ documentOverride: latestDocument });');
+    expect(sessionScreen.indexOf('const documentBeforeStop = composerDocumentRef.current;')).toBeLessThan(
+      sessionScreen.indexOf('const latestDraft = await controller.stop();'),
     );
+    expect(sessionScreen).toContain('const latestDocument = latestDraft.trim()');
     expect(sessionScreen).toContain('readCurrentDraft: () => draftRef.current');
     expect(sessionScreen).toContain('onDraftChanged: setComposerDraft');
     expect(sessionScreen).toContain('createMobileVoiceControllerSession({');
-    expect(sessionScreen).not.toContain('await sendLatest({ draftOverride: draft });');
+    expect(sessionScreen).not.toContain('await sendLatest({ draftOverride: latestDraft });');
   });
 
   it('guards the mobile voice composer against the legacy desktop transcription path', () => {

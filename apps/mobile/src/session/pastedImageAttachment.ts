@@ -1,5 +1,5 @@
 /**
- * 粘贴图片附件解析:把 expo-paste-input 抛出的剪贴板临时文件 uri 解析成
+ * 粘贴图片附件解析:把 ComposerRichInput 从 WebView 剪贴板落盘的临时文件 uri 解析成
  * 可直接走现有上传链路(buildMobileImageAttachmentCandidate →
  * uploadMobileAttachmentFromFile)的 { uri, fileName }。
  *
@@ -11,6 +11,7 @@ import { extractRemoteFileExt } from '@/session/attachments';
 
 /** 与 useContextSheetMediaAssets 同口径:iOS 原生格式,白名单与下游模型接口都不收。 */
 const PASTED_JPEG_COMPRESS = 0.9;
+export const COMPOSER_PASTED_IMAGE_FILE_PREFIX = 'cindy-composer-paste-';
 
 const WHITELISTED_IMAGE_EXTS = ['jpg', 'jpeg', 'png', 'gif', 'webp'] as const;
 
@@ -58,6 +59,11 @@ export function classifyPastedImageUri(uri: string): PastedImageClassification {
 /** 粘贴临时文件名无意义,统一生成友好名(纯函数)。 */
 export function buildPastedImageFileName(index: number, ext: string): string {
   return `pasted-image-${index + 1}.${ext}`;
+}
+
+/** 只识别 ComposerRichInput 明确创建、应由本链路负责回收的缓存文件。 */
+export function isComposerPastedImageUri(uri: string): boolean {
+  return basenameFromUri(uri).startsWith(COMPOSER_PASTED_IMAGE_FILE_PREFIX);
 }
 
 /**

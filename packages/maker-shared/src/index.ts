@@ -1,4 +1,5 @@
 export * from './agentCapabilities.js';
+export * from './agentInputProjection.js';
 export * from './agentTask.js';
 export * from './branding.js';
 export * from './brandIdentity.js';

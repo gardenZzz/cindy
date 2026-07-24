@@ -9,6 +9,12 @@
  */
 
 import { stripChatQuoteMarkerLines } from '@cindy/maker-shared/chat-quotes';
+import {
+  projectAgentFacingText,
+  type AgentInputReference,
+} from '@cindy/maker-shared/agent-input-projection';
+
+export type { AgentInputReference } from '@cindy/maker-shared/agent-input-projection';
 
 export type AgentInputFileCategory = 'image' | 'pdf' | 'text' | 'office' | 'file';
 
@@ -85,6 +91,7 @@ export interface AgentInputChatMessage {
   images?: Array<AgentInputImageRef | AgentInputFallbackImage>;
   files?: Array<{ name: string; path: string }>;
   quotesEncoded?: boolean;
+  agentReferences?: AgentInputReference[];
   pastedTextRanges?: Array<{ start: number; end: number; display: string }>;
   slashCommandRanges?: Array<{ start: number; end: number }>;
 }
@@ -128,6 +135,8 @@ export interface AgentInputQueuedMessage {
   sessionRefs?: AgentInputSessionRef[];
   trustedSessionReferenceContexts?: AgentInputSessionReferenceContext[];
   sessionReferencesRequireTrustedSnapshot?: boolean;
+  /** Structured Composer references used only for semantic projection. */
+  agentReferences?: AgentInputReference[];
   chatMessage: AgentInputChatMessage;
   createOpts: AgentInputCreateOpts;
   userName?: string;
@@ -218,12 +227,71 @@ export function queuedMessageRetryToken(queued: AgentInputQueuedMessage): string
 export function sanitizeQueuedMessageForPersistence(
   item: AgentInputQueuedMessage,
 ): AgentInputQueuedMessage {
-  if (!item.trustedSessionReferenceContexts) return item;
+  let changed = false;
+  let persistedContent = item.persistedContent;
+  let agentReferences = item.agentReferences;
+
+  const stripMessageBodies = (
+    references: readonly unknown[],
+  ): { references: unknown[]; stripped: boolean } => {
+    let stripped = false;
+    const next = references.map((reference) => {
+      if (!reference || typeof reference !== 'object' || Array.isArray(reference)) {
+        return reference;
+      }
+      const record = reference as Record<string, unknown>;
+      if (
+        record.kind !== 'message'
+        || (!Object.hasOwn(record, 'text') && !Object.hasOwn(record, 'truncated'))
+      ) {
+        return reference;
+      }
+      stripped = true;
+      const sanitized = { ...record };
+      delete sanitized.text;
+      delete sanitized.truncated;
+      return sanitized;
+    });
+    return { references: stripped ? next : [...references], stripped };
+  };
+
+  if (agentReferences) {
+    const topLevel = stripMessageBodies(agentReferences);
+    if (topLevel.stripped) {
+      changed = true;
+      agentReferences = topLevel.references as AgentInputReference[];
+    }
+  }
+  try {
+    const parsed = JSON.parse(persistedContent) as unknown;
+    if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
+      const record = parsed as Record<string, unknown>;
+      if (Array.isArray(record.agentReferences)) {
+        const persisted = stripMessageBodies(record.agentReferences);
+        if (persisted.stripped) {
+          changed = true;
+          persistedContent = JSON.stringify({
+            ...record,
+            agentReferences: persisted.references,
+          });
+        }
+      }
+    }
+  } catch {
+    // Historical plain-text queue payloads have no embedded reference bodies.
+  }
+
+  if (!changed && !item.trustedSessionReferenceContexts) return item;
   const sanitized: AgentInputQueuedMessage = {
     ...item,
-    sessionReferencesRequireTrustedSnapshot: true,
+    persistedContent,
+    ...(agentReferences ? { agentReferences } : {}),
+    ...(item.trustedSessionReferenceContexts
+      ? { sessionReferencesRequireTrustedSnapshot: true }
+      : {}),
   };
-  delete sanitized.trustedSessionReferenceContexts;
+  if (!item.agentReferences) delete sanitized.agentReferences;
+  if (item.trustedSessionReferenceContexts) delete sanitized.trustedSessionReferenceContexts;
   return sanitized;
 }
 
@@ -265,6 +333,7 @@ export function updateQueuedMessageText(
       // Arbitrary text edits invalidate presentation offsets. A composer-based
       // queue edit supplies freshly computed metadata through update-content.
       delete nextParsed.pastedTextRanges;
+      delete nextParsed.agentReferences;
       // Preserve the explicit "new renderer metadata" marker while clearing
       // stale offsets. The empty array prevents legacy line-start guessing.
       nextParsed.slashCommandRanges = [];
@@ -297,6 +366,7 @@ export function updateQueuedMessageText(
   }
   if (sessionRefs.length > 0) updated.sessionRefs = sessionRefs;
   else delete updated.sessionRefs;
+  delete updated.agentReferences;
   return updated;
 }
 
@@ -326,6 +396,14 @@ export function updateQueuedMessageContent(
   // (手机编辑器能完整表达附件,undefined / 空数组都表示清空)。
   if (next.files && next.files.length > 0) merged.files = next.files;
   else delete merged.files;
+  // Structured references are tied to offsets in the replacement text.
+  // `next` is the complete composer submission, so stale references from the
+  // old queue item must never survive an edit that removed or reordered chips.
+  if (next.agentReferences && next.agentReferences.length > 0) {
+    merged.agentReferences = next.agentReferences;
+  } else {
+    delete merged.agentReferences;
+  }
   // mentions 语义不同:手机端编辑器(update-content 目前唯一调用方)不能表达
   // mentions,构造的 next 恒不带该字段——undefined 视为「无表达,保留原条目」,
   // 只有显式数组才是权威替换(空数组 = 清空)。否则手机编辑一条桌面排队的
@@ -417,13 +495,23 @@ export function serializeSessionReferencePayload(
   });
 }
 
+/** Immutable semantic projection shared by Ghost, titles, turn and steer. */
+export function getAgentFacingText(queued: AgentInputQueuedMessage): string {
+  return projectAgentFacingText({
+    text: queued.text,
+    quotesEncoded: queued.chatMessage.quotesEncoded === true,
+    agentReferences: queued.agentReferences,
+  });
+}
+
 export function buildMakerUserMessage(
   queued: AgentInputQueuedMessage,
   sessionReferenceContexts: AgentInputSessionReferenceContext[] = [],
 ): AgentInputMakerMessage {
   const blocks: Array<{ type: string; [k: string]: unknown }> = [];
-  if (queued.text.length > 0) {
-    blocks.push({ type: 'text', text: queued.text });
+  const agentFacingText = getAgentFacingText(queued);
+  if (agentFacingText.length > 0) {
+    blocks.push({ type: 'text', text: agentFacingText });
   }
   for (const m of queued.mentions ?? []) {
     blocks.push({ type: 'mention', name: m.name, path: m.path, kind: m.type });

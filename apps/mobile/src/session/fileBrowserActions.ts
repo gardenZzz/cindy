@@ -3,7 +3,18 @@
  */
 import { ungzip } from 'pako';
 
-import { readComposerDraftSync, saveComposerDraft } from '@/session/composerDraftStore';
+import {
+  readComposerDocumentDraftSync,
+  readComposerDraftSync,
+  saveComposerDocumentDraft,
+  saveComposerDraft,
+} from '@/session/composerDraftStore';
+import {
+  appendComposerNode,
+  composerDocumentProjectedText,
+  mentionComposerNode,
+  textComposerDocument,
+} from '@/session/composerDocument';
 import { serializeAtResource } from '@/session/composerPalette';
 import { imageMimeFromUrl } from '@/session/remoteMediaDiskCache';
 
@@ -53,9 +64,17 @@ export function mergePathIntoComposerDraft(
   const existing = readComposerDraftSync(sessionId) ?? '';
   const token = serializeAtResource({ type: kind, relPath });
   if (existing.includes(token)) return existing;
-  const merged = existing.length === 0
-    ? `${token} `
-    : `${existing.endsWith(' ') || existing.endsWith('\n') ? existing : `${existing} `}${token} `;
+  const currentDocument = readComposerDocumentDraftSync(sessionId) ?? textComposerDocument(existing);
+  const separated = existing.length > 0 && !existing.endsWith(' ') && !existing.endsWith('\n')
+    ? appendComposerNode(currentDocument, { type: 'text', text: ' ' })
+    : currentDocument;
+  const withMention = appendComposerNode(
+    separated,
+    mentionComposerNode({ type: kind, relPath }),
+  );
+  const mergedDocument = appendComposerNode(withMention, { type: 'text', text: ' ' });
+  const merged = composerDocumentProjectedText(mergedDocument);
+  saveComposerDocumentDraft(sessionId, mergedDocument);
   saveComposerDraft(sessionId, merged);
   return merged;
 }

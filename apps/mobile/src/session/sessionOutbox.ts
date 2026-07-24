@@ -18,6 +18,13 @@
  */
 import type { MobileSessionReference } from '@/session/sessionReferences';
 import type { RemoteSerializedAttachment } from '@/session/types';
+import type { AgentInputReference } from '@cindy/maker-shared/agent-input-projection';
+import {
+  composerDocumentFromSerializedMessage,
+  normalizeComposerDocument,
+  type ComposerDocument,
+  type ComposerNode,
+} from '@/session/composerDocument';
 import {
   joinChatQuoteTextSegments,
   parseChatQuoteSegments,
@@ -55,6 +62,9 @@ export interface MobileOutboxItem {
   quotesEncoded: boolean;
   /** 点击发送时解析出的来源设备提示；附件上传期间不得重新依赖易失的远程镜像。 */
   sessionRefs?: MobileSessionReference[];
+  agentReferences: AgentInputReference[];
+  pastedTextRanges: Array<{ start: number; end: number; display: string }>;
+  slashCommandRanges: Array<{ start: number; end: number }>;
   /**
    * 发送时刻的权限档快照:plan 一次性语义在点发送时就恢复会话档,dispatch 重读
    * store 拿到的已是恢复后的值,消息本身必须仍按发送时刻的档位派发。
@@ -115,12 +125,14 @@ export interface MobileOutboxDraftRecovery {
   visibleText: string;
   encodedBody: string;
   quotes: ChatQuote[];
+  document: ComposerDocument;
 }
 
 export interface MobileOutboxExistingDraft {
   visibleText: string;
   encodedBody: string;
   quotes: readonly ChatQuote[];
+  document?: ComposerDocument;
 }
 
 export function buildOutboxItem(input: {
@@ -129,6 +141,9 @@ export function buildOutboxItem(input: {
   text: string;
   quotesEncoded?: boolean;
   sessionRefs?: readonly MobileSessionReference[];
+  agentReferences?: AgentInputReference[];
+  pastedTextRanges?: Array<{ start: number; end: number; display: string }>;
+  slashCommandRanges?: Array<{ start: number; end: number }>;
   permissionModeAtSend: string;
   /** 发送时刻已就绪的附件(占前段槽位)。 */
   readyAttachments: readonly RemoteSerializedAttachment[];
@@ -166,6 +181,9 @@ export function buildOutboxItem(input: {
     ...(input.sessionRefs && input.sessionRefs.length > 0
       ? { sessionRefs: [...input.sessionRefs] }
       : {}),
+    agentReferences: input.agentReferences ?? [],
+    pastedTextRanges: input.pastedTextRanges ?? [],
+    slashCommandRanges: input.slashCommandRanges ?? [],
     permissionModeAtSend: input.permissionModeAtSend,
     attachmentSlots: slots,
     slotMeta,
@@ -185,11 +203,18 @@ export function recoverOutboxItemsToComposerDraft(
   const visibleParts: string[] = [];
   const encodedParts: string[] = [];
   const quotes: ChatQuote[] = [];
+  const documents: ComposerDocument[] = [];
 
   for (const item of items) {
     const encodedText = item.text.trim();
     if (!encodedText) continue;
     encodedParts.push(encodedText);
+    documents.push(composerDocumentFromSerializedMessage(encodedText, {
+      quotesEncoded: item.quotesEncoded,
+      pastedTextRanges: item.pastedTextRanges,
+      slashCommandRanges: item.slashCommandRanges,
+      agentReferences: item.agentReferences,
+    }));
     if (!item.quotesEncoded) {
       visibleParts.push(encodedText);
       continue;
@@ -217,11 +242,29 @@ export function recoverOutboxItemsToComposerDraft(
     encodedParts.push(normalizedExistingEncodedBody);
   }
   quotes.push(...(existingDraft?.quotes ?? []));
+  if (existingDraft?.document) {
+    documents.push(existingDraft.document);
+  } else if (normalizedExistingEncodedBody) {
+    documents.push(composerDocumentFromSerializedMessage(normalizedExistingEncodedBody, {
+      quotesEncoded: (existingDraft?.quotes.length ?? 0) > 0,
+    }));
+  }
+
+  const nodes: ComposerNode[] = [];
+  documents.forEach((document, index) => {
+    const previous = nodes.at(-1);
+    const first = document.nodes[0];
+    if (index > 0 && previous?.type !== 'quote' && first?.type !== 'quote') {
+      nodes.push({ type: 'text', text: '\n\n' });
+    }
+    nodes.push(...document.nodes);
+  });
 
   return {
     visibleText: visibleParts.join('\n\n'),
     encodedBody: encodedParts.join('\n\n'),
     quotes,
+    document: normalizeComposerDocument({ version: 1, nodes }),
   };
 }
 

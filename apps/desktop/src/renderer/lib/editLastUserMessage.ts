@@ -48,6 +48,7 @@ import {
 import type { AttachedFile } from '@/lib/fileTypes';
 import type { FileRef, PastedTextRange, SlashCommandRange } from '@/lib/imageRef';
 import type { Session } from '@/lib/ccAgent.types';
+import type { AgentInputReference } from '../../shared/agentInputQueue';
 
 export interface CommitEditAndResendOptions {
   sessionId: string;
@@ -65,6 +66,8 @@ export interface CommitEditAndResendOptions {
    * 标志门控,丢掉会让 markdown blockquote 退回普通文本展示。
    */
   quotesEncoded?: boolean;
+  /** 原消息语义引用 range；只有编辑框确认可见文本未改变时才传入。 */
+  agentReferences?: AgentInputReference[];
   /** 原消息长粘贴 range；只有编辑框确认文本未改变时才传入。 */
   pastedTextRanges?: PastedTextRange[];
   /** 原消息 slash range；undefined 表示缺少显式 range，空数组表示明确无 slash。 */
@@ -243,9 +246,13 @@ export async function commitEditAndResend(
     session.workingDir ?? opts.fallbackWorkingDir,
     attachments.length > 0 ? attachments : undefined,
     undefined,
-    opts.quotesEncoded || opts.pastedTextRanges?.length || opts.slashCommandRanges !== undefined
+    opts.quotesEncoded ||
+    opts.agentReferences?.length ||
+    opts.pastedTextRanges?.length ||
+    opts.slashCommandRanges !== undefined
       ? {
           ...(opts.quotesEncoded ? { quotesEncoded: true } : {}),
+          ...(opts.agentReferences?.length ? { agentReferences: opts.agentReferences } : {}),
           ...(opts.pastedTextRanges?.length ? { pastedTextRanges: opts.pastedTextRanges } : {}),
           ...(opts.slashCommandRanges !== undefined ? { slashCommandRanges: opts.slashCommandRanges } : {}),
         }

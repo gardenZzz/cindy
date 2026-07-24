@@ -455,6 +455,27 @@ describe('parseUserContent — round-trip with localDb mapper simulation', () =>
     ).toMatchObject({ text: '/unknown', slashCommandRanges: [] });
   });
 
+  it('round-trips structured reference metadata without changing bubble text', () => {
+    const href = 'cindy://session/session-a?message=message-a';
+    const text = `inspect ${href}`;
+    const references = [{
+      kind: 'message' as const,
+      start: text.indexOf(href),
+      end: text.length,
+      href,
+      sessionId: 'session-a',
+      messageClientId: 'message-a',
+      text: 'Complete target message body',
+    }];
+    const persisted = stringifyUserContent(text, [], [], false, [], [], [], references);
+
+    expect(parseUserContent(JSON.parse(persisted))).toMatchObject({
+      text,
+      agentReferences: references,
+    });
+    expect(JSON.parse(persisted)).toMatchObject({ text, agentReferences: references });
+  });
+
   it('drops malformed slash ranges so corrupted history uses legacy compatibility', () => {
     const parsed = parseUserContent({
       text: 'not-a-command',

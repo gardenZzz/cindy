@@ -147,8 +147,16 @@ describe('UserMessageEditBox — idle 发送', () => {
     await waitFor(() => expect(editedOverride).toHaveBeenCalledWith({ text: 'edited reply' }));
   });
 
-  it('文本未修改时保留长粘贴与 slash ranges，文本修改后丢弃', async () => {
+  it('文本未修改时保留语义引用与 chip ranges，文本修改后丢弃', async () => {
+    const agentReferences = [{
+      kind: 'session' as const,
+      start: 0,
+      end: 13,
+      href: 'cindy://session/source',
+      sessionId: 'source',
+    }];
     const ranges = {
+      agentReferences,
       pastedTextRanges: [{ start: 0, end: 13, display: 'Pasted text (1 line)' }],
       slashCommandRanges: [] as [],
     };
@@ -157,6 +165,7 @@ describe('UserMessageEditBox — idle 发送', () => {
     await waitFor(() => expect(commitMock).toHaveBeenCalledTimes(1));
     expect(commitMock.mock.calls[0][0]).toMatchObject({
       text: 'original text',
+      agentReferences,
       pastedTextRanges: ranges.pastedTextRanges,
       slashCommandRanges: [],
     });
@@ -167,13 +176,22 @@ describe('UserMessageEditBox — idle 发送', () => {
     fireEvent.change(second.textarea, { target: { value: 'edited text' } });
     fireEvent.click(second.sendBtn);
     await waitFor(() => expect(commitMock).toHaveBeenCalledTimes(1));
+    expect(commitMock.mock.calls[0][0].agentReferences).toBeUndefined();
     expect(commitMock.mock.calls[0][0].pastedTextRanges).toBeUndefined();
     expect(commitMock.mock.calls[0][0].slashCommandRanges).toBeUndefined();
   });
 
-  it('被拦消息覆盖重发在文本未修改时透传 chip ranges', async () => {
+  it('被拦消息覆盖重发在文本未修改时透传语义引用与 chip ranges', async () => {
     const override = vi.fn(async () => {});
+    const agentReferences = [{
+      kind: 'session' as const,
+      start: 0,
+      end: 13,
+      href: 'cindy://session/source',
+      sessionId: 'source',
+    }];
     const ranges = {
+      agentReferences,
       pastedTextRanges: [{ start: 0, end: 13, display: 'Pasted text (1 line)' }],
       slashCommandRanges: [] as [],
     };
@@ -186,6 +204,7 @@ describe('UserMessageEditBox — idle 发送', () => {
     await waitFor(() =>
       expect(override).toHaveBeenCalledWith({
         text: 'original text',
+        agentReferences,
         pastedTextRanges: ranges.pastedTextRanges,
         slashCommandRanges: [],
       }),

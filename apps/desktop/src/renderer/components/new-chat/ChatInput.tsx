@@ -14,6 +14,7 @@ import { createPortal } from 'react-dom';
 import { useNavigate } from 'react-router-dom';
 import { Folder, MessageSquarePlus, Mic, Pen, TriangleAlert, X } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
+import type { AgentInputReference } from '@cindy/maker-shared/agent-input-projection';
 import { requiresFullAccessConfirmation } from '@cindy/maker-shared/permission-mode';
 import { ImageLightbox } from '@/components/chat/ImageLightbox';
 import { TextLightbox } from '@/components/chat/TextLightbox';
@@ -56,6 +57,11 @@ import {
   type BrowserCommentDraftItem,
 } from '@/lib/browserComments';
 import { formatMentionRef } from '@/lib/mentionRefFormat';
+import {
+  parseProjectDeepLinkHref,
+  parseSessionDeepLinkHref,
+  projectDisplayName,
+} from '@/lib/deepLink';
 import { isGlobalDropIntercepted } from '@/lib/globalDropIntercept';
 import { shouldOpenTextLightbox } from '@/lib/filePreview';
 import {
@@ -114,6 +120,7 @@ import {
 import type { PastedTextRange, SlashCommandRange } from '@/lib/imageRef';
 import {
   pastedSessionChipAttrs,
+  resolveSessionMessageReferencesForSend,
   serializeSessionChipText,
   resolveSessionChipTitles,
 } from './sessionLinkPaste';
@@ -250,6 +257,8 @@ interface ChatInputProps {
       providerId?: string | null;
       /** chat-text-quote:message 开头的 blockquote 为引用功能拼接产出。 */
       quotesEncoded?: boolean;
+      /** Ordered semantic projection metadata for session/project/message chips. */
+      agentReferences?: AgentInputReference[];
       /** Local display ranges for sent long-paste chips; never added to Agent text. */
       pastedTextRanges?: PastedTextRange[];
       /** Exact local display ranges for slash commands confirmed by this composer. */
@@ -652,6 +661,7 @@ function serializeEditorContent(editor: Editor): {
   text: string;
   mentions: MentionedResource[];
   hasQuotes: boolean;
+  agentReferences: AgentInputReference[];
   pastedTextRanges: PastedTextRange[];
   slashCommandRanges: SlashCommandRange[];
 } {
@@ -683,6 +693,7 @@ function serializeEditorContent(editor: Editor): {
     }
     if (pNode.type.name !== 'paragraph') return;
     let buf = '';
+    let bufAgentReferences: AgentInputReference[] = [];
     let bufPastedTextRanges: PastedTextRange[] = [];
     let bufSlashCommandRanges: SlashCommandRange[] = [];
     let emittedInlineSegment = false;
@@ -691,10 +702,12 @@ function serializeEditorContent(editor: Editor): {
       blocks.push({
         kind: 'text',
         text: buf,
+        ...(bufAgentReferences.length > 0 ? { agentReferences: bufAgentReferences } : {}),
         ...(bufPastedTextRanges.length > 0 ? { pastedTextRanges: bufPastedTextRanges } : {}),
         ...(bufSlashCommandRanges.length > 0 ? { slashCommandRanges: bufSlashCommandRanges } : {}),
       });
       buf = '';
+      bufAgentReferences = [];
       bufPastedTextRanges = [];
       bufSlashCommandRanges = [];
       emittedInlineSegment = true;
@@ -718,11 +731,48 @@ function serializeEditorContent(editor: Editor): {
         } else if (attrs.kind === 'session') {
           // 会话深链 chip:有标题 → `[标题](href)`(消息侧 / 手机端 markdown
           // 链路显式 label 优先),标题未解析 → 裸 href。
-          buf += serializeSessionChipText(attrs);
+          const wire = serializeSessionChipText(attrs);
+          const start = buf.length;
+          buf += wire;
+          const target = parseSessionDeepLinkHref(attrs.path);
+          if (target?.messageClientId) {
+            bufAgentReferences.push({
+              kind: 'message',
+              start,
+              end: buf.length,
+              href: attrs.path,
+              sessionId: target.sessionId,
+              messageClientId: target.messageClientId,
+              ...(attrs.agentText ? { text: attrs.agentText } : {}),
+              ...(attrs.agentTextTruncated ? { truncated: true } : {}),
+            });
+          } else if (target) {
+            bufAgentReferences.push({
+              kind: 'session',
+              start,
+              end: buf.length,
+              href: attrs.path,
+              sessionId: target.sessionId,
+              ...(attrs.titled && attrs.label ? { title: attrs.label } : {}),
+            });
+          }
         } else if (attrs.kind === 'project') {
           // 项目深链 chip:同 session 的取舍——显式标题走 markdown 形式,
           // 目录名占位是 href 可推导的,裸 href 即可(消息侧自行取 basename)。
-          buf += serializeProjectChipText(attrs);
+          const wire = serializeProjectChipText(attrs);
+          const start = buf.length;
+          buf += wire;
+          const target = parseProjectDeepLinkHref(attrs.path);
+          if (target) {
+            bufAgentReferences.push({
+              kind: 'project',
+              start,
+              end: buf.length,
+              href: attrs.path,
+              name: attrs.label || projectDisplayName(target.workingDir),
+              workingDir: target.workingDir,
+            });
+          }
         } else if (attrs.kind === 'dir') {
           // 含空格的 path 用 `@"..."` 引号形式序列化（formatMentionRef），否则
           // 下游 `@\S+` 切词会从空格处把 chip 截断。dir 的尾 `/` 一并纳入引号内，
@@ -3349,10 +3399,20 @@ export function ChatInput({
       if (!editor) return;
       if (disabled) return;
       if (dispatchSendInFlightRef.current) return;
+      dispatchSendInFlightRef.current = true;
+      setSendDispatchInFlight(true);
+      try {
+        await resolveSessionMessageReferencesForSend(editor);
+      } finally {
+        dispatchSendInFlightRef.current = false;
+        setSendDispatchInFlight(false);
+      }
+      if (editor.isDestroyed) return;
       const {
         text: editorText,
         mentions,
         hasQuotes,
+        agentReferences,
         pastedTextRanges,
         slashCommandRanges,
       } = serializeEditorContent(editor);
@@ -3451,6 +3511,7 @@ export function ChatInput({
             deliveryMode,
             providerId: sendProviderId,
             ...(hasQuotes ? { quotesEncoded: true } : {}),
+            ...(agentReferences.length > 0 ? { agentReferences } : {}),
             ...(pastedTextRanges.length > 0 ? { pastedTextRanges } : {}),
             slashCommandRanges,
             ...(usedGhost ? { onAccepted: markRecentPluginUsage } : {}),
