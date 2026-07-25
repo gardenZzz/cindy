@@ -2102,9 +2102,11 @@
       },
       "defaults": {
         "title": "New Conversation Configuration",
-        "description": "New conversations started from Feishu, Slack, or Discord use this agent and model configuration. Changes apply only to new conversations; send /new in an existing Discord DM to apply them.",
-        "localDescription": "New conversations started from Feishu or Discord use this agent and model configuration. Changes apply only to new conversations; send /new in an existing Discord DM to apply them.",
-        "feishuOnlyDescription": "New conversations started from Feishu use this agent and model configuration. Changes apply only to new conversations.",
+        "channelDescriptions": {
+          "feishu": "New Feishu conversations use this Agent and model. Send /new in an existing DM to apply it.",
+          "slack": "New Slack threads use this Agent and model.",
+          "discord": "New Discord conversations use this Agent and model. Send /new in an existing DM to apply it."
+        },
         "agentLabel": "Agent",
         "modelLabel": "Model Configuration",
         "loading": "Loading new conversation configuration…",

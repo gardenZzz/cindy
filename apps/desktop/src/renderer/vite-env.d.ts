@@ -214,6 +214,7 @@ type LocalThemeWriteRequest = import('../shared/local-themes').LocalThemeWriteRe
 type LocalThemeWriteResult = import('../shared/local-themes').LocalThemeWriteResult;
 type ImDefaultSettingsPatch = import('../shared/imDefaultSettings').ImDefaultSettingsPatch;
 type ImDefaultSettingsState = import('../shared/imDefaultSettings').ImDefaultSettingsState;
+type ImDefaultSettingsChannel = import('../shared/imDefaultSettings').ImDefaultSettingsChannel;
 type SubagentModelSettingsPatch = import('../shared/subagentModelSettings').SubagentModelSettingsPatch;
 type SubagentModelSettingsState = import('../shared/subagentModelSettings').SubagentModelSettingsState;
 
@@ -3918,10 +3919,13 @@ interface ElectronAPI {
       codexRestartDeferred: boolean;
     }>;
 
-    /** IM 新会话默认 agent/model/effort/provider。仅影响新 IM session 和 Feishu `/new` */
-    imDefaultSettingsGet: () => Promise<ImDefaultSettingsState>;
-    imDefaultSettingsSet: (patch: ImDefaultSettingsPatch) => Promise<ImDefaultSettingsState>;
-    imDefaultSettingsReset: () => Promise<ImDefaultSettingsState>;
+    /** IM 新会话默认 agent/model/effort/provider。传 channel 时按渠道独立读写。 */
+    imDefaultSettingsGet: (channel?: ImDefaultSettingsChannel) => Promise<ImDefaultSettingsState>;
+    imDefaultSettingsSet: (
+      patch: ImDefaultSettingsPatch,
+      channel?: ImDefaultSettingsChannel,
+    ) => Promise<ImDefaultSettingsState>;
+    imDefaultSettingsReset: (channel?: ImDefaultSettingsChannel) => Promise<ImDefaultSettingsState>;
 
     /** 子代理模型覆盖。null 表示不注入覆盖，仅对新建 agent 会话生效。 */
     subagentModelSettingsGet: () => Promise<SubagentModelSettingsState>;

@@ -2101,9 +2101,11 @@
       },
       "defaults": {
         "title": "新会话配置",
-        "description": "从飞书、Slack 或 Discord 发起新会话时，会使用这里的 Agent 和模型配置。修改后只影响新会话；已有 Discord 私聊请发送 /new 才会应用新配置。",
-        "localDescription": "从飞书或 Discord 发起新会话时，会使用这里的 Agent 和模型配置。修改后只影响新会话；已有 Discord 私聊请发送 /new 才会应用新配置。",
-        "feishuOnlyDescription": "从飞书发起新会话时，会使用这里的 Agent 和模型配置。修改后只影响新会话。",
+        "channelDescriptions": {
+          "feishu": "飞书新会话会使用这组 Agent 和模型；已有私聊发送 /new 后应用。",
+          "slack": "Slack 新 thread 会使用这组 Agent 和模型。",
+          "discord": "Discord 新会话会使用这组 Agent 和模型；已有私聊发送 /new 后应用。"
+        },
         "agentLabel": "Agent",
         "modelLabel": "模型配置",
         "loading": "正在读取新会话配置…",
