@@ -15,6 +15,16 @@
 export const WORD_BOUNDARY = 'A-Za-z0-9_-';
 
 /**
+ * URL 片段。
+ *
+ * 关键是**不能**用 \S+ 收尾:中文正文常紧跟在 URL 后面且中间没有空格
+ * (「请访问 https://x.test,返回对话列表」),\S+ 会把全角标点连同后面整句正文一起吞掉,
+ * 于是 URL 之后的禁用词、大小写问题全部检测不到,门禁静默放行。
+ * 按 CJK 句读与括号截断,只吃掉 URL 本身。
+ */
+const URL_TOKEN = /\b[a-z][\w-]*:\/\/[^\s，。；：！？、（）「」【】《》“”‘’…]+/gi;
+
+/**
  * 剥离不该参与术语匹配的片段,避免误报:
  *  - {{var}} / {{var, format}}  i18next 插值(变量名常与术语同形,如 {{project}})
  *  - <0>…</0>                   Trans 组件占位
@@ -26,7 +36,7 @@ export function stripNonProse(text) {
     .replace(/\{\{[^}]*\}\}/g, ' ')
     .replace(/<\/?\d+>/g, ' ')
     .replace(/\$t\([^)]*\)/g, ' ')
-    .replace(/\b[a-z][\w-]*:\/\/\S+/gi, ' ')
+    .replace(URL_TOKEN, ' ')
     .replace(/\S+@\S+\.\S+/g, ' ')
     .replace(/\b[\w-]+\.(json|ts|tsx|js|mjs|md|yml|yaml|sql|lock|toml)\b/gi, ' ');
 }
@@ -134,7 +144,7 @@ export function normalizeForPunctuation(text) {
     .replace(/\{\{[^}]*\}\}/g, PROSE_PLACEHOLDER)
     .replace(/<\/?\d+>/g, PROSE_PLACEHOLDER)
     .replace(/\$t\([^)]*\)/g, PROSE_PLACEHOLDER)
-    .replace(/\b[a-z][\w-]*:\/\/\S+/gi, ' ')
+    .replace(URL_TOKEN, ' ')
     .replace(/\S+@\S+\.\S+/g, ' ')
     .replace(/\b[\w-]+\.(json|ts|tsx|js|mjs|md|yml|yaml|sql|lock|toml)\b/gi, ' ');
 }

@@ -105,6 +105,30 @@ if (schemaErrors.length > 0) {
   );
 }
 
+// 以语言为键的映射,其键名必须落在 glossary.locales 里。
+//
+// schema 管不了这条:locales 是数据(glossary.json 自己声明的),而 JSON Schema 里的
+// additionalProperties 只能约束「值」的形状,不能拿另一个字段的内容去约束键名。
+// 于是 forbidden.zh_CN(下划线,正确写法是 zh-CN)这类拼写照样通过校验,而扫描时只按
+// glossary.locales 迭代,那条规则就被静默忽略了——写了规则、看着有校验、实际没生效。
+const LOCALE_KEYED_FIELDS = ['translations', 'forbidden', 'alsoAllowed', 'minorityByDesign'];
+const declaredLocales = new Set(glossary.locales);
+const localeKeyErrors = [];
+for (const term of glossary.terms) {
+  for (const field of LOCALE_KEYED_FIELDS) {
+    for (const locale of Object.keys(term[field] ?? {})) {
+      if (!declaredLocales.has(locale)) {
+        localeKeyErrors.push(
+          `术语 ${term.id} 的 ${field}.${locale}:"${locale}" 不在 locales [${glossary.locales.join(', ')}] 里`,
+        );
+      }
+    }
+  }
+}
+if (localeKeyErrors.length > 0) {
+  fail(`术语表里有无法生效的语言键(拼错的语言键会让整条规则静默失效):\n${localeKeyErrors.map((e) => `  - ${e}`).join('\n')}`);
+}
+
 /** 递归展平嵌套 JSON 为 Map<'a.b.c', string>。 */
 function flatten(obj, prefix, out) {
   for (const [key, value] of Object.entries(obj)) {
@@ -206,8 +230,11 @@ for (const term of glossary.terms) {
         if (isExempt(key)) continue;
         if (!occursIn(stripNonProse(value), bad)) continue;
         if (sourceRe) {
+          // 英文源同样要先剥离非文案片段:whenEn 若只出现在 URL / 文件名 / $t() 里
+          // (例如英文源含 agent-config.json),会被误判为「英文命中」,把禁用规则
+          // 套到一个其实没提到该概念的 key 上。
           const source = corpus.get(glossary.sourceLocale)?.get(key);
-          if (!source || !sourceRe.test(source)) continue;
+          if (!source || !sourceRe.test(stripNonProse(source))) continue;
         }
         const expected = term.translations?.[locale] ?? term.en;
         violations.push(
@@ -309,16 +336,39 @@ violations.sort((a, b) => a.fingerprint.localeCompare(b.fingerprint));
 const blockingAll = violations.filter((v) => v.severity === 'error');
 
 if (UPDATE_BASELINE) {
+  // --update-baseline **只能删,不能加**。
+  //
+  // 原先它把当前全部违规覆盖写进 baseline,于是「引入违规 + 顺手重跑一次本命令」就能
+  // 让新违规被登记为已知存量,CI 照常通过——门禁等于自带一个绕过开关。baseline 的
+  // 约定本来就是「只减不增」,这里必须让工具本身遵守,而不是指望使用者自觉。
+  //
+  // 真要新冻结一批存量(例如新增一条规则),得手动编辑 JSON——那样新增条目会明明白白
+  // 出现在 diff 里被 review 看到。
+  const existing = fs.existsSync(BASELINE_PATH) ? new Set(readJson(BASELINE_PATH).entries ?? []) : new Set();
+  const additions = blockingAll.filter((v) => !existing.has(v.fingerprint));
+  if (additions.length > 0) {
+    fail(
+      `--update-baseline 只能删除已修好的条目,不能登记新违规(当前有 ${additions.length} 条不在 baseline 里):\n` +
+        additions
+          .slice(0, 10)
+          .map((v) => `  - ${v.fingerprint.split('\t').slice(0, 3).join(' / ')}`)
+          .join('\n') +
+        (additions.length > 10 ? `\n  ...另有 ${additions.length - 10} 条` : '') +
+        '\n请修掉这些违规;确需冻结时手动编辑 i18n/glossary-baseline.json,让新增条目出现在 diff 里。',
+    );
+  }
+  const kept = blockingAll.map((v) => v.fingerprint).sort();
   const payload = {
     _comment:
       '存量违规冻结清单(仅 status=decided 的术语与标点规则)。只减不增:修好一条就从这里' +
-      '删一条,新增违规一律阻断 CI。重新生成: node scripts/check-i18n-glossary.mjs --update-baseline',
+      '删一条,新增违规一律阻断 CI。剪枝: node scripts/check-i18n-glossary.mjs --update-baseline' +
+      '(该命令拒绝登记新违规,新增条目必须手动编辑本文件)',
     _generatedFrom: `glossary.json version ${glossary.version}`,
-    entries: blockingAll.map((v) => v.fingerprint).sort(),
+    entries: kept,
   };
   fs.writeFileSync(BASELINE_PATH, `${JSON.stringify(payload, null, 2)}\n`, 'utf8');
   console.log(
-    `[check-i18n-glossary] 已写入 baseline: ${blockingAll.length} 条存量违规 → ${path.relative(repoRoot, BASELINE_PATH)}`,
+    `[check-i18n-glossary] baseline 已剪枝: ${existing.size} → ${kept.length} 条 → ${path.relative(repoRoot, BASELINE_PATH)}`,
   );
   process.exit(0);
 }

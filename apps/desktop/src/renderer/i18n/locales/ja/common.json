@@ -5558,8 +5558,8 @@
         "capabilitiesSearch": "機能を検索",
         "capabilitiesEmpty": "一致する機能がありません",
         "capabilityDescs": {
-          "jira_read": "Jira Issueの照会・読み取り（キー指定 / JQL 検索）",
-          "jira_comment": "Jira Issueへのコメント追加",
+          "jira_read": "Jira 課題の照会・読み取り（キー指定 / JQL 検索）",
+          "jira_comment": "Jira 課題へのコメント追加",
           "sessions_dispatch": "{{appName}} セッションの作成・再開とメッセージ送信",
           "feishu_read": "最近アクティブなチャットの一覧取得;指定チャット(グループ/DM)の最新メッセージ取得"
         },
