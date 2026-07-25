@@ -534,9 +534,8 @@ export interface StartSessionOptions {
    */
   codexHistoryHasProductPrompt?: boolean;
   /**
-   * 附加只读引用目录列表(绝对路径)。Claude 透传到 SDK options.additionalDirectories,
-   * 让 agent 能读 workingDir 之外的目录(只读语义,permission 仍受 sandbox 控制)。
-   * Codex 不支持 (capability=false), 收到此字段会忽略。
+   * 附加只读引用目录列表(绝对路径)。Claude 透传到 SDK options.additionalDirectories；
+   * Codex 透传到 app-server runtimeWorkspaceRoots，并用 permission profile 保持只读。
    * 跟 model/effort 同语义: 启动时快照 + 由 setExtraDirs 热更新 closure。
    */
   extraDirs?: string[];
@@ -730,8 +729,7 @@ export interface AgentSessionHandle {
   setFastMode?(enabled: boolean): Promise<void>;
 
   /**
-   * 运行时增删 extraDirs(覆盖式)。Claude 推 closure → 下一 turn buildQuery 自动用新值。
-   * Codex 不实现(capability=false 时 Session 层会先抛 NotSupportedError)。
+   * 运行时增删 extraDirs(覆盖式)。Claude 与 Codex 都更新 closure，在下一 turn 生效。
    */
   setExtraDirs?(dirs: string[]): Promise<void>;
 

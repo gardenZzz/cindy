@@ -301,9 +301,17 @@ async function waitForExpectation(assertion: () => void | Promise<void>, timeout
 function installFakeHost(
   agent: CodexAgent,
   requestImpl?: (method: string, params: unknown) => Promise<unknown> | unknown,
-  opts: { codexProxyActive?: boolean; remoteCompactionProviderId?: string; userAgent?: string } = {},
+  opts: {
+    codexProxyActive?: boolean;
+    remoteCompactionProviderId?: string;
+    userAgent?: string;
+    codexHome?: string;
+  } = {},
 ) {
-  const ensureStarted = vi.fn(async () => ({ userAgent: opts.userAgent ?? 'mock-codex/0.144.6' }));
+  const ensureStarted = vi.fn(async () => ({
+    userAgent: opts.userAgent ?? 'mock-codex/0.144.6',
+    ...(opts.codexHome ? { codexHome: opts.codexHome } : {}),
+  }));
   let threadHandlers: ThreadEventHandlers | null = null;
   const request = vi.fn(async (method: string, params: unknown): Promise<unknown> => {
     if (requestImpl) {
@@ -380,6 +388,182 @@ describe('CodexAgent permissions', () => {
       'auto',
       'bypassPermissions',
     ]);
+    expect(agent.capabilities.extraDirs).toEqual({ supported: true });
+  });
+});
+
+describe('CodexAgent reference directories', () => {
+  const profileName = 'cindy-readonly-references';
+
+  it('keeps reference roots read-only on thread/start and every turn', async () => {
+    const agent = new CodexAgent(createDeps());
+    let turnSeq = 0;
+    const host = installFakeHost(
+      agent,
+      (method) => {
+        if (method === Method.TurnStart) return { turn: { id: `turn-${++turnSeq}` } };
+        return undefined;
+      },
+      { codexHome: '/tmp/mock-codex-home' },
+    );
+    const handle = await agent.startSession({
+      sessionId: 'session-extra-dirs',
+      model: 'gpt-5.4',
+      workingDir: '/repo',
+      extraDirs: ['/shared-a'],
+    });
+
+    const [, startParams] = host.request.mock.calls.find(
+      ([method]) => method === Method.ThreadStart,
+    ) as [string, Record<string, unknown>];
+    expect(startParams.runtimeWorkspaceRoots).toEqual(['/repo', '/shared-a']);
+    expect(startParams.permissions).toBe(profileName);
+    expect('sandbox' in startParams).toBe(false);
+
+    const profile = (
+      startParams.config as Record<string, {
+        filesystem: Record<string, unknown>;
+        network: { enabled: boolean };
+      }>
+    )[`permissions.${profileName}`];
+    expect(profile).toBeDefined();
+    expect(profile.network).toEqual({ enabled: false });
+    expect(profile.filesystem).toMatchObject({
+      ':root': 'read',
+      ':workspace_roots': 'read',
+      ':tmpdir': 'write',
+      ':slash_tmp': 'write',
+      '/repo': {
+        '.': 'write',
+        '.git': 'read',
+        '.agents': 'read',
+        '.codex': 'read',
+      },
+      '/tmp/mock-codex-home/memories': 'write',
+    });
+    expect(profile.filesystem['/shared-a']).toBeUndefined();
+
+    await handle.send({ type: 'user', content: 'read the shared project' });
+    const turnCalls = () => host.request.mock.calls.filter(
+      ([method]) => method === Method.TurnStart,
+    );
+    const [, firstTurn] = turnCalls()[0] as [string, Record<string, unknown>];
+    expect(firstTurn.runtimeWorkspaceRoots).toEqual(['/repo', '/shared-a']);
+    expect(firstTurn.permissions).toBe(profileName);
+    expect('sandboxPolicy' in firstTurn).toBe(false);
+
+    const handlers = host.getThreadHandlers();
+    if (!handlers) throw new Error('expected thread handlers');
+    handlers.turnCompleted?.({
+      threadId: 'start-thread-id',
+      turn: { id: 'turn-1', status: 'completed' },
+    });
+
+    await handle.setExtraDirs?.(['/shared-b']);
+    await handle.send({ type: 'user', content: 'use the replacement reference' });
+    const [, secondTurn] = turnCalls()[1] as [string, Record<string, unknown>];
+    expect(secondTurn.runtimeWorkspaceRoots).toEqual(['/repo', '/shared-b']);
+    expect(secondTurn.permissions).toBe(profileName);
+    handlers.turnCompleted?.({
+      threadId: 'start-thread-id',
+      turn: { id: 'turn-2', status: 'completed' },
+    });
+
+    await handle.setPermissionMode?.('bypassPermissions');
+    await handle.send({ type: 'user', content: 'run with full access' });
+    const [, bypassTurn] = turnCalls()[2] as [string, Record<string, unknown>];
+    expect(bypassTurn.runtimeWorkspaceRoots).toEqual(['/repo', '/shared-b']);
+    expect('permissions' in bypassTurn).toBe(false);
+    expect(bypassTurn.sandboxPolicy).toEqual({ type: 'dangerFullAccess' });
+    handlers.turnCompleted?.({
+      threadId: 'start-thread-id',
+      turn: { id: 'turn-3', status: 'completed' },
+    });
+
+    await handle.setPermissionMode?.('ask');
+    await handle.setExtraDirs?.([]);
+    await handle.send({ type: 'user', content: 'continue without references' });
+    const [, noReferencesTurn] = turnCalls()[3] as [string, Record<string, unknown>];
+    expect(noReferencesTurn.runtimeWorkspaceRoots).toEqual(['/repo']);
+    expect('permissions' in noReferencesTurn).toBe(false);
+    expect(noReferencesTurn.sandboxPolicy).toEqual({
+      type: 'workspaceWrite',
+      writableRoots: ['/tmp/mock-codex-home/memories'],
+    });
+    await handle.close();
+  });
+
+  it('restores reference roots and the permission profile on thread/resume', async () => {
+    const agent = new CodexAgent(createDeps());
+    const host = installFakeHost(agent);
+    const handle = await agent.startSession({
+      sessionId: 'session-extra-dirs-resume',
+      model: 'gpt-5.4',
+      workingDir: '/repo',
+      extraDirs: ['/shared-resume'],
+      resumeSessionId: '123e4567-e89b-12d3-a456-426614174000',
+    });
+
+    const [, resumeParams] = host.request.mock.calls.find(
+      ([method]) => method === Method.ThreadResume,
+    ) as [string, Record<string, unknown>];
+    expect(resumeParams.runtimeWorkspaceRoots).toEqual(['/repo', '/shared-resume']);
+    expect(resumeParams.permissions).toBe(profileName);
+    expect('sandbox' in resumeParams).toBe(false);
+    expect(resumeParams.config).toHaveProperty(`permissions.${profileName}`);
+    await handle.close();
+  });
+
+  it('reapplies roots and the profile when a stale daemon requires resume + retry', async () => {
+    const agent = new CodexAgent(createDeps());
+    let turnStartCount = 0;
+    const host = installFakeHost(agent, (method) => {
+      if (method === Method.TurnStart) {
+        turnStartCount += 1;
+        if (turnStartCount === 1) throw new Error('thread not found');
+        return { turn: { id: 'turn-retry' } };
+      }
+      return undefined;
+    });
+    const handle = await agent.startSession({
+      sessionId: 'session-extra-dirs-retry',
+      model: 'gpt-5.4',
+      workingDir: '/repo',
+      extraDirs: ['/shared-retry'],
+    });
+
+    await handle.send({ type: 'user', content: 'retry after restart' });
+
+    const resumeCalls = host.request.mock.calls.filter(
+      ([method]) => method === Method.ThreadResume,
+    );
+    expect(resumeCalls).toHaveLength(1);
+    const [, resumeParams] = resumeCalls[0] as [string, Record<string, unknown>];
+    expect(resumeParams.runtimeWorkspaceRoots).toEqual(['/repo', '/shared-retry']);
+    expect(resumeParams.permissions).toBe(profileName);
+    expect(resumeParams.config).toHaveProperty(`permissions.${profileName}`);
+
+    const turnCalls = host.request.mock.calls.filter(
+      ([method]) => method === Method.TurnStart,
+    );
+    expect(turnCalls).toHaveLength(2);
+    for (const [, params] of turnCalls as Array<[string, Record<string, unknown>]>) {
+      expect(params.runtimeWorkspaceRoots).toEqual(['/repo', '/shared-retry']);
+      expect(params.permissions).toBe(profileName);
+      expect('sandboxPolicy' in params).toBe(false);
+    }
+    await handle.close();
+  });
+
+  it('rejects reference roots when a remote app-server is too old to keep them read-only', async () => {
+    const agent = new CodexAgent(createDeps());
+    installFakeHost(agent, undefined, { userAgent: 'mock-codex/0.143.0' });
+    await expect(agent.startSession({
+      sessionId: 'session-extra-dirs-old-server',
+      model: 'gpt-5.4',
+      workingDir: '/repo',
+      extraDirs: ['/shared-old'],
+    })).rejects.toThrow('require app-server 0.144.6 or newer');
   });
 });
 

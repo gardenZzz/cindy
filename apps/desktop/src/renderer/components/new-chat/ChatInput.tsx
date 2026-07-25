@@ -479,7 +479,7 @@ interface ChatInputProps {
    * 与 onExtraDirsChange 成对出现:
    *   - 创建时(NewMakerDraftRoute):传 draft.extraDirs + 写 newMakerDraft store
    *   - 中途(CCAgentSessionView):传 session.extraDirs + 双 IPC(sessionService.update + maker.setExtraDirs)
-   * 不传 / 传 undefined → 不显示引用目录段(老调用方零迁移)。引用目录仍是 cc 专属;
+   * 不传 / 传 undefined → 不显示引用目录段(老调用方零迁移)。Claude 与 Codex 共用;
    * 但「+」按钮本身在有 onNewGoal(新建目标入口)时两端都会出现。
    */
   extraDirs?: string[];
@@ -5266,24 +5266,22 @@ export function ChatInput({
                   // create-agent 按 Figma 使用 hug-content pills;默认会话页仍保留左侧优先压缩。
                 )}
               >
-                {/* composer 「+」菜单(权限左侧):新建目标 + 计划模式(两端通用、同级)+ 引用目录(仅 cc)。
+                {/* composer 「+」菜单(权限左侧):新建目标 + 计划模式 + 引用目录(两端通用、同级)。
                 显示条件:有新建目标入口(会话内 → 内部 NewGoalDialog;首页 → onNewGoal 回调)、
-                计划模式入口(capability + 接线齐备),或 cc 有引用目录。
-                agentKind 透传真实 vendor(ExtraDirsButton 内部按能力裁剪菜单)。 */}
+                计划模式入口(capability + 接线齐备),或有引用目录接线。 */}
                 {(inSessionGoalEnabled ||
                   onNewGoal ||
                   planModeEntry ||
                   pluginsForMenu.length > 0 ||
-                  (vendorKey === 'cc' && extraDirs !== undefined && onExtraDirsChange)) && (
+                  (extraDirs !== undefined && onExtraDirsChange)) && (
                   <ExtraDirsButton
                     extraDirs={extraDirs ?? []}
                     workingDir={workingDir}
-                    agentKind={vendorKey === 'cc' ? 'cc' : 'codex'}
                     planMode={planModeEntry}
                     plugins={pluginsForMenu}
                     pluginAvailableIds={pluginAvailableIds}
                     onPluginSelect={handlePluginSelect}
-                    onChange={onExtraDirsChange ?? (() => {})}
+                    onChange={onExtraDirsChange}
                     onNewGoal={
                       inSessionGoalEnabled || onNewGoal
                         ? () => {

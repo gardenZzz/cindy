@@ -1979,7 +1979,7 @@ export function CCAgentSessionView({
   // 双 IPC 协调,跟 setModel 同模式:
   //   1. sessionService.update({ extraDirs }) → 落 DB(持久化)
   //   2. window.electronAPI.maker.setExtraDirs(sessionId, ...) → 推 closure
-  //      (Claude 下一 turn buildQuery 自动用新值; agent capability=false / session 已 close 时 no-op)
+  //      (Claude / Codex 都在下一 turn 使用新值；session 已 close 时 no-op)
   //   3. refreshServerSession → 让本视图的 session.extraDirs 同步到最新值
   // 失败任一只 toast warn,不阻塞;乐观 UI 由 chip 数字角标已经反映。
   const handleExtraDirsChange = useCallback(
