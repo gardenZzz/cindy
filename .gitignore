@@ -37,6 +37,10 @@ apps/desktop/resources/tools/
 apps/desktop/resources/cc-manager/
 apps/desktop/resources/anthropic-compat-proxy/
 apps/desktop/resources/remote-file-service/
+# Windows 打包时由 prePackage 现场 cargo build 生成并覆盖(forge.config.ts
+# buildCindyUpdater);源码在 apps/desktop/cindy-updater/,不入仓避免 4.5MB
+# 二进制持续消耗 Git LFS 流量。
+apps/desktop/resources/cindy-updater.exe
 
 # ── Agent CLI 本地二进制 ─────────────────────────────────────
 # 实体文件按 tools/<kind>/latest.json 的 pin 下载，不进 Git/LFS。
