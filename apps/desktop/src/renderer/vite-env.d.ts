@@ -12,6 +12,8 @@ interface ImportMeta {
 
 type ModelAccessStatusPayload = import('../shared/modelAccess').ModelAccessStatus;
 type RsbWindowCommand = import('../shared/rightSidebarWindow').RsbWindowCommand;
+type VoiceInputPowerStatePayload =
+  import('../shared/voiceInputPowerIpc').VoiceInputPowerStatePayload;
 type DesktopLoginAction = import('../shared/authIpc').DesktopLoginAction;
 type DesktopLoginActionResult = import('../shared/authIpc').DesktopLoginActionResult;
 type UtilityTextFailure = import('../shared/utilityTextResult').UtilityTextFailure;
@@ -1332,6 +1334,8 @@ interface ElectronAPI {
     onDictionaryLearningEvidence: (
       callback: (payload: { evidence: Pick<VoiceInputDictionaryAdviceInput, 'source' | 'rawTranscriptText' | 'beforeText' | 'afterText' | 'context'> }) => void,
     ) => () => void;
+    /** 系统挂起/锁屏 → 释放 fast activation 的保活麦克风。 */
+    onPowerStateChange: (callback: (payload: VoiceInputPowerStatePayload) => void) => () => void;
     notifyGlobalOverlayReady: () => void;
     pasteIntoFocusedTarget: (text: string, rawTranscriptText?: string) => Promise<VoiceInputGlobalResult>;
     restoreGlobalPasteTargetFocus: () => Promise<VoiceInputGlobalResult>;
