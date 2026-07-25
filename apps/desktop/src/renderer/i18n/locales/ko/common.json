@@ -7214,6 +7214,7 @@
       "errorDescription": "네트워크를 확인하고 다시 시도하세요. 로컬 대체 요금제는 표시하지 않습니다.",
       "emptyTitle": "요금제가 없습니다",
       "emptyDescription": "서버에서 공개한 요금제가 아직 없습니다.",
+      "currentPlan": "현재 요금제",
       "unavailableReasons": {
         "OFFER_COMING_SOON": "출시 예정",
         "NO_AVAILABLE_PAYMENT_CHANNEL": "사용 가능한 결제 수단 없음"

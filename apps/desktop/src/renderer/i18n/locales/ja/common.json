@@ -7214,6 +7214,7 @@
       "errorDescription": "接続を確認して再試行してください。ローカルの代替プランは表示しません。",
       "emptyTitle": "プランはまだありません",
       "emptyDescription": "サーバーで公開中のプランはまだありません。",
+      "currentPlan": "現在のプラン",
       "unavailableReasons": {
         "OFFER_COMING_SOON": "近日提供",
         "NO_AVAILABLE_PAYMENT_CHANNEL": "利用可能な支払い方法なし"

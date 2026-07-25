@@ -7225,6 +7225,7 @@
       "errorDescription": "Check your connection and retry. Local fallback plans will not be used.",
       "emptyTitle": "No Plans Available",
       "emptyDescription": "The server has not published any plans yet.",
+      "currentPlan": "Current Plan",
       "unavailableReasons": {
         "OFFER_COMING_SOON": "Coming Soon",
         "NO_AVAILABLE_PAYMENT_CHANNEL": "No Payment Method Available"

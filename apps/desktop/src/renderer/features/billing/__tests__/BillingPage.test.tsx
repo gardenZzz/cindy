@@ -852,6 +852,47 @@ describe('BillingPage remote catalog rendering', () => {
     expect(checkout.startSubscription).not.toHaveBeenCalled();
   });
 
+  it('marks the current subscription offer and prevents selecting it again', async () => {
+    window.electronAPI.billing.getCurrentSubscription = vi.fn(async () => ({
+      subscription: {
+        subscriptionId: 'subscription_fixture',
+        status: 'ACTIVE' as const,
+        currentPeriodStartAt: '2026-07-01T00:00:00.000Z',
+        currentPeriodEndAt: '2026-08-01T00:00:00.000Z',
+        entitlementValidUntil: '2026-08-02T00:00:00.000Z',
+        cancelAtPeriodEnd: true,
+        effectivePlan: {
+          version: 1 as const,
+          product: { code: 'plus', kind: 'SUBSCRIPTION' as const, level: 1 },
+          offer: { code: 'plus_month', interval: 'MONTH' as const },
+          terms: {
+            amount: '9',
+            currency: 'usd',
+            creditAmount: '100',
+            rolloverCap: '0',
+          },
+          capturedAt: '2026-07-01T00:00:00.000Z',
+        },
+        purchaseAttemptId: null,
+        paymentAction: null,
+      },
+    }));
+
+    render(<BillingPage />);
+    fireEvent.click(await screen.findByText('billing.settings.subscriptionCard.action'));
+
+    const dialog = await screen.findByRole('dialog');
+    const currentPlan = within(dialog).getByRole('button', { name: /Configured subscription/ });
+    expect(currentPlan).toHaveProperty('disabled', true);
+    expect(currentPlan.getAttribute('aria-current')).toBe('true');
+    expect(within(dialog).getByText('billing.catalog.currentPlan')).toBeTruthy();
+    expect(within(dialog).queryByText('billing.steps.channel.title')).toBeNull();
+    expect(within(dialog).queryByText('stripe')).toBeNull();
+
+    fireEvent.click(currentPlan);
+    expect(checkout.startSubscription).not.toHaveBeenCalled();
+  });
+
   it('keeps subscription purchases disabled when subscription status is unavailable', async () => {
     window.electronAPI.billing.getCurrentSubscription = vi.fn(async () => {
       throw new Error('subscription status unavailable');
