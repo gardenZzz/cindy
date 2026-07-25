@@ -7177,7 +7177,16 @@
         "priceInterval": "{{price}} / {{interval}}",
         "includedCredits": "Includes {{amount}} credits per {{interval}}",
         "renewsAt": "Renews {{date}}",
-        "endsAt": "Plan ends {{date}}"
+        "endsAt": "Plan ends {{date}}",
+        "cancelAction": "Cancel Subscription",
+        "cancelConfirmTitle": "Cancel Your Current Subscription?",
+        "cancelConfirmDescription": "This action does not issue a refund or immediately change your credits. Your current plan stays available through {{date}}, then it will not renew.",
+        "cancelConfirmDescriptionWithoutDate": "This action does not issue a refund or immediately change your credits. Your current plan stays available through the end of this billing period, then it will not renew.",
+        "cancelConfirmAction": "Confirm Cancellation",
+        "cancelSuccess": "Auto-renewal is canceled. Your current plan remains available through {{date}}.",
+        "cancelSuccessWithoutDate": "Auto-renewal is canceled. Your current plan will end after this billing period.",
+        "cancelNotSupported": "This subscription cannot be canceled yet.",
+        "cancelFailed": "Could not cancel the subscription. Try again later."
       },
       "topupCard": {
         "action": "Buy credits"
@@ -7246,6 +7255,7 @@
       "errorDescription": "Check your connection and retry. Local fallback plans will not be used.",
       "emptyTitle": "No Plans Available",
       "emptyDescription": "The server has not published any plans yet.",
+      "currentPlan": "Current Plan",
       "unavailableReasons": {
         "OFFER_COMING_SOON": "Coming Soon",
         "NO_AVAILABLE_PAYMENT_CHANNEL": "No Payment Method Available"
