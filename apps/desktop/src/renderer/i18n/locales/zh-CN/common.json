@@ -2426,7 +2426,9 @@
         "preview": "可在右侧栏浏览器中打开以下网站的预览页面",
         "previewDetail": "只能打开下方列出的网站;每次打开都会提示是哪个插件打开的。",
         "nodeChildSpawn": "Node 程序可请宿主再启动包内申报过的子进程",
-        "nodeChildSpawnDetail": "只能启动它自己包里申报过的 JS 文件(与主程序同样的本机权限),不能执行任意命令;插件停用或退出时子进程一并关闭。"
+        "nodeChildSpawnDetail": "只能启动它自己包里申报过的 JS 文件(与主程序同样的本机权限),不能执行任意命令;插件停用或退出时子进程一并关闭。",
+        "skill": "为 AI 助手添加技能「{{name}}」",
+        "skillDetail": "技能是一份指令文件,AI 会把它当作自己的指令加载执行,拥有你的全部权限,对 Claude Code 与 Codex、所有项目都生效——不受本插件沙箱约束。插件启用期间持续可用,停用或卸载即移除;仅对某个文件夹关闭本插件不会隐藏它。此处无法预览技能全文——请只安装你信任的插件。"
       },
       "connections": {
         "confirmTitle": "添加连接地址",
@@ -2513,7 +2515,8 @@
         "slotCard": "消息卡片",
         "slotNetwork": "网络访问",
         "slotNotify": "系统提示",
-        "slotFs": "写文件"
+        "slotFs": "写文件",
+        "slotSkill": "Agent 技能"
       },
       "commandPaletteTag": "插件指令",
       "updateConfirm": {

@@ -20,10 +20,12 @@ import JSZip from 'jszip';
 
 import {
   GHOST_MANIFEST_FILE,
+  GHOST_SKILL_MD_MAX_BYTES,
   validateGhostManifest,
   type GhostManifest,
 } from '../../shared/ghost.js';
 import { validateGhostLocaleResourcesInDirectory } from './ghostLocaleFiles.js';
+import { checkSkillMdConsistency } from './skillSlot.js';
 
 /** 与 GhostManager 装入侧同一量级的上限(打包侧提前拦,fail fast)。 */
 const MAX_BASIC_FILES = 256;
@@ -571,12 +573,44 @@ export async function packGhostDir(dir: string): Promise<ForgePackResult> {
     if (manifest.node?.entry) mustExist.push(manifest.node.entry);
     if (manifest.panel?.html) mustExist.push(manifest.panel.html);
     if (manifest.settingsHtml) mustExist.push(manifest.settingsHtml);
+    for (const item of manifest.skill?.items ?? []) mustExist.push(`${item.dir}/SKILL.md`);
     for (const rel of mustExist) {
       try {
         const st = await fs.promises.stat(path.join(dir, rel));
         if (!st.isFile()) throw new Error('not a file');
       } catch {
         return { ok: false, errorCode: 'ENTRY_MISSING', message: `清单声明的文件不存在:${rel}` };
+      }
+    }
+
+    // 3.5) skill 槽:SKILL.md frontmatter 与清单声明必须逐字一致。与装入侧
+    // (GhostManager.parse)共用同一裁判,避免"Forge 能打包、安装被拒"的漂移。
+    for (const item of manifest.skill?.items ?? []) {
+      const skillMdPath = path.join(dir, ...item.dir.split('/'), 'SKILL.md');
+      let content: string;
+      try {
+        content = await fs.promises.readFile(skillMdPath, 'utf-8');
+      } catch (err) {
+        return {
+          ok: false,
+          errorCode: 'ENTRY_MISSING',
+          message: `读取 ${item.dir}/SKILL.md 失败:${err instanceof Error ? err.message : String(err)}`,
+        };
+      }
+      if (Buffer.byteLength(content, 'utf8') > GHOST_SKILL_MD_MAX_BYTES) {
+        return {
+          ok: false,
+          errorCode: 'MANIFEST_INVALID',
+          message: `${item.dir}/SKILL.md 过大(上限 ${GHOST_SKILL_MD_MAX_BYTES} 字节)`,
+        };
+      }
+      const consistencyError = checkSkillMdConsistency(content, item);
+      if (consistencyError) {
+        return {
+          ok: false,
+          errorCode: 'MANIFEST_INVALID',
+          message: `skill 条目 ${item.dir}:${consistencyError}`,
+        };
       }
     }
 
@@ -783,7 +817,7 @@ my-ghost/
 64KB 都会在 Forge 打包期、内置播种期与安装期拒绝。清单列表、详情页、Panel 标题、
 安装/配置提示和 Agent 工具目录都消费同一份本地化结果。
 
-十三个卡槽:\`tool\`(注册工具给 AI)、\`cindy\`(请 Cindy 本体代办:出图/改图)、\`agent\`(让
+十四个卡槽:\`tool\`(注册工具给 AI)、\`cindy\`(请 Cindy 本体代办:出图/改图)、\`agent\`(让
 当前 Agent 开始一个普通用户回合,见 §4.11)、\`panel\`(常驻
 面板)、\`card\`(聊天卡片:自绘工具调用的过程与结果,见 §4.5)、\`subscribe\`(旁听会话
 事件 + 拦截用户消息,见 §4.6)、\`network\`(访问自带服务的域名白名单 HTTP,主机代发,
@@ -792,7 +826,8 @@ my-ghost/
 Node 工作进程或 stdio MCP,见 §4.12)、\`session-context\`(派活时主机把当前会话的
 可信 session_id / workdir 注入 args,见 §4.13)、\`pick\`(请主机弹系统选文件夹窗口,
 用户亲选即授权,见 §4.14)、\`preview\`(请主机在右侧栏内置浏览器打开白名单网站的
-预览标签,见 §4.15)。
+预览标签,见 §4.15)、\`skill\`(捆绑 Agent Skills:随包 SKILL.md 技能,启用后
+Claude Code 与 Codex 都能发现,见 §4.16)。
 
 **agent 能力详单**:在 \`slots\` 加 \`"agent"\`，默认只允许在用户真实点击你的
 聊天卡片后发起一次 Agent 回合；这一档不写配套字段。若确实需要没有当次点击也能
@@ -831,6 +866,18 @@ node 详单**不接受** \`command\` / \`args\` / \`shell\` / \`env\` 或其它�
 \`\`\`json
 "preview": {
   "hosts": ["*.example.dev", "localhost"]   // 1–4 条;语法同 network.hosts;能在右侧栏打开的预览网站白名单,装入确认框逐条展示
+}
+\`\`\`
+
+**skill 详单**(声明 skill 槽时必写,详见 §4.16):
+
+\`\`\`json
+"skill": {
+  "items": [{                       // 1–4 条
+    "dir": "skills/my-skill",       // 包内技能目录,内必须有 SKILL.md
+    "name": "my-skill",             // 硬规则:与 SKILL.md frontmatter name 逐字一致;小写字母/数字加单连字符分段(禁首尾/连续连字符),≤64
+    "description": "……"             // 硬规则:与 SKILL.md frontmatter description 逐字一致(确认框展示的就是 Agent 读到的),1–1024 字
+  }]
 }
 \`\`\`
 
@@ -2219,6 +2266,43 @@ if (!opened.ok) console.warn(opened.errorCode, opened.message);
 - 每次打开,宿主都会弹带你身份头的提示("xxx 打开了一个预览页面"),用户永远
   知道页面是谁开的;
 - 标签开在用户自己的右侧栏浏览器里,关不关、看不看由用户决定。
+
+## 4.16 捆绑 Agent Skills(skill 槽)
+
+想让插件"自带一份教 Agent 怎么用好自己的说明书"(或任何领域技能),把技能目录
+随包携带并声明 \`skill\` 槽 + \`skill.items\` 详单(见 §2)。装入且启用后,主机把
+每个技能目录链接进共享技能根 \`~/.agents/skills/<插件id>--<技能name>\`(Windows 用
+junction),Claude Code 与 Codex 都能自动发现——不复制字节,插件更新技能跟着更新,
+停用/卸载即撤链。
+
+目录形态(每条 item 一个目录,内必须有 SKILL.md):
+
+\`\`\`
+my-ghost/
+  ghost.json
+  main.js
+  skills/
+    my-skill/
+      SKILL.md        ← frontmatter 必须有 name + description
+      reference.md    ← 可选:技能附带的其它文件一并随链接可见
+\`\`\`
+
+SKILL.md 硬规则(打包与装入双侧强制,任一不满足直接拒):
+
+- frontmatter 的 \`name\` / \`description\` 必须与 \`skill.items\` 声明**逐字一致**
+  ——装入确认框展示的是清单声明,Agent 读到的是 SKILL.md,两者必须是同一份事实;
+- \`name\`:小写字母/数字加单连字符分段(禁首尾/连续连字符),≤64 字符;
+- SKILL.md 单文件 ≤64KB;items 最多 4 条。
+
+信任与作用域(如实告知用户,也请作者自重):
+
+- 技能指令由**主 Agent 以用户全部权限执行**,对所有项目、所有会话生效,
+  **不受插件沙箱约束**——这是十四个卡槽里信任面最高的能力,装入确认框会把
+  每个技能置顶逐条列出;
+- 技能跟随插件的**全局**启用状态:仅在某个工作目录停用插件**不会**隐藏技能,
+  只有全局停用或卸载才撤链(本期只有全局作用域);
+- \`skill.items\` 的字段不参与 locales 本地化(必须与 SKILL.md 逐字一致,而
+  SKILL.md 只有一份)。
 
 ## 5. 面板(panel.html/css/js)
 

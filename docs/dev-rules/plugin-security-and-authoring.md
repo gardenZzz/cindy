@@ -28,7 +28,7 @@
 | 身份卡字段与校验、管子协议类型 | `apps/desktop/src/shared/ghost.ts`（`validateGhostManifest`、`cindy.send` / `cindy.onHostMessage` 类型） |
 | 打包限制 | `apps/desktop/src/main/cindy-brain/forge.ts` 的 `packGhostDir` |
 | 运行时、沙箱进程与生命周期 | `apps/desktop/src/main/cindy-brain/runtime/GhostRuntime.ts`、`GhostManager.ts` |
-| 能力 slot（网络／通知／文件系统／宿主等） | `apps/desktop/src/main/cindy-brain/networkSlot.ts`、`notifySlot.ts`、`fsSlot.ts`、`cindySlot.ts` |
+| 能力 slot（网络／通知／文件系统／技能／宿主等） | `apps/desktop/src/main/cindy-brain/networkSlot.ts`、`notifySlot.ts`、`fsSlot.ts`、`cindySlot.ts`、`skillSlot.ts` |
 | 面板供片、注入主题 token 与协议 | `apps/desktop/src/renderer/cindy-brain/ghostPanelTheme.ts`、`cindy-ghost://` 分支 |
 | 权限注入／更新确认 UI | `apps/desktop/src/renderer/cindy-brain/GhostPermissionList.tsx` |
 | 远程／手机版能力准入白名单 | `packages/device-link/src/allowlist.ts` |
@@ -60,6 +60,14 @@
   也不构成授权。
 - 新增或修改 slot 时，除同步编写手册与校验（下节 5）外，还必须同步 shared 类型、
   preload／host handler、权限 UI（`GhostPermissionList.tsx`）、错误边界和测试。
+- `skill` 槽是唯一**越出沙箱**的能力：技能指令由主 Agent 以用户全部权限执行、全局
+  生效、不随 workdir 级停用隐藏。其安全边界是**声明一致性**（manifest 里的
+  name／description 必须与 SKILL.md frontmatter 逐字一致，`skillSlot.ts` 的
+  `checkSkillMdConsistency` 是唯一裁判，打包与装入两侧共用）+ **链接对账**
+  （`reconcileGhostSkillLinks` 只增删"目标落在 cindy-brain 安装根内的
+  symlink／junction"，绝不触碰真实目录与外来链接；启用挂链、停用／卸载撤链、
+  断链自愈）。改动技能落链、命名（`<id>--<name>`，name 侧禁 `--`）或对账判据前，
+  必须先读 `skillSlot.ts` 头注释并保持上述不变量。
 
 ## 4. 网络、凭证与资源交接
 
@@ -96,6 +104,10 @@
 
 - `networkSlot.ts` 的 `as: 'media'` 不能只信任 Content-Type（GLB 常见
   `application/octet-stream`），需要安全的 magic-byte／扩展名嗅探。
+- `skill` 槽尚未镜像进协议仓（`cindy-protocol/packages/plugin-protocol/src/manifest.ts`
+  的 `GHOST_SLOTS` 与校验器是桌面端的手工双份）：本地／手动安装不受影响，但
+  plugin-market 分发声明了 skill 槽的包会被服务端校验拒绝，需与 plugin-server
+  协调后升级 submodule 指针（见 `protocol-and-submodules.md`）。
 - SSH 远程场景必须让 `LiziMcpSessionContext` 携带 remote 标识；目录过户不得回退读取本机
   同名路径，无法证明来源时 **fail closed**。
 - 手机版仍需把历史 mivo 动作按钮降级为纯展示。
