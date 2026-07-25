@@ -1075,7 +1075,7 @@
     },
     "providers": {
       "title": "模型供应商",
-      "subtitle": "选择模型时的来源。每个来源提供它支持的模型与计费方式，可在对话里按对话切换。",
+      "subtitle": "选择模型时的来源。每个来源提供它支持的模型与计费方式，可按对话分别切换。",
       "pill": {
         "connected": "已连接"
       },
@@ -4279,7 +4279,7 @@
       "bashStatus_other": "后台任务运行中（{{count}} 个）…",
       "stopAll": "全部停止",
       "stopAllTitle": "关闭该对话的后台进程，停止全部后台子任务（对话可继续使用）",
-      "stopBashTitle": "停止该对话仍在运行的后台任务（不关闭对话进程）",
+      "stopBashTitle": "停止该对话仍在运行的后台任务（不关闭会话进程）",
       "stopping": "停止中…"
     },
     "interruptedBanner": {
