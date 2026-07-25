@@ -169,10 +169,9 @@ function platformLabel(platform: string | null): string {
 
 /**
  * Desktop promotion surface for the regional Cindy mobile download page.
- * The QR edge reuses the official app artwork, so its brand colors stay
- * coupled to the asset instead of introducing component-level color values
- * (registered exception: DESIGN.md §15.7 / §14.4). The card itself carries no
- * shadow and no pointer tilt.
+ * The QR card is a bare code: no brand edge, no border, no shadow and no
+ * pointer tilt — the only brand artwork left in the dialog is the header icon
+ * (DESIGN.md §15.7). Its only motion is the linked ↔ onboarding size tween.
  */
 export function MobileDownloadDialog({
   open,
@@ -437,7 +436,7 @@ export function MobileDownloadDialog({
                 data-compact={hasLinkedMobile ? 'true' : 'false'}
                 aria-label={t('sidebar.mobileDownload.openPage')}
                 className={cn(
-                  'mobile-download-qr-card relative shrink-0 overflow-hidden rounded-xl',
+                  'mobile-download-qr-card shrink-0 overflow-hidden rounded-xl',
                   hasLinkedMobile ? 'h-[132px] w-[132px]' : 'h-[228px] w-[228px]',
                   'focus-visible:ring-2 focus-visible:ring-[var(--focus-ring)]',
                   'disabled:cursor-not-allowed disabled:opacity-60',
@@ -447,21 +446,9 @@ export function MobileDownloadDialog({
                 }}
               >
                 <span
-                  aria-hidden="true"
-                  className="mobile-download-qr-edge pointer-events-none absolute inset-[-45%]"
-                >
-                  <img
-                    src={cindyIconUrl}
-                    alt=""
-                    className="h-full w-full select-none object-cover"
-                    draggable={false}
-                  />
-                </span>
-                {/* 2px:1px 时红蓝几乎看不见，3px 起就压成相框边了。 */}
-                <span
                   className={cn(
-                    'absolute inset-[2px] flex items-center justify-center overflow-hidden',
-                    'rounded-[10px] bg-[var(--confirm-bg)]',
+                    'flex h-full w-full items-center justify-center overflow-hidden',
+                    'rounded-xl bg-[var(--confirm-bg)]',
                   )}
                   aria-live="polite"
                 >
