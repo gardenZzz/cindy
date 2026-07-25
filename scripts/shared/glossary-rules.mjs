@@ -58,10 +58,13 @@ const EMAIL_TOKEN = new RegExp(`[A-Za-z0-9._%+-]+@${TOKEN_TAIL}`, 'g');
  *
  * 两个约束防止误伤:
  *  - 扩展名必须是纯小写字母 → `1.5`、`v1.0`、`2.0 GB` 不会被当成文件名吃掉
- *    (那会让「1.5,上限」这类半角标点违规漏检);
+ *    (那会让「1.5,上限」这类半角标点违规漏检);长度放到 12 是因为仓库实际支持
+ *    `.markdown`(8)、`.properties`(10)、`.webmanifest`(11) 这些较长扩展名
+ *    (见 packages/maker-shared/src/filePreview.ts),卡在 6 位会让 `worker.markdown`
+ *    留在正文里被误报成产品 Worker;
  *  - 词干必须含至少一个字母 → 纯数字的 `12.34` 同理排除。
  */
-const FILENAME_TOKEN = /\b[A-Za-z0-9_-]*[A-Za-z][A-Za-z0-9_-]*\.[a-z]{1,6}\b/g;
+const FILENAME_TOKEN = /\b[A-Za-z0-9_-]*[A-Za-z][A-Za-z0-9_-]*\.[a-z]{1,12}\b/g;
 
 /**
  * 剥离不该参与术语匹配的片段,避免误报:
@@ -146,6 +149,24 @@ export function findCaseMismatch(text, standard) {
     if (hit !== standard) return hit;
   }
   return null;
+}
+
+/**
+ * 大小写形态不符的**次数**(而非术语出现的总次数)。
+ *
+ * fingerprint 必须用这个:数总次数的话,`worker … Worker` 与 `worker … worker` 产出同一个
+ * `worker×2` 指纹——前者冻进 baseline 后,把那个原本正确的 Worker 也改成小写,新增的违规
+ * 会被静默掩盖。指纹要反映「错了几处」,不是「这个词出现了几次」。
+ */
+export function countCaseMismatches(text, standard) {
+  if (!/^[A-Za-z][A-Za-z0-9 ]*$/.test(standard)) return 0;
+  const escaped = standard.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  const re = new RegExp(`(?<![${WORD_BOUNDARY}])${escaped}s?(?![${WORD_BOUNDARY}])`, 'gi');
+  let n = 0;
+  for (const m of text.matchAll(re)) {
+    if (m[0].replace(/s$/, '') !== standard) n += 1;
+  }
+  return n;
 }
 
 /**
