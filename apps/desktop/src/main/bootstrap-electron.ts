@@ -263,6 +263,7 @@ import {
 } from './windowFocusClassifier.js';
 import { assertTrustedAppRendererEvent } from './security/trustedAppRenderer.js';
 import { initHeartbeatService } from './heartbeatService';
+import { initAnalyticsSettingsService, noteAuthColdStartState } from './analyticsSettingsService';
 import { WindowManualDragController } from './windowManualDrag';
 // 设备互联(跨设备远程控制): relay 连接 host + 开关/设备列表 IPC
 import { initDeviceLinkService, releaseDeviceLinkOwnershipBeforeLogout } from './device-link';
@@ -3358,6 +3359,15 @@ const registerIpcHandlers = () => {
           authManager.getAuthState(),
         );
       }
+      // 使用统计同意闸的一次性存量迁移:只认冷启动恢复出来的登录态。内部有 guard,
+      // 多个窗口各自 initialize 只会评估一次(见 analyticsSettingsService)。
+      // 埋点是 best-effort:再包一层 catch,任何异常都不得让这次认证被判失败
+      // (那会让用户被归一成未登录)。
+      try {
+        noteAuthColdStartState(state, pendingCompletion);
+      } catch (analyticsErr) {
+        console.warn('[analytics] cold-start consent migration failed', analyticsErr);
+      }
       return state;
     } catch (err) {
       if (!app.isPackaged) {
@@ -5562,6 +5572,11 @@ app.on('ready', async () => {
   // 强制引用避免 tree-shaking 干掉 feishuIm（imHost 已通过 im 间接持有，但 main/im 也直接用它）
   void feishuIm;
   // 端点清单已就绪、IPC 已注册,此后 second-instance / activate 允许按需建窗。
+  // 使用统计(TapDB)的同意闸:必须在 createWindow **之前**注册。renderer 的
+  // tapdbClient 一挂载就 invoke analytics:settings-get 来决定是否初始化 SDK,
+  // handler 还没注册的话那次 invoke 会 reject,而它是 fail closed 的 —— 已同意
+  // 的用户会一直不上报,直到手动去设置里拨一下开关。
+  initAnalyticsSettingsService();
   startupWindowCreationAllowed = true;
   createWindow();
   // 预热仅服务 dev macOS，延迟执行避免和启动关键路径争用 CPU；失败由入口内部吞掉。

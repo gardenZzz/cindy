@@ -11,6 +11,7 @@ interface ImportMeta {
 }
 
 type ModelAccessStatusPayload = import('../shared/modelAccess').ModelAccessStatus;
+type AnalyticsSettingsPayload = import('../shared/analyticsSettings').AnalyticsSettingsPayload;
 type RsbWindowCommand = import('../shared/rightSidebarWindow').RsbWindowCommand;
 type VoiceInputPowerStatePayload =
   import('../shared/voiceInputPowerIpc').VoiceInputPowerStatePayload;
@@ -1505,6 +1506,15 @@ interface ElectronAPI {
   onAuthStateChange: (callback: (state: AuthStateChangePayload) => void) => () => void;
   onAuthSessionExpired: (callback: (state: AuthSessionExpiredPayload) => void) => () => void;
   onTapdbDailyActive: (callback: (payload: { date: string }) => void) => () => void;
+
+  // ── 使用统计(TapDB)同意闸 ──
+  getAnalyticsSettings: () => Promise<AnalyticsSettingsPayload>;
+  setAnalyticsEnabled: (enabled: boolean) => Promise<AnalyticsSettingsPayload>;
+  resetAnalyticsEnabled: () => Promise<AnalyticsSettingsPayload>;
+  acceptPrivacyConsent: () => Promise<AnalyticsSettingsPayload>;
+  onAnalyticsSettingsChange: (
+    callback: (payload: AnalyticsSettingsPayload) => void,
+  ) => () => void;
 
   // ── Profile 编辑(设置 → 用户卡片编辑名字 / 头像;直写服务端,跨设备生效) ──
   profileGetState: () => Promise<{

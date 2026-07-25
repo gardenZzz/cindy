@@ -185,6 +185,8 @@ void (async () => {
   await bootstrapMemorySettingsFromMain();
 
   // TapDB 在线活跃上报 — 只在主视图启用,避免 voice-input 浮窗的弹出被算成 PV。
+  // 这里只挂"同意闸":SDK 是否初始化由 main 的 analytics-settings 决定,用户没
+  // 同意过《隐私政策》时一个字节都不会发出去(见 analytics/tapdbClient.ts)。
   initTapdb();
 
   // 顶层 boundary:App 内 RouterProvider 之上的 provider 链渲染崩溃时兜底
