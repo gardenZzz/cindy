@@ -21,6 +21,7 @@ import {
   occursIn,
   stripNonProse,
 } from '../shared/glossary-rules.mjs';
+import { validateAgainstSchema } from '../shared/json-schema-lite.mjs';
 import { renderGlossaryDoc } from '../shared/glossary-doc.mjs';
 
 const ROOT = path.resolve(fileURLToPath(new URL('../..', import.meta.url)));
@@ -353,4 +354,69 @@ test('glossary-baseline.json: 条目格式合法且无重复', () => {
     assert.equal(parts.length, 4, `baseline 条目 "${entry}" 应为 locale\\tkey\\trule\\tdetail 四段`);
     assert.ok(glossary.locales.includes(parts[0]), `baseline 条目语言 "${parts[0]}" 不在术语表 locales 内`);
   }
+});
+
+// ---------------------------------------------------------------------------
+// schema 校验器
+//
+// 子集校验器的价值全在「拼错字段能被抓住」和「schema 加了新关键字不会被静默忽略」
+// 这两条上。两条都塌了的话,它比没有更危险——看起来有校验,实际全绿放行。
+// ---------------------------------------------------------------------------
+
+test('validateAgainstSchema: 正本必须符合自己的 schema', () => {
+  const schema = JSON.parse(fs.readFileSync(path.join(ROOT, 'i18n', 'glossary.schema.json'), 'utf8'));
+  assert.deepEqual(validateAgainstSchema(glossary, schema), []);
+});
+
+test('validateAgainstSchema: 拼错的字段名被判为未知字段', () => {
+  const schema = {
+    type: 'object',
+    additionalProperties: false,
+    properties: { forbidden: { type: 'array', items: { type: 'string' } } },
+  };
+  const errors = validateAgainstSchema({ forbiden: ['会话'] }, schema);
+  assert.equal(errors.length, 1);
+  assert.match(errors[0], /forbiden/);
+});
+
+test('validateAgainstSchema: 校验 required / enum / pattern / oneOf', () => {
+  const schema = {
+    type: 'object',
+    required: ['id', 'status'],
+    additionalProperties: false,
+    properties: {
+      id: { type: 'string', pattern: '^[a-z0-9-]+$' },
+      status: { enum: ['decided', 'proposed'] },
+      forbidden: {
+        type: 'array',
+        items: {
+          oneOf: [
+            { type: 'string' },
+            {
+              type: 'object',
+              required: ['text', 'whenEn'],
+              additionalProperties: false,
+              properties: { text: { type: 'string' }, whenEn: { type: 'string' } },
+            },
+          ],
+        },
+      },
+    },
+  };
+  assert.deepEqual(validateAgainstSchema({ id: 'session', status: 'decided' }, schema), []);
+  assert.match(validateAgainstSchema({ id: 'session' }, schema).join(), /缺少必填字段 "status"/);
+  assert.match(validateAgainstSchema({ id: 'Session', status: 'decided' }, schema).join(), /不匹配/);
+  assert.match(validateAgainstSchema({ id: 'a', status: 'decied' }, schema).join(), /取值必须是/);
+  // 条件禁用少写 whenEn 时,两个 oneOf 分支都不匹配
+  assert.match(
+    validateAgainstSchema({ id: 'a', status: 'decided', forbidden: [{ text: '代理' }] }, schema).join(),
+    /oneOf/,
+  );
+});
+
+test('validateAgainstSchema: schema 用了未实现的关键字必须报错而非忽略', () => {
+  assert.throws(
+    () => validateAgainstSchema({}, { type: 'object', anyOf: [{ type: 'object' }] }),
+    /未实现的关键字 "anyOf"/,
+  );
 });

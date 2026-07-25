@@ -7,6 +7,10 @@
   "required": ["version", "locales", "sourceLocale", "terms"],
   "additionalProperties": false,
   "properties": {
+    "$schema": {
+      "type": "string",
+      "description": "指向本 schema 的相对路径，供编辑器提供补全与校验。additionalProperties 为 false，必须显式允许。"
+    },
     "version": {
       "type": "integer",
       "description": "schema 版本；破坏性结构调整时 +1，guard 会拒绝不认识的版本。"
