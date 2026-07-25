@@ -103,8 +103,20 @@ function validateNode(value, schema, root, path, errors) {
   }
 
   if (typeof value === 'string') {
-    if (schema.pattern && !new RegExp(schema.pattern).test(value)) {
-      errors.push(`${path}: "${value}" 不匹配 ${schema.pattern}`);
+    if (schema.pattern) {
+      // schema 里的 pattern 写坏时,new RegExp 会抛出去、整个校验流程中断,调用方拿不到
+      // 带 path 的可读错误(check-i18n-glossary 会直接崩栈而不是走 fail())。
+      // 转成普通校验错误,并明确指向是 schema 自身的问题而非数据的问题。
+      let re;
+      try {
+        re = new RegExp(schema.pattern);
+      } catch (err) {
+        errors.push(`${path}: schema 的 pattern 不是合法正则(${schema.pattern}):${err.message}`);
+        re = null;
+      }
+      if (re && !re.test(value)) {
+        errors.push(`${path}: "${value}" 不匹配 ${schema.pattern}`);
+      }
     }
     if (schema.minLength !== undefined && value.length < schema.minLength) {
       errors.push(`${path}: 长度需 ≥ ${schema.minLength}`);
