@@ -5020,6 +5020,7 @@
       "newDialogue": "새 대화",
       "dialoguesToggleExpand": "대화 펼치기",
       "dialoguesToggleCollapse": "대화 접기",
+      "loadingDialogues": "불러오는 중…",
       "noDialogues": "대화 없음",
       "dialogueSettings": "대화 정리",
       "dialogueSettingsAria": "대화 정리(정렬: {{sortBy}})",

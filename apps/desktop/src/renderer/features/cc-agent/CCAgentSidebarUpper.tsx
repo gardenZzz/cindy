@@ -162,6 +162,7 @@ import {
 } from './lib/remoteSessionWriteGuard';
 import {
   useEffectiveSelectedMachineId,
+  useRemoteSessionBootstrapLoading,
   useSelectedMachineConnecting,
 } from '@/features/device-link/useMachineSwitcher';
 import {
@@ -867,6 +868,12 @@ function ExpandedView({
   // 机器切换栏选中机器后整体过滤:本机 → 只本地会话;远程 → 只该机器会话。
   // 过滤在源头做,下游 grouping / pinned / projects / dialogues / date-grouped / search 自动继承。
   const selectedMachineId = useEffectiveSelectedMachineId();
+  // 「所有」或含远程设备的作用域还要等 device-link 首次 sessions snapshot；
+  // 否则本地 sessions 先完成时会把尚未知的远程空数组误报成真实空态。
+  const remoteSessionBootstrapLoading =
+    useRemoteSessionBootstrapLoading(selectedMachineId);
+  const isLoadingSidebarSessions =
+    sessionsHook.isLoading || remoteSessionBootstrapLoading;
   // 选中的远程机器尚在连接中(会话未同步)→ 用「连接中」占位替换空列表的「暂无对话」。
   const selectedMachineConnecting = useSelectedMachineConnecting();
   // orca worker + status 过滤(**不含**机器过滤)—— 抽出给「机器过滤后渲染」与「全量项目宇宙」共用。
@@ -2224,6 +2231,7 @@ function ExpandedView({
         {filter.groupBy === 'date' ? (
           <DateGroupedSessionsSection
             sessions={visibleDateSessions}
+            isLoading={isLoadingSidebarSessions}
             allKnownProjects={projectUniverse.projects}
             filter={filter}
             activeSessionId={activeSessionId}
@@ -2277,6 +2285,7 @@ function ExpandedView({
             />
             <DialogueSection
               sessions={visibleDialogues}
+              isLoading={isLoadingSidebarSessions}
               activeSessionId={activeSessionId}
               runningSessionIds={displayRunningSessionIds}
               attachedSessionIds={attachedSessionIds}
