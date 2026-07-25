@@ -27,10 +27,12 @@ vi.mock('electron', () => ({
     getPath: mocks.electronAppGetPath,
   },
   BrowserWindow: {
-    getAllWindows: () => [{
-      isDestroyed: () => false,
-      webContents: { send: mocks.send },
-    }],
+    getAllWindows: () => [
+      {
+        isDestroyed: () => false,
+        webContents: { send: mocks.send },
+      },
+    ],
   },
 }));
 vi.mock('../../logger', () => ({
@@ -48,8 +50,7 @@ vi.mock('../../clientEndpointsService', () => ({
   getClientEndpoint: mocks.getClientEndpoint,
 }));
 vi.mock('../../secrets/providerSecretStore', () => ({
-  resolveOwnerScopedSecretStorageKey:
-    mocks.resolveOwnerScopedSecretStorageKey,
+  resolveOwnerScopedSecretStorageKey: mocks.resolveOwnerScopedSecretStorageKey,
 }));
 
 import { CURRENT_CINDY_REGION } from '../../../shared/brandRegion';
@@ -83,9 +84,7 @@ beforeEach(async () => {
   tempUserDataDir = await mkdtemp(path.join(os.tmpdir(), 'cindy-model-pricing-'));
   mocks.electronAppGetPath.mockReturnValue(tempUserDataDir);
   mocks.getCurrentDbClientUserId.mockReturnValue('user-a');
-  mocks.getClientEndpoint.mockReturnValue(
-    'https://model-access.example.test',
-  );
+  mocks.getClientEndpoint.mockReturnValue('https://model-access.example.test');
   mocks.resolveOwnerScopedSecretStorageKey.mockReturnValue('provider-xd');
   mocks.statSync.mockReturnValue({
     dev: 1n,
@@ -154,10 +153,77 @@ describe('gateway model pricing projection', () => {
         },
       },
     });
-    expect(mocks.send).toHaveBeenCalledWith(
-      MODEL_PRICING_CHANGED_CHANNEL,
-      pricing,
-    );
+    expect(mocks.send).toHaveBeenCalledWith(MODEL_PRICING_CHANGED_CHANNEL, pricing);
+  });
+
+  it('applies gateway costDiscount to quotes and keeps originals for display', async () => {
+    const pricing = replaceGatewayModelPricing([
+      {
+        id: 'half-price',
+        costDiscount: 0.5,
+        inputCostPerToken: 0.000012,
+        outputCostPerToken: 0.000036,
+        cacheReadInputTokenCost: 0.000012,
+      },
+      {
+        id: 'invalid-discount',
+        costDiscount: 1.2,
+        inputCostPerToken: 0.000012,
+        outputCostPerToken: 0.000036,
+      },
+      {
+        // codex/ 折扣路由的 0.15 乘数是客户端权威,不与服务端 costDiscount 叠加。
+        id: 'codex/gpt-5.5',
+        costDiscount: 0.5,
+        inputCostPerToken: 0.00002,
+        outputCostPerToken: 0.00004,
+      },
+    ]);
+
+    expect(pricing).toEqual({
+      xd: {
+        'half-price': {
+          providerId: 'xd',
+          modelId: 'half-price',
+          currency: gatewayCurrencyForRegion(CURRENT_CINDY_REGION),
+          source: 'gateway',
+          approximate: false,
+          inputPerMtok: 6,
+          outputPerMtok: 18,
+          cacheReadPerMtok: 6,
+          discount: 0.5,
+          originalInputPerMtok: 12,
+          originalOutputPerMtok: 36,
+          originalCacheReadPerMtok: 12,
+        },
+        'invalid-discount': {
+          providerId: 'xd',
+          modelId: 'invalid-discount',
+          currency: gatewayCurrencyForRegion(CURRENT_CINDY_REGION),
+          source: 'gateway',
+          approximate: false,
+          inputPerMtok: 12,
+          outputPerMtok: 36,
+        },
+        'codex/gpt-5.5': {
+          providerId: 'xd',
+          modelId: 'codex/gpt-5.5',
+          currency: gatewayCurrencyForRegion(CURRENT_CINDY_REGION),
+          source: 'gateway',
+          approximate: false,
+          inputPerMtok: 3,
+          outputPerMtok: 6,
+        },
+      },
+    });
+
+    // 折扣元数据经磁盘缓存整组存活,冷启动记账与展示口径不回退到原价。
+    await vi.waitFor(async () => {
+      const raw = JSON.parse(await readFile(userDataPath('cache', 'model-pricing.json'), 'utf8'));
+      expect(raw.pricing).toEqual(pricing);
+    });
+    __resetModelPricingCacheForTesting();
+    await expect(getModelPricing()).resolves.toEqual(pricing);
   });
 
   it('keeps legal zero tiers but drops missing, invalid and 0/0 standard prices', () => {
@@ -202,17 +268,29 @@ describe('gateway model pricing projection', () => {
     ]);
     expect(await getModelPricing()).not.toBeNull();
 
-    expect(replaceGatewayModelPricing([
-      { id: 'unpriced' },
-    ])).toBeNull();
-    expect(await getModelPricing()).toBeNull();
-    expect(mocks.send).toHaveBeenLastCalledWith(
-      MODEL_PRICING_CHANGED_CHANNEL,
-      null,
-    );
+    expect(replaceGatewayModelPricing([{ id: 'unpriced' }])).toEqual({});
+    expect(await getModelPricing()).toEqual({});
+    expect(mocks.send).toHaveBeenLastCalledWith(MODEL_PRICING_CHANGED_CHANNEL, {});
 
     clearGatewayModelPricing();
-    expect(await getModelPricing()).toBeNull();
+    expect(await getModelPricing()).toEqual({});
+  });
+
+  it('hydrates a successful empty pricing snapshot as loaded', async () => {
+    replaceGatewayModelPricing([
+      {
+        id: 'free',
+        inputCostPerToken: 0,
+        outputCostPerToken: 0,
+      },
+    ]);
+    await vi.waitFor(async () => {
+      const raw = JSON.parse(await readFile(userDataPath('cache', 'model-pricing.json'), 'utf8'));
+      expect(raw.pricing).toEqual({});
+    });
+
+    __resetModelPricingCacheForTesting();
+    await expect(getModelPricing()).resolves.toEqual({});
   });
 });
 
@@ -229,9 +307,7 @@ describe('pricing cache lifecycle', () => {
     ]);
 
     await vi.waitFor(async () => {
-      const raw = JSON.parse(
-        await readFile(userDataPath('cache', 'model-pricing.json'), 'utf8'),
-      );
+      const raw = JSON.parse(await readFile(userDataPath('cache', 'model-pricing.json'), 'utf8'));
       expect(raw).toMatchObject({
         version: 3,
         scope: expectedScope(),

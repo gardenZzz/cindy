@@ -100,8 +100,8 @@
   - 豁免范围：`desktop:scheduler.editor.script.capabilityDescs.jira_comment`、`desktop:scheduler.editor.script.capabilityDescs.jira_read`
 - **Plugin** — 中文一律「插件」，不保留英文原词（现状 94:4）。历史上 Ghost / Plugin 两种叫法并存，对外统一为「插件」。
 - **Project** — 中文一律「项目」（现状 119:15）。同一个侧边栏里筛选叫「项目」、批量操作提示叫「Project」是既有 bug。小写 project 不入 forbidden——它常出现在路径与文件名里（project.json）。
-- **Provider** — 中文用「供应商」（现状 36:18 领先简称）。全称「模型供应商」在需要消歧的位置仍可用。「提供商」「提供方」是同义漂移，禁用——设置页标题写「模型供应商」、它自己的表单写「提供商」是既有 bug。豁免 ssoVerificationSubtitle：那里的「身份提供方」是 SSO / SAML 领域 Identity Provider 的标准中文术语，与模型供应商是两个概念。该文案在 desktop locale 与 mobile 影子 catalog 各有一份副本，两处都要豁免。（2026-07 修正：ko 原声明 제공업체 仅 6 处，实测 제공자 32 处为主流，改随主流。）ja 的「提供元」是多义词——同时表示 "source"（来源），因此按 whenEn=Provider 条件禁用；无条件禁会把「共有元の提供元を信頼できるか」这类 source 语境一并换掉。
-  - 豁免范围：`desktop:login.ssoVerificationSubtitle`、`mobile/loginMessages:ssoVerificationSubtitle`
+- **Provider** — 中文用「供应商」（现状 36:18 领先简称）。全称「模型供应商」在需要消歧的位置仍可用。「提供商」「提供方」是同义漂移，禁用——设置页标题写「模型供应商」、它自己的表单写「提供商」是既有 bug。豁免 ssoVerificationSubtitle：那里的「身份提供方」是 SSO / SAML 领域 Identity Provider 的标准中文术语，与模型供应商是两个概念。该文案在 desktop locale 与 mobile 影子 catalog 各有一份副本，两处都要豁免。（2026-07 修正：ko 原声明 제공업체 仅 6 处，实测 제공자 32 处为主流，改随主流。）ja 的「提供元」是多义词——同时表示 "source"（来源），因此按 whenEn=Provider 条件禁用；无条件禁会把「共有元の提供元を信頼できるか」这类 source 语境一并换掉。豁免 creditParity 两条:那里的 third-party providers 指支付渠道/收单机构,不是模型供应商——ja 用「事業者」、zh-CN 用「第三方渠道」都对,套上「プロバイダー」反而会让用户以为是模型服务商在收钱。
+  - 豁免范围：`desktop:billing.balance.creditParityCny`、`desktop:billing.balance.creditParityUsd`、`desktop:login.ssoVerificationSubtitle`、`mobile/loginMessages:ssoVerificationSubtitle`
 - **Proxy** — 网络代理，中文保留英文原词（2026-07 裁决：Agent 与 Proxy 都不叫「代理」）。本条只管英文源为 Proxy 的那些——Agent / Subagent 的「代理」误译各自登记在自己条目下。ja / ko 沿用既有音译。
 - **Quota** — 周期内的使用上限用「配额」（现状已有 3 处这么写）。与 credits 条目一起裁决：「额度」原先同时表示 Balance / Credits / Quota，三个概念在计费与限额提示里互相污染。「额度」的 forbidden 统一登记在 credits 条目下，不在这里重复——一个词只归属一个术语，否则同一处违规会被两个术语各报一次。（2026-07 修正：ko 原声明 쿼터 在全仓零出现，属凭空造词；ja 原声明 クォータ 仅 desktop 用、mobile 用 残量。定为 ja クォータ / ko 할당량——残量 语义偏 Balance 会与 残高 混淆，而 ko 的 사용량 正是 Usage 的标准词，让 Quota 占用它会重演 zh「额度」三义合一的错误。）
 - **Running** — 状态标签用「运行中」（现状 16:9）。条件禁用是必需的——「进行中」是 In Progress 的正确译法、「执行中」在别处也可能对，无条件禁会大面积误伤。mobile/devices 的自动化面板上「运行中 / 执行中 / 重跑中」三种写法同屏出现。
@@ -112,7 +112,8 @@
 - **SkillHub** — 产品名，四语一律保留英文原样（暂定保留，未来若做中文名再改）。注意与 skill 条目区分：侧边栏 tab 现在叫「技能」但实际指 SkillHub，创建面板的「技能」指 Skills——这是既有 bug，两者不是一个东西不该同名，清理存量时需一并处理。
 - **Subagent** — Agent 的派生概念，中文跟随 Agent 保留英文原词，不译「子代理」。「代理」在此条下按 whenEn=Subagent 登记：同一个中文词在 Agent / Subagent / Proxy 三处各有来源，只有按英文源区分，自动替换才知道该换成哪个词。ja / ko 沿用既有音译。
 - **Thread** — 全仓仅 8 处，按语境分四类，是「同一个词必须分场合翻译」的典型：①指产品内的对话 → 跟随 session 叫「对话」（已落地 3 处）；②Codex 外部概念 → 保留 thread；③GitHub PR review thread →「review 评论」；④比喻用法 "persistent work thread" → 原译「工作线程」，中文有 OS 线程歧义，已改写为「持续推进的工作对话」。「线程」一律禁用。
-- **Usage** — 中文用「用量」（现状 37:6 压倒性）。「使用情况」「使用表现」是同义漂移，禁用。注意 usage 在英文里也有「用法」义（如 CLI usage），那属于另一个概念，不在本条约束范围。
+- **Usage** — 中文用「用量」（现状 37:6 压倒性）。「使用情况」「使用表现」是同义漂移，禁用。注意 usage 在英文里也有「用法」义（如 CLI usage），那属于另一个概念，不在本条约束范围。豁免遥测说明两处:那里的 usage 指「启动与留存情况」这类使用行为,不是计费口径的用量指标。硬套成「用量」会写出「启动与留存用量」这种不通的话——zh-CN 用的是「留存情况」+「使用环境」,ja/ko 的「継続利用状況」「지속 사용 현황」同理。
+  - 豁免范围：`desktop:settings.about.analyticsDescription`、`mobile/settings:legal.analyticsHint`
 - **Worker** — Orca 协同角色名，四语统一保留英文。这里只钉大小写形态：首字母大写 Worker。小写 worker 由 guard 的大小写规则单独覆盖（desktop 26:13 混用、mobile 一律小写）。
 - **Worktree** — Git worktree 是外部工具的既定概念，四语一律保留英文小写原词（现状 21 处最多）。desktop:chat 一个模块里就有 worktree / 工作区 / 工作树 三种写法。特别要紧的是「工作区」——它同时被用于 worktree、Workspace、working tree 三个不同英文概念，必须让出来只表示 Workspace；working directory 用「工作目录」。条件禁用只在英文源含 Worktree 时生效，不影响 Workspace 的正常翻译。豁免导入提示那一句：英文原文同时出现 worktree 与 main workspace，条件禁用是按整句英文判定的，无法区分句内两个概念——那里的「主工作区」正是 Workspace，必须保留，否则会把「不影响主工作区」这条安全边界说成「不影响主 worktree」。
   - 豁免范围：`desktop:sessionShare.import.useWorktreeHint`

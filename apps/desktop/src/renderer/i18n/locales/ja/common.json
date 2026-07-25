@@ -646,6 +646,11 @@
       "autoUpdateEnabledToast": "アイドル時の更新インストールを有効にしました",
       "autoUpdateDisabledToast": "アイドル時の更新インストールを無効にしました",
       "autoUpdateSaveFailed": "自動更新設定を保存できませんでした",
+      "analyticsLabel": "利用統計",
+      "analyticsDescription": "Cindy の起動状況や継続利用状況の把握に使います。送信するのはデバイスの機種名、OS バージョン、アプリバージョン、デバイス識別子などのデバイス・利用環境情報と、ログイン後はアカウント ID で、会話内容・ファイル・プロンプトは一切含みません。オフにすると送信は直ちに停止します。",
+      "analyticsEnabledToast": "利用統計を有効にしました",
+      "analyticsDisabledToast": "利用統計を無効にしました",
+      "analyticsSaveFailed": "利用統計の設定を保存できませんでした",
       "debugLogLabel": "デバッグログ",
       "debugLogDescription": "有効にすると詳細なデバッグログを出力します:main/maker logger が debug レベルになり、新しい Claude Code セッションは API リクエスト URL/ステータス/レイテンシ、Node レベルの DNS/TCP/TLS ハンドシェイクのタイミング、SDK 内部情報も出力します。ログ量が大きいため、調査が終わったらオフにしてください。dev モードでは常に有効です。",
       "social": {
@@ -2426,7 +2431,9 @@
         "preview": "以下のサイトのプレビューページをサイドバーのブラウザで開けます",
         "previewDetail": "開けるのは下に列挙されたサイトだけです。ページを開くたびに、どのプラグインが開いたかが表示されます。",
         "nodeChildSpawn": "Node プログラムは、パッケージ内で申告済みのサブプロセスの起動をホストに依頼できます",
-        "nodeChildSpawnDetail": "起動できるのは自身のパッケージ内で申告済みの JS ファイルだけです(メインプログラムと同じローカル権限)。任意のコマンドは実行できません。プラグインの無効化や終了時にはサブプロセスも一緒に閉じられます。"
+        "nodeChildSpawnDetail": "起動できるのは自身のパッケージ内で申告済みの JS ファイルだけです(メインプログラムと同じローカル権限)。任意のコマンドは実行できません。プラグインの無効化や終了時にはサブプロセスも一緒に閉じられます。",
+        "skill": "AI アシスタントにスキル「{{name}}」を追加します",
+        "skillDetail": "スキルは AI が自分の指示として読み込んで実行する指示ファイルです。あなたの全権限で、Claude Code と Codex のすべてのプロジェクトに適用され、このプラグインのサンドボックスには制限されません。プラグインが有効な間は利用可能で、無効化またはアンインストールすると削除されます。特定のフォルダーだけでプラグインをオフにしても非表示にはなりません。ここではスキルの全文をプレビューできません——信頼できるプラグインのみをインストールしてください。"
       },
       "connections": {
         "confirmTitle": "接続先の追加",
@@ -2513,7 +2520,8 @@
         "slotCard": "メッセージカード",
         "slotNetwork": "ネットワークアクセス",
         "slotNotify": "システム通知",
-        "slotFs": "ファイル書き込み"
+        "slotFs": "ファイル書き込み",
+        "slotSkill": "エージェントスキル"
       },
       "commandPaletteTag": "プラグインコマンド",
       "updateConfirm": {
@@ -3660,6 +3668,59 @@
       "queueTooltip": "クリックでキューに追加。{{shortcut}} でタスクを中断せずに割り込み送信",
       "stop": "生成を停止"
     },
+    "pluginSetup": {
+      "title": "{{name}} の設定",
+      "chooseOne": "設定方法を1つ選択してください",
+      "restoreAria": "{{name}} の設定を展開",
+      "minimizeAria": "{{name}} の設定を折りたたむ",
+      "completeOnDesktop": "操作対象のデスクトップで設定を完了してください。このカードは自動的に更新されます。",
+      "cancel": "キャンセル",
+      "cancelling": "キャンセル中…",
+      "retry": "再試行",
+      "saveConfiguration": "設定を保存",
+      "saving": "保存中…",
+      "error": {
+        "ACTION_FAILED": "設定操作を完了できませんでした。もう一度お試しください。",
+        "ACTION_STALE": "設定内容が更新されました。設定操作を選び直してください。",
+        "AUTH_CANCELLED": "認証がキャンセルされました。必要に応じてもう一度認証してください。",
+        "AUTH_FAILED": "認証を完了できませんでした。もう一度お試しください。",
+        "INLINE_INVALID": "設定内容が無効です。内容を確認してもう一度お試しください。",
+        "INLINE_UNAVAILABLE": "このバージョンの Cindy ではチャット内でこの設定を保存できません。Cindy を更新してもう一度お試しください。",
+        "SAVE_FAILED": "設定を保存できませんでした。もう一度お試しください。",
+        "WINDOW_CLOSED": "設定を開始したウィンドウが閉じられました。セッションに戻ってもう一度お試しください。",
+        "TARGET_UNAVAILABLE": "プラグインが無効、アンインストール済み、または利用できません。プラグインの状態を確認してもう一度お試しください。",
+        "ASSESSMENT_FAILED": "設定状況を更新できませんでした。もう一度お試しください。",
+        "TIMEOUT": "設定の待機時間を超えました。もう一度お試しください。"
+      },
+      "hostRequirements": {
+        "modelProvider": {
+          "label": "AIモデルサービス",
+          "description": "プラグインが宣言した画像または動画機能を使用する前に、利用可能なモデルサービスへ接続してください。"
+        }
+      },
+      "form": {
+        "placeholder": "{{label}}を入力",
+        "required": "{{label}}を入力してください",
+        "tooLong": "{{maxLength}}文字以内で入力してください",
+        "openLink": "{{label}}を取得",
+        "openLinkFailed": "ページを開けませんでした。もう一度お試しください。"
+      },
+      "action": {
+        "oauth_connect": "認証",
+        "open_plugin_settings": "設定を開く",
+        "manage_connection": "接続を管理",
+        "open_client_settings": "モデル設定を開く"
+      },
+      "phase": {
+        "pending": "設定待ち",
+        "action_running": "処理中…",
+        "waiting_external": "認証待ち…",
+        "verifying": "検証中…",
+        "satisfied": "完了",
+        "failed": "失敗",
+        "cancelled": "キャンセル済み"
+      }
+    },
     "createAgent": {
       "quickStart": "クイックスタート",
       "quickStarts": {
@@ -3725,6 +3786,8 @@
         "output": "出力",
         "cacheRead": "キャッシュ読み取り",
         "cacheCreate": "キャッシュ書き込み",
+        "free": "期間限定無料",
+        "discount": "{{percent}}%お得",
         "perMillion": "モデル標準価格",
         "fixedFx": "固定レート 1 USD = 6.7 CNY による概算",
         "subscriptionEstimate": "価値の推定であり、実際の請求額ではありません"
@@ -4868,7 +4931,8 @@
       "card": {
         "awaitingPermission": "承認待ち",
         "awaitingQuestion": "返信待ち",
-        "awaitingPlan": "プランの確認待ち"
+        "awaitingPlan": "プランの確認待ち",
+        "awaitingPluginSetup": "プラグイン設定待ち"
       },
       "showAllSessions": "すべて表示 {{count}} 件",
       "dialogues": "会話",
@@ -7025,7 +7089,6 @@
     "sidebar": "クレジットとプラン",
     "settings": {
       "title": "使用量と請求",
-      "subtitle": "利用可能なクレジットと現在のプランを確認し、必要に応じてクレジットを購入できます。",
       "subscriptionCard": {
         "title": "現在のプラン",
         "empty": "有効なサブスクリプションはありません",
@@ -7040,15 +7103,13 @@
         "endsAt": "{{date}} にプラン終了"
       },
       "topupCard": {
-        "title": "クレジット",
-        "description": "従量制のモデルや機能で使うクレジットを購入します。",
-        "cardTitle": "必要に応じてクレジットを購入",
-        "cardDescription": "必要に応じて利用可能なクレジットを追加できます。最終金額は決済ページに表示されます。",
         "action": "クレジットを購入"
       }
     },
     "balance": {
       "title": "利用可能残高",
+      "creditParityCny": "1クレジット = 1元。クレジットは Cindy AI の利用量の決済に使われ、支払いは第三者の決済事業者が処理します。",
+      "creditParityUsd": "1クレジット = 1米ドル。クレジットは Cindy AI の利用量の決済に使われ、支払いは第三者の決済事業者が処理します。",
       "plan": "プランクレジット",
       "purchased": "購入済みクレジット",
       "promotional": "特典クレジット",
@@ -7057,17 +7118,15 @@
       "unavailable": "残高を取得できません。更新してもう一度お試しください。"
     },
     "usage": {
+      "title": "クレジット使用量",
       "observedAt": "クレジット更新: {{date}}",
-      "used": "使用済み",
-      "total": "合計",
+      "poolDetail": "使用済み {{used}} · 合計 {{total}}",
       "remaining": "残り",
       "progressLabel": "{{label}}の使用量",
       "historyUnavailable": "使用履歴が完全ではないため、残りのクレジットのみ表示しています。",
-      "percentUsed": "{{percent}}% 使用済み",
       "detailsUnavailable": "使用量の詳細を取得できないため、現在の残高のみ表示しています。",
       "promotionalDetails": {
         "title": "特典クレジット明細",
-        "description": "現在の付与明細と合計残高は同じクレジットスナップショットに基づき、使用済み額には実際のモデル利用分のみが含まれます。",
         "count": "{{count}}件",
         "empty": "特典クレジットの付与履歴はありません。",
         "incomplete": "付与履歴が多いため、最新の{{count}}件のみ表示しています。",
@@ -7086,31 +7145,15 @@
     },
     "dialogs": {
       "subscription": {
-        "title": "サブスクリプションプランを選択",
-        "description": "サーバーで公開中のサブスクリプションプランを表示します。購入できないプランには状態を表示します。"
+        "title": "サブスクリプションプランを選択"
       },
       "topup": {
-        "title": "クレジットを購入",
-        "description": "サーバーで公開中のクレジット商品を表示します。購入できない商品には状態を表示します。"
+        "title": "クレジットを購入"
       }
     },
-    "eyebrow": "アカウントと使用量",
-    "title": "最適なプランを選択",
-    "subtitle": "プランと支払い方法はサーバーから配信されます。先にプランを選ぶと、現在利用可能な支払い方法が表示されます。",
     "steps": {
-      "offer": {
-        "title": "プランを選択",
-        "description": "サーバーで公開中のチャージとサブスクリプションを表示します。"
-      },
       "channel": {
-        "title": "支払い方法を選択",
-        "description": "利用できる支払い方法はプランごとに異なります。",
-        "selectOfferFirst": "プランを選ぶと、対応する支払い方法が表示されます"
-      },
-      "confirm": {
-        "title": "確認して支払う",
-        "description": "プランと支払い方法を確認して決済を作成します。",
-        "selectChannelFirst": "支払い方法を選択してください"
+        "title": "支払い方法を選択"
       }
     },
     "actions": {
@@ -7130,10 +7173,6 @@
         "OFFER_COMING_SOON": "近日提供",
         "NO_AVAILABLE_PAYMENT_CHANNEL": "利用可能な支払い方法なし"
       }
-    },
-    "offerKinds": {
-      "topup": "クレジットチャージ",
-      "subscription": "サブスクリプション"
     },
     "amount": {
       "custom": "金額を指定",
@@ -7159,7 +7198,6 @@
       "alipay": "Alipay",
       "stripe": "カード"
     },
-    "securityNotice": "支払いは選択したプロバイダーが安全に処理し、Cindyは支払い認証情報を保存しません",
     "currentSubscription": {
       "title": "現在のサブスクリプション",
       "purchaseBlocked": "未終了のサブスクリプションがあります。既存のサブスクリプションを処理してから新しいプランを購入してください。"
@@ -7184,7 +7222,6 @@
     "checkout": {
       "creatingTitle": "支払いを作成中",
       "awaitingTitle": "支払い待ち",
-      "fulfillingTitle": "クレジットを反映中",
       "completedTitle": "支払い完了",
       "failedTitle": "完了できませんでした",
       "expiredTitle": "支払い期限切れ",
@@ -7199,7 +7236,6 @@
       "redirectHint": "支払いページで完了後、Cindyに戻ってください。",
       "openPayment": "支払いページを開く",
       "refreshingAction": "支払い情報を取得中…",
-      "creditingBody": "支払いが完了しました。クレジットの反映を待っています…",
       "paymentCompleted": "支払いが完了しました。",
       "requestFailed": "リクエストに失敗しました。不明な作成結果では同じ冪等キーで安全に再試行します。",
       "expiredBody": "支払いリンクの期限が切れました。新しい支払いを作成してください。",
@@ -7208,8 +7244,6 @@
     },
     "planChange": {
       "targetTitle": "サブスクリプションプランの変更",
-      "targetDescription": "プラン変更は現在の支払い方法を引き継ぎます。最終的な金額と適用時期は次のステップで確認します。",
-      "targetDescriptionWithCurrent": "現在のプラン:{{plan}}。変更は現在の支払い方法を引き継ぎ、最終的な金額と適用時期は次のステップで確認します。",
       "upgradeBadge": "アップグレード",
       "downgradeBadge": "ダウングレード",
       "emptyTitle": "切り替え可能なプランがありません",
