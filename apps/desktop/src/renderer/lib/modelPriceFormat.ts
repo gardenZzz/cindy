@@ -40,7 +40,7 @@ export function formatModelPriceAmount(amount: number, currency: MoneyCurrency):
 export function formatModelPricePair(quote: ModelPriceQuote): string {
   const input = formatModelPriceAmount(quote.inputPerMtok, quote.currency);
   const output = formatModelPriceAmount(quote.outputPerMtok, quote.currency);
-  return `${quote.approximate ? '≈' : ''}${input} / ${output}`;
+  return `${input} / ${output}`;
 }
 
 export function modelPriceDiscountLabelValues(discount: number): {
