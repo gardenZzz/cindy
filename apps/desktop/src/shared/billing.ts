@@ -88,8 +88,10 @@ export type BillingPaymentOrder = {
   status: BillingPaymentOrderStatus;
   paymentAction: BillingPaymentAction | null;
   /**
-   * Added by the fulfillment projection. Older servers may omit it; the client
-   * must then stay in "crediting" and never infer delivery from payment alone.
+   * Added by the fulfillment projection; informational only. Since PR #401 the
+   * checkout UX treats payment status SUCCEEDED as terminal (COMPLETED) and no
+   * longer keys any phase, recovery or polling behavior off this field —
+   * crediting is reconciled server-side for every SUCCEEDED order.
    */
   fulfillmentStatus?: BillingFulfillmentStatus;
   createdAt: string;
