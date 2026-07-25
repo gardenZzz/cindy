@@ -78,18 +78,15 @@ const SUPPORTED_SUBSCRIPTION_CAPABILITIES = new Set<BillingPurchaseOption['capab
   'PROVIDER_MANAGED_SUBSCRIPTION',
 ]);
 
-// 新服务端的“当前订阅”只包含真实生命周期状态，未完成首购不再下发也不阻断重选；
-// INCOMPLETE 仅作为旧服务端兼容防御保留（旧服务端仍会拒绝重复首购）。
+// 未完成首购只属于当前 checkout 会话，不能展示为当前套餐或阻断重新购买。
 const SUBSCRIPTION_PURCHASE_BLOCKING_STATUSES: BillingSubscription['status'][] = [
-  'INCOMPLETE',
   'TRIALING',
   'ACTIVE',
   'PAST_DUE',
   'UNPAID',
   'PAUSED',
 ];
-const SUBSCRIPTION_CANCELLABLE_STATUSES: BillingSubscription['status'][] =
-  SUBSCRIPTION_PURCHASE_BLOCKING_STATUSES.filter((status) => status !== 'INCOMPLETE');
+const SUBSCRIPTION_CANCELLABLE_STATUSES = SUBSCRIPTION_PURCHASE_BLOCKING_STATUSES;
 
 const PLAN_CHANGE_ENTRY_STATUSES: BillingSubscription['status'][] = ['ACTIVE'];
 
@@ -295,14 +292,23 @@ export function BillingSettingsSection({ accountId }: { accountId: string | null
     }
   }, []);
 
-  const loadSubscription = useCallback(async () => {
+  const loadSubscription = useCallback(async (fallback: BillingSubscription | null = null) => {
     setLoadingSubscription(true);
     setSubscriptionError(false);
     try {
-      setCurrentSubscription((await billingApi.getCurrentSubscription()).subscription);
+      const subscription = (await billingApi.getCurrentSubscription()).subscription;
+      setCurrentSubscription(
+        subscription && SUBSCRIPTION_PURCHASE_BLOCKING_STATUSES.includes(subscription.status)
+          ? subscription
+          : null,
+      );
     } catch {
-      setCurrentSubscription(null);
-      setSubscriptionError(true);
+      const completedFallback =
+        fallback && SUBSCRIPTION_PURCHASE_BLOCKING_STATUSES.includes(fallback.status)
+          ? fallback
+          : null;
+      setCurrentSubscription(completedFallback);
+      setSubscriptionError(completedFallback === null);
     } finally {
       setLoadingSubscription(false);
     }
@@ -328,13 +334,6 @@ export function BillingSettingsSection({ accountId }: { accountId: string | null
     void loadBillingState();
   }, [loadBillingState]);
 
-  useEffect(() => {
-    if (checkout.state.subscription) {
-      setCurrentSubscription(checkout.state.subscription);
-      setSubscriptionError(false);
-    }
-  }, [checkout.state.subscription]);
-
   const closeCheckout = useCallback(() => {
     const abandonedIncomplete = checkout.state.subscription?.status === 'INCOMPLETE';
     checkout.close();
@@ -349,8 +348,17 @@ export function BillingSettingsSection({ accountId }: { accountId: string | null
     previousCheckoutPhaseRef.current = checkout.state.phase;
     if (previousPhase !== 'COMPLETED' && checkout.state.phase === 'COMPLETED') {
       void loadBalance();
+      if (checkout.state.kind === 'SUBSCRIPTION') {
+        void loadSubscription(checkout.state.subscription);
+      }
     }
-  }, [checkout.state.phase, loadBalance]);
+  }, [
+    checkout.state.kind,
+    checkout.state.phase,
+    checkout.state.subscription,
+    loadBalance,
+    loadSubscription,
+  ]);
 
   const handlePlanChangeSettled = useCallback(
     (kind: PlanChangeSettledKind) => {
@@ -484,6 +492,35 @@ export function BillingSettingsSection({ accountId }: { accountId: string | null
     SUPPORTED_BILLING_PROVIDERS.has(currentSubscription.provider as SupportedBillingProvider)
       ? (currentSubscription.provider as SupportedBillingProvider)
       : null;
+  const currentPlanCandidate = useMemo<PlanChangeCandidate | null>(() => {
+    if (!currentPlan) return null;
+    const catalogProduct = catalog?.products.find(
+      (product) => product.code === currentPlan.product.code,
+    );
+    return {
+      product: {
+        code: currentPlan.product.code,
+        name: catalogProduct?.name ?? currentPlan.product.code,
+        kind: 'SUBSCRIPTION',
+        level: currentPlan.product.level,
+        sortOrder: catalogProduct?.sortOrder ?? 0,
+        offers: [],
+      },
+      offer: {
+        code: currentPlan.offer.code,
+        interval: currentPlan.offer.interval,
+        currency: currentPlan.terms.currency,
+        amount: currentPlan.terms.amount,
+        minAmount: null,
+        maxAmount: null,
+        creditAmount: currentPlan.terms.creditAmount,
+        rolloverCap: currentPlan.terms.rolloverCap,
+        purchaseOptions: [],
+      },
+      providers: currentProvider ? [currentProvider] : [],
+      direction: null,
+    };
+  }, [catalog, currentPlan, currentProvider]);
   const showPlanChangeEntry =
     currentPlan !== null &&
     currentSubscription !== null &&
@@ -827,6 +864,7 @@ export function BillingSettingsSection({ accountId }: { accountId: string | null
 
       <PlanChangeTargetDialog
         open={planChangeTargetOpen}
+        currentPlan={currentPlanCandidate}
         candidates={planChangeCandidates}
         onClose={() => setPlanChangeTargetOpen(false)}
         onSelect={selectPlanChangeTarget}
