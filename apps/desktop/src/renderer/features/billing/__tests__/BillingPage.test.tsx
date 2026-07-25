@@ -9,6 +9,12 @@ const i18n = {
   resolvedLanguage: 'en' as string | undefined,
 };
 
+const uiMocks = vi.hoisted(() => ({
+  confirm: vi.fn(),
+  toastError: vi.fn(),
+  toastSuccess: vi.fn(),
+}));
+
 const checkout = {
   state: {
     open: false,
@@ -55,6 +61,15 @@ vi.mock('@/features/feature-context', () => ({
 vi.mock('@/contexts/AuthContext', () => ({
   useAuth: () => ({ dataOwnerId: 'account-fixture' }),
 }));
+vi.mock('@/components/ui/confirm-dialog-provider', () => ({
+  useConfirmDialog: () => ({ confirm: uiMocks.confirm }),
+}));
+vi.mock('@/lib/toast', () => ({
+  toast: {
+    error: uiMocks.toastError,
+    success: uiMocks.toastSuccess,
+  },
+}));
 vi.mock('../useBillingCheckout', () => ({
   useBillingCheckout: () => checkout,
 }));
@@ -63,6 +78,12 @@ vi.mock('qrcode', () => ({
 }));
 
 import { BillingPage } from '../BillingPage';
+
+beforeEach(() => {
+  uiMocks.confirm.mockReset().mockResolvedValue(false);
+  uiMocks.toastError.mockReset();
+  uiMocks.toastSuccess.mockReset();
+});
 
 describe('BillingPage remote catalog rendering', () => {
   beforeEach(() => {
@@ -1122,6 +1143,7 @@ describe('BillingPage plan change', () => {
     })),
     getCatalog: vi.fn(async () => subscriptionCatalog),
     getCurrentSubscription: vi.fn(async () => ({ subscription: activeSubscription() })),
+    cancelCurrentSubscription: vi.fn(),
     quotePlanChange: vi.fn(),
     confirmPlanChange: vi.fn(),
     refreshPlanChange: vi.fn(),
@@ -1153,6 +1175,52 @@ describe('BillingPage plan change', () => {
     vi.stubGlobal('crypto', {
       randomUUID: () => '00000000-0000-4000-8000-000000000042',
     });
+  });
+
+  it('confirms provider-neutral cancellation and keeps credits unchanged until period end', async () => {
+    const billing = install(billingMocks());
+    billing.cancelCurrentSubscription.mockResolvedValue({
+      ...activeSubscription(),
+      cancelAtPeriodEnd: true,
+    });
+    uiMocks.confirm.mockResolvedValueOnce(true);
+
+    render(<BillingPage />);
+    fireEvent.click(await screen.findByText('billing.settings.subscriptionCard.cancelAction'));
+
+    await waitFor(() => expect(billing.cancelCurrentSubscription).toHaveBeenCalledWith());
+    expect(uiMocks.confirm).toHaveBeenCalledWith(
+      expect.objectContaining({
+        title: 'billing.settings.subscriptionCard.cancelConfirmTitle',
+        confirmText: 'billing.settings.subscriptionCard.cancelConfirmAction',
+      }),
+    );
+    expect(billing.getBalance).toHaveBeenCalledTimes(1);
+    expect(uiMocks.toastSuccess).toHaveBeenCalledTimes(1);
+    expect(
+      screen.getByText((text) => text.startsWith('billing.settings.subscriptionCard.endsAt')),
+    ).toBeTruthy();
+    expect(screen.queryByText('billing.settings.subscriptionCard.cancelAction')).toBeNull();
+  });
+
+  it('shows the server-state rejection without inferring a payment provider', async () => {
+    const billing = install(billingMocks());
+    billing.cancelCurrentSubscription.mockRejectedValue(
+      new Error('[PRECONDITION_FAILED] billing request conflicts with the current state'),
+    );
+    uiMocks.confirm.mockResolvedValueOnce(true);
+
+    render(<BillingPage />);
+    fireEvent.click(await screen.findByText('billing.settings.subscriptionCard.cancelAction'));
+
+    await waitFor(() =>
+      expect(uiMocks.toastError).toHaveBeenCalledWith(
+        'billing.settings.subscriptionCard.cancelNotSupported',
+      ),
+    );
+    expect(billing.cancelCurrentSubscription).toHaveBeenCalledWith();
+    expect(billing.getBalance).toHaveBeenCalledTimes(1);
+    expect(screen.getByText('billing.settings.subscriptionCard.cancelAction')).toBeTruthy();
   });
 
   it('offers plan change for an active subscription with same-provider candidates only', async () => {

@@ -11,6 +11,8 @@ import {
 } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 
+import { useConfirmDialog } from '@/components/ui/confirm-dialog-provider';
+import { toast } from '@/lib/toast';
 import { Spinner } from '@/components/ui/spinner';
 import { useAuth } from '@/contexts/AuthContext';
 import { cn } from '@/lib/utils';
@@ -220,6 +222,7 @@ export function BillingPage() {
 
 export function BillingSettingsSection({ accountId }: { accountId: string | null }) {
   const { t, i18n } = useTranslation();
+  const { confirm } = useConfirmDialog();
   const billingLocale = i18n.resolvedLanguage ?? i18n.language;
   const [catalog, setCatalog] = useState<BillingCatalog | null>(null);
   const [catalogError, setCatalogError] = useState(false);
@@ -227,6 +230,7 @@ export function BillingSettingsSection({ accountId }: { accountId: string | null
   const [currentSubscription, setCurrentSubscription] = useState<BillingSubscription | null>(null);
   const [loadingSubscription, setLoadingSubscription] = useState(true);
   const [subscriptionError, setSubscriptionError] = useState(false);
+  const [cancelingSubscription, setCancelingSubscription] = useState(false);
   const [creditUsage, setCreditUsage] = useState<ModelAccessCreditUsage | null>(null);
   const [balance, setBalance] = useState<ModelAccessBalance | null>(null);
   const [usageDetailsUnavailable, setUsageDetailsUnavailable] = useState(false);
@@ -456,6 +460,45 @@ export function BillingSettingsSection({ accountId }: { accountId: string | null
     };
   }, [billingLocale, currentSubscription, planNameOf, t]);
 
+  const cancelCurrentSubscription = useCallback(async () => {
+    if (!currentSubscription || currentSubscription.cancelAtPeriodEnd || cancelingSubscription) {
+      return;
+    }
+    const periodEndAt = currentPlanFacts?.periodEndAt ?? null;
+    const confirmed = await confirm({
+      title: t('billing.settings.subscriptionCard.cancelConfirmTitle'),
+      description: periodEndAt
+        ? t('billing.settings.subscriptionCard.cancelConfirmDescription', {
+            date: periodEndAt,
+          })
+        : t('billing.settings.subscriptionCard.cancelConfirmDescriptionWithoutDate'),
+      confirmText: t('billing.settings.subscriptionCard.cancelConfirmAction'),
+      cancelText: t('commonUi.confirmDialog.cancel'),
+    });
+    if (!confirmed) return;
+
+    setCancelingSubscription(true);
+    try {
+      const canceled = await billingApi.cancelCurrentSubscription();
+      setCurrentSubscription(canceled);
+      setSubscriptionError(false);
+      toast.success(
+        periodEndAt
+          ? t('billing.settings.subscriptionCard.cancelSuccess', { date: periodEndAt })
+          : t('billing.settings.subscriptionCard.cancelSuccessWithoutDate'),
+      );
+    } catch (error) {
+      const ipcError = extractIpcError(error);
+      toast.error(
+        ipcError?.code === 'PRECONDITION_FAILED'
+          ? t('billing.settings.subscriptionCard.cancelNotSupported')
+          : t('billing.settings.subscriptionCard.cancelFailed'),
+      );
+    } finally {
+      setCancelingSubscription(false);
+    }
+  }, [cancelingSubscription, confirm, currentPlanFacts?.periodEndAt, currentSubscription, t]);
+
   // UI candidates only. The quote is the authority on whether a target is
   // actually reachable; this filter just avoids offering obviously invalid
   // targets (other interval, same level, or another provider's offers).
@@ -606,17 +649,18 @@ export function BillingSettingsSection({ accountId }: { accountId: string | null
               loading={loadingSubscription}
               error={subscriptionError}
               planChangeable={planChangeable}
-              actionDisabled={loadingSubscription || subscriptionError}
+              canceling={cancelingSubscription}
+              actionDisabled={loadingSubscription || subscriptionError || cancelingSubscription}
               pendingPlanChange={pendingPlanChange}
               pendingTargetName={planNameOf(pendingPlanChange?.targetPlan?.product.code)}
+              onCancelSubscription={() => void cancelCurrentSubscription()}
               onChangePlan={openPlanChange}
               onPurchase={() => openPurchaseDialog('SUBSCRIPTION')}
               onResumePending={() => {
                 if (pendingPlanChange) planChange.resumePending(pendingPlanChange);
               }}
               onCancelPending={() => {
-                if (pendingPlanChange)
-                  void planChange.cancelChange(pendingPlanChange.planChangeId);
+                if (pendingPlanChange) void planChange.cancelChange(pendingPlanChange.planChangeId);
               }}
             />
           </BillingGroup>
@@ -803,9 +847,11 @@ function SubscriptionOverviewCard({
   loading,
   error,
   planChangeable,
+  canceling,
   actionDisabled,
   pendingPlanChange,
   pendingTargetName,
+  onCancelSubscription,
   onChangePlan,
   onPurchase,
   onResumePending,
@@ -815,9 +861,11 @@ function SubscriptionOverviewCard({
   loading: boolean;
   error: boolean;
   planChangeable: boolean;
+  canceling: boolean;
   actionDisabled: boolean;
   pendingPlanChange: BillingPendingPlanChange | null;
   pendingTargetName: string | null;
+  onCancelSubscription: () => void;
   onChangePlan: () => void;
   onPurchase: () => void;
   onResumePending: () => void;
@@ -890,16 +938,32 @@ function SubscriptionOverviewCard({
             </>
           )}
         </div>
-        <button
-          type="button"
-          onClick={planChangeable ? onChangePlan : onPurchase}
-          disabled={actionDisabled}
-          className="h-8 shrink-0 select-none rounded-full border border-[var(--border-default)] px-3.5 text-12 font-medium text-[var(--text-primary)] transition-colors hover:bg-[var(--surface-hover-soft)] disabled:cursor-not-allowed disabled:opacity-40"
-        >
-          {planChangeable
-            ? t('billing.settings.subscriptionCard.changeAction')
-            : t('billing.settings.subscriptionCard.action')}
-        </button>
+        <div className="flex shrink-0 items-center gap-2.5">
+          {facts && !facts.cancelAtPeriodEnd && (
+            <button
+              type="button"
+              onClick={onCancelSubscription}
+              disabled={actionDisabled}
+              className="inline-flex h-8 select-none items-center justify-center rounded-full border border-[var(--border-default)] px-3.5 text-12 font-medium text-[var(--error-fg)] transition-colors hover:bg-[var(--error-bg)] disabled:cursor-not-allowed disabled:opacity-40"
+            >
+              {canceling ? (
+                <Spinner size={13} />
+              ) : (
+                t('billing.settings.subscriptionCard.cancelAction')
+              )}
+            </button>
+          )}
+          <button
+            type="button"
+            onClick={planChangeable ? onChangePlan : onPurchase}
+            disabled={actionDisabled}
+            className="h-8 select-none rounded-full border border-[var(--border-default)] px-3.5 text-12 font-medium text-[var(--text-primary)] transition-colors hover:bg-[var(--surface-hover-soft)] disabled:cursor-not-allowed disabled:opacity-40"
+          >
+            {planChangeable
+              ? t('billing.settings.subscriptionCard.changeAction')
+              : t('billing.settings.subscriptionCard.action')}
+          </button>
+        </div>
       </div>
       {pendingPlanChange && (
         <PendingPlanChangeBanner
@@ -1088,9 +1152,7 @@ function UsageBreakdownCard({
               ['purchased', usage.purchased],
               ['promotional', usage.promotional],
             ] as const
-          ).map(([key, pool]) => (
-            <CreditPoolRow key={key} label={poolLabels[key]} pool={pool} />
-          ))
+          ).map(([key, pool]) => <CreditPoolRow key={key} label={poolLabels[key]} pool={pool} />)
         : balance
           ? (
               [
