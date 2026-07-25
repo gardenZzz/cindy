@@ -2018,7 +2018,7 @@
       "prefs": {
         "agentLabel": "Agent",
         "modelLabel": "모델",
-        "effortLabel": "사고 강도",
+        "effortLabel": "추론 강도",
         "permissionLabel": "권한 모드",
         "providerSlack": "Slack",
         "providerTelegram": "Telegram",
@@ -5705,7 +5705,7 @@
         "modelListAria": "모델 목록",
         "modelSelectorAria": "모델 선택기",
         "categoryListAria": "{{category}} 모델",
-        "effortListAria": "Effort 레벨"
+        "effortListAria": "추론 강도"
       }
     },
     "toast": {
@@ -6609,7 +6609,7 @@
     "workingDirPlaceholder": "오른쪽 버튼으로 디렉토리 선택",
     "selectButton": "선택…",
     "modelLabel": "모델:",
-    "effortLabel": "강도:",
+    "effortLabel": "추론 강도:",
     "permissionLabel": "권한:",
     "warningHint": "⚠ 표시된 모드 (ask/default/plan/acceptEdits) 는 1단계에서 UI 승인 팝업이 연결되지 않았으며, 실험 페이지 hook 이 자동으로 도구 호출을 deny 합니다 — 실제 테스트에는 auto / bypassPermissions 만 권장됩니다.",
     "createSession": "세션 만들기",
@@ -6750,7 +6750,7 @@
       "agentLabel": "Agent",
       "modelLabel": "모델",
       "noAvailableModels": "사용 가능한 {{agent}} 모델이 없습니다. 설정에서 공급자 연결과 자격 증명을 확인하세요.",
-      "effortLabel": "Effort",
+      "effortLabel": "추론 강도",
       "initialTaskLabel": "초기 작업",
       "optional": "(선택)",
       "initialTaskPlaceholder": "이 Worker 에게 보낼 선택적 첫 작업",

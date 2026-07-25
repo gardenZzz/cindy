@@ -52,8 +52,8 @@
     "connecting": "正在连接 Relay",
     "stopped": "Relay 未连接",
     "lastSynced": "上次同步 {{time}}",
-    "canSync": "可以同步远程会话。",
-    "reconnectHint": "网络恢复后会自动重新订阅远程会话。",
+    "canSync": "可以同步远程对话。",
+    "reconnectHint": "网络恢复后会自动重新订阅远程对话。",
     "resumeHint": "回到前台或重新登录后会恢复连接。"
   },
   "header": {
@@ -89,7 +89,7 @@
     "appFilingNumber": "App 备案号"
   },
   "account": {
-    "logoutHint": "退出只会清除这台手机上的登录态和本地远程镜像，不会影响电脑端会话。",
+    "logoutHint": "退出只会清除这台手机上的登录态和本地远程镜像，不会影响电脑端对话。",
     "logout": "退出登录",
     "loggingOut": "退出中",
     "loggingOutAccessibility": "正在退出登录"

@@ -2018,7 +2018,7 @@
       "prefs": {
         "agentLabel": "Agent",
         "modelLabel": "モデル",
-        "effortLabel": "思考強度",
+        "effortLabel": "推論強度",
         "permissionLabel": "権限モード",
         "providerSlack": "Slack",
         "providerTelegram": "Telegram",
@@ -5705,7 +5705,7 @@
         "modelListAria": "モデル一覧",
         "modelSelectorAria": "モデルセレクター",
         "categoryListAria": "{{category}} モデル",
-        "effortListAria": "Effort レベル"
+        "effortListAria": "推論強度"
       }
     },
     "toast": {
@@ -6609,7 +6609,7 @@
     "workingDirPlaceholder": "右のボタンでディレクトリを選択",
     "selectButton": "選択…",
     "modelLabel": "モデル:",
-    "effortLabel": "強度:",
+    "effortLabel": "推論強度:",
     "permissionLabel": "権限:",
     "warningHint": "⚠ マークのモード（ask/default/plan/acceptEdits）はステージ 1 で UI 承認ポップアップ未接続、実験ページの hook はツール呼び出しを自動 deny します — 実テストには auto / bypassPermissions のみ推奨。",
     "createSession": "セッションを作成",
@@ -6750,7 +6750,7 @@
       "agentLabel": "Agent",
       "modelLabel": "モデル",
       "noAvailableModels": "利用可能な {{agent}} モデルがありません。設定でプロバイダーの接続と認証情報を確認してください。",
-      "effortLabel": "Effort",
+      "effortLabel": "推論強度",
       "initialTaskLabel": "初期タスク",
       "optional": "（任意）",
       "initialTaskPlaceholder": "この Worker に渡す任意の最初のタスク",
