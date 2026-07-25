@@ -615,14 +615,20 @@ registerColor('login-error-fg', {
   light: '#D91F37',
   dark: '#D91F37',
 }, 'Login — 错误文本/error 描边(语义豁免,跨模式不变 #D91F37)');
-// 注销提示气泡底(figma 678:1075「注销状态」组件集;用户拍板 2026-07-25):值是 var 引用——
-// light 消费 --chat-input-bg(agent 输入框底,实值 #FFFFFF)、dark 消费 --surface(main 最深
-// 深色背景,实值 #1F1F1E,用户点名"找最深的");非默认扩展主题自动跟随这两个语义槽,
-// 无需逐主题 override(规则 16:alias 形态,同 panel-bg 先例)。
+// 注销提示气泡底 + 描边(figma 678:1075「注销状态」组件集;用户拍板 2026-07-25 取
+// 「agent 输入框底/描边、main 最深深色底」的**值**:#FFFFFF / #D7D7D4 / #1F1F1E)。
+// 不用 alias(var(--chat-input-bg)/var(--chat-input-border)/var(--surface)):login skin
+// 只分亮/暗、不随扩展主题——alias 会被扩展主题 override(cindy-dark 下 --surface 取
+// #2A2828,气泡变浅且与 mobile 色板不一致),同 login-bg-base 上方注释的改判先例。
+// 与 mobile loginPalettes.deletionBubbleBg/deletionBubbleBorder 逐值一致。
 registerColor('login-deletion-bubble-bg', {
-  light: 'var(--chat-input-bg)',
-  dark: 'var(--surface)',
-}, 'Login — 注销提示气泡底(figma 678:1075;light alias --chat-input-bg #FFFFFF / dark alias --surface #1F1F1E,var 引用随扩展主题自动跟随)');
+  light: '#FFFFFF',
+  dark: '#1F1F1E',
+}, 'Login — 注销提示气泡底(figma 678:1075;固定值 #FFFFFF / #1F1F1E,取 agent 输入框底与最深深色底的值,不用 alias——login skin 不随扩展主题,与 mobile 逐值一致)');
+registerColor('login-deletion-bubble-border', {
+  light: '#D7D7D4',
+  dark: '#3C3C3A',
+}, 'Login — 注销提示气泡 1px 描边(figma 678:1075;固定值 #D7D7D4 / #3C3C3A,取 agent 输入框描边的值,不用 alias——同 bubble-bg 口径,与 mobile 逐值一致)');
 // Splash 统一面板进度条(亮色 track #D9D9D9/fill #252222;暗色推导 track #434343/fill #D4D4D4,待 Figma 精确)。
 registerColor('login-splash-progress-track', {
   light: '#D9D9D9',
