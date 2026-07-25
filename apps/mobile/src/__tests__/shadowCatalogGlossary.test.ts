@@ -34,7 +34,8 @@ interface GlossaryTerm {
   id: string;
   status: 'decided' | 'proposed';
   en: string;
-  translations: Record<string, string>;
+  /** status=proposed 的术语允许还没定译法,与 glossary.schema.json 一致 */
+  translations?: Record<string, string>;
   forbidden?: Record<string, (string | { text: string; whenEn: string })[]>;
   exempt?: string[];
   checkCase?: boolean;
@@ -77,6 +78,11 @@ function collectEntries(): { locale: string; key: string; value: string }[] {
 
 const entries = collectEntries();
 
+/** key → 英文源文案。条件禁用要按 key 查英文源,放进三重循环里线性扫会随 catalog 增长恶化。 */
+const sourceByKey = new Map(
+  entries.filter((e) => e.locale === glossary.sourceLocale).map((e) => [e.key, e.value]),
+);
+
 describe('影子 catalog 术语一致性', () => {
   it('catalog 非空且覆盖全部支持语言（防止 import 失效后测试静默通过）', () => {
     expect(entries.length).toBeGreaterThan(0);
@@ -100,7 +106,7 @@ describe('影子 catalog 术语一致性', () => {
           const whenEn = typeof entry === 'string' ? null : entry.whenEn;
           if (!occursIn(stripNonProse(value), bad)) continue;
           if (whenEn) {
-            const source = entries.find((e) => e.key === key && e.locale === glossary.sourceLocale)?.value;
+            const source = sourceByKey.get(key);
             const re = new RegExp(
               `(?<![${WORD_BOUNDARY}])${whenEn.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}s?(?![${WORD_BOUNDARY}])`,
               'i',

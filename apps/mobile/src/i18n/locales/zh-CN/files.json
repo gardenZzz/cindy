@@ -60,7 +60,7 @@
     "fetchPdfFailed": "取回 PDF 失败：{{detail}}",
     "fetchingPdf": "正在从电脑取回 PDF…",
     "unsupportedType": "此类型暂不支持在手机上预览",
-    "oversize": "文件超过预览上限({{size}}),可下载原文件查看",
+    "oversize": "文件超过预览上限({{size}})，可下载原文件查看",
     "oversizeUnknown": "过大",
     "binaryFile": "二进制文件，无法以文本预览",
     "readFailed": "读取失败",
