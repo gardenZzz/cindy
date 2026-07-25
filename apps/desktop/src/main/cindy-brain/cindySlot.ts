@@ -9,7 +9,8 @@
  *     → 频控(默认不限并发;用户可按意识配置在途上限,经 deps.getInflightLimit
  *       注入——配了才闸,防失控刷付费接口;配额治理随分发渠道重启)
  *     → 模型白名单校验(意识只能从主机菜单里挑,挑不了菜单外的任何路由;
- *       图像/视频各一份白名单与默认,同来自 providers.json 目录)
+ *       图像/视频各一份白名单与默认,同来自 providers.json 目录;该类目清单
+ *       为空 = 能力暂不可用,直接拒单)
  *     → 吃源图的代办(改图/图生视频):指纹逐张查账验归属(只能用自己名下的媒体)
  *     → 主机走统一媒体通道干活(字节从头到尾在主机手里;视频为分钟级长任务)
  *     → 落 blob(SHA-256 主机算)+ 账本记账(出生=该意识)
@@ -36,10 +37,14 @@ import {
 } from '../../shared/ghost.js';
 import { probeImageSize } from './imageProbe.js';
 
-/** 媒体能力配置(图像/视频同构):白名单 + 默认/档位选型,真身在 providers.json 目录。 */
+/**
+ * 媒体能力配置(图像/视频同构):白名单 + 默认/档位选型,真身在 providers.json 目录。
+ * models 空 / defaults null = 目录没有该类目的任何模型 = 该能力暂不可用(见
+ * cindyMediaCatalog.ts 的空清单语义),本模块据此早拒,不拿不在册的型号下单。
+ */
 export interface CindyMediaConfig {
   models: ReadonlyArray<{ id: string; label: string }>;
-  defaults: { standard: string; draft: string; best: string };
+  defaults: { standard: string; draft: string; best: string } | null;
 }
 
 export interface CindySlotDeps {
@@ -83,7 +88,8 @@ export interface CindySlotDeps {
   /**
    * 当前图像能力配置——真身是 providers.json 运行时目录(与会话模型列表
    * 同一获取来源),每单现读跟随热更。models = 白名单与显示名;defaults =
-   * 默认/档位选型(同样来自目录,代码零模型字面量)。
+   * 默认/档位选型(同样来自目录,代码零模型字面量);清单空 / defaults null
+   * = 目录没给,能力暂不可用。
    */
   getImageConfig(): CindyMediaConfig;
   /** 当前视频能力配置(同 getImageConfig 语义;白名单 id = 视频 provider 层 alias)。 */
@@ -199,7 +205,8 @@ const CATEGORY_LABEL: Record<CindyKindInfo['category'], string> = { image: '图�
 
 // 可选清单与默认/档位选型都不再是本模块常量:经 deps.getImageConfig 注入,
 // 真身来自 providers.json 运行时目录(与会话模型列表同一获取来源,OSS 热更
-// 同机制),见 index.ts 的 getCatalogImageConfig。本文件零模型字面量。
+// 同机制),见 index.ts 的 getCatalogImageConfig 与 cindyMediaCatalog.ts 的派生
+// 规则。本文件零模型字面量;目录没给清单时不猜、不顶,直接拒单。
 
 /** 指纹形状(与 blobStore 同一规则;这里先粗筛,细校验在归属解析)。 */
 const HASH_RE = /^[0-9a-f]{64}$/;
@@ -280,18 +287,46 @@ export class GhostCindySlot {
     }
     const aspectRatio = p.aspectRatio as GhostImageAspectRatio | undefined;
 
+    const ghost = this.deps.getGhost(ghostId);
+    if (!ghost || !ghost.enabled) {
+      return { ok: false, message: '意识不在可用状态' };
+    }
+    if (!ghost.manifest.slots?.includes('cindy')) {
+      return { ok: false, message: '本意识未声明 cindy 卡槽,无权请 Cindy 代办' };
+    }
+    // 能力粒度资格审:详单里没申请的动作点不了(缺详单 = 零能力,提示作者补声明)。
+    const declaredActions: readonly string[] = ghost.manifest.cindy?.[info.category] ?? [];
+    if (!declaredActions.includes(info.action)) {
+      return {
+        ok: false,
+        message: `本意识未声明${CATEGORY_LABEL[info.category]}「${info.verb}」能力(身份卡 cindy.${info.category} 缺 "${info.action}"),请意识作者更新声明`,
+      };
+    }
+
     // 选型优先级(低 → 高逐层覆盖):出厂默认 → 档位(意识意图,主机翻译)
     // → 意识专属覆盖(用户在详情页钉的)→ 调用显式点名(用户当场说的)。
     // 意识报了白名单外的名字 = 拒,不静默降级。配置按类目取(图像/视频
     // 各一份白名单与默认,同来自 providers.json 目录)。
     const cfg = info.category === 'image' ? this.deps.getImageConfig() : this.deps.getVideoConfig();
+    // 目录没给该类目任何模型 = 能力暂不可用:早拒并说清原因,不落回任何写死型号
+    // (说明见 cindyMediaCatalog.ts;详情页对应的那几行同时显示为灰字不可选)。
+    if (cfg.models.length === 0 || cfg.defaults === null) {
+      const category = CATEGORY_LABEL[info.category];
+      return {
+        ok: false,
+        message:
+          `主机当前没有可用的${category}模型(模型目录暂时取不到,不是本插件缺${category}能力)。` +
+          '这是主机侧临时状态,不要频繁重试;请如实告知用户,可稍后再试或重启应用重新加载模型目录。',
+      };
+    }
+    const defaults = cfg.defaults;
     const whitelist = new Set(cfg.models.map((m) => m.id));
-    let model = cfg.defaults.standard;
+    let model = defaults.standard;
     if (p.tier !== undefined) {
       if (typeof p.tier !== 'string' || !(GHOST_MODEL_TIERS as readonly string[]).includes(p.tier)) {
         return { ok: false, message: `未知档位(可用:${GHOST_MODEL_TIERS.join(' / ')})` };
       }
-      model = cfg.defaults[p.tier as GhostModelTier];
+      model = defaults[p.tier as GhostModelTier];
     }
     const capability = `${info.category}.${info.action}`;
     const override = this.deps.getOverride(ghostId, capability);
@@ -308,23 +343,6 @@ export class GhostCindySlot {
         return { ok: false, message: '不支持的模型(不在主机白名单内)' };
       }
       model = p.model;
-    }
-
-    const ghost = this.deps.getGhost(ghostId);
-    if (!ghost || !ghost.enabled) {
-      return { ok: false, message: '意识不在可用状态' };
-    }
-    if (!ghost.manifest.slots?.includes('cindy')) {
-      // 身份卡没声明模型槽 = 结构上没有这个器官,直接拒。
-      return { ok: false, message: '本意识未声明 cindy 卡槽,无权请 Cindy 代办' };
-    }
-    // 能力粒度资格审:详单里没申请的动作点不了(缺详单 = 零能力,提示作者补声明)。
-    const declaredActions: readonly string[] = ghost.manifest.cindy?.[info.category] ?? [];
-    if (!declaredActions.includes(info.action)) {
-      return {
-        ok: false,
-        message: `本意识未声明${CATEGORY_LABEL[info.category]}「${info.verb}」能力(身份卡 cindy.${info.category} 缺 "${info.action}"),请意识作者更新声明`,
-      };
     }
 
     // 吃源图的代办(改图/图生视频):指纹形状先粗筛(不占在途名额),
