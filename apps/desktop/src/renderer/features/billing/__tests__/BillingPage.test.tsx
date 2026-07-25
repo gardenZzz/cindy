@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 
-import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
+import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { BillingPaymentOrder, BillingSubscription } from '../../../../shared/billing';
 
@@ -1110,9 +1110,9 @@ describe('BillingPage plan change', () => {
   };
 
   const activeSubscription = (
-    pendingPlanChange: unknown = null,
+    pendingPlanChange: BillingSubscription['pendingPlanChange'] = null,
     interval: 'MONTH' | 'YEAR' = 'MONTH',
-  ) => ({
+  ): BillingSubscription => ({
     subscriptionId: 'subscription_active',
     status: 'ACTIVE' as const,
     provider: 'stripe',
@@ -1204,6 +1204,71 @@ describe('BillingPage plan change', () => {
       screen.getByText((text) => text.startsWith('billing.settings.subscriptionCard.endsAt')),
     ).toBeTruthy();
     expect(screen.queryByText('billing.settings.subscriptionCard.cancelAction')).toBeNull();
+  });
+
+  it.each(['CANCELED', 'INCOMPLETE_EXPIRED'] as const)(
+    'does not offer cancellation for a terminal %s subscription',
+    async (status) => {
+      const billing = billingMocks();
+      billing.getCurrentSubscription = vi.fn(async () => ({
+        subscription: { ...activeSubscription(), status },
+      }));
+      install(billing);
+
+      render(<BillingPage />);
+
+      await screen.findByText(`billing.subscriptionStatus.${status}`);
+      expect(screen.queryByText('billing.settings.subscriptionCard.cancelAction')).toBeNull();
+      expect(billing.cancelCurrentSubscription).not.toHaveBeenCalled();
+    },
+  );
+
+  it('locks cancellation before confirmation resolves', async () => {
+    const billing = install(billingMocks());
+    let resolveConfirm!: (confirmed: boolean) => void;
+    uiMocks.confirm.mockReturnValueOnce(
+      new Promise<boolean>((resolve) => {
+        resolveConfirm = resolve;
+      }),
+    );
+
+    render(<BillingPage />);
+    const cancelButton = await screen.findByText('billing.settings.subscriptionCard.cancelAction');
+    fireEvent.click(cancelButton);
+    fireEvent.click(cancelButton);
+
+    expect(uiMocks.confirm).toHaveBeenCalledTimes(1);
+    expect(billing.cancelCurrentSubscription).not.toHaveBeenCalled();
+
+    await act(async () => resolveConfirm(false));
+  });
+
+  it('keeps the loading cancellation accessible and disables refresh during the request', async () => {
+    const billing = install(billingMocks());
+    const canceled = { ...activeSubscription(), cancelAtPeriodEnd: true };
+    let resolveCancellation!: (subscription: BillingSubscription) => void;
+    billing.cancelCurrentSubscription.mockReturnValueOnce(
+      new Promise<BillingSubscription>((resolve) => {
+        resolveCancellation = resolve;
+      }),
+    );
+    uiMocks.confirm.mockResolvedValueOnce(true);
+
+    render(<BillingPage />);
+    fireEvent.click(await screen.findByText('billing.settings.subscriptionCard.cancelAction'));
+
+    await waitFor(() => expect(billing.cancelCurrentSubscription).toHaveBeenCalledTimes(1));
+    expect(
+      screen
+        .getByRole('button', { name: 'billing.settings.subscriptionCard.cancelAction' })
+        .hasAttribute('disabled'),
+    ).toBe(true);
+    const refreshButton = screen.getByRole('button', { name: 'billing.actions.refreshCatalog' });
+    expect(refreshButton.hasAttribute('disabled')).toBe(true);
+    fireEvent.click(refreshButton);
+    expect(billing.getCurrentSubscription).toHaveBeenCalledTimes(1);
+
+    await act(async () => resolveCancellation(canceled));
   });
 
   it('shows the server-state rejection without inferring a payment provider', async () => {

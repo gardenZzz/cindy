@@ -87,6 +87,14 @@ const SUBSCRIPTION_PURCHASE_BLOCKING_STATUSES: BillingSubscription['status'][] =
   'UNPAID',
   'PAUSED',
 ];
+const SUBSCRIPTION_CANCELLABLE_STATUSES: BillingSubscription['status'][] = [
+  'INCOMPLETE',
+  'TRIALING',
+  'ACTIVE',
+  'PAST_DUE',
+  'UNPAID',
+  'PAUSED',
+];
 
 function decimalParts(value: string): { value: bigint; scale: number } | null {
   const match = /^(0|[1-9]\d{0,14})(?:\.(\d{1,9}))?$/.exec(value.trim());
@@ -244,6 +252,7 @@ export function BillingSettingsSection({ accountId }: { accountId: string | null
   const [customAmount, setCustomAmount] = useState('');
   const checkout = useBillingCheckout(accountId);
   const previousCheckoutPhaseRef = useRef(checkout.state.phase);
+  const cancelSubscriptionLockRef = useRef(false);
 
   const resetSelection = useCallback(() => {
     setSelectedOfferCode(null);
@@ -461,51 +470,54 @@ export function BillingSettingsSection({ accountId }: { accountId: string | null
   }, [billingLocale, currentSubscription, planNameOf, t]);
 
   const cancelCurrentSubscription = useCallback(async () => {
-    if (!currentSubscription || currentSubscription.cancelAtPeriodEnd || cancelingSubscription) {
+    if (
+      cancelSubscriptionLockRef.current ||
+      !currentSubscription ||
+      currentSubscription.cancelAtPeriodEnd ||
+      !SUBSCRIPTION_CANCELLABLE_STATUSES.includes(currentSubscription.status)
+    ) {
       return;
     }
-    const periodEndAt = currentPlanFacts?.periodEndAt ?? null;
-    const confirmed = await confirm({
-      title: t('billing.settings.subscriptionCard.cancelConfirmTitle'),
-      description: periodEndAt
-        ? t('billing.settings.subscriptionCard.cancelConfirmDescription', {
-            date: periodEndAt,
-          })
-        : t('billing.settings.subscriptionCard.cancelConfirmDescriptionWithoutDate'),
-      confirmText: t('billing.settings.subscriptionCard.cancelConfirmAction'),
-      cancelText: t('commonUi.confirmDialog.cancel'),
-    });
-    if (!confirmed) return;
-
-    setCancelingSubscription(true);
+    cancelSubscriptionLockRef.current = true;
     try {
-      const canceled = await billingApi.cancelCurrentSubscription();
-      setCurrentSubscription(canceled);
-      setSubscriptionError(false);
-      const canceledPeriodEndAt = formatBillingDate(canceled.currentPeriodEndAt, billingLocale);
-      toast.success(
-        canceledPeriodEndAt
-          ? t('billing.settings.subscriptionCard.cancelSuccess', { date: canceledPeriodEndAt })
-          : t('billing.settings.subscriptionCard.cancelSuccessWithoutDate'),
-      );
-    } catch (error) {
-      const ipcError = extractIpcError(error);
-      toast.error(
-        ipcError?.code === 'PRECONDITION_FAILED'
-          ? t('billing.settings.subscriptionCard.cancelNotSupported')
-          : t('billing.settings.subscriptionCard.cancelFailed'),
-      );
+      const periodEndAt = currentPlanFacts?.periodEndAt ?? null;
+      const confirmed = await confirm({
+        title: t('billing.settings.subscriptionCard.cancelConfirmTitle'),
+        description: periodEndAt
+          ? t('billing.settings.subscriptionCard.cancelConfirmDescription', {
+              date: periodEndAt,
+            })
+          : t('billing.settings.subscriptionCard.cancelConfirmDescriptionWithoutDate'),
+        confirmText: t('billing.settings.subscriptionCard.cancelConfirmAction'),
+        cancelText: t('commonUi.confirmDialog.cancel'),
+      });
+      if (!confirmed) return;
+
+      setCancelingSubscription(true);
+      try {
+        const canceled = await billingApi.cancelCurrentSubscription();
+        setCurrentSubscription(canceled);
+        setSubscriptionError(false);
+        const canceledPeriodEndAt = formatBillingDate(canceled.currentPeriodEndAt, billingLocale);
+        toast.success(
+          canceledPeriodEndAt
+            ? t('billing.settings.subscriptionCard.cancelSuccess', { date: canceledPeriodEndAt })
+            : t('billing.settings.subscriptionCard.cancelSuccessWithoutDate'),
+        );
+      } catch (error) {
+        const ipcError = extractIpcError(error);
+        toast.error(
+          ipcError?.code === 'PRECONDITION_FAILED'
+            ? t('billing.settings.subscriptionCard.cancelNotSupported')
+            : t('billing.settings.subscriptionCard.cancelFailed'),
+        );
+      } finally {
+        setCancelingSubscription(false);
+      }
     } finally {
-      setCancelingSubscription(false);
+      cancelSubscriptionLockRef.current = false;
     }
-  }, [
-    billingLocale,
-    cancelingSubscription,
-    confirm,
-    currentPlanFacts?.periodEndAt,
-    currentSubscription,
-    t,
-  ]);
+  }, [billingLocale, confirm, currentPlanFacts?.periodEndAt, currentSubscription, t]);
 
   // UI candidates only. The quote is the authority on whether a target is
   // actually reachable; this filter just avoids offering obviously invalid
@@ -624,7 +636,9 @@ export function BillingSettingsSection({ accountId }: { accountId: string | null
           <button
             type="button"
             onClick={() => void loadBillingState()}
-            disabled={loadingCatalog || loadingSubscription || loadingBalance}
+            disabled={
+              loadingCatalog || loadingSubscription || loadingBalance || cancelingSubscription
+            }
             className="inline-flex h-8 shrink-0 items-center gap-2 rounded-full border border-[var(--border-default)] px-3.5 text-12 font-medium text-[var(--text-secondary)] transition-colors hover:bg-[var(--surface-hover-soft)] disabled:opacity-45"
           >
             {loadingCatalog || loadingSubscription || loadingBalance ? (
@@ -947,20 +961,23 @@ function SubscriptionOverviewCard({
           )}
         </div>
         <div className="flex shrink-0 items-center gap-2.5">
-          {facts && !facts.cancelAtPeriodEnd && (
-            <button
-              type="button"
-              onClick={onCancelSubscription}
-              disabled={actionDisabled}
-              className="inline-flex h-8 select-none items-center justify-center rounded-full border border-[var(--border-default)] px-3.5 text-12 font-medium text-[var(--error-fg)] transition-colors hover:bg-[var(--error-bg)] disabled:cursor-not-allowed disabled:opacity-40"
-            >
-              {canceling ? (
-                <Spinner size={13} />
-              ) : (
-                t('billing.settings.subscriptionCard.cancelAction')
-              )}
-            </button>
-          )}
+          {facts &&
+            !facts.cancelAtPeriodEnd &&
+            SUBSCRIPTION_CANCELLABLE_STATUSES.includes(facts.status) && (
+              <button
+                type="button"
+                onClick={onCancelSubscription}
+                disabled={actionDisabled}
+                aria-label={t('billing.settings.subscriptionCard.cancelAction')}
+                className="inline-flex h-8 select-none items-center justify-center rounded-full border border-[var(--border-default)] px-3.5 text-12 font-medium text-[var(--error-fg)] transition-colors hover:bg-[var(--error-bg)] disabled:cursor-not-allowed disabled:opacity-40"
+              >
+                {canceling ? (
+                  <Spinner size={13} />
+                ) : (
+                  t('billing.settings.subscriptionCard.cancelAction')
+                )}
+              </button>
+            )}
           <button
             type="button"
             onClick={planChangeable ? onChangePlan : onPurchase}
