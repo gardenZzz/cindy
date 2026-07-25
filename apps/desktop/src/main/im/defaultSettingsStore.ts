@@ -73,12 +73,40 @@ function normalizeSettings(raw: unknown): ImDefaultSettings {
 
 function normalizeDocument(raw: unknown): ImDefaultSettingsDocument {
   const record = isRecord(raw) ? raw : {};
-  const hasLegacyRootSettings =
-    'agentKind' in record ||
-    'agents' in record ||
-    'providerId' in record ||
-    'model' in record ||
-    'effort' in record;
+
+  // Detect legacy v1 overrides even after createOverrideSettingsFile merges
+  // them with v2 defaults (which injects schemaVersion/global/channels).
+  //
+  // Signals that root-level fields came from a v1 persisted file:
+  //   1. providerId/model/effort at root — v2 never writes these at root.
+  //   2. Root agentKind disagrees with global.agentKind — in v2 backward-compat
+  //      the root mirror always matches global; a v1 override diverges.
+  //   3. Root agentKind/agents present without any global — pure v1 input.
+  //   4. Root agents present without root agentKind, and global.agents equals
+  //      system defaults — a v1 agents-only override (user changed model/provider
+  //      without switching agent) merged over v2 defaults. In a real v2 file the
+  //      global.agents would reflect the user's customization, not defaults.
+  const hasLegacyScalarOverrides =
+    'providerId' in record || 'model' in record || 'effort' in record;
+  const globalRecord = isRecord(record.global) ? record.global : null;
+  const normalizedGlobal = globalRecord ? normalizeSettings(globalRecord) : null;
+  // In v2, the root agentKind mirror always equals normalizedGlobal.agentKind.
+  // A divergence means a v1 override's agentKind sits at root while global
+  // retains the defaults value. Normalize global before comparing so a partial
+  // v2 global (with agents but no agentKind) falls back to the default agentKind
+  // and doesn't spuriously diverge.
+  const rootAgentKindDiverges =
+    'agentKind' in record && normalizedGlobal !== null &&
+    record.agentKind !== normalizedGlobal.agentKind;
+  const rootAgentsOnlyWithDefaultGlobal =
+    'agents' in record && isRecord(record.agents) &&
+    !('agentKind' in record) && normalizedGlobal !== null &&
+    JSON.stringify(normalizedGlobal.agents) ===
+      JSON.stringify(IM_DEFAULT_SETTINGS.agents);
+  const hasLegacyAgentFields =
+    ('agentKind' in record || 'agents' in record) &&
+    (globalRecord === null || rootAgentKindDiverges || rootAgentsOnlyWithDefaultGlobal);
+  const hasLegacyRootSettings = hasLegacyScalarOverrides || hasLegacyAgentFields;
 
   // Before schema v2 there was one flat route shared by every IM channel.
   // A legacy file is unambiguous user customization, so seed every channel
@@ -241,7 +269,7 @@ function documentOverrides(
   next: ImDefaultSettingsDocument,
   defaults: ImDefaultSettingsDocument,
 ): Record<string, unknown> {
-  const overrides: Record<string, unknown> = { schemaVersion: SETTINGS_SCHEMA_VERSION };
+  const overrides: Record<string, unknown> = {};
   const global = settingsOverrides(next.global, defaults.global);
   if (Object.keys(global).length > 0) overrides.global = global;
 
@@ -251,6 +279,19 @@ function documentOverrides(
     if (Object.keys(channelOverrides).length > 0) channels[channel] = channelOverrides;
   }
   if (Object.keys(channels).length > 0) overrides.channels = channels;
+
+  if (Object.keys(overrides).length === 0) return overrides;
+
+  // Write schemaVersion only when there are actual overrides, so that the
+  // "empty overrides → reset()" cleanup path in createOverrideSettingsFile works.
+  overrides.schemaVersion = SETTINGS_SCHEMA_VERSION;
+
+  // Preserve flat legacy fields so that an older app version (pre-v2) reading
+  // this file still picks up the global route instead of falling back to
+  // system defaults.
+  overrides.agentKind = next.global.agentKind;
+  overrides.agents = next.global.agents;
+
   return overrides;
 }
 

@@ -67,6 +67,7 @@ export function ImChannelSettingsCard({
   onToggle: () => void;
   children: ReactNode;
 }) {
+  const triggerId = `${id}-trigger`;
   const panelId = `${id}-panel`;
 
   return (
@@ -82,6 +83,7 @@ export function ImChannelSettingsCard({
       <div className="flex items-center transition-colors hover:bg-[var(--surface-hover-soft)]">
         <button
           type="button"
+          id={triggerId}
           aria-expanded={expanded}
           aria-controls={panelId}
           onClick={onToggle}
@@ -124,6 +126,7 @@ export function ImChannelSettingsCard({
         open={expanded}
         id={panelId}
         role="region"
+        aria-labelledby={triggerId}
         innerClassName="border-t border-[var(--settings-theme-card-border)]"
       >
         <div className="flex flex-col gap-5 p-4">{children}</div>

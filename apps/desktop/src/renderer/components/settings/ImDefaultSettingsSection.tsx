@@ -85,10 +85,7 @@ export function ImDefaultSettingsSection({
   }, [channel, t]);
 
   useEffect(() => {
-    if (!settings) {
-      onSummaryChange?.(null);
-      return;
-    }
+    if (!settings) return;
     onSummaryChange?.({
       agentKind: settings.agentKind,
       model: settings.agents[settings.agentKind].model,
