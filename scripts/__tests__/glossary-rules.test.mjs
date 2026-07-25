@@ -617,3 +617,20 @@ test('validateAgainstSchema: boolean schema 的 false 必须恒失败', () => {
     /oneOf/,
   );
 });
+
+test('stripNonProse: 邮箱 local part 不能把紧贴在前面的中文正文吃掉', () => {
+  // local part 若允许 CJK,会一路吞到上一个空白/标点为止:`返回worker联系a@x.com`
+  // 整条被剥成一个空格,里面小写的 worker 违规随之消失
+  const stripped = stripNonProse('返回worker联系a@x.com');
+  assert.ok(stripped.includes('worker'), `正文被吞了:${JSON.stringify(stripped)}`);
+  assert.ok(!stripped.includes('@'));
+  // 正常写法仍要剥干净
+  assert.ok(!stripNonProse('联系 ops@x.com 即可').includes('@'));
+});
+
+test('ELLIPSIS_LOCALES 必须含 en', () => {
+  // DESIGN.md §11 Voice & Content 明文要求英文也用「…」而非三个半角点。
+  // 漏掉 en 等于让门禁替既有违规背书(实测当时 en 侧有 54 处)。
+  assert.ok(ELLIPSIS_LOCALES.has('en'));
+  for (const l of ['zh-CN', 'ja', 'ko']) assert.ok(ELLIPSIS_LOCALES.has(l), l);
+});
