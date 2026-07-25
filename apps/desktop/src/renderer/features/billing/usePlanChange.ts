@@ -2,18 +2,11 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 
 import { extractIpcError } from '@/utils/ipcError';
 import type {
-  BillingPendingPlanChange,
   BillingPlanChange,
   BillingPlanChangeTargetPlan,
 } from '../../../shared/billing';
 import { billingApi } from './api';
-import {
-  clearBillingPlanChangeIntent,
-  newBillingIdempotencyKey,
-  readBillingPlanChangeIntent,
-  writeBillingPlanChangeIntent,
-  type BillingPlanChangeIntentV1,
-} from './checkoutIntent';
+import { newBillingIdempotencyKey } from './checkoutIntent';
 
 export type PlanChangePhase =
   | 'IDLE'
@@ -87,16 +80,6 @@ function phaseForPlanChange(change: BillingPlanChange): PlanChangePhase {
   }
 }
 
-function isSettledPhase(phase: PlanChangePhase): boolean {
-  return (
-    phase === 'APPLIED' ||
-    phase === 'CANCELED' ||
-    phase === 'FAILED' ||
-    phase === 'EXPIRED' ||
-    phase === 'SCHEDULED'
-  );
-}
-
 function quoteFailureReason(error: unknown): PlanChangeQuoteFailureReason {
   return extractIpcError(error)?.code === 'PLAN_CHANGE_NOT_AVAILABLE'
     ? 'TARGET_NOT_ALLOWED'
@@ -110,24 +93,15 @@ export function usePlanChange(
   const [state, setState] = useState<PlanChangeState>(INITIAL_STATE);
   const stateRef = useRef(state);
   const mountedRef = useRef(true);
-  const inFlightRef = useRef(false);
+  // 会话代次：切换账号或重新挂载后，旧账号/旧会话的迟到响应不得覆盖新状态。
+  const sessionRef = useRef(0);
+  // 请求锁按会话持有：旧会话的在途刷新不阻断新目标的重新报价，
+  // 且旧请求结束时不会误释放新会话已持有的锁。
+  const inFlightRef = useRef<number | null>(null);
   const settledNotifiedRef = useRef(new Set<string>());
   const onSettledRef = useRef(onSettled);
   stateRef.current = state;
   onSettledRef.current = onSettled;
-
-  const persistIntent = useCallback(
-    (intent: BillingPlanChangeIntentV1 | null) => {
-      if (!accountId) return;
-      try {
-        if (intent) writeBillingPlanChangeIntent(accountId, intent);
-        else clearBillingPlanChangeIntent(accountId);
-      } catch {
-        // Server projection still recovers state without local storage.
-      }
-    },
-    [accountId],
-  );
 
   const notifySettled = useCallback((change: BillingPlanChange) => {
     if (
@@ -147,17 +121,14 @@ export function usePlanChange(
   const applyChange = useCallback(
     (
       change: BillingPlanChange,
+      session: number,
       options?: { targetPlan?: PlanChangeTargetSnapshot | null; open?: boolean },
     ) => {
-      const phase = phaseForPlanChange(change);
-      if (phase !== 'QUOTE_READY' && phase !== 'AWAITING_PAYMENT') {
-        persistIntent(null);
-      }
+      if (!mountedRef.current || session !== sessionRef.current) return;
       notifySettled(change);
-      if (!mountedRef.current) return;
       setState((current) => ({
         open: options?.open ?? current.open,
-        phase,
+        phase: phaseForPlanChange(change),
         planChange: change,
         targetPlan: options?.targetPlan !== undefined ? options.targetPlan : current.targetPlan,
         error: false,
@@ -165,46 +136,26 @@ export function usePlanChange(
         stale: false,
       }));
     },
-    [notifySettled, persistIntent],
+    [notifySettled],
   );
 
-  const withRequestLock = useCallback(async (request: () => Promise<void>) => {
-    if (inFlightRef.current) return;
-    inFlightRef.current = true;
+  const withRequestLock = useCallback(async (session: number, request: () => Promise<void>) => {
+    if (inFlightRef.current === session) return;
+    inFlightRef.current = session;
     try {
       await request();
     } finally {
-      inFlightRef.current = false;
+      if (inFlightRef.current === session) inFlightRef.current = null;
     }
   }, []);
 
-  /** Adopt whatever the server says is open; never trust local state over it. */
-  const adoptServerPending = useCallback(async (): Promise<boolean> => {
-    try {
-      const pending = (await billingApi.getCurrentSubscription()).subscription?.pendingPlanChange;
-      if (!pending) return false;
-      applyChange(pending, { targetPlan: pending.targetPlan, open: true });
-      return true;
-    } catch {
-      return false;
-    }
-  }, [applyChange]);
-
   const startQuote = useCallback(
     async (targetOfferCode: string, targetPlan: PlanChangeTargetSnapshot | null) => {
-      if (!accountId || inFlightRef.current) return;
-      const previous = readBillingPlanChangeIntent(accountId);
-      const intent: BillingPlanChangeIntentV1 =
-        previous && previous.targetOfferCode === targetOfferCode && !previous.planChangeId
-          ? previous
-          : {
-              version: 1,
-              targetOfferCode,
-              idempotencyKey: newBillingIdempotencyKey('plan-change'),
-              planChangeId: null,
-              createdAt: new Date().toISOString(),
-            };
-      persistIntent(intent);
+      if (!accountId || inFlightRef.current === sessionRef.current) return;
+      // 每次重新选择目标都是新的结算会话：新代次 + 新幂等键，旧会话在途响应作废，
+      // 服务端自动撤销旧未完成变更。
+      const session = ++sessionRef.current;
+      const idempotencyKey = newBillingIdempotencyKey('plan-change');
       setState({
         open: true,
         phase: 'QUOTING',
@@ -214,14 +165,13 @@ export function usePlanChange(
         quoteFailureReason: null,
         stale: false,
       });
-      await withRequestLock(async () => {
+      await withRequestLock(session, async () => {
         try {
-          const change = await billingApi.quotePlanChange(targetOfferCode, intent.idempotencyKey);
-          persistIntent({ ...intent, planChangeId: change.planChangeId });
-          applyChange(change, { targetPlan });
+          applyChange(await billingApi.quotePlanChange(targetOfferCode, idempotencyKey), session, {
+            targetPlan,
+          });
         } catch (error) {
-          if (await adoptServerPending()) return;
-          if (mountedRef.current) {
+          if (mountedRef.current && session === sessionRef.current) {
             setState((current) => ({
               ...current,
               phase: 'FAILED',
@@ -232,23 +182,28 @@ export function usePlanChange(
         }
       });
     },
-    [accountId, adoptServerPending, applyChange, persistIntent, withRequestLock],
+    [accountId, applyChange, withRequestLock],
   );
 
   const confirm = useCallback(async () => {
     const current = stateRef.current;
-    if (!current.planChange || current.planChange.status !== 'QUOTED' || inFlightRef.current)
+    if (
+      !current.planChange ||
+      current.planChange.status !== 'QUOTED' ||
+      inFlightRef.current === sessionRef.current
+    )
       return;
     const change = current.planChange;
+    const session = sessionRef.current;
     setState((value) => ({
       ...value,
       phase: 'CONFIRMING',
       error: false,
       quoteFailureReason: null,
     }));
-    await withRequestLock(async () => {
+    await withRequestLock(session, async () => {
       try {
-        applyChange(await billingApi.confirmPlanChange(change.planChangeId));
+        applyChange(await billingApi.confirmPlanChange(change.planChangeId), session);
       } catch {
         // The confirm may have landed server-side even though the response was
         // lost. Re-read the change before restoring anything local, so a
@@ -259,9 +214,9 @@ export function usePlanChange(
         } catch {
           // Fall back to the pre-request snapshot below.
         }
-        if (!mountedRef.current) return;
+        if (!mountedRef.current || session !== sessionRef.current) return;
         if (latest) {
-          applyChange(latest);
+          applyChange(latest, session);
           if (latest.status === change.status) {
             setState((value) => ({ ...value, error: true }));
           }
@@ -280,15 +235,20 @@ export function usePlanChange(
     });
   }, [applyChange, withRequestLock]);
 
-  const refresh = useCallback(async () => {
+  const refresh = useCallback(async (expectedSession = sessionRef.current) => {
+    if (expectedSession !== sessionRef.current) return;
     const current = stateRef.current;
     if (!current.planChange) return;
     const planChangeId = current.planChange.planChangeId;
-    await withRequestLock(async () => {
+    const session = expectedSession;
+    await withRequestLock(session, async () => {
+      if (session !== sessionRef.current) return;
       try {
-        applyChange(await billingApi.refreshPlanChange(planChangeId));
+        applyChange(await billingApi.refreshPlanChange(planChangeId), session);
       } catch {
-        if (mountedRef.current) setState((value) => ({ ...value, error: true }));
+        if (mountedRef.current && session === sessionRef.current) {
+          setState((value) => ({ ...value, error: true }));
+        }
       }
     });
   }, [applyChange, withRequestLock]);
@@ -296,75 +256,44 @@ export function usePlanChange(
   /** Cancels a quoted change or a scheduled downgrade (撤销). */
   const cancelChange = useCallback(
     async (planChangeId: string) => {
-      if (inFlightRef.current) return;
-      await withRequestLock(async () => {
+      if (inFlightRef.current === sessionRef.current) return;
+      const session = sessionRef.current;
+      await withRequestLock(session, async () => {
         try {
-          applyChange(await billingApi.cancelPlanChange(planChangeId));
+          applyChange(await billingApi.cancelPlanChange(planChangeId), session);
         } catch {
-          if (mountedRef.current) setState((value) => ({ ...value, error: true }));
+          if (mountedRef.current && session === sessionRef.current) {
+            setState((value) => ({ ...value, error: true }));
+          }
         }
       });
     },
     [applyChange, withRequestLock],
   );
 
-  /** Re-enter a server-reported open change (e.g. resume an alipay QR). */
-  const resumePending = useCallback(
-    (pending: BillingPendingPlanChange) => {
-      applyChange(pending, { targetPlan: pending.targetPlan, open: true });
-    },
-    [applyChange],
-  );
-
   const close = useCallback(() => {
-    setState((current) =>
-      current.phase === 'QUOTING' || current.phase === 'CONFIRMING'
-        ? current
-        : { ...current, open: false },
-    );
+    const current = stateRef.current;
+    if (current.phase === 'QUOTING' || current.phase === 'CONFIRMING') return;
+    sessionRef.current += 1;
+    inFlightRef.current = null;
+    const next = { ...current, open: false };
+    stateRef.current = next;
+    setState(next);
   }, []);
 
   useEffect(() => {
+    // 套餐变更会话只属于当前打开的 Dialog：切换账号或重新挂载都从空状态开始，
+    // 不从本地存储或服务端恢复历史二维码。
     mountedRef.current = true;
+    sessionRef.current += 1;
+    inFlightRef.current = null;
     settledNotifiedRef.current = new Set();
+    stateRef.current = INITIAL_STATE;
     setState(INITIAL_STATE);
-    if (!accountId) {
-      return () => {
-        mountedRef.current = false;
-      };
-    }
-    const intent = readBillingPlanChangeIntent(accountId);
-    if (intent?.planChangeId) {
-      const planChangeId = intent.planChangeId;
-      void withRequestLock(async () => {
-        try {
-          const change = await billingApi.refreshPlanChange(planChangeId);
-          if (!mountedRef.current) return;
-          const phase = phaseForPlanChange(change);
-          applyChange(change, {
-            // The catalog-side target label is rebuilt from the server pending
-            // projection when present; a bare refresh keeps it unknown.
-            targetPlan: null,
-            open:
-              phase === 'AWAITING_PAYMENT' ||
-              phase === 'PENDING_PROVIDER' ||
-              phase === 'QUOTE_READY',
-          });
-          if (isSettledPhase(phase)) persistIntent(null);
-        } catch {
-          // The pendingPlanChange banner remains the recovery entry point.
-        }
-      });
-    } else if (intent) {
-      // The quote request never resolved locally. If it landed server-side the
-      // pendingPlanChange projection will surface it; the stored key alone must
-      // not trigger a new quote on startup.
-      persistIntent(null);
-    }
     return () => {
       mountedRef.current = false;
     };
-  }, [accountId, applyChange, persistIntent, withRequestLock]);
+  }, [accountId]);
 
   useEffect(() => {
     // Poll while waiting for a payment, and also while showing a stale
@@ -375,11 +304,12 @@ export function usePlanChange(
       (state.phase !== 'AWAITING_PAYMENT' && state.phase !== 'PENDING_PROVIDER' && !state.stale)
     )
       return;
+    const session = sessionRef.current;
     const timer = window.setInterval(() => {
-      if (document.visibilityState === 'visible') void refresh();
+      if (document.visibilityState === 'visible') void refresh(session);
     }, 3_000);
     const onVisible = () => {
-      if (document.visibilityState === 'visible') void refresh();
+      if (document.visibilityState === 'visible') void refresh(session);
     };
     window.addEventListener('focus', onVisible);
     document.addEventListener('visibilitychange', onVisible);
@@ -396,7 +326,6 @@ export function usePlanChange(
     confirm,
     refresh,
     cancelChange,
-    resumePending,
     close,
   };
 }

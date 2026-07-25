@@ -27,20 +27,12 @@ const checkout = {
     subscription: null,
     error: false,
   },
-  recoverables: {
-    topups: [] as BillingPaymentOrder[],
-    subscription: null as BillingSubscription | null,
-  },
-  recovering: false,
   startTopup: vi.fn(),
   startSubscription: vi.fn(),
   refreshActive: vi.fn(),
   retry: vi.fn(),
   cancel: vi.fn(),
   close: vi.fn(),
-  resumeTopup: vi.fn(),
-  resumeSubscription: vi.fn(),
-  resumeFailed: vi.fn(),
 };
 
 vi.mock('react-i18next', () => ({
@@ -104,12 +96,6 @@ describe('BillingPage remote catalog rendering', () => {
     checkout.startTopup.mockClear();
     checkout.startSubscription.mockClear();
     checkout.close.mockClear();
-    checkout.resumeTopup.mockClear();
-    checkout.resumeSubscription.mockClear();
-    checkout.resumeFailed.mockClear();
-    checkout.recoverables.topups = [];
-    checkout.recoverables.subscription = null;
-    checkout.recovering = false;
     Object.defineProperty(window, 'electronAPI', {
       configurable: true,
       value: {
@@ -520,64 +506,11 @@ describe('BillingPage remote catalog rendering', () => {
     ).toBeNull();
   });
 
-  it('places recoverable checkout actions before the balance overview', async () => {
-    const order = {
-      orderId: 'order_pending',
-      productCode: 'credit_topup',
-      offerCode: 'credit_topup_custom',
-      amount: '10',
-      currency: 'cny',
-      status: 'PENDING' as const,
-      fulfillmentStatus: 'NOT_STARTED' as const,
-      paymentAction: null,
-      createdAt: '2026-07-24T00:00:00.000Z',
-      updatedAt: '2026-07-24T00:00:00.000Z',
-    };
-    checkout.recoverables.topups = [order];
-
+  it('never renders a payment recovery banner on the settings page', async () => {
     render(<BillingPage />);
 
-    const recovery = screen.getByText('billing.recovery.title');
-    const balanceTitle = await screen.findByText('billing.balance.title');
-    expect(recovery.compareDocumentPosition(balanceTitle) & Node.DOCUMENT_POSITION_FOLLOWING).toBe(
-      Node.DOCUMENT_POSITION_FOLLOWING,
-    );
-    fireEvent.click(screen.getByText((text) => text.startsWith('billing.recovery.continueTopup')));
-    expect(checkout.resumeTopup).toHaveBeenCalledWith(order);
-  });
-
-  it('offers a user-initiated retry entry after background recovery fails', async () => {
-    Object.assign(checkout.state, {
-      open: false,
-      kind: 'TOPUP',
-      phase: 'FAILED',
-      intent: {
-        version: 1,
-        kind: 'TOPUP',
-        idempotencyKey: 'desktop:topup:uncertain',
-        request: {
-          offerCode: 'credit_topup_custom',
-          amount: '10',
-          purchaseOptionId: 'listing_alipay',
-        },
-        orderId: null,
-        createdAt: '2026-07-24T00:00:00.000Z',
-      },
-      order: null,
-      subscription: null,
-      error: true,
-    });
-
-    render(<BillingPage />);
-
-    const resume = screen.getByText('billing.recovery.continueFailed');
-    const balanceTitle = await screen.findByText('billing.balance.title');
-    expect(resume.compareDocumentPosition(balanceTitle) & Node.DOCUMENT_POSITION_FOLLOWING).toBe(
-      Node.DOCUMENT_POSITION_FOLLOWING,
-    );
-    fireEvent.click(resume);
-    expect(checkout.resumeFailed).toHaveBeenCalledTimes(1);
-    expect(checkout.retry).not.toHaveBeenCalled();
+    await screen.findByText('billing.balance.title');
+    expect(screen.queryByText((text) => text.startsWith('billing.recovery'))).toBeNull();
   });
 
   it('shows usage progress and each promotional grant with its own state and expiry', async () => {
@@ -703,6 +636,41 @@ describe('BillingPage remote catalog rendering', () => {
     expect(getBalance).toHaveBeenCalledTimes(2);
   });
 
+  it('switches to the expired hint once the server stops issuing the payment action', async () => {
+    const order = {
+      orderId: 'order_expiring_action',
+      productCode: 'credit_topup',
+      offerCode: 'credit_topup_custom',
+      amount: '10',
+      currency: 'cny',
+      status: 'PENDING' as const,
+      paymentAction: {
+        type: 'QR_CODE' as const,
+        value: 'https://qr.alipay.example/live',
+        expiresAt: new Date(Date.now() + 60_000).toISOString(),
+      },
+      createdAt: '2026-01-01T00:00:00.000Z',
+      updatedAt: '2026-01-01T00:01:00.000Z',
+    };
+    Object.assign(checkout.state, {
+      open: true,
+      kind: 'TOPUP',
+      phase: 'AWAITING_PAYMENT',
+      order,
+    });
+
+    const view = render(<BillingPage />);
+    // 服务端仍下发的动作以服务端为准展示，不用本地时钟提前藏码。
+    expect(await screen.findByAltText('billing.checkout.qrAlt')).toBeTruthy();
+    expect(screen.queryByText('billing.checkout.actionExpiredBody')).toBeNull();
+
+    // 服务端判定过期后轮询响应把动作置空：切换为过期提示，不再显示二维码。
+    Object.assign(checkout.state, { order: { ...order, paymentAction: null } });
+    view.rerender(<BillingPage />);
+    expect(await screen.findByText('billing.checkout.actionExpiredBody')).toBeTruthy();
+    expect(screen.queryByAltText('billing.checkout.qrAlt')).toBeNull();
+  });
+
   it('does not show zero or block purchases when balance is not provisioned', async () => {
     window.electronAPI.billing.getBalance = vi.fn(async () => {
       throw Object.assign(new Error('[NOT_FOUND] balance account is not provisioned'), {
@@ -805,27 +773,6 @@ describe('BillingPage remote catalog rendering', () => {
       offerCode: 'plus_month',
       purchaseOptionId: 'listing_stripe',
     });
-  });
-
-  it('keeps checkout disabled until startup recovery finishes', async () => {
-    checkout.recovering = true;
-    const view = render(<BillingPage />);
-
-    fireEvent.click(screen.getByText('billing.settings.topupCard.action'));
-    fireEvent.click((await screen.findByText('Configured top-up')).closest('button')!);
-    fireEvent.click((await screen.findByText('alipay')).closest('button')!);
-    fireEvent.change(screen.getByPlaceholderText('billing.amount.placeholder'), {
-      target: { value: '10' },
-    });
-
-    const pay = screen.getByText('billing.actions.pay').closest('button')!;
-    expect(pay).toHaveProperty('disabled', true);
-    fireEvent.click(pay);
-    expect(checkout.startTopup).not.toHaveBeenCalled();
-
-    checkout.recovering = false;
-    view.rerender(<BillingPage />);
-    expect(pay).toHaveProperty('disabled', false);
   });
 
   it('does not expose plan change when an active subscription has no effective plan', async () => {
@@ -1323,9 +1270,6 @@ describe('BillingPage plan change', () => {
 
   beforeEach(() => {
     localStorage.clear();
-    checkout.recoverables.topups = [];
-    checkout.recoverables.subscription = null;
-    checkout.recovering = false;
     Object.assign(checkout.state, {
       open: false,
       kind: null,
@@ -1618,37 +1562,69 @@ describe('BillingPage plan change', () => {
     expect(screen.getByText('billing.settings.subscriptionCard.action')).toBeTruthy();
   });
 
-  it('routes INCOMPLETE without an effective plan to recovery and keeps duplicate purchase blocked', async () => {
-    const incompleteSubscription: BillingSubscription = {
-      ...activeSubscription(null, 'MONTH', 'INCOMPLETE'),
-      effectivePlan: null,
-    };
+  it('keeps new selection enabled when no current subscription exists (no INCOMPLETE task)', async () => {
+    // 服务端不再把未支付的首购作为“当前订阅”下发；页面必须允许正常重新选择。
     const billing = billingMocks();
-    billing.getCurrentSubscription = vi.fn(async () => ({
-      subscription: incompleteSubscription,
-    }));
+    billing.getCurrentSubscription = vi.fn(
+      async () => ({ subscription: null }),
+    ) as unknown as typeof billing.getCurrentSubscription;
     install(billing);
-    checkout.recoverables.subscription = incompleteSubscription;
 
     render(<BillingPage />);
 
-    await waitFor(() =>
-      expect(screen.getAllByText('billing.recovery.continueSubscription')).toHaveLength(2),
-    );
-    const recoveryActions = screen.getAllByText('billing.recovery.continueSubscription');
-    expect(screen.queryByText('billing.settings.subscriptionCard.changeAction')).toBeNull();
-    fireEvent.click(recoveryActions[1]);
-    expect(checkout.resumeSubscription).toHaveBeenCalledWith(incompleteSubscription);
+    fireEvent.click(await screen.findByText('billing.settings.subscriptionCard.action'));
+    fireEvent.click((await screen.findAllByText('Plus plan'))[0].closest('button')!);
+    fireEvent.click(screen.getByText('stripe').closest('button')!);
+    const pay = screen.getByText('billing.actions.pay').closest('button')!;
+    expect(pay).toHaveProperty('disabled', false);
+    fireEvent.click(pay);
+    expect(checkout.startSubscription).toHaveBeenCalledWith({
+      offerCode: 'plus_month',
+      purchaseOptionId: 'listing_plus_stripe',
+    });
   });
 
-  it('keeps the duplicate-purchase guard reachable when INCOMPLETE recovery is unavailable', async () => {
-    const incompleteSubscription: BillingSubscription = {
-      ...activeSubscription(null, 'MONTH', 'INCOMPLETE'),
-      effectivePlan: null,
-    };
+  it('stops treating the abandoned checkout subscription as current when the dialog closes', async () => {
+    const billing = billingMocks();
+    billing.getCurrentSubscription = vi.fn(
+      async () => ({ subscription: null }),
+    ) as unknown as typeof billing.getCurrentSubscription;
+    install(billing);
+    Object.assign(checkout.state, {
+      open: true,
+      kind: 'SUBSCRIPTION',
+      phase: 'AWAITING_PAYMENT',
+      subscription: {
+        subscriptionId: 'subscription_incomplete',
+        status: 'INCOMPLETE',
+        currentPeriodStartAt: null,
+        currentPeriodEndAt: null,
+        entitlementValidUntil: null,
+        cancelAtPeriodEnd: false,
+        effectivePlan: null,
+        purchaseAttemptId: 'attempt_incomplete',
+        paymentAction: null,
+      },
+    });
+
+    render(<BillingPage />);
+    fireEvent.click(await screen.findByLabelText('billing.actions.close'));
+
+    expect(checkout.close).toHaveBeenCalled();
+    await waitFor(() => expect(billing.getCurrentSubscription.mock.calls.length).toBeGreaterThan(1));
+    fireEvent.click(await screen.findByText('billing.settings.subscriptionCard.action'));
+    fireEvent.click((await screen.findAllByText('Plus plan'))[0].closest('button')!);
+    fireEvent.click(screen.getByText('stripe').closest('button')!);
+    expect(screen.getByText('billing.actions.pay').closest('button')).toHaveProperty(
+      'disabled',
+      false,
+    );
+  });
+
+  it('still blocks a duplicate purchase while a real subscription is live', async () => {
     const billing = billingMocks();
     billing.getCurrentSubscription = vi.fn(async () => ({
-      subscription: incompleteSubscription,
+      subscription: { ...activeSubscription(), effectivePlan: null },
     }));
     install(billing);
 
@@ -1722,7 +1698,9 @@ describe('BillingPage plan change', () => {
     await waitFor(() => expect(billing.getCurrentSubscription).toHaveBeenCalledTimes(2));
   });
 
-  it('resumes a pending alipay upgrade payment with the server-issued QR action', async () => {
+  it('ignores non-SCHEDULED pending changes and reopens target selection instead', async () => {
+    // 兼容旧服务端：即使投影里出现 AWAITING_PAYMENT，也不再提供“继续支付”入口；
+    // 变更套餐总是回到目标选择，由服务端在新报价时自动替换旧动作。
     const qr = {
       type: 'QR_CODE' as const,
       value: 'https://qr.alipay.example/plan-change',
@@ -1750,27 +1728,16 @@ describe('BillingPage plan change', () => {
       },
     }));
     install(billing);
-    billing.refreshPlanChange.mockResolvedValue({
-      planChangeId: 'plan_change_up',
-      changeType: 'UPGRADE',
-      status: 'AWAITING_PAYMENT',
-      quotedAmountMinor: 1500,
-      quotedCurrency: 'cny',
-      quoteExpiresAt: null,
-      effectiveAt: '2026-07-24T00:00:00.000Z',
-      paymentAction: qr,
-    });
 
     render(<BillingPage />);
-    await screen.findByText((text) => text.startsWith('billing.planChange.pendingPayment'));
-
-    fireEvent.click(screen.getByText('billing.planChange.resume'));
-    await screen.findByText('billing.planChange.awaitingTitle');
+    await screen.findByText('Plus plan');
     expect(
-      await screen.findByText((text) => text.startsWith('billing.planChange.scanToPay')),
-    ).toBeTruthy();
-    await screen.findByAltText('billing.checkout.qrAlt');
-    // Resuming re-displays the stored server action without quoting again.
-    expect(billing.quotePlanChange).not.toHaveBeenCalled();
+      screen.queryByText((text) => text.startsWith('billing.planChange.pendingDowngrade')),
+    ).toBeNull();
+    expect(screen.queryByText('billing.planChange.undo')).toBeNull();
+
+    fireEvent.click(screen.getByText('billing.settings.subscriptionCard.changeAction'));
+    expect(await screen.findByText('billing.planChange.targetTitle')).toBeTruthy();
+    expect(billing.refreshPlanChange).not.toHaveBeenCalled();
   });
 });

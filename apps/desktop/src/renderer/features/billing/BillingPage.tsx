@@ -23,7 +23,6 @@ import type {
   BillingCatalogOfferUnavailableReason,
   BillingCatalogProduct,
   BillingPendingPlanChange,
-  BillingPaymentOrder,
   BillingPurchaseOption,
   BillingSubscription,
 } from '../../../shared/billing';
@@ -79,6 +78,8 @@ const SUPPORTED_SUBSCRIPTION_CAPABILITIES = new Set<BillingPurchaseOption['capab
   'PROVIDER_MANAGED_SUBSCRIPTION',
 ]);
 
+// 新服务端的“当前订阅”只包含真实生命周期状态，未完成首购不再下发也不阻断重选；
+// INCOMPLETE 仅作为旧服务端兼容防御保留（旧服务端仍会拒绝重复首购）。
 const SUBSCRIPTION_PURCHASE_BLOCKING_STATUSES: BillingSubscription['status'][] = [
   'INCOMPLETE',
   'TRIALING',
@@ -90,10 +91,6 @@ const SUBSCRIPTION_PURCHASE_BLOCKING_STATUSES: BillingSubscription['status'][] =
 const SUBSCRIPTION_CANCELLABLE_STATUSES: BillingSubscription['status'][] =
   SUBSCRIPTION_PURCHASE_BLOCKING_STATUSES.filter((status) => status !== 'INCOMPLETE');
 
-// This list only controls which card action opens the plan-change flow. It is
-// intentionally separate from the new-purchase guard above: INCOMPLETE still
-// blocks a duplicate purchase, but without an effective plan there is nothing
-// meaningful to change.
 const PLAN_CHANGE_ENTRY_STATUSES: BillingSubscription['status'][] = ['ACTIVE'];
 
 function decimalParts(value: string): { value: bigint; scale: number } | null {
@@ -338,6 +335,15 @@ export function BillingSettingsSection({ accountId }: { accountId: string | null
     }
   }, [checkout.state.subscription]);
 
+  const closeCheckout = useCallback(() => {
+    const abandonedIncomplete = checkout.state.subscription?.status === 'INCOMPLETE';
+    checkout.close();
+    if (abandonedIncomplete) {
+      setCurrentSubscription(null);
+      void loadSubscription();
+    }
+  }, [checkout, loadSubscription]);
+
   useEffect(() => {
     const previousPhase = previousCheckoutPhaseRef.current;
     previousCheckoutPhaseRef.current = checkout.state.phase;
@@ -356,13 +362,6 @@ export function BillingSettingsSection({ accountId }: { accountId: string | null
     [loadBillingState, loadSubscription],
   );
   const planChange = usePlanChange(accountId, handlePlanChangeSettled);
-  const hasRecoverableFailedIntent =
-    !checkout.state.open &&
-    checkout.state.phase === 'FAILED' &&
-    checkout.state.error &&
-    checkout.state.intent !== null &&
-    checkout.state.order === null &&
-    checkout.state.subscription === null;
 
   const offers = useMemo<CatalogOfferEntry[]>(() => {
     if (!catalog) return [];
@@ -462,7 +461,6 @@ export function BillingSettingsSection({ accountId }: { accountId: string | null
   }, [billingLocale, customAmount, selected, t]);
 
   const canCheckout =
-    !checkout.recovering &&
     selected !== null &&
     selectedOption !== null &&
     !(
@@ -492,11 +490,6 @@ export function BillingSettingsSection({ accountId }: { accountId: string | null
     PLAN_CHANGE_ENTRY_STATUSES.includes(currentSubscription.status) &&
     !currentSubscription.cancelAtPeriodEnd &&
     currentPlan.offer.interval === 'MONTH';
-  const recoverableSubscription =
-    currentSubscription?.status === 'INCOMPLETE' &&
-    checkout.recoverables.subscription?.subscriptionId === currentSubscription.subscriptionId
-      ? checkout.recoverables.subscription
-      : null;
   const currentPlanFacts = useMemo(() => {
     if (!currentSubscription) return null;
     const plan = currentSubscription.effectivePlan;
@@ -661,12 +654,8 @@ export function BillingSettingsSection({ accountId }: { accountId: string | null
   };
 
   const openPlanChange = () => {
-    // An open change is the server's fact; re-enter it instead of quoting anew.
-    if (pendingPlanChange) {
-      planChange.resumePending(pendingPlanChange);
-    } else {
-      setPlanChangeTargetOpen(true);
-    }
+    // 服务端在新报价时自动撤销旧未完成变更；这里总是重新选择目标。
+    setPlanChangeTargetOpen(true);
   };
 
   const selectPlanChangeTarget = (candidate: PlanChangeCandidate) => {
@@ -721,20 +710,6 @@ export function BillingSettingsSection({ accountId }: { accountId: string | null
           </button>
         </div>
 
-        {!checkout.recovering &&
-          (checkout.recoverables.topups.length > 0 ||
-            checkout.recoverables.subscription !== null ||
-            hasRecoverableFailedIntent) && (
-            <BillingRecoveryNotice
-              topups={checkout.recoverables.topups}
-              subscription={checkout.recoverables.subscription}
-              failedIntent={hasRecoverableFailedIntent}
-              onResumeTopup={checkout.resumeTopup}
-              onResumeSubscription={checkout.resumeSubscription}
-              onResumeFailed={checkout.resumeFailed}
-            />
-          )}
-
         <div className="mt-6 flex flex-col gap-8">
           <BillingGroup title={t('billing.settings.subscriptionCard.title')}>
             <SubscriptionOverviewCard
@@ -742,25 +717,13 @@ export function BillingSettingsSection({ accountId }: { accountId: string | null
               loading={loadingSubscription}
               error={subscriptionError}
               showPlanChangeEntry={showPlanChangeEntry}
-              recoveryAvailable={recoverableSubscription !== null}
               canceling={cancelingSubscription}
-              actionDisabled={
-                loadingSubscription ||
-                subscriptionError ||
-                cancelingSubscription ||
-                (recoverableSubscription !== null && checkout.recovering)
-              }
+              actionDisabled={loadingSubscription || subscriptionError || cancelingSubscription}
               pendingPlanChange={pendingPlanChange}
               pendingTargetName={planNameOf(pendingPlanChange?.targetPlan?.product.code)}
               onCancelSubscription={() => void cancelCurrentSubscription()}
               onChangePlan={openPlanChange}
-              onRecover={() => {
-                if (recoverableSubscription) checkout.resumeSubscription(recoverableSubscription);
-              }}
               onPurchase={() => openPurchaseDialog('SUBSCRIPTION')}
-              onResumePending={() => {
-                if (pendingPlanChange) planChange.resumePending(pendingPlanChange);
-              }}
               onCancelPending={() => {
                 if (pendingPlanChange) void planChange.cancelChange(pendingPlanChange.planChangeId);
               }}
@@ -857,7 +820,7 @@ export function BillingSettingsSection({ accountId }: { accountId: string | null
 
       <BillingCheckoutDialog
         state={checkout.state}
-        onClose={checkout.close}
+        onClose={closeCheckout}
         onRefresh={() => void checkout.refreshActive()}
         onRetry={() => void checkout.retry()}
       />
@@ -885,98 +848,31 @@ export function BillingSettingsSection({ accountId }: { accountId: string | null
   );
 }
 
-function BillingRecoveryNotice({
-  topups,
-  subscription,
-  failedIntent,
-  onResumeTopup,
-  onResumeSubscription,
-  onResumeFailed,
-}: {
-  topups: BillingPaymentOrder[];
-  subscription: BillingSubscription | null;
-  failedIntent: boolean;
-  onResumeTopup: (order: BillingPaymentOrder) => void;
-  onResumeSubscription: (subscription: BillingSubscription) => void;
-  onResumeFailed: () => void;
-}) {
-  const { t, i18n } = useTranslation();
-  const billingLocale = i18n.resolvedLanguage ?? i18n.language;
-  return (
-    <section className="mt-5 rounded-xl border border-[var(--border-default)] bg-[var(--surface-elevated)] px-5 py-4">
-      <p className="text-sm font-medium text-[var(--text-primary)]">
-        {t('billing.recovery.title')}
-      </p>
-      <p className="mt-1 text-12 text-[var(--text-secondary)]">
-        {t('billing.recovery.description')}
-      </p>
-      <div className="mt-3 flex flex-wrap gap-2">
-        {topups.map((order) => (
-          <button
-            key={order.orderId}
-            type="button"
-            onClick={() => onResumeTopup(order)}
-            className="select-none rounded-full border border-[var(--border-default)] px-3 py-1.5 text-12 font-medium transition-colors hover:bg-[var(--surface-hover-soft)]"
-          >
-            {t('billing.recovery.continueTopup', {
-              amount: formatMoney(order.amount, order.currency, billingLocale),
-            })}
-          </button>
-        ))}
-        {subscription && (
-          <button
-            type="button"
-            onClick={() => onResumeSubscription(subscription)}
-            className="select-none rounded-full border border-[var(--border-default)] px-3 py-1.5 text-12 font-medium transition-colors hover:bg-[var(--surface-hover-soft)]"
-          >
-            {t('billing.recovery.continueSubscription')}
-          </button>
-        )}
-        {failedIntent && (
-          <button
-            type="button"
-            onClick={onResumeFailed}
-            className="select-none rounded-full border border-[var(--border-default)] px-3 py-1.5 text-12 font-medium transition-colors hover:bg-[var(--surface-hover-soft)]"
-          >
-            {t('billing.recovery.continueFailed')}
-          </button>
-        )}
-      </div>
-    </section>
-  );
-}
-
 function SubscriptionOverviewCard({
   facts,
   loading,
   error,
   showPlanChangeEntry,
-  recoveryAvailable,
   canceling,
   actionDisabled,
   pendingPlanChange,
   pendingTargetName,
   onCancelSubscription,
   onChangePlan,
-  onRecover,
   onPurchase,
-  onResumePending,
   onCancelPending,
 }: {
   facts: CurrentPlanFacts | null;
   loading: boolean;
   error: boolean;
   showPlanChangeEntry: boolean;
-  recoveryAvailable: boolean;
   canceling: boolean;
   actionDisabled: boolean;
   pendingPlanChange: BillingPendingPlanChange | null;
   pendingTargetName: string | null;
   onCancelSubscription: () => void;
   onChangePlan: () => void;
-  onRecover: () => void;
   onPurchase: () => void;
-  onResumePending: () => void;
   onCancelPending: () => void;
 }) {
   const { t } = useTranslation();
@@ -1066,26 +962,21 @@ function SubscriptionOverviewCard({
             )}
           <button
             type="button"
-            onClick={
-              showPlanChangeEntry ? onChangePlan : recoveryAvailable ? onRecover : onPurchase
-            }
+            onClick={showPlanChangeEntry ? onChangePlan : onPurchase}
             disabled={actionDisabled}
             className="h-8 select-none rounded-full border border-[var(--border-default)] px-3.5 text-12 font-medium text-[var(--text-primary)] transition-colors hover:bg-[var(--surface-hover-soft)] disabled:cursor-not-allowed disabled:opacity-40"
           >
             {showPlanChangeEntry
               ? t('billing.settings.subscriptionCard.changeAction')
-              : recoveryAvailable
-                ? t('billing.recovery.continueSubscription')
-                : t('billing.settings.subscriptionCard.action')}
+              : t('billing.settings.subscriptionCard.action')}
           </button>
         </div>
       </div>
-      {pendingPlanChange && (
+      {pendingPlanChange?.status === 'SCHEDULED' && (
         <PendingPlanChangeBanner
           pending={pendingPlanChange}
           targetName={pendingTargetName}
           disabled={actionDisabled}
-          onResume={onResumePending}
           onUndo={onCancelPending}
         />
       )}
@@ -1093,17 +984,16 @@ function SubscriptionOverviewCard({
   );
 }
 
+// 服务端普通订阅投影只下发 SCHEDULED 变更：它是已确定的期末事实，展示并允许撤销。
 function PendingPlanChangeBanner({
   pending,
   targetName,
   disabled,
-  onResume,
   onUndo,
 }: {
   pending: BillingPendingPlanChange;
   targetName: string | null;
   disabled: boolean;
-  onResume: () => void;
   onUndo: () => void;
 }) {
   const { t, i18n } = useTranslation();
@@ -1112,41 +1002,22 @@ function PendingPlanChangeBanner({
     () => formatBillingDate(pending.effectiveAt, billingLocale) ?? pending.effectiveAt,
     [billingLocale, pending.effectiveAt],
   );
-  const label =
-    pending.status === 'SCHEDULED'
-      ? t('billing.planChange.pendingDowngrade', {
-          name: targetName ?? t('billing.settings.subscriptionCard.unnamedPlan'),
-          date: effectiveDate,
-        })
-      : pending.status === 'AWAITING_PAYMENT'
-        ? t('billing.planChange.pendingPayment', {
-            name: targetName ?? t('billing.settings.subscriptionCard.unnamedPlan'),
-          })
-        : t('billing.planChange.pendingQuote', {
-            name: targetName ?? t('billing.settings.subscriptionCard.unnamedPlan'),
-          });
   return (
     <div className="flex flex-wrap items-center gap-3 border-t border-[var(--border-default)] px-5 py-3">
-      <p className="min-w-0 flex-1 text-12 leading-5 text-[var(--text-secondary)]">{label}</p>
-      {pending.status === 'SCHEDULED' ? (
-        <button
-          type="button"
-          onClick={onUndo}
-          disabled={disabled}
-          className="h-8 shrink-0 select-none rounded-full border border-[var(--border-default)] px-3.5 text-12 font-medium text-[var(--text-primary)] transition-colors hover:bg-[var(--surface-hover-soft)] disabled:cursor-not-allowed disabled:opacity-40"
-        >
-          {t('billing.planChange.undo')}
-        </button>
-      ) : (
-        <button
-          type="button"
-          onClick={onResume}
-          disabled={disabled}
-          className="h-8 shrink-0 select-none rounded-full border border-[var(--border-default)] px-3.5 text-12 font-medium text-[var(--text-primary)] transition-colors hover:bg-[var(--surface-hover-soft)] disabled:cursor-not-allowed disabled:opacity-40"
-        >
-          {t('billing.planChange.resume')}
-        </button>
-      )}
+      <p className="min-w-0 flex-1 text-12 leading-5 text-[var(--text-secondary)]">
+        {t('billing.planChange.pendingDowngrade', {
+          name: targetName ?? t('billing.settings.subscriptionCard.unnamedPlan'),
+          date: effectiveDate,
+        })}
+      </p>
+      <button
+        type="button"
+        onClick={onUndo}
+        disabled={disabled}
+        className="h-8 shrink-0 select-none rounded-full border border-[var(--border-default)] px-3.5 text-12 font-medium text-[var(--text-primary)] transition-colors hover:bg-[var(--surface-hover-soft)] disabled:cursor-not-allowed disabled:opacity-40"
+      >
+        {t('billing.planChange.undo')}
+      </button>
     </div>
   );
 }

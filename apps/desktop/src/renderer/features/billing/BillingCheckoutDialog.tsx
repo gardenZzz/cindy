@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import * as Dialog from '@radix-ui/react-dialog';
 import * as QRCode from 'qrcode';
 import { Check, CircleAlert, ExternalLink, LoaderCircle, RotateCcw, X } from 'lucide-react';
@@ -79,6 +79,17 @@ export function BillingCheckoutDialog({
     if (action?.type === 'REDIRECT') void billingApi.openPaymentRedirect(action.url);
   };
 
+  // 过期判定以服务端为权威：服务端只下发仍有效的动作，动作过期后轮询响应里
+  // 会把它置空。因此“曾经有动作、现在没有了”才代表过期，本地时钟偏移不会
+  // 误藏仍可支付的二维码，也不会闪现已过期动作。倒计时仅作展示。
+  const hadActionRef = useRef(false);
+  useEffect(() => {
+    if (action) hadActionRef.current = true;
+    if (!state.open || state.phase !== 'AWAITING_PAYMENT') hadActionRef.current = false;
+  }, [action, state.open, state.phase]);
+  const actionExpired =
+    state.phase === 'AWAITING_PAYMENT' && action === null && hadActionRef.current;
+
   const canRetry =
     (state.error && state.intent !== null && state.order === null && state.subscription === null) ||
     (state.kind === 'TOPUP' &&
@@ -132,7 +143,18 @@ export function BillingCheckoutDialog({
               </>
             )}
 
-            {state.phase === 'AWAITING_PAYMENT' && action?.type === 'QR_CODE' && (
+            {state.phase === 'AWAITING_PAYMENT' && actionExpired && (
+              <>
+                <div className="grid size-14 place-items-center rounded-full bg-[var(--surface-chip)]">
+                  <CircleAlert size={23} />
+                </div>
+                <p className="mt-4 max-w-[320px] text-sm text-[var(--text-secondary)]">
+                  {t('billing.checkout.actionExpiredBody')}
+                </p>
+              </>
+            )}
+
+            {state.phase === 'AWAITING_PAYMENT' && !actionExpired && action?.type === 'QR_CODE' && (
               <>
                 <div
                   className="grid place-items-center rounded-xl border border-[var(--border-default)] bg-white p-2"
@@ -159,7 +181,7 @@ export function BillingCheckoutDialog({
               </>
             )}
 
-            {state.phase === 'AWAITING_PAYMENT' && action?.type === 'REDIRECT' && (
+            {state.phase === 'AWAITING_PAYMENT' && !actionExpired && action?.type === 'REDIRECT' && (
               <>
                 <div className="grid size-14 place-items-center rounded-full bg-[var(--surface-chip)]">
                   <ExternalLink size={22} />
@@ -176,7 +198,7 @@ export function BillingCheckoutDialog({
               </>
             )}
 
-            {state.phase === 'AWAITING_PAYMENT' && !action && (
+            {state.phase === 'AWAITING_PAYMENT' && !action && !actionExpired && (
               <>
                 <Spinner size={26} className="text-[var(--text-secondary)]" />
                 <p className="mt-4 text-sm text-[var(--text-secondary)]">
