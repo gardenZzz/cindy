@@ -5329,8 +5329,8 @@
       "loadFailed": "로드 실패: {{error}}"
     },
     "empty": {
-      "promptHeading": "자동화이 아직 없습니다",
-      "promptDescription": "cron 자동화을 만들어 Claude Code 또는 Codex로 프롬프트를 일정에 따라 실행하세요."
+      "promptHeading": "자동화가 아직 없습니다",
+      "promptDescription": "cron 자동화를 만들어 Claude Code 또는 Codex로 프롬프트를 일정에 따라 실행하세요."
     },
     "template": {
       "useTemplate": "초보자 도움말",
@@ -5352,8 +5352,8 @@
     "projectAutomation": {
       "toast": {
         "summary": "추가 {{inserted}} · 업데이트 {{updated}} · 삭제 {{deleted}}",
-        "installed": "{{projectName}} 프로젝트 자동화이 설치되었습니다 ({{summary}})",
-        "updated": "{{projectName}} 프로젝트 자동화이 업데이트되었습니다 ({{summary}})"
+        "installed": "{{projectName}} 프로젝트 자동화가 설치되었습니다 ({{summary}})",
+        "updated": "{{projectName}} 프로젝트 자동화가 업데이트되었습니다 ({{summary}})"
       },
       "cell": {
         "tag": "프로젝트",
@@ -5388,9 +5388,9 @@
         "reloadAria": "프로젝트 자동화 다시 로드"
       },
       "promote": {
-        "menu": "프로젝트 자동화으로 승격",
+        "menu": "프로젝트 자동화로 승격",
         "noWorkingDir": "작업 디렉터리가 없는 일정은 승격할 수 없습니다",
-        "success": "프로젝트 자동화으로 승격되었습니다"
+        "success": "프로젝트 자동화로 승격되었습니다"
       },
       "editProject": {
         "menu": "설정 편집"
@@ -5722,8 +5722,8 @@
     },
     "deleteDialog": {
       "title": "자동화 \"{{name}}\"을(를) 삭제하시겠습니까?",
-      "titleFallback": "자동화을 삭제하시겠습니까?",
-      "description": "향후 트리거가 중지됩니다. 이 자동화이 이미 생성한 대화를 어떻게 처리할지 선택하세요.",
+      "titleFallback": "자동화를 삭제하시겠습니까?",
+      "description": "향후 트리거가 중지됩니다. 이 자동화가 이미 생성한 대화를 어떻게 처리할지 선택하세요.",
       "sessionCountPending": "생성된 대화를 확인하는 중…",
       "sessionCount": "생성된 대화 {{count}}개",
       "inflightCount": "현재 {{count}}건의 실행이 진행 중이며 삭제하면 중지됩니다",
@@ -5743,8 +5743,8 @@
         }
       },
       "confirm": "자동화 삭제",
-      "confirmDeleteSessions": "자동화과 대화 삭제",
-      "sessionUpdatePartial": "자동화은 삭제되었지만 {{fail}}개 대화를 처리하지 못했습니다"
+      "confirmDeleteSessions": "자동화와 대화 삭제",
+      "sessionUpdatePartial": "자동화는 삭제되었지만 {{fail}}개 대화를 처리하지 못했습니다"
     },
     "confirm": {
       "delete": {

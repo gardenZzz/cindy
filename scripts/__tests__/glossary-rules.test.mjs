@@ -93,6 +93,15 @@ test('findCaseMismatch: 连字符复合词同样豁免', () => {
   assert.equal(findCaseMismatch('service-worker 已注册', 'Worker'), null);
 });
 
+test('findCaseMismatch: 扫描全部匹配,不因首个正确就漏掉后面的错误形态', () => {
+  // #389 两位 reviewer 同标 P1:非全局 match 只看第一个匹配,首个正确即返回 null,
+  // 后面的错误形态永远进不了报告,能一路漏到 UI。
+  assert.equal(findCaseMismatch('创建 Worker 后，该 worker 会自动启动', 'Worker'), 'worker');
+  assert.equal(findCaseMismatch('Agent 与另一个 agent 协作', 'Agent'), 'agent');
+  // 全部正确时仍应返回 null,不能因为改成全局匹配就误报。
+  assert.equal(findCaseMismatch('创建 Worker 后，该 Worker 会自动启动', 'Worker'), null);
+});
+
 // ---------------------------------------------------------------------------
 // makeExemptChecker:豁免
 // ---------------------------------------------------------------------------
@@ -272,12 +281,16 @@ test('glossary.json: 声明的译法必须是现状主流，否则要写明为�
 test('glossary.json: 同一 locale 下 forbidden 词不跨术语重复', () => {
   // 重复会让同一处违规被两个术语各报一次,baseline 也会存两条指纹。
   // 一个词只归属一个术语,其余条目在 note 里交叉引用(如「代理」统一登记在 proxy 下)。
+  // 例外:带 whenEn 的条件禁用可以同词多登记——它们按英文源区分,替换目标唯一。
+  // 「代理」正是如此:Agent / Subagent / Proxy 三个来源各登记一条,统一挂在某一条下
+  // 反而会让自动替换无法确定该换成哪个词(2026-07 一次批量重放就因此产出「子 Proxy 模型」)。
   const owner = new Map();
   for (const term of glossary.terms) {
     for (const [locale, words] of Object.entries(term.forbidden ?? {})) {
       for (const entry of words) {
         const word = typeof entry === 'string' ? entry : entry.text;
-        const slot = `${locale}\t${word}`;
+        const scope = typeof entry === 'string' ? '' : `@${entry.whenEn}`;
+        const slot = `${locale}\t${word}${scope}`;
         const prev = owner.get(slot);
         assert.equal(
           prev,

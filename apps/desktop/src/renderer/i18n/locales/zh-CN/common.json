@@ -116,7 +116,7 @@
       "personalization": "个性化",
       "chipMetrics": "用量指示器",
       "memory": "记忆",
-      "subagentModels": "子 Proxy 模型",
+      "subagentModels": "Subagent 模型",
       "compaction": "上下文压缩",
       "terminalShell": "默认终端 shell",
       "linkOpen": "链接打开方式",
@@ -1530,12 +1530,12 @@
       }
     },
     "subagentModels": {
-      "title": "子 Proxy 模型",
+      "title": "Subagent 模型",
       "description": "分别设置 Claude Code 和 Codex 执行子任务时使用的默认模型。设置按入口生效，不会为每个模型单独保存。",
       "unspecified": "不指定（跟随原逻辑）",
       "codexUnavailable": "当前 Codex 版本暂不支持安全覆盖",
-      "hint": "可选模型取决于已连接的模型来源；留空表示使用 Agent 原本的默认设置。Claude Code 的修改从新建对话开始生效，Codex 当前版本暂不支持覆盖子 Proxy 模型。",
-      "saveFailed": "保存子 Proxy 模型失败"
+      "hint": "可选模型取决于已连接的模型来源；留空表示使用 Agent 原本的默认设置。Claude Code 的修改从新建对话开始生效，Codex 当前版本暂不支持覆盖 Subagent 模型。",
+      "saveFailed": "保存 Subagent 模型失败"
     },
     "compaction": {
       "title": "上下文压缩",
@@ -1768,7 +1768,7 @@
           "openScreenRecording": "打开屏幕录制设置",
           "recheck": "重新检查",
           "windowsHint": "Windows 不需要额外系统授权。使用时请保持目标应用在当前活跃桌面中可见，Agent 会接管前台操作。",
-          "linuxHint": "Linux 不需要 macOS 的 TCC 授权；请确保当前桌面对话允许窗口读取和输入自动化。"
+          "linuxHint": "Linux 不需要 macOS 的 TCC 授权；请确保当前桌面会话允许窗口读取和输入自动化。"
         },
         "toggleHint": "这个开关只对之后新建的 Agent 对话生效；正在进行的对话不受影响。",
         "noProjectHint": "从项目对话中打开「设置」可针对该项目开关直接电脑控制。",
@@ -4088,9 +4088,9 @@
       }
     },
     "agentTask": {
-      "emptyTitle": "子 Agent 任务",
-      "showDetails": "展开子 Agent 详情",
-      "hideDetails": "收起子 Agent 详情",
+      "emptyTitle": "Subagent 任务",
+      "showDetails": "展开 Subagent 详情",
+      "hideDetails": "收起 Subagent 详情",
       "provider": {
         "claude": "Claude Code",
         "codex": "Codex",
@@ -4898,7 +4898,7 @@
         "alphabetic": "字母排序"
       },
       "filterStatusHeading": "状态",
-      "filterAgentHeading": "Proxy",
+      "filterAgentHeading": "Agent",
       "filterLastActivityHeading": "最近活跃",
       "filterGroupByHeading": "分组",
       "filterSortByHeading": "排序",
@@ -5303,7 +5303,7 @@
         "activityDesc": "最近活跃",
         "activityAsc": "最早活跃"
       },
-      "filterAria": "搜索筛选（状态：{{status}}，Proxy：{{agent}}，最近活跃：{{lastActivity}}，项目：{{projects}}）",
+      "filterAria": "搜索筛选（状态：{{status}}，Agent：{{agent}}，最近活跃：{{lastActivity}}，项目：{{projects}}）",
       "filter": {
         "label": "筛选",
         "active": "筛选 {{count}}",
@@ -6604,7 +6604,7 @@
     "notReadyBody": "window.electronAPI.maker 不可用。请重启应用并检查控制台中的 IPC 注册错误。",
     "title": "Maker Experimental — 一阶段重构新链路",
     "description": "新链路验证页面。老链路（cc-agent / codex）不受影响。",
-    "agentLabel": "Proxy：",
+    "agentLabel": "Agent：",
     "workingDirLabel": "工作目录：",
     "workingDirPlaceholder": "点右侧按钮选择目录",
     "selectButton": "选择…",
@@ -6615,7 +6615,7 @@
     "createSession": "创建对话",
     "closeSession": "关闭对话",
     "sessionField": "对话：",
-    "agentField": "Proxy：",
+    "agentField": "Agent：",
     "statusField": "状态：",
     "errorField": "错误：",
     "sendNotAccepted": "发送未被接受，turn 没有启动。请检查工作目录或对话状态后重试。",
@@ -7023,7 +7023,7 @@
       }
     },
     "balance": {
-      "title": "可用点数",
+      "title": "可用余额",
       "plan": "订阅点数",
       "purchased": "已购点数",
       "promotional": "赠送点数",

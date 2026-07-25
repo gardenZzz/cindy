@@ -1172,7 +1172,7 @@
         },
         "protocol": {
           "claude": "Claude Code",
-          "claudeDesc": "Claude Code は Anthropic プロトコルに従います（x-api-key で認証）。このプロバイダーの Claude Code 用 baseURL・キー・モデルを入力します。空欄にするとこのプロバイダーは Claude Code を提供しません。",
+          "claudeDesc": "Claude Code は Anthropic プロトコルに従います（x-api-key で認証）。この提供元の Claude Code 用 baseURL・キー・モデルを入力します。空欄にするとこの提供元は Claude Code を提供しません。",
           "codex": "Codex",
           "codexDesc": "Codex は OpenAI Responses プロトコルを使用します。Responses ネイティブの上流、または Chat Completions のみを提供するプロバイダーを Cindy でブリッジする方式を選べます。このプロバイダーの Codex 用ベース URL・キー・モデルを入力します。空欄にすると Codex では利用しません。"
         },
@@ -2224,13 +2224,13 @@
         "addPlugin": "プラグインを追加",
         "addPluginAria": "プラグイン追加オプション",
         "createWithCindy": "Cindy で作成",
-        "createPrompt": "Cindy プラグインを作成したいです。まず ghost_forge_guide を呼び出して完全な仕様を読み、すぐに実装を始めないでください。質問から始め、毎回一つの重要な判断に集中しながら、解決するIssue、対象ユーザー、操作フロー、必要なツールと接続、権限の境界、受け入れ条件を段階的に確認してください。設計を確認した後、仕様に沿って実装と検証を行い、最後に ghost_forge_pack を呼び出してプラグインをパッケージ化し、インストールしてください。",
+        "createPrompt": "Cindy プラグインを作成したいです。まず ghost_forge_guide を呼び出して完全な仕様を読み、すぐに実装を始めないでください。質問から始め、毎回一つの重要な判断に集中しながら、解決する課題、対象ユーザー、操作フロー、必要なツールと接続、権限の境界、受け入れ条件を段階的に確認してください。設計を確認した後、仕様に沿って実装と検証を行い、最後に ghost_forge_pack を呼び出してプラグインをパッケージ化し、インストールしてください。",
         "installedTitle": "インストール済みプラグイン",
         "installedExpand": "インストール済みプラグインをさらに {{count}} 件表示",
         "installedCollapse": "追加のインストール済みプラグインを隠す",
         "allTitle": "すべてのプラグイン",
         "filterAll": "すべて",
-        "filtersAria": "プロバイダーでプラグインを絞り込む",
+        "filtersAria": "提供元でプラグインを絞り込む",
         "origin": {
           "public": "公開",
           "organization": "チーム共有",
@@ -2241,7 +2241,7 @@
         "useAria": "{{name}} を使用"
       },
       "market": {
-        "scopeAria": "プラグインのプロバイダーを絞り込む",
+        "scopeAria": "プラグインの提供元を絞り込む",
         "scope": {
           "all": "すべて",
           "public": "公開",
@@ -4054,7 +4054,7 @@
     "closeWithShortcut": "閉じて破棄（{{shortcut}}）",
     "codexRequired": "音声入力を使用するには、先に {{appName}} で Codex に接続してください。",
     "apiKeyRequired": "音声入力を使用するには、先に API Key を設定してください。",
-    "cindyServiceUnavailable": "Cindy 音声サービスを利用できません。ネットワークを確認するか、サービスプロバイダーを切り替えてください。",
+    "cindyServiceUnavailable": "Cindy 音声サービスを利用できません。ネットワークを確認するか、サービス提供元を切り替えてください。",
     "asrServiceUnavailable": "音声認識サービスに接続できません。ネットワークを確認してから再試行してください。",
     "emptyTranscript": "音声は検出されましたが、テキストを認識できませんでした。もう一度お試しください。"
   },
@@ -6964,7 +6964,7 @@
       "passwordPlaceholder": "パスワード",
       "unlock": "ロック解除",
       "previewMeta": "{{agent}} · {{count}} 件のメッセージ · {{exportedAt}} にエクスポート",
-      "riskWarning": "このファイルは外部から共有されたものです。プロバイダーが信頼できることを確認してください。インポートした履歴は AI のその後の動作に影響する可能性があり、会話を続けると AI はローカルファイルの読み書きやコマンドの実行を行うことができます。",
+      "riskWarning": "このファイルは外部から共有されたものです。提供元が信頼できることを確認してください。インポートした履歴は AI のその後の動作に影響する可能性があり、会話を続けると AI はローカルファイルの読み書きやコマンドの実行を行うことができます。",
       "workdirHint": "元のセッションの作業ディレクトリは {{originalDir}} です。このマシン上の対応するディレクトリを選択してください。",
       "workdirEmpty": "ディレクトリが未選択です",
       "pickWorkdir": "ディレクトリを選択",

@@ -14,12 +14,19 @@ function sortTerms(terms) {
   });
 }
 
-/** 单元格转义:markdown 表格里的 | 会破坏列结构。 */
+/**
+ * 单元格转义:markdown 表格里的 | 会破坏列结构。
+ * 反斜杠必须**先**转义,否则原文里的 `\` 会与后面补上的转义符结合成新的转义序列
+ * (CodeQL: incomplete string escaping)。
+ */
 function cell(text) {
-  return String(text ?? '').replace(/\|/g, '\\|').replace(/\n/g, ' ');
+  return String(text ?? '')
+    .replace(/\\/g, '\\\\')
+    .replace(/\|/g, '\\|')
+    .replace(/\n/g, ' ');
 }
 
-/** 译法展示:空字符串表示「保留英文原词」,直接显示 en 并标注。 */
+/** 译法展示:译法与 en 相同即「保留英文原词」,标注出来。 */
 function renderTranslation(term, locale) {
   const value = term.translations?.[locale];
   if (!value) return '—';

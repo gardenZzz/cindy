@@ -45,17 +45,21 @@ export function occursIn(text, term) {
 }
 
 /**
- * 大小写形态检查:命中术语但拼写形态与标准不符时返回实际拼写,否则返回 null。
- * 只对「保留英文原词」的术语有意义(译成中文/日文的术语无大小写问题)。
+ * 大小写形态检查:命中术语但拼写形态与标准不符时返回**第一个不符的**实际拼写,否则 null。
+ *
+ * 必须扫描全部匹配,不能只看第一个:一条文案里常先出现正确形态、后出现错误形态
+ * (「创建 Worker 后,该 worker 会自动启动」)。用非全局 match 时,第一个匹配正确就直接
+ * 返回 null,后面的错误形态永远查不出来——两位 reviewer 在 #389 都把这条标为 P1。
  */
 export function findCaseMismatch(text, standard) {
   if (!/^[A-Za-z][A-Za-z0-9 ]*$/.test(standard)) return null;
   const escaped = standard.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-  const re = new RegExp(`(?<![${WORD_BOUNDARY}])${escaped}s?(?![${WORD_BOUNDARY}])`, 'i');
-  const m = text.match(re);
-  if (!m) return null;
-  const hit = m[0].replace(/s$/, '');
-  return hit === standard ? null : hit;
+  const re = new RegExp(`(?<![${WORD_BOUNDARY}])${escaped}s?(?![${WORD_BOUNDARY}])`, 'gi');
+  for (const m of text.matchAll(re)) {
+    const hit = m[0].replace(/s$/, '');
+    if (hit !== standard) return hit;
+  }
+  return null;
 }
 
 /**

@@ -20,10 +20,14 @@
       },
       "forbidden": {
         "zh-CN": [
-          "智能体"
+          "智能体",
+          {
+            "text": "代理",
+            "whenEn": "Agent"
+          }
         ]
       },
-      "note": "产品一级概念，四语统一保留英文原词。zh-CN 现状 44:5 已是主流；ja / ko 实测拉丁 Agent 同样是主流（59:38 / 58:39），故三语一致（2026-07 修正：此前误按抽样声明为片假名 エージェント / 한글 에이전트，那是少数派）。「代理」一词在中文 UI 里整体废弃——Agent 与 Proxy 都保留英文，不共用这个译名；该词的 forbidden 统一登记在 proxy 条目下，避免同一处违规被两个术语重复报告。引入术语表时全仓仅 9 处「代理」，已全部清理为 Agent / Subagent / Proxy。豁免 settings.remote 整段：那里的 agent 指 ssh-agent（英文原文即 \"SSH agent\" / \"probe agent\"），是与产品 Agent 同形的另一个概念。",
+      "note": "产品一级概念，四语统一保留英文原词。zh-CN 现状 44:5 已是主流；ja / ko 实测拉丁 Agent 同样是主流（59:38 / 58:39），故三语一致（2026-07 修正：此前误按抽样声明为片假名 エージェント / 한글 에이전트，那是少数派）。「代理」一词在中文 UI 里整体废弃——Agent 与 Proxy 都保留英文，不共用这个译名；「代理」按英文源分别登记在 agent / subagent / proxy 三条下（条件禁用），不再统一挂 proxy——统一登记会让自动替换无法确定目标：2026-07 一次批量重放就把 \"Agent\"→「代理」的 4 处和 \"Subagent models\" 的 4 处一并换成了 Proxy，产出「子 Proxy 模型」这种错译。引入术语表时全仓仅 9 处「代理」，已全部清理为 Agent / Subagent / Proxy。豁免 settings.remote 整段：那里的 agent 指 ssh-agent（英文原文即 \"SSH agent\" / \"probe agent\"），是与产品 Agent 同形的另一个概念。",
       "exempt": [
         "desktop:settings.remote."
       ]
@@ -38,11 +42,14 @@
         "ko": "하위 에이전트"
       },
       "forbidden": {
-        "ko": [
-          "서브 에이전트"
+        "zh-CN": [
+          {
+            "text": "代理",
+            "whenEn": "Subagent"
+          }
         ]
       },
-      "note": "Agent 的派生概念，中文跟随 Agent 保留英文原词，不译「子代理」——「代理」在中文 UI 已整体废弃。「子代理」含「代理」，由 proxy 条目的 forbidden 统一拦截，这里不重复登记。ja / ko 沿用既有音译。"
+      "note": "Agent 的派生概念，中文跟随 Agent 保留英文原词，不译「子代理」。「代理」在此条下按 whenEn=Subagent 登记：同一个中文词在 Agent / Subagent / Proxy 三处各有来源，只有按英文源区分，自动替换才知道该换成哪个词。ja / ko 沿用既有音译。"
     },
     {
       "id": "proxy",
@@ -55,10 +62,13 @@
       },
       "forbidden": {
         "zh-CN": [
-          "代理"
+          {
+            "text": "代理",
+            "whenEn": "Proxy"
+          }
         ]
       },
-      "note": "网络代理，中文保留英文原词（2026-07 裁决：Agent 与 Proxy 都不叫「代理」）。这条 forbidden 同时兜住 Agent / Subagent 的误译——「代理」在 zh-CN 文案里一律视为违规，无论它来自哪个英文词。ja / ko 沿用既有音译。不设 exempt：本条只禁中文「代理」，settings.remote 里的 ssh-agent 是英文、不会命中，加豁免只会平白削弱门禁。"
+      "note": "网络代理，中文保留英文原词（2026-07 裁决：Agent 与 Proxy 都不叫「代理」）。本条只管英文源为 Proxy 的那些——Agent / Subagent 的「代理」误译各自登记在自己条目下。ja / ko 沿用既有音译。"
     },
     {
       "id": "plugin",
@@ -122,13 +132,14 @@
           "会话"
         ]
       },
-      "note": "面向用户一律叫「对话」——「会话」太生硬难懂（2026-07 裁决）。代码与内部标识仍用 Session，本条只约束 UI 文案。Chat 合并到同一个词，见 chat 条目。落地时把 440 处「会话」+ 22 处「聊天」统一改为「对话」。ja / ko 沿用既有音译，不受本条约束。豁免的 4 处是同形异义的技术 session（登录态、WebSocket 语音连接），与产品对话无关——注意 login.errors 的「绑定会话」指账号绑定态，scheduler 的「绑定对话」才是产品对话，两者同名不同义，靠 key 精确区分。",
+      "note": "面向用户一律叫「对话」——「会话」太生硬难懂（2026-07 裁决）。代码与内部标识仍用 Session，本条只约束 UI 文案。Chat 合并到同一个词，见 chat 条目。落地时把 440 处「会话」+ 22 处「聊天」统一改为「对话」。ja / ko 沿用既有音译，不受本条约束。豁免的 4 处是同形异义的技术 session（登录态、WebSocket 语音连接），与产品对话无关——同类的还有 Linux Computer Use 提示里的「桌面会话」——那是 OS 桌面会话（窗口读取与输入自动化的授权范围）。注意 login.errors 的「绑定会话」指账号绑定态，scheduler 的「绑定对话」才是产品对话，两者同名不同义，靠 key 精确区分。",
       "exempt": [
         "desktop:login.errors.INVALID_LOGIN_TICKET",
         "desktop:login.errors.INVALID_BIND_TICKET",
         "mobile/composer:voice.missingConnectionProvider",
         "mobile/composer:voice.sessionExpiredOrForbidden",
-        "mobile/composer:voice.sessionNotConnected"
+        "mobile/composer:voice.sessionNotConnected",
+        "desktop:settings.computerUse.directControl.permissions.linuxHint"
       ]
     },
     {
@@ -243,10 +254,13 @@
           "议题"
         ],
         "ja": [
-          "課題"
+          {
+            "text": "課題",
+            "whenEn": "Issue"
+          }
         ]
       },
-      "note": "保留英文（2026-07 裁决）。现状「工单」32 /「议题」4 是既有 bug 的来源：列表按钮写「新建议题」、点进去页面标题写「新建工单」。「问题」不入 forbidden——它在「修复问题和失败」这类泛指语境下是正常中文，不是 Issue 的误译。checkCase 关闭：issue 同时是常用英语单词，prompt 模板里的 \"fix the issue\" 是正常用法，做大小写约束会制造 9 处假阳性。（2026-07 修正：ko 原声明 Issue 仅 3 处，实测 이슈 45 处才是主流，改随本语言主流；ja 的 Issue 43:2 保持不变。）",
+      "note": "保留英文（2026-07 裁决）。现状「工单」32 /「议题」4 是既有 bug 的来源：列表按钮写「新建议题」、点进去页面标题写「新建工单」。「问题」不入 forbidden——它在「修复问题和失败」这类泛指语境下是正常中文，不是 Issue 的误译。checkCase 关闭：issue 同时是常用英语单词，prompt 模板里的 \"fix the issue\" 是正常用法，做大小写约束会制造 9 处假阳性。（2026-07 修正：ko 原声明 Issue 仅 3 处，实测 이슈 45 处才是主流，改随本语言主流；ja 的 Issue 43:2 保持不变。）ja 的「課題」同样是多义词（问题 / 课题），按 whenEn=Issue 条件禁用——插件创建 prompt 里的 \"define the problem\" 用「課題」是正确的。",
       "minorityByDesign": {
         "ja": "ja 侧 Issue 43/63 本就是主流，此处无偏离；保留字段以说明与 ko 的 이슈 有意分道——各语言跟随本语言主流，不强求跨语言一致。"
       }
@@ -274,15 +288,21 @@
           "提供商"
         ],
         "ja": [
-          "提供元",
-          "事業者"
+          {
+            "text": "提供元",
+            "whenEn": "Provider"
+          },
+          {
+            "text": "事業者",
+            "whenEn": "Provider"
+          }
         ],
         "ko": [
           "공급자",
           "제공업체"
         ]
       },
-      "note": "中文用「供应商」（现状 36:18 领先简称）。全称「模型供应商」在需要消歧的位置仍可用。「提供商」「提供方」是同义漂移，禁用——设置页标题写「模型供应商」、它自己的表单写「提供商」是既有 bug。豁免 ssoVerificationSubtitle：那里的「身份提供方」是 SSO / SAML 领域 Identity Provider 的标准中文术语，与模型供应商是两个概念。该文案在 desktop locale 与 mobile 影子 catalog 各有一份副本，两处都要豁免。（2026-07 修正：ko 原声明 제공업체 仅 6 处，实测 제공자 32 处为主流，改随主流。）",
+      "note": "中文用「供应商」（现状 36:18 领先简称）。全称「模型供应商」在需要消歧的位置仍可用。「提供商」「提供方」是同义漂移，禁用——设置页标题写「模型供应商」、它自己的表单写「提供商」是既有 bug。豁免 ssoVerificationSubtitle：那里的「身份提供方」是 SSO / SAML 领域 Identity Provider 的标准中文术语，与模型供应商是两个概念。该文案在 desktop locale 与 mobile 影子 catalog 各有一份副本，两处都要豁免。（2026-07 修正：ko 原声明 제공업체 仅 6 处，实测 제공자 32 处为主流，改随主流。）ja 的「提供元」是多义词——同时表示 \"source\"（来源），因此按 whenEn=Provider 条件禁用；无条件禁会把「共有元の提供元を信頼できるか」这类 source 语境一并换掉。",
       "exempt": [
         "desktop:login.ssoVerificationSubtitle",
         "mobile/loginMessages:ssoVerificationSubtitle"
