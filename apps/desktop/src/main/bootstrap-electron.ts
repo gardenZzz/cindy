@@ -52,6 +52,18 @@ if (
   safeStorage.setUsePlainTextEncryption(true);
 }
 
+// TapTap Maker 等站点的 WASM 多线程引擎依赖 SharedArrayBuffer。Chromium 把 SAB 锁在
+// crossOriginIsolated(COOP/COEP 响应头)之后,而 Electron 不实现 COOP 进程隔离——
+// 即便站点响应头正确,BrowserWindow / `<webview>` 里 crossOriginIsolated 恒为 false,
+// SAB 拿不到,RSB 内置浏览器里这类站点直接报"缺少运行时支持"(Electron 41.2.0 实测,
+// 真 Chrome 同页面为 true)。这里用 Chromium 官方 feature 开关无条件恢复 SAB 构造器,
+// TapTap Maker 桌面端(xdt-maker.exe)、VS Code 同款做法。风险面是向所有网页内容放开
+// 高精度共享内存计时器(Spectre 类),缓解依赖远程内容只跑在 webview-security.ts 强制
+// 加固的 webview 里(sandbox + webSecurity + 隔离分区,无 Node)。注意 appendSwitch
+// 同 key 后写覆盖前写:如需再加其他
+// enable-features,必须合并进同一次调用的逗号分隔值,不能另起一行。
+app.commandLine.appendSwitch('enable-features', 'SharedArrayBuffer');
+
 // agentManager 已在 vendor 大扫除时退役。app 退出 / 崩溃路径走 maker.shutdown()
 // 一刀切 — 它内部按 (Layer 1) 关所有 session → (Layer 2) dispose 所有 agent (Codex
 // shared app-server 子进程 SIGTERM, Claude no-op) 的固定顺序跑, 调用方不需要分两步。
@@ -550,6 +562,7 @@ import { registerLayoutIpc } from './layout/index.js';
 import {
   getGhostManager,
   isGhostAvailableForActiveSession,
+  refreshGhostLocalization,
   registerGhostIpc,
   setGhostsChangedObserver,
   suspendAllGhosts,
@@ -1498,6 +1511,7 @@ ipcMain.handle('app-menu:set-locale', (_event, locale: unknown): { ok: true } =>
   );
   setSelectionContextMenuLocale(currentApplicationMenuLocale);
   setMainLocale(currentApplicationMenuLocale);
+  refreshGhostLocalization();
   const mainWindow = mainWindowRef && !mainWindowRef.isDestroyed() ? mainWindowRef : null;
   if (mainWindow) {
     installApplicationMenu(mainWindow, currentApplicationMenuLocale);
