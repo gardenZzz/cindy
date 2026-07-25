@@ -4021,6 +4021,9 @@
       "startFailedContinue": "开启协同失败，已改为单对话继续",
       "createWorkerRefreshFailed": "Worker 状态刷新失败，请稍后重试",
       "openHint": "召集 Worker 协作",
+      "disabledHint": "当前项目已关闭协同模式，请在项目设置中重新启用",
+      "unavailableHint": "暂时无法确认当前项目的协同设置，请稍后重试",
+      "loadingHint": "正在确认当前项目的协同设置，请稍后重试",
       "stopHint": "停止协同",
       "stopAria": "停止协同",
       "toggleOnAria": "协同模式已开启，点击停止",
@@ -4046,7 +4049,10 @@
         "PROVIDER_ROUTE_UNAVAILABLE_REMOTE": "被控设备上的所选模型与供应商精确路由当前不可用，请改选该设备可用的路由后重试。",
         "BUDGET_MODEL_REQUIRES_API_MODE": "此 Codex 模型需要先在设置中配置 API key 才能使用。请配置后重试。",
         "BUDGET_MODEL_REQUIRES_API_MODE_CONTINUE": "此 Codex 模型需要先在设置中配置 API key；协同未开启，已改为单对话继续。请配置 API key 后重试。",
-        "BUDGET_MODEL_REQUIRES_API_MODE_REMOTE": "被控设备尚未配置此 Codex 模型所需的 API key。请在被控设备上配置后重试。"
+        "BUDGET_MODEL_REQUIRES_API_MODE_REMOTE": "被控设备尚未配置此 Codex 模型所需的 API key。请在被控设备上配置后重试。",
+        "PRECONDITION_FAILED": "当前项目已关闭协同模式，或当前对话不支持协同。",
+        "PRECONDITION_FAILED_CONTINUE": "当前项目已关闭协同模式，已改为单对话继续。",
+        "PRECONDITION_FAILED_REMOTE": "被控对话不支持协同。"
       }
     },
     "chatInput": {

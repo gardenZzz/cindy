@@ -43,6 +43,7 @@ import {
   type AgentInputSessionReferenceContext,
 } from '../../shared/agentInputQueue.js';
 import { getManagedWorktreeBasePath } from '../../shared/managedWorktreePaths.js';
+import { normalizeWorkingDirForProjectSettings } from '../../shared/workingDir.js';
 import { buildTurnUsageDetails } from '../../shared/turnUsageDetails.js';
 import type { DesktopCommandContext } from '../commands/index.js';
 import { getDesktopCommandRegistry } from '../commands/index.js';
@@ -184,6 +185,7 @@ import {
   writeMemorySetting,
 } from '../maker-host/memory-settings-store.js';
 import { GLOBAL_PLUGIN_IDS } from '../maker-host/plugins/types.js';
+import { assertCollabProjectEnabled } from './collabProjectPolicy.js';
 import type { GitSnapshotCoordinator } from '../git-snapshot/gitSnapshotCoordinator.js';
 import {
   getRemoteNewMakerDefaults,
@@ -4248,6 +4250,7 @@ export function registerMakerIpc(maker: Maker, options: RegisterMakerIpcOptions 
     dispatched: boolean;
     dispatchOutcome?: CollabDispatchOutcome;
   }> {
+    await assertLeadCollabProjectEnabled(leadSessionId);
     const result = await orcaLifecycleService.enableTeam({
       leadSessionId,
       workerAgent: opts.workerAgent,
@@ -4274,6 +4277,30 @@ export function registerMakerIpc(maker: Maker, options: RegisterMakerIpcOptions 
       dispatched: result.dispatched,
       ...(result.dispatchOutcome ? { dispatchOutcome: result.dispatchOutcome } : {}),
     };
+  }
+
+  async function assertLeadCollabProjectEnabled(leadSessionId: string): Promise<void> {
+    const lead = maker.getSession(leadSessionId);
+    const leadRow = await getSessionRowSnapshot(leadSessionId);
+    const rawWorkingDir =
+      typeof leadRow?.workingDir === 'string' ? leadRow.workingDir : lead?.workDir;
+    const normalizedWorkingDir =
+      typeof rawWorkingDir === 'string'
+        ? normalizeWorkingDirForProjectSettings(rawWorkingDir) ?? rawWorkingDir
+        : rawWorkingDir;
+    const liveWorkspaceKind = (lead as { workspaceKind?: unknown } | undefined)?.workspaceKind;
+    const workspaceKind =
+      liveWorkspaceKind === 'project' || liveWorkspaceKind === 'dialogue'
+        ? liveWorkspaceKind
+        : leadRow?.workspaceKind;
+    assertCollabProjectEnabled(
+      {
+        workingDir: normalizedWorkingDir,
+        workspaceKind,
+        remoteHostId: lead?.remoteHostId ?? leadRow?.remoteHostId,
+      },
+      (pluginId, workingDir) => getPluginRegistry().isEnabled(pluginId, workingDir),
+    );
   }
 
   type SendToSessionDispatchSession = {
@@ -5269,6 +5296,7 @@ export function registerMakerIpc(maker: Maker, options: RegisterMakerIpcOptions 
     if (!label.ok) throwIpcError('INVALID_PARAMS', label.message);
     const agent = b.agent === 'codex' ? 'codex' as const : 'claude-code' as const;
     const model = typeof b.model === 'string' && b.model.length > 0 ? b.model : undefined;
+    await assertLeadCollabProjectEnabled(b.leadSessionId);
     const result = await orcaLifecycleService.createWorker({
       leadSessionId: b.leadSessionId,
       role: b.role,
@@ -5705,6 +5733,7 @@ export function registerMakerIpc(maker: Maker, options: RegisterMakerIpcOptions 
     cancelWorkerQueuedMessage: (params) => orcaTeamService.cancelWorkerQueuedMessage(params),
     startTeam: async ({ leadSessionId }) => {
       try {
+        await assertLeadCollabProjectEnabled(leadSessionId);
         return await orcaLifecycleService.startTeam({ leadSessionId });
       } catch (err) {
         return {
@@ -5716,6 +5745,7 @@ export function registerMakerIpc(maker: Maker, options: RegisterMakerIpcOptions 
     },
     createWorker: async (params) => {
       try {
+        await assertLeadCollabProjectEnabled(params.leadSessionId);
         return await orcaLifecycleService.createWorker(params);
       } catch (err) {
         return {
@@ -5727,6 +5757,7 @@ export function registerMakerIpc(maker: Maker, options: RegisterMakerIpcOptions 
     },
     createWorkerFromTask: async ({ leadSessionId, task, agentKind }) => {
       try {
+        await assertLeadCollabProjectEnabled(leadSessionId);
         const created = await orcaLifecycleService.createWorker({
           leadSessionId,
           role: 'developer',
