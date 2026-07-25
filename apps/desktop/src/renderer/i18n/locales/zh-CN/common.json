@@ -7120,8 +7120,7 @@
     "usage": {
       "title": "额度使用",
       "observedAt": "额度更新于 {{date}}",
-      "used": "已用",
-      "total": "总额",
+      "poolDetail": "已用 {{used}} · 总额 {{total}}",
       "remaining": "剩余",
       "progressLabel": "{{label}}使用进度",
       "historyUnavailable": "历史记录不完整，暂时仅显示剩余额度。",
