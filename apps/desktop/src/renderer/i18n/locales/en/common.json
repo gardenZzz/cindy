@@ -7131,8 +7131,7 @@
     "usage": {
       "title": "Credit usage",
       "observedAt": "Balance updated {{date}}",
-      "used": "Used",
-      "total": "Total",
+      "poolDetail": "Used {{used}} · Total {{total}}",
       "remaining": "Remaining",
       "progressLabel": "{{label}} usage",
       "historyUnavailable": "Usage history is incomplete. Only the remaining balance is available.",

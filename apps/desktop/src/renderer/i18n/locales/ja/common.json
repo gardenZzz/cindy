@@ -7120,8 +7120,7 @@
     "usage": {
       "title": "クレジット使用状況",
       "observedAt": "クレジット更新: {{date}}",
-      "used": "使用済み",
-      "total": "合計",
+      "poolDetail": "使用済み {{used}} · 合計 {{total}}",
       "remaining": "残り",
       "progressLabel": "{{label}}の使用状況",
       "historyUnavailable": "使用履歴が完全ではないため、残りのクレジットのみ表示しています。",

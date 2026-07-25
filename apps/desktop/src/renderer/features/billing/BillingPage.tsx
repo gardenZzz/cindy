@@ -1120,7 +1120,10 @@ function CreditPoolRow({ label, pool }: { label: string; pool: ModelAccessCredit
   const percent = usagePercent(pool);
   const detail =
     pool.used !== null && pool.total !== null
-      ? `${t('billing.usage.used')} ${formatMoney(pool.used, BILLING_CURRENCY, billingLocale)} · ${t('billing.usage.total')} ${formatMoney(pool.total, BILLING_CURRENCY, billingLocale)}`
+      ? t('billing.usage.poolDetail', {
+          used: formatMoney(pool.used, BILLING_CURRENCY, billingLocale),
+          total: formatMoney(pool.total, BILLING_CURRENCY, billingLocale),
+        })
       : t('billing.usage.historyUnavailable');
   return (
     <div className="flex flex-wrap items-center justify-between gap-x-6 gap-y-2 px-5 py-3.5">
@@ -1350,7 +1353,9 @@ function BillingOfferDialog({
                           'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset',
                           'focus-visible:ring-[var(--text-primary)]',
                           'disabled:cursor-not-allowed disabled:opacity-55 disabled:hover:bg-transparent',
-                          active ? 'bg-[var(--surface)]' : 'hover:bg-[var(--surface-hover-soft)]',
+                          active
+                            ? 'bg-[var(--surface-chip)]'
+                            : 'hover:bg-[var(--surface-hover-soft)]',
                         )}
                       >
                         <div className="min-w-0 flex-1">
@@ -1535,7 +1540,7 @@ function PaymentOptionRow({
         'flex w-full items-center gap-3 px-4 py-3 text-left transition-colors',
         'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset',
         'focus-visible:ring-[var(--text-primary)]',
-        active ? 'bg-[var(--surface)]' : 'hover:bg-[var(--surface-hover-soft)]',
+        active ? 'bg-[var(--surface-chip)]' : 'hover:bg-[var(--surface-hover-soft)]',
       )}
     >
       {option.provider === 'alipay' ? (
