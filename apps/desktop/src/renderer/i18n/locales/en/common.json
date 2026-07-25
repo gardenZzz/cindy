@@ -3612,7 +3612,31 @@
       "settingsLink": "Settings, current user: {{name}}",
       "canaryBadge": "Canary user",
       "viewReleaseNotes": "View release notes",
-      "reopenUpdateBanner": "Update ready — click to review"
+      "reopenUpdateBanner": "Update ready — click to review",
+      "downloadMobile": "Download Cindy Mobile"
+    },
+    "mobileDownload": {
+      "title": "Control Cindy Remotely",
+      "subtitle": "Connect your phone to this desktop",
+      "qrAlt": "QR code to download Cindy mobile",
+      "preparing": "Preparing QR code…",
+      "error": "Couldn’t create the QR code. Try again later.",
+      "openPage": "Open Download Page",
+      "openFailed": "Couldn’t open the download page. Check your system browser settings.",
+      "scanToOpen": "Scan to open the Cindy app and sign in with the same account",
+      "scanAnother": "Scan Another Device",
+      "scanAnotherHint": "Open Cindy on another phone",
+      "myDevices": "My Devices",
+      "deviceOffline": "Offline",
+      "allowControl": "Allow same-account devices to control this machine",
+      "deviceId": "This device · {{id}}",
+      "remoteAction": {
+        "checking": "Checking…",
+        "unavailable": "Unavailable",
+        "enable": "Enable",
+        "enabled": "Enabled"
+      },
+      "close": "Close Download Dialog"
     },
     "vendorReadiness": {
       "loading": "loading"
