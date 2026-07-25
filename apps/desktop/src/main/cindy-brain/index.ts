@@ -1848,28 +1848,11 @@ export async function installOrUpdateMarketGhostPackage(
     rejectUnauthorizedTokenBroker(inspected.manifest);
 
     const installed = manager.list().find((ghost) => ghost.manifest.id === expected.ghostId);
-    if (inspected.manifest.node) {
-      const sender = expected.nodeAuthorizationWebContents;
-      if (
-        !sender ||
-        !(await requestNodeInstallAuthorization(
-          sender,
-          inspected.manifest,
-          installed ? 'update' : 'install',
-        ))
-      ) {
-        throwIpcError(
-          'PERMISSION_DENIED',
-          sender
-            ? '用户取消了 Node Plugin 安装授权'
-            : 'Node Plugin 需要用户显式授权，不能自动安装',
-        );
-      }
-    }
+    // Node 高风险条目由 renderer 装入确认卡权限清单如实展示;
+    // 2026-07-24 Lizi 定案:不再有 Main 侧原生二次确认弹窗(PR #333,本处为其
+    // 漏删的市场安装路径调用点,一并对齐)。
     // Hold the owner-stability lease only for the actual Ghost filesystem
-    // mutation. Node authorization is an unbounded user interaction; keeping
-    // the lease across it would block account teardown indefinitely if the
-    // dialog is left unanswered.
+    // mutation.
     releaseMutation = beginGhostMutation(mutationOwner);
     if (!installed) {
       // defaultInstall 首次装入即启用；手动市场安装仍保持沉睡，等待用户主动开启。
