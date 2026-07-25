@@ -84,14 +84,14 @@
             "type": "array",
             "items": {
               "oneOf": [
-                { "type": "string" },
+                { "type": "string", "minLength": 1 },
                 {
                   "type": "object",
                   "required": ["text", "whenEn"],
                   "additionalProperties": false,
                   "properties": {
-                    "text": { "type": "string", "description": "禁用的译法" },
-                    "whenEn": { "type": "string", "description": "英文源需匹配的词（按词边界、大小写不敏感匹配）" }
+                    "text": { "type": "string", "minLength": 1, "description": "禁用的译法。minLength 为 1 是必须的：空串会被计数函数当成 CJK 词，而空串的 indexOf 永远返回同一个偏移、长度为 0，循环不推进——门禁会挂死而不是报错，且 CI 里 check:i18n-glossary 排在单测之前，一个手滑的 \"\" 就能卡住整条流水线。" },
+                    "whenEn": { "type": "string", "minLength": 1, "description": "英文源需匹配的词（按词边界、大小写不敏感匹配）。同样不能为空：空串会让条件禁用退化成无条件命中。" }
                   }
                 }
               ]

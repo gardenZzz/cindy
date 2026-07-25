@@ -89,6 +89,7 @@ export function stripNonProse(text) {
  * 含 CJK 的词(代理 / 插件)没有词边界概念,用子串。
  */
 export function occursIn(text, term) {
+  if (!term) return false;
   if (/^[\x20-\x7e]+$/.test(term)) {
     const escaped = term.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
     return new RegExp(`(?<![${WORD_BOUNDARY}])${escaped}s?(?![${WORD_BOUNDARY}])`).test(text);
@@ -105,6 +106,11 @@ export function occursIn(text, term) {
  * 的契约。把次数编进 fingerprint,增加一处就是一条新指纹。
  */
 export function countOccurrences(text, term, { caseInsensitive = false } = {}) {
+  // 空串必须先挡掉:走到下面的 CJK 分支时 `indexOf('', from)` 永远返回 from、
+  // `term.length` 为 0,循环不推进——门禁会**挂死**而不是报错。CI 里
+  // check:i18n-glossary 排在单测之前,一个手滑的 "" 就能让整条流水线卡住。
+  // schema 那边也加了 minLength: 1,这里是第二道防线:任何调用路径都不该挂住。
+  if (!term) return 0;
   if (/^[\x20-\x7e]+$/.test(term)) {
     const escaped = term.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
     // 默认**大小写敏感**,与 occursIn 同口径。禁用译法的判定必须如此:术语表里
@@ -206,6 +212,10 @@ export const ELLIPSIS_LOCALES = new Set(['en', 'zh-CN', 'ja', 'ko']);
  *
  *  1. 汉字 / 右闭合符号 + 半角标点。只认汉字的话 `(直接替换,不留原文),或…` 会漏——
  *     逗号前面是右括号。右括号 / 右引号 / 右书名号后面接的仍是中文正文。
+ *     直引号与反引号同样要算:中文文案里常写 `默认 "cindy",有重名时…`,
+ *     闭合的半角引号后面那个逗号一样是正文标点。但引号这一支**要求右侧是 CJK**
+ *     ——半角引号常用来包英文,`英文 "note", then continue` 里的逗号是英文标点,
+ *     不该判违规。全角括号 / 书名号那一支不需要这个条件(已对 26 处实例逐条核对过)。
  *  2. 拉丁字母或数字 + 半角标点 + **后面是 CJK**。`Keychain,重启` 这类漏了整整一类:
  *     中文句子里夹的英文产品名、技术词后面同样该用全角。这一支必须要求右边是 CJK,
  *     否则 `a=1,b=2`、`GPT-4,Claude` 这种纯 ASCII 片段会被误判。
@@ -215,7 +225,7 @@ export const ELLIPSIS_LOCALES = new Set(['en', 'zh-CN', 'ja', 'ko']);
  *     ——`a=1, b=2` 后面仍不是 CJK。
  */
 const HALF_WIDTH_AFTER_HAN = new RegExp(
-  `[一-鿿）)」』】》〉”’][,:;!?]|[A-Za-z0-9][,:;!?](?=\\s*[${CJK_CHAR}])`,
+  `[一-鿿）)」』】》〉”’][,:;!?]|["'\`][,:;!?](?=\\s*[${CJK_CHAR}])|[A-Za-z0-9][,:;!?](?=\\s*[${CJK_CHAR}])`,
 );
 const ASCII_ELLIPSIS = /\.\.\./;
 

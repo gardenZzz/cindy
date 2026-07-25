@@ -192,7 +192,7 @@
         "unlockSubmit": "解锁",
         "generateTitle": "生成新的 SSH 密钥",
         "nameLabel": "名字(可选)",
-        "nameHint": "保存为 ~/.ssh/<名字>。默认 \"cindy\",有重名时自动加 -1 / -2 …",
+        "nameHint": "保存为 ~/.ssh/<名字>。默认 \"cindy\"，有重名时自动加 -1 / -2 …",
         "encryptLabel": "用 passphrase 加密(推荐)",
         "encryptHint": "passphrase 现在输入一次，然后 ssh-add 会把解密后的密钥缓存在系统 ssh-agent 里。macOS 还会把 passphrase 存到 Keychain，重启后自动恢复。",
         "passLabel": "Passphrase",
