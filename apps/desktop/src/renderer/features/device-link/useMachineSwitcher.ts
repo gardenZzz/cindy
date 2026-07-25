@@ -24,7 +24,10 @@
 import { useCallback, useMemo, useSyncExternalStore } from 'react';
 import { useRemoteDevices, type RemoteDeviceSummary } from './remoteProjectsStore';
 import { revokedDevicesStore } from './revokedDevicesStore';
-import { useDeviceLinkDeviceList } from './useDeviceLinkDeviceList';
+import {
+  useDeviceLinkDeviceList,
+  useDeviceLinkDeviceListSettled,
+} from './useDeviceLinkDeviceList';
 import { buildSwitcherDevices, selectableDeviceIds, type SwitcherDevice } from './switcherDevices';
 import {
   MACHINE_ALL,
@@ -40,6 +43,40 @@ export interface SelectedMachineConnectingInput {
   rawSelection: MachineSelection;
   devices: readonly SwitcherDevice[];
   syncedDevices: readonly RemoteDeviceSummary[];
+}
+
+export interface RemoteSessionBootstrapLoadingInput {
+  selectedMachineId: MachineSelection;
+  deviceListSettled: boolean;
+  devices: readonly SwitcherDevice[];
+  syncedDevices: readonly RemoteDeviceSummary[];
+}
+
+/**
+ * 当前机器作用域是否仍包含尚未完成首次 sessions snapshot 的远程设备。
+ * syncedDevices 即使 sessionCount=0 也代表 bootstrap 已落过权威空快照；
+ * connecting 且没有对应分片才是冷启动中的未知状态。
+ */
+export function shouldWaitForRemoteSessionBootstrap({
+  selectedMachineId,
+  deviceListSettled,
+  devices,
+  syncedDevices,
+}: RemoteSessionBootstrapLoadingInput): boolean {
+  const selectedRemoteIds =
+    selectedMachineId === MACHINE_ALL
+      ? null
+      : new Set(selectedMachineId.filter((id) => id !== MACHINE_LOCAL));
+  if (selectedRemoteIds?.size === 0) return false;
+  if (!deviceListSettled) return true;
+
+  const syncedIds = new Set(syncedDevices.map((device) => device.deviceId));
+  return devices.some(
+    (device) =>
+      device.status === 'connecting' &&
+      !syncedIds.has(device.deviceId) &&
+      (selectedRemoteIds === null || selectedRemoteIds.has(device.deviceId)),
+  );
 }
 
 /**
@@ -109,6 +146,29 @@ export function useSelectedMachineConnecting(): boolean {
     devices,
     syncedDevices: synced,
   });
+}
+
+/**
+ * 当前可见列表是否还在等待 device-link 远程会话的首次 bootstrap。
+ * 「所有」作用域包含本机与全部远程源，因此远端设备清单或任一相关首快照未落地时，
+ * 侧栏继续显示加载态，避免本地 sessions 先完成后短暂误报真实空态。
+ */
+export function useRemoteSessionBootstrapLoading(
+  selectedMachineId: MachineSelection,
+): boolean {
+  const deviceListSettled = useDeviceLinkDeviceListSettled();
+  const devices = useSwitcherDevices();
+  const synced = useRemoteDevices();
+  return useMemo(
+    () =>
+      shouldWaitForRemoteSessionBootstrap({
+        selectedMachineId,
+        deviceListSettled,
+        devices,
+        syncedDevices: synced,
+      }),
+    [selectedMachineId, deviceListSettled, devices, synced],
+  );
 }
 
 export interface MachineSwitcherState {

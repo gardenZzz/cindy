@@ -5020,6 +5020,7 @@
       "newDialogue": "新規会話",
       "dialoguesToggleExpand": "会話を展開",
       "dialoguesToggleCollapse": "会話を折りたたむ",
+      "loadingDialogues": "読み込み中…",
       "noDialogues": "会話はありません",
       "dialogueSettings": "会話を整理",
       "dialogueSettingsAria": "会話を整理（並び替え：{{sortBy}}）",

@@ -5030,6 +5030,7 @@
       "newDialogue": "New dialogue",
       "dialoguesToggleExpand": "Expand dialogues",
       "dialoguesToggleCollapse": "Collapse dialogues",
+      "loadingDialogues": "Loading…",
       "noDialogues": "No dialogues",
       "dialogueSettings": "Organize dialogues",
       "dialogueSettingsAria": "Organize dialogues (Sort by: {{sortBy}})",

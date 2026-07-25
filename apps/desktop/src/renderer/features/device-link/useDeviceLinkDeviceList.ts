@@ -19,6 +19,8 @@ import { useSyncExternalStore } from 'react';
 let devices: DeviceLinkDeviceView[] | null = null;
 const subs = new Set<() => void>();
 let started = false;
+/** 当前账号 / relay 生命周期内，至少一次最新的 listDevices 请求已经 resolve 或 reject。 */
+let initialRequestSettled = false;
 /**
  * 加载代次:**每次 refresh 发起**与**每次清空(登出 / relay stop)**都自增,作废所有更早的在途
  * listDevices 响应 —— 只有"最新一次操作"的响应能落地(同 remoteProjectsStore 的 snapshotEpoch 思路)。
@@ -74,16 +76,27 @@ export function applyDeviceRename(
 function setDevices(next: DeviceLinkDeviceView[]): void {
   // 按 deviceId 稳定排序,避免服务端返回顺序抖动触发无谓重渲染。
   const sorted = [...next].sort((a, b) => a.deviceId.localeCompare(b.deviceId));
-  if (relevantEqual(devices, sorted)) return;
+  const devicesChanged = !relevantEqual(devices, sorted);
+  const settledChanged = !initialRequestSettled;
+  if (!devicesChanged && !settledChanged) return;
   devices = sorted;
+  initialRequestSettled = true;
   subs.forEach((fn) => fn());
 }
 
 /** 清空缓存设备,回到「未加载」态(null → 切换栏隐藏)。登出 / relay 停止时调用。 */
 function clearDevices(): void {
   loadGeneration += 1; // 作废所有在途 listDevices 响应(见 loadGeneration 注释)。
-  if (devices === null) return;
+  const changed = devices !== null || initialRequestSettled;
+  if (!changed) return;
   devices = null;
+  initialRequestSettled = false;
+  subs.forEach((fn) => fn());
+}
+
+function markInitialRequestSettled(): void {
+  if (initialRequestSettled) return;
+  initialRequestSettled = true;
   subs.forEach((fn) => fn());
 }
 
@@ -116,8 +129,12 @@ function ensureStarted(): void {
         setDevices(list);
       })
       .catch(() => {
+        // 只有最新请求的失败才算本轮首拉已经结算；更晚的 refresh 仍在途时继续等待它。
+        if (gen !== loadGeneration) return;
+        markInitialRequestSettled();
         // 瞬态拉取失败(relay 重连中等)保持当前快照;登出 / relay 停止由下面的 'stopped'
-        // 状态事件显式清空,不靠这里的失败兜底(避免一次网络抖动就清掉、闪烁)。
+        // 状态事件显式清空,不靠这里的失败兜底(避免一次网络抖动就清掉、闪烁)。但把请求
+        // 标成已结算，避免远端 sidebar bootstrap 因 devices 仍为 null 永久显示加载态。
       });
   };
   refresh();
@@ -154,4 +171,13 @@ function getSnapshot(): DeviceLinkDeviceView[] | null {
 /** 订阅全量设备列表(共享单例);null = 尚未加载。 */
 export function useDeviceLinkDeviceList(): DeviceLinkDeviceView[] | null {
   return useSyncExternalStore(subscribe, getSnapshot);
+}
+
+function getInitialRequestSettledSnapshot(): boolean {
+  return initialRequestSettled;
+}
+
+/** 首次设备清单请求是否已结算；失败也算结算，后续 push / online 事件仍会继续 refresh。 */
+export function useDeviceLinkDeviceListSettled(): boolean {
+  return useSyncExternalStore(subscribe, getInitialRequestSettledSnapshot);
 }
