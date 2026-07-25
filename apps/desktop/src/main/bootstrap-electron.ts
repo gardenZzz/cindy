@@ -571,6 +571,8 @@ import {
   suspendAllGhosts,
   waitForGhostMutations,
 } from './cindy-brain/index.js';
+import { getGhostSetupChangeBus } from './cindy-brain/ghostSetupChangeBus.js';
+import { getGhostSetupInteractionBridge } from './cindy-brain/ghostSetupInteractionBridge.js';
 import { registerPluginMarketIpc } from './plugin-market/registerIpc.js';
 import { findCindyFileInArgv } from './cindy-brain/argv.js';
 import { handleIncomingCindyFile } from './cindy-brain/openFileInstall.js';
@@ -1816,7 +1818,21 @@ app.on('browser-window-focus', (_event, win) => {
     clearTimeout(appFocusSyncTimer);
     appFocusSyncTimer = null;
   }
-  syncAppFocusState(isAppContentWindow(win));
+  const focusedAppContent = isAppContentWindow(win);
+  syncAppFocusState(focusedAppContent);
+  if (focusedAppContent) {
+    // OAuth and system settings may complete outside Cindy. Focus is a
+    // metadata-only fallback wake-up: each pending plugin is re-assessed, but
+    // no stored value crosses the change bus.
+    const pendingGhostIds = new Set(
+      (getGhostSetupInteractionBridge()?.pendingSnapshots() ?? []).map(
+        ({ request }) => request.ghost.id,
+      ),
+    );
+    for (const ghostId of pendingGhostIds) {
+      getGhostSetupChangeBus().wake(ghostId, { source: 'focus' });
+    }
+  }
 });
 
 app.on('browser-window-blur', () => {
@@ -3221,6 +3237,13 @@ const registerIpcHandlers = () => {
     cancelCodexAuthModeChange();
   };
 
+  const notifyProviderKeyChanged = (providerId: string): void => {
+    getGhostSetupChangeBus().emitAll({
+      source: 'host_config',
+      ref: `provider:${providerId}`,
+    });
+  };
+
   ipcMain.handle(
     'safe-storage-store',
     async (_event: Electron.IpcMainInvokeEvent, key: string, value: string): Promise<boolean> => {
@@ -3246,7 +3269,10 @@ const registerIpcHandlers = () => {
           if (restartResult.ok) {
             // 手填 XD key 保存成功:来源标记翻 manual(endpoint 回落编译期常量,
             // 与 model-access 自动下发的 endpoint 解耦,见 credentialsStore 注释)。
-            if (key === 'api_key') noteManualXdKeySaved();
+            if (key === 'api_key') {
+              noteManualXdKeySaved();
+              notifyProviderKeyChanged('xd');
+            }
             return true;
           }
           if (hadPrevious && previousContent !== null)
@@ -3331,7 +3357,10 @@ const registerIpcHandlers = () => {
           return { success: false, error: 'codex_restart_failed' };
         }
         // 手填 XD key 被删除(断开):清来源标记,endpoint 回落编译期常量。
-        if (key === 'api_key') noteManualXdKeyRemoved();
+        if (key === 'api_key') {
+          noteManualXdKeyRemoved();
+          notifyProviderKeyChanged('xd');
+        }
         return { success: true };
       } catch (err: unknown) {
         console.error('[safe-storage-remove]', err);
