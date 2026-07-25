@@ -3611,7 +3611,31 @@
       "settingsLink": "設定, 現在のユーザー: {{name}}",
       "canaryBadge": "Canary ユーザー",
       "viewReleaseNotes": "リリースノートを表示",
-      "reopenUpdateBanner": "更新の準備完了 — クリックして確認"
+      "reopenUpdateBanner": "更新の準備完了 — クリックして確認",
+      "downloadMobile": "Cindy モバイル版をダウンロード"
+    },
+    "mobileDownload": {
+      "title": "Cindy をリモート操作",
+      "subtitle": "モバイルからデスクトップへ接続",
+      "qrAlt": "Cindy モバイル版ダウンロード用 QR コード",
+      "preparing": "QR コードを準備しています…",
+      "error": "QR コードを作成できませんでした。しばらくしてからお試しください。",
+      "openPage": "ダウンロードページを開く",
+      "openFailed": "ダウンロードページを開けませんでした。システムのブラウザー設定を確認してください",
+      "scanToOpen": "スキャンして Cindy アプリを開き、同じアカウントでログイン",
+      "scanAnother": "別のデバイスをスキャン",
+      "scanAnotherHint": "別のスマートフォンで Cindy を開く",
+      "myDevices": "自分のデバイス",
+      "deviceOffline": "オフライン",
+      "allowControl": "同じアカウントのデバイスによるこのマシンの操作を許可",
+      "deviceId": "このデバイス · {{id}}",
+      "remoteAction": {
+        "checking": "確認中…",
+        "unavailable": "利用できません",
+        "enable": "有効にする",
+        "enabled": "有効"
+      },
+      "close": "ダウンロード画面を閉じる"
     },
     "vendorReadiness": {
       "loading": "読み込み中"
