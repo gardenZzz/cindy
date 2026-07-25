@@ -157,6 +157,11 @@ const violations = [];
 // --- 规则 1 & 2:术语 forbidden / 大小写形态 ---
 for (const term of glossary.terms) {
   const isExempt = makeExemptChecker(term.exempt);
+  // 严格校验 status:拼错(如 "decied")时若静默按 proposed 处理,该术语的全部违规会
+  // 降级成告警、CI 照常通过——门禁被无声关掉比报错危险得多。
+  if (term.status !== 'decided' && term.status !== 'proposed') {
+    fail(`术语 ${term.id} 的 status "${term.status}" 非法,只能是 decided 或 proposed`);
+  }
   const severity = term.status === 'decided' ? 'error' : 'warn';
 
   for (const locale of locales) {
@@ -184,7 +189,7 @@ for (const term of glossary.terms) {
           const source = corpus.get(glossary.sourceLocale)?.get(key);
           if (!source || !sourceRe.test(source)) continue;
         }
-        const expected = term.translations?.[locale] || term.en;
+        const expected = term.translations?.[locale] ?? term.en;
         violations.push(
           makeViolation({
             locale,
@@ -205,6 +210,12 @@ for (const term of glossary.terms) {
     //  - translations 值与 en 相同(译成中文/日文/韩文的术语没有大小写问题);
     //  - checkCase 未显式关闭。Issue / Session 这类词同时是常用英语单词,英文句子里
     //    的 "fix the issue" 是正常用法,强行要求大写会在 prompt 模板里制造大批假阳性。
+    //
+    // **源语言(en)刻意不做大小写检查**:glossary 把英文存在 term.en 而非
+    // translations.en,所以下面的 standard 取值天然为 undefined、直接跳过。这不是疏漏
+    // ——英文原文里 agent / worker 作普通名词小写本就是正确英语("ask the agent to
+    // explain"、"after agent edits"),实测开启会产生 84 处假阳性。中英混排的约束只在
+    // 译文侧成立:中文句子里出现的 Agent 一定指产品概念,英文句子里则不一定。
     if (term.checkCase === false) continue;
     const standard = term.translations?.[locale];
     if (!standard || standard !== term.en) continue;
