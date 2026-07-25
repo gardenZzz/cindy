@@ -3846,7 +3846,6 @@
         "cacheRead": "キャッシュ読み取り",
         "cacheCreate": "キャッシュ書き込み",
         "free": "期間限定無料",
-        "discount": "{{percent}}%お得",
         "perMillion": "モデル標準価格",
         "fixedFx": "固定レート 1 USD = 6.7 CNY による概算",
         "subscriptionEstimate": "価値の推定であり、実際の請求額ではありません"
@@ -3859,7 +3858,7 @@
       "category": {
         "anthropic": "Anthropic",
         "gpt": "OpenAI",
-        "budget": "85%オフ",
+        "budget": "GPT 割引",
         "grok": "xAI",
         "google": "Google",
         "china": "国内",
@@ -3877,8 +3876,7 @@
       "meta": {
         "context": "コンテキスト {{value}}",
         "price": "{{input}}/{{output}} / 100万",
-        "fastBadge": "高速",
-        "budgetDiscount": "85%オフ"
+        "fastBadge": "高速"
       },
       "source": {
         "railLabel": "ソース",
@@ -5849,7 +5847,7 @@
         "category": {
           "anthropic": "Anthropic",
           "gpt": "GPT",
-          "gpt-budget": "GPT（85%オフ）",
+          "gpt-budget": "GPT 割引",
           "google": "Google",
           "china": "China"
         },
@@ -7311,6 +7309,7 @@
     "planChange": {
       "targetTitle": "サブスクリプションプランの変更",
       "upgradeBadge": "アップグレード",
+      "sameLevelBadge": "同じレベル",
       "downgradeBadge": "ダウングレード",
       "emptyTitle": "切り替え可能なプランがありません",
       "emptyDescription": "現在の支払い方法で切り替え可能なプランがまだ設定されていません。",
@@ -7332,7 +7331,9 @@
       "expiredBody": "見積もりの有効期限が切れました。もう一度プラン変更を開始してください。",
       "failedTitle": "プラン変更に失敗しました",
       "failedBody": "プラン変更は完了しませんでした。現在のプランは変わりません。",
-      "requestFailed": "リクエストに失敗しました。もう一度お試しください。",
+      "requestFailed": "プラン変更リクエストを完了できませんでした。サブスクリプションの状態を更新して、もう一度お試しください。",
+      "quoteRejected": "現在のサブスクリプションではこのプランに変更できません。別のプランを選択してください。",
+      "chooseAnotherPlan": "別のプランを選択",
       "resyncHint": "確認結果を検証できませんでした。サーバーから最新の状態を同期しています…",
       "upgradeDueNow": "今期の差額 {{amount}} をお支払いください",
       "upgradeNoAmount": "確認後、アップグレードは即時適用されます。",

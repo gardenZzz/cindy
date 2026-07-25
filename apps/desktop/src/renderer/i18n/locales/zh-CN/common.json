@@ -3846,7 +3846,6 @@
         "cacheRead": "缓存读取",
         "cacheCreate": "缓存写入",
         "free": "限时免费",
-        "discount": "立省 {{percent}}%",
         "perMillion": "模型标准价格",
         "fixedFx": "按固定汇率 1 USD = 6.7 CNY 约算",
         "subscriptionEstimate": "价值估算，不代表实际账单"
@@ -3859,7 +3858,7 @@
       "category": {
         "anthropic": "Anthropic",
         "gpt": "OpenAI",
-        "budget": "立省 85%",
+        "budget": "GPT 折扣",
         "grok": "xAI",
         "google": "Google",
         "china": "国内",
@@ -3877,8 +3876,7 @@
       "meta": {
         "context": "{{value}} 上下文",
         "price": "{{input}}/{{output}} / 百万",
-        "fastBadge": "快速",
-        "budgetDiscount": "立省 85%"
+        "fastBadge": "快速"
       },
       "source": {
         "railLabel": "来源",
@@ -5849,7 +5847,7 @@
         "category": {
           "anthropic": "Anthropic",
           "gpt": "GPT",
-          "gpt-budget": "GPT（立省 85%）",
+          "gpt-budget": "GPT 折扣",
           "google": "Google",
           "china": "China"
         },
@@ -7312,6 +7310,7 @@
     "planChange": {
       "targetTitle": "更改订阅套餐",
       "upgradeBadge": "升级",
+      "sameLevelBadge": "同等级",
       "downgradeBadge": "降级",
       "emptyTitle": "暂无可切换的套餐",
       "emptyDescription": "服务端尚未为当前支付方式配置其他可切换套餐。",
@@ -7333,7 +7332,9 @@
       "expiredBody": "报价已过期，请重新发起套餐变更获取新报价。",
       "failedTitle": "套餐变更失败",
       "failedBody": "套餐变更未完成，当前套餐保持不变。",
-      "requestFailed": "请求失败，请重试。",
+      "requestFailed": "套餐变更请求未完成，请刷新订阅状态后重试。",
+      "quoteRejected": "当前订阅无法切换到这个套餐，请选择其他套餐。",
+      "chooseAnotherPlan": "选择其他套餐",
       "resyncHint": "确认结果暂时无法核实，正在从服务端同步最新状态…",
       "upgradeDueNow": "本期需支付差价 {{amount}}",
       "upgradeNoAmount": "确认后升级立即生效。",
