@@ -237,10 +237,10 @@
             "other": "ssh-add 失败，但原因无法识别。"
           },
           "cmd": {
-            "verifySock": "确认 ssh-agent 在跑且导出了 SSH_AUTH_SOCK(在 Terminal.app 里跑，不要在 {{appName}} 的 shell 里跑):",
+            "verifySock": "确认 ssh-agent 在跑且导出了 SSH_AUTH_SOCK(在 Terminal.app 里跑，不要在 {{appName}} 的 shell 里跑)：",
             "listAgent": "查看 agent 当前加载了哪些密钥：",
-            "linuxStart": "启动一个用户级 ssh-agent(把这行加到 ~/.bashrc / ~/.zshrc 让它持久):",
-            "win32Enable": "启用 ssh-agent 服务(在管理员 PowerShell 里执行):"
+            "linuxStart": "启动一个用户级 ssh-agent(把这行加到 ~/.bashrc / ~/.zshrc 让它持久)：",
+            "win32Enable": "启用 ssh-agent 服务(在管理员 PowerShell 里执行)："
           }
         }
       },
@@ -261,7 +261,7 @@
           "pinnedKeyChange": "更换",
           "pinnedKeyClear": "取消钉选",
           "pinnedKeyHintSet": "agent 只会向服务器 offer 这一把 key —— 避免 agent 里 key 太多时撞到 'Too many authentication failures'。",
-          "pinnedKeyHintUnset": "不钉的话 agent 会把已加载的所有密钥挨个 offer;服务端有重试上限(MaxAuthTries,默认 6),agent 里密钥多了可能没到对的那把就被踢了。",
+          "pinnedKeyHintUnset": "不钉的话 agent 会把已加载的所有密钥挨个 offer;服务端有重试上限(MaxAuthTries,默认 6)，agent 里密钥多了可能没到对的那把就被踢了。",
           "key": "私钥文件",
           "keyHint": "直接读私钥文件。为了不存密码，不支持加密的密钥 —— 仅在 ssh-agent 不可用时使用。"
         },
@@ -668,7 +668,7 @@
         "usageLabel": "媒体文件占用",
         "usageValue": "{{size}}({{count}} 个文件，含缓存 {{cacheSize}})",
         "statsFailed": "统计暂不可用",
-        "legacyUsage": "旧版本数据(只读，不参与清理):{{size}}",
+        "legacyUsage": "旧版本数据(只读，不参与清理)：{{size}}",
         "cleanupLabel": "磁盘清理",
         "cleanupDescription": "扫描没有被任何对话引用的媒体文件、超限缓存与废弃目录。先报数，确认后才删除；输入框草稿和排队消息里的图片会被自动保护。",
         "scanButton": "扫描",
@@ -1014,7 +1014,7 @@
       },
       "xai": {
         "logoutConfirm": {
-          "title": "断开 xAI(SuperGrok)?",
+          "title": "断开 xAI(SuperGrok)？",
           "description": "断开会清除本机保存的 xAI 登录凭证；已选 Grok 模型的对话将无法调用，直到重新授权。",
           "confirm": "断开",
           "cancel": "取消"
@@ -1575,7 +1575,7 @@
       "title": "个性化",
       "subtitle": "自定义提示词",
       "description": "为你的助手提供额外的指令和上下文。",
-      "placeholder": "在这里输入自定义指令，会追加到 Claude / Codex 的系统提示词末尾。\n\n· 仅对 {{appName}} 内嵌对话生效；老对话维持启动时快照，修改后下一次新对话才应用。\n· 想让所有 Claude Code 对话(含终端直跑、其他 IDE)硬性生效：在 ~/.claude/settings.json 里配 SessionStart hook(harness 级强制)。\n· Codex CLI 可在 ~/.codex/hooks.json 配 SessionStart hook 强制注入(harness 级，和 CC 同款);或通过 ~/.codex/AGENTS.md 自动加载(软约束，模型可能忽略)。",
+      "placeholder": "在这里输入自定义指令，会追加到 Claude / Codex 的系统提示词末尾。\n\n· 仅对 {{appName}} 内嵌对话生效；老对话维持启动时快照，修改后下一次新对话才应用。\n· 想让所有 Claude Code 对话(含终端直跑、其他 IDE)硬性生效：在 ~/.claude/settings.json 里配 SessionStart hook(harness 级强制)。\n· Codex CLI 可在 ~/.codex/hooks.json 配 SessionStart hook 强制注入(harness 级，和 CC 同款)；或通过 ~/.codex/AGENTS.md 自动加载(软约束，模型可能忽略)。",
       "ariaLabel": "自定义指令",
       "save": "保存",
       "overLimit": " — 已超出长度限制",
@@ -2313,7 +2313,7 @@
       "enableAria": "使 {{name}} 生效",
       "uninstall": "卸载",
       "uninstallConfirm": {
-        "title": "卸载「{{name}}」?",
+        "title": "卸载「{{name}}」？",
         "description": "面板与能力将随之移除；布局位置会保留，重新安装时原位复活。",
         "cancel": "取消"
       },
@@ -2396,14 +2396,14 @@
         "subscribeHooks": "可读取、拦截或改写你发出的消息",
         "subscribeHooksDetail": "发送前先经它审阅：可拦下消息，也可能改写正文后再发出；被拦的消息可编辑后重发。",
         "subscribeAssistantReply": "可读取并重写 AI 的回复",
-        "subscribeAssistantReplyDetail": "AI 每轮回复完成后先经它处理：可润色改写正文(直接替换，不留原文),或用自绘卡片替换回复气泡(卡片替换时原文保留，可一键查看)。",
+        "subscribeAssistantReplyDetail": "AI 每轮回复完成后先经它处理：可润色改写正文(直接替换，不留原文)，或用自绘卡片替换回复气泡(卡片替换时原文保留，可一键查看)。",
         "card": "渲染消息卡片",
         "cardExternalLink": "卡片内可声明外链，经你确认后打开浏览器",
         "cardExternalLinkDetail": "卡片中的链接点击后会弹出确认框，你同意后才会在系统浏览器中打开；仅限 http/https 地址。",
         "notify": "可弹出系统提示(屏幕顶部的轻提示)",
         "notifyDetail": "提示内容由这个插件提供，提示上会标注它的名字；自动消失，不会打断你的操作。",
         "fsWrite": "可写入文件(创建/修改)",
-        "fsWriteDetail": "它自己的专属数据目录随时可写；当前对话的工作目录跟随对话的权限模式(免批模式直接写，逐条确认模式先征求你同意);其它目录每次都需要你确认。文件始终由主机代写，插件本身无法直接访问你的文件系统。",
+        "fsWriteDetail": "它自己的专属数据目录随时可写；当前对话的工作目录跟随对话的权限模式(免批模式直接写，逐条确认模式先征求你同意)；其它目录每次都需要你确认。文件始终由主机代写，插件本身无法直接访问你的文件系统。",
         "networkHost": "访问网络域名 {{host}}",
         "networkSecret": "需要你提供凭证「{{name}}」",
         "networkSecretGhostInputDetail": "凭证由这个插件自己的设置界面收集，录入时会经过插件页面；随后一次性交给主机加密保管，存入后插件无法读回，主机只在请求它声明的域名时注入。",
@@ -2422,16 +2422,16 @@
         "pick": "可请求你选择一个文件夹交给它",
         "pickDetail": "它发起请求时，Cindy 会弹出系统的选择文件夹窗口；选哪个、给不给，都由你亲手决定，取消则它什么都拿不到。",
         "sessionContext": "可获知当前对话正在使用的项目文件夹位置",
-        "sessionContextDetail": "只在它为当前对话干活时告知位置信息(对话编号与项目文件夹路径),不包含文件内容，也不因此获得文件访问权。",
+        "sessionContextDetail": "只在它为当前对话干活时告知位置信息(对话编号与项目文件夹路径)，不包含文件内容，也不因此获得文件访问权。",
         "preview": "可在右侧栏浏览器中打开以下网站的预览页面",
         "previewDetail": "只能打开下方列出的网站；每次打开都会提示是哪个插件打开的。",
         "nodeChildSpawn": "Node 程序可请宿主再启动包内申报过的子进程",
-        "nodeChildSpawnDetail": "只能启动它自己包里申报过的 JS 文件(与主程序同样的本机权限),不能执行任意命令；插件停用或退出时子进程一并关闭。"
+        "nodeChildSpawnDetail": "只能启动它自己包里申报过的 JS 文件(与主程序同样的本机权限)，不能执行任意命令；插件停用或退出时子进程一并关闭。"
       },
       "connections": {
         "confirmTitle": "添加连接地址",
         "confirmMessage": "插件「{{name}}」请求添加连接地址 {{host}}",
-        "confirmDetail": "允许后，该插件可经主机访问此地址({{label}});你提供的凭证只会注入这个地址的请求。",
+        "confirmDetail": "允许后，该插件可经主机访问此地址({{label}})；你提供的凭证只会注入这个地址的请求。",
         "confirmAllow": "允许",
         "confirmCancel": "取消"
       },
@@ -2442,7 +2442,7 @@
         "idReserved": "该 id 使用了官方保留前缀 cindy-,仅随应用内置的插件可用",
         "sourceMissing": "找不到所选文件",
         "generic": "操作失败，请稍后重试",
-        "updateIdMismatch": "所选文件是插件「{{id}}」,与当前插件「{{expected}}」不一致"
+        "updateIdMismatch": "所选文件是插件「{{id}}」，与当前插件「{{expected}}」不一致"
       },
       "detail": {
         "enable": "生效",
@@ -2517,7 +2517,7 @@
       },
       "commandPaletteTag": "插件指令",
       "updateConfirm": {
-        "title": "更新插件「{{name}}」?",
+        "title": "更新插件「{{name}}」？",
         "body": "版本 {{from}} → {{to}}。将替换现有版本；生效状态与面板位置保持不变。",
         "confirm": "更新",
         "cancel": "取消"
@@ -2572,7 +2572,7 @@
         "deleteFailed": "删除失败"
       },
       "deleteConfirm": {
-        "title": "删除 “{{name}}”?",
+        "title": "删除 “{{name}}”？",
         "message": "删除后新建的对话将不再加载该 MCP。",
         "confirm": "删除"
       }
@@ -2648,7 +2648,7 @@
         "relationNotePlaceholder": "备注(职位…)"
       },
       "deleteConfirm": {
-        "title": "删除「{{name}}」?",
+        "title": "删除「{{name}}」？",
         "description": "将同时删除其全部身份、事件记录与分组关系，不可恢复。",
         "confirm": "删除",
         "cancel": "取消"
@@ -2684,7 +2684,7 @@
         "buttonAria": "合并重复档案",
         "hint": "选择一份重复档案，将其身份、事件、关联并入「{{target}}」后删除。",
         "searchPlaceholder": "搜索重复档案…",
-        "confirmTitle": "把「{{source}}」并入「{{target}}」?",
+        "confirmTitle": "把「{{source}}」并入「{{target}}」？",
         "confirmDescription": "「{{source}}」的身份、事件、关联、分组将全部迁入，其档案随后删除，不可恢复。",
         "confirm": "合并",
         "success": "已把「{{source}}」并入「{{target}}」",
@@ -2693,7 +2693,7 @@
       "import": {
         "title": "导入联系人",
         "button": "导入",
-        "pickHint": "从外部来源批量导入。邮箱/电话与已有档案相同的会自动并入(不产生重复);名字相似的会列入待人工确认清单。",
+        "pickHint": "从外部来源批量导入。邮箱/电话与已有档案相同的会自动并入(不产生重复)；名字相似的会列入待人工确认清单。",
         "sourceSystem": "系统通讯录",
         "sourceSystemDesc": "只读拉取，首次需系统授权",
         "sourceVcf": "vCard 文件",
@@ -2725,7 +2725,7 @@
       "guide": {
         "hint": "通讯录还是空的。让 AI 帮你开始：整理对话里出现过的人、或从系统通讯录导入。",
         "cta": "让 AI 整理通讯录",
-        "prompt": "帮我整理一下我的智能通讯录：先看看现在有什么，然后把值得记录的人补进去(可以从系统通讯录或 vCard 导入，也可以问我),有重复的帮我确认后合并。"
+        "prompt": "帮我整理一下我的智能通讯录：先看看现在有什么，然后把值得记录的人补进去(可以从系统通讯录或 vCard 导入，也可以问我)，有重复的帮我确认后合并。"
       }
     }
   },
@@ -2972,8 +2972,8 @@
     "openProxyUsage": "打开浏览器查看完整用量看板",
     "openXaiUsage": "打开 xAI 账户页面",
     "xai": {
-      "requestsLine": "限流(请求):剩余 {{remaining}}/{{limit}}",
-      "tokensLine": "限流(token):剩余 {{remaining}}/{{limit}}",
+      "requestsLine": "限流(请求)：剩余 {{remaining}}/{{limit}}",
+      "tokensLine": "限流(token)：剩余 {{remaining}}/{{limit}}",
       "noQuotaDetail": "xAI 未提供订阅配额明细，此处仅显示价值估算"
     },
     "dailyLimitLabel": "今日 {{spend}}/{{limit}}",
@@ -6052,7 +6052,7 @@
   },
   "issueAgent": {
     "command": {
-      "instruction": "我想给 {{appName}} 提交一条反馈。请协助我整理成一个高质量的 GitHub issue:先和我确认反馈类型(bug 还是功能建议),并追问必要细节(现象、复现步骤或使用场景、期望行为);信息足够后用 cindy_helper 的 call_tool 调用 submit_github_issue 工具提交(category=feedback,可先 list_tools 查看参数要求；提交前系统会弹确认卡片给我看)。如果提交失败，如实告诉我原因。{{details}}",
+      "instruction": "我想给 {{appName}} 提交一条反馈。请协助我整理成一个高质量的 GitHub issue:先和我确认反馈类型(bug 还是功能建议)，并追问必要细节(现象、复现步骤或使用场景、期望行为)；信息足够后用 cindy_helper 的 call_tool 调用 submit_github_issue 工具提交(category=feedback,可先 list_tools 查看参数要求；提交前系统会弹确认卡片给我看)。如果提交失败，如实告诉我原因。{{details}}",
       "detailsPrefix": "\n我的初始描述：{{details}}"
     },
     "confirm": {

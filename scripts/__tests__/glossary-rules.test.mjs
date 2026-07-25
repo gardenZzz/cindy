@@ -477,3 +477,28 @@ test('glossary.json: 语言键必须都在 locales 里', () => {
     }
   }
 });
+
+test('stripNonProse: 任意扩展名的文件名都要剥离,但不能吃掉数字', () => {
+  // 白名单式的扩展名列表补不全,plugin.py / worker.go 会被误判成正文里的产品术语
+  for (const [text, gone] of [
+    ['请编辑 plugin.py 后重试', 'plugin'],
+    ['运行 worker.go', 'worker'],
+    ['打开 Agent.java', 'Agent'],
+  ]) {
+    assert.ok(!stripNonProse(text).includes(gone), text);
+  }
+  // 版本号 / 小数不是文件名。若被当成文件名吃掉,「已用 1.5 GB」会变成「已用  」,
+  // 后续的术语与标点检查都在残缺文本上跑
+  assert.ok(stripNonProse('已用 1.5 GB').includes('1.5'));
+  assert.ok(stripNonProse('版本 v1.0 可用').includes('v1.0'));
+  // 若 1.5 被当成文件名吃掉,「已用 1.5 GB，缓存超限,请清理」里的「限,」就会连带丢失
+  assert.equal(findHalfWidthPunct(normalizeForPunctuation('已用 1.5 GB，缓存超限,请清理')), ',');
+});
+
+test('findHalfWidthPunct: 右括号等闭合符号也算中文正文的左边界', () => {
+  assert.equal(findHalfWidthPunct('可润色改写正文(直接替换),或用卡片替换'), ',');
+  assert.equal(findHalfWidthPunct('卸载「{{name}}」?'.replace('{{name}}', 'x')), '?');
+  // 右括号做边界后,英文括注也会命中。这不是问题:标点规则只对 zh-CN 生效
+  // (HALFWIDTH_PUNCT_LOCALES),而 zh-CN 文案里的英文括注同样该跟中文标点
+  assert.equal(findHalfWidthPunct('see (note), then continue'), ',');
+});

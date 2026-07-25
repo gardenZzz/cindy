@@ -25,6 +25,20 @@ export const WORD_BOUNDARY = 'A-Za-z0-9_-';
 const URL_TOKEN = /\b[a-z][\w-]*:\/\/[^\s，。；：！？、（）「」【】《》“”‘’…]+/gi;
 
 /**
+ * 文件名片段。
+ *
+ * 原先用扩展名白名单(json|ts|tsx|…),漏掉 `plugin.py`、`worker.go`、`Agent.java` 这类
+ * ——它们会被当成正文里的产品术语,报「plugin 应为 Plugin」这种假阳性并阻断 CI。
+ * 白名单永远补不全,改成通用形态。
+ *
+ * 两个约束防止误伤:
+ *  - 扩展名必须是纯小写字母 → `1.5`、`v1.0`、`2.0 GB` 不会被当成文件名吃掉
+ *    (那会让「1.5,上限」这类半角标点违规漏检);
+ *  - 词干必须含至少一个字母 → 纯数字的 `12.34` 同理排除。
+ */
+const FILENAME_TOKEN = /\b[A-Za-z0-9_-]*[A-Za-z][A-Za-z0-9_-]*\.[a-z]{1,6}\b/g;
+
+/**
  * 剥离不该参与术语匹配的片段,避免误报:
  *  - {{var}} / {{var, format}}  i18next 插值(变量名常与术语同形,如 {{project}})
  *  - <0>…</0>                   Trans 组件占位
@@ -38,7 +52,7 @@ export function stripNonProse(text) {
     .replace(/\$t\([^)]*\)/g, ' ')
     .replace(URL_TOKEN, ' ')
     .replace(/\S+@\S+\.\S+/g, ' ')
-    .replace(/\b[\w-]+\.(json|ts|tsx|js|mjs|md|yml|yaml|sql|lock|toml)\b/gi, ' ');
+    .replace(FILENAME_TOKEN, ' ');
 }
 
 /**
@@ -102,7 +116,13 @@ export function makeExemptChecker(list) {
 export const HALFWIDTH_PUNCT_LOCALES = new Set(['zh-CN']);
 export const ELLIPSIS_LOCALES = new Set(['zh-CN', 'ja', 'ko']);
 
-const HALF_WIDTH_AFTER_HAN = /[一-鿿][,:;!?]/;
+/**
+ * 中文正文的「左边界」:汉字,以及各类右闭合符号。
+ *
+ * 只认汉字的话,`(直接替换,不留原文),或…` 这种会漏——半角逗号前面是右括号而非汉字。
+ * 右括号 / 右引号 / 右书名号后面接的仍是中文正文,标点该跟中文规则走。
+ */
+const HALF_WIDTH_AFTER_HAN = /[一-鿿）)」』】》〉”’][,:;!?]/;
 const ASCII_ELLIPSIS = /\.\.\./;
 
 /**
@@ -146,7 +166,7 @@ export function normalizeForPunctuation(text) {
     .replace(/\$t\([^)]*\)/g, PROSE_PLACEHOLDER)
     .replace(URL_TOKEN, ' ')
     .replace(/\S+@\S+\.\S+/g, ' ')
-    .replace(/\b[\w-]+\.(json|ts|tsx|js|mjs|md|yml|yaml|sql|lock|toml)\b/gi, ' ');
+    .replace(FILENAME_TOKEN, ' ');
 }
 
 /** 汉字后紧跟半角标点时返回该标点,否则 null。 */
