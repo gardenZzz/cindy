@@ -2,10 +2,7 @@
 
 import { useEffect, useState } from 'react';
 
-import type {
-  ModelPriceQuote,
-  ModelPricingCatalog,
-} from '../../shared/regionalMoney';
+import type { ModelPriceQuote, ModelPricingCatalog } from '../../shared/regionalMoney';
 
 let cache: ModelPricingCatalog | null = null;
 let cacheLoaded = false;
@@ -30,10 +27,23 @@ function isValidQuote(
     quote.approximate === false &&
     isNonNegativeFinite(quote.inputPerMtok) &&
     isNonNegativeFinite(quote.outputPerMtok) &&
-    (quote.cacheReadPerMtok === undefined ||
-      isNonNegativeFinite(quote.cacheReadPerMtok)) &&
-    (quote.cacheCreatePerMtok === undefined ||
-      isNonNegativeFinite(quote.cacheCreatePerMtok))
+    (quote.cacheReadPerMtok === undefined || isNonNegativeFinite(quote.cacheReadPerMtok)) &&
+    (quote.cacheCreatePerMtok === undefined || isNonNegativeFinite(quote.cacheCreatePerMtok)) &&
+    // 折扣元数据可选;discount 存在时必须合法且带完整 input/output 原价。
+    (quote.discount === undefined ||
+      (typeof quote.discount === 'number' &&
+        Number.isFinite(quote.discount) &&
+        quote.discount > 0 &&
+        quote.discount <= 1 &&
+        isNonNegativeFinite(quote.originalInputPerMtok) &&
+        isNonNegativeFinite(quote.originalOutputPerMtok))) &&
+    (quote.originalInputPerMtok === undefined || isNonNegativeFinite(quote.originalInputPerMtok)) &&
+    (quote.originalOutputPerMtok === undefined ||
+      isNonNegativeFinite(quote.originalOutputPerMtok)) &&
+    (quote.originalCacheReadPerMtok === undefined ||
+      isNonNegativeFinite(quote.originalCacheReadPerMtok)) &&
+    (quote.originalCacheCreatePerMtok === undefined ||
+      isNonNegativeFinite(quote.originalCacheCreatePerMtok))
   );
 }
 
@@ -45,8 +55,8 @@ function isValidCatalog(v: unknown): v is ModelPricingCatalog {
       !!rawModels &&
       typeof rawModels === 'object' &&
       !Array.isArray(rawModels) &&
-      Object.entries(rawModels as Record<string, unknown>).every(
-        ([modelId, quote]) => isValidQuote(quote, providerId, modelId),
+      Object.entries(rawModels as Record<string, unknown>).every(([modelId, quote]) =>
+        isValidQuote(quote, providerId, modelId),
       ),
   );
 }
@@ -78,12 +88,11 @@ export function useModelPricing(): ModelPricingCatalog | null {
 
   useEffect(() => {
     let active = true;
-    const unsubscribe =
-      window.electronAPI.maker.usage.onModelPricingChanged((next) => {
-        cacheLoaded = true;
-        cache = isValidCatalog(next) ? next : null;
-        if (active) setPricing(cache);
-      });
+    const unsubscribe = window.electronAPI.maker.usage.onModelPricingChanged((next) => {
+      cacheLoaded = true;
+      cache = isValidCatalog(next) ? next : null;
+      if (active) setPricing(cache);
+    });
     void load().then((res) => {
       if (active) setPricing(res);
     });
