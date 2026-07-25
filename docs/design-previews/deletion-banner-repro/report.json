@@ -4,8 +4,8 @@
   "demo": "deletion-banner-repro",
   "inputHashes": {
     "spec.json": "249c2a33e35c138c96dfdd58fbc22eb7fe5d815087dcccd76e4a570552a74fa7",
-    "truth.json": "35446ecd1be5ebea7c9e5e731f5806ad7f1eb8f5770162d3bd3275c6d47c686d",
-    "index.html": "09c40bbc84fc9468afb8cc80739d18fabda618d588393aefc50971c832049a88",
+    "truth.json": "46af01379aa39634aac52121e5ba02b5b12675bad6e5cf111b26f5125a7c811a",
+    "index.html": "8a2be15f5488ebf828fd25aacdea61a614a0e3f5bcfff8c0db494972945ab0f0",
     "baselines": {
       "declared": [],
       "files": []
@@ -424,5 +424,5 @@
     "cases": [],
     "detail": "spec.adaptive 未配置——窗口拉伸行为未验证"
   },
-  "generatedAt": "2026-07-25T15:28:12.708Z"
+  "generatedAt": "2026-07-25T20:35:53.844Z"
 }
