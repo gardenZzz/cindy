@@ -873,11 +873,13 @@ export const GHOST_NETWORK_FORBIDDEN_INJECT_HEADERS: readonly string[] = [
 
 /** setup.requires 需求组条数上限。 */
 export const GHOST_SETUP_MAX_GROUPS = 8;
+/** Host-owned requirement groups (e.g. model-provider capability). */
+export const GHOST_SETUP_MAX_HOST_GROUPS = 2;
 /** 每个需求组内 anyOf 条目上限。 */
 export const GHOST_SETUP_MAX_ITEMS_PER_GROUP = 8;
 /** 一张 setup 卡最多需要覆盖 manifest 合法声明的全部可操作条目。 */
 export const GHOST_SETUP_MAX_STEPS =
-  GHOST_SETUP_MAX_GROUPS * GHOST_SETUP_MAX_ITEMS_PER_GROUP;
+  (GHOST_SETUP_MAX_GROUPS + GHOST_SETUP_MAX_HOST_GROUPS) * GHOST_SETUP_MAX_ITEMS_PER_GROUP;
 /**
  * Host-owned setup providers may append requirements that do not exist in the
  * plugin manifest (for example, a shared client capability). Reserve a bounded
@@ -4532,6 +4534,15 @@ export const GHOST_MODEL_TIERS = ['draft', 'standard', 'best'] as const;
 export type GhostModelTier = (typeof GHOST_MODEL_TIERS)[number];
 
 /**
+ * cindy 槽生图代办的画幅意图:方图 / 横图 / 竖图。与 tier 同一哲学——意识
+ * 只声明比例意图,主机翻译成当前后端支持的具体像素尺寸(枚举值即真实产出
+ * 比例,当前三档全后端可兑现,不做"最近似"降级)。将来扩值域(如 16:9)
+ * 是向后兼容的加法,老意识不受影响。
+ */
+export const GHOST_IMAGE_ASPECT_RATIOS = ['1:1', '3:2', '2:3'] as const;
+export type GhostImageAspectRatio = (typeof GHOST_IMAGE_ASPECT_RATIOS)[number];
+
+/**
  * 异步代办(mode:'submit')完成结果的保留时长(毫秒,30 分钟):完成后
  * 过期即清,query_job 查无此单。TTL 之外还有每意识完成记录条数上限
  * (cindySlot 的 settled-job eviction):快速提交循环下最旧的完成记录会
@@ -4564,6 +4575,13 @@ export type GhostPipeCindyRequest =
       prompt: string;
       tier?: GhostModelTier;
       model?: string;
+      /**
+       * 画幅比例(可选):'1:1' 方图 / '3:2' 横图 / '2:3' 竖图;不传 =
+       * 后端自定(auto)。比例是意图声明,主机映射为该后端的具体尺寸,
+       * 实际像素以返回的 width/height 为准。仅生图支持——改图跟随源图
+       * 画幅,视频画幅由 provider 层自治,带了会被明拒。
+       */
+      aspectRatio?: GhostImageAspectRatio;
       /**
        * 归因号(可选):这单代办由哪次 tool-call 触发,把收到的
        * callId 原样带上——配额记账、日志、用量面板由此对上"哪次调用花的
