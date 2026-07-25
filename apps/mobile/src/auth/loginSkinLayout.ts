@@ -439,6 +439,74 @@ export const LOGIN_CONSENT_DIALOG = {
   button: { y: 260, width: 260, height: 80, radius: 40, font: 24, disagreeX: 70, agreeX: 350 },
 } as const;
 
+/* ── 账号注销提示气泡(figma 678:1075,2026-07-26 用户拍板;**浮层,物理 pt/dp,
+      不走 750 stage 设计 px 缩放**——气泡渲染在 stage 之外的 viewport 坐标浮层,
+      盖过立绘/字标/面板/社交行,不参与滚动与布局流) ── */
+
+/** 注销气泡定位输出(物理 pt/dp,viewport 坐标)。 */
+export interface LoginDeletionBubbleFrame {
+  top: number;
+  left: number;
+  width: number;
+}
+
+/**
+ * 注销提示气泡布局常量(figma 678:1075;单位物理 pt/dp):
+ * 圆角 22、四边 padding 20、1px 描边、不透明底;标题/正文 20/23 Regular 居中,
+ * 标题↔正文 5、正文↔「我知道了」22、「我知道了」↔气泡底 20(= padding,
+ * 文案再长底距不变);高度内容撑开,禁止固定高;无图标/阴影/动画。
+ * - phone:top = safe-area 顶(insets.top,间距 0),宽 min(335, 屏宽−2×20),水平居中;
+ * - pad:top = 72 固定(已含状态栏之下安全余量),宽 556(与 CINDY 字标同宽);
+ *   pad-landscape 中轴 = 登录 stage 右半屏中心(左立绘右表单双栏,字标在右栏
+ *   正中——stage 1180 系字标/登录组中心均 ≈885=0.75×1180;用 stage 坐标换算,
+ *   窄边受限居中的 viewport(iPad mini 横屏等)下仍与字标同轴);
+ *   pad-portrait 中轴 = 屏幕中心(竖排构图,字标/表单均居中,右半屏中心会把
+ *   气泡推出屏幕右缘);left 仅 clamp 到屏内(margin ≥ 0)——基准画布右缘余量
+ *   17 是「556 宽 + 右半屏中轴」的结果而非独立参数,不额外设最小边距;
+ *   退化窄横屏(stage 自身 scale 触底,如 1000×690)气泡贴右缘也不出屏。
+ */
+export const LOGIN_DELETION_BUBBLE = {
+  radius: 22,
+  padding: 20,
+  borderWidth: 1,
+  font: 20,
+  lineHeight: LOGIN_COPY_LINE_HEIGHT,
+  titleBodyGap: 5,
+  bodyLinkGap: 22,
+  /** 「我知道了」热区扩张(视觉不变):23 行高 + 上下 12 → 47 ≥ 44;左右 20 余量 */
+  linkHitSlop: { top: 12, bottom: 12, left: 20, right: 20 },
+  /** 屏幕两侧最小边距(phone 宽 = min(maxWidth, 屏宽−2×sideMargin)) */
+  sideMargin: 20,
+  phone: { maxWidth: 335 },
+  pad: { width: 556, top: 72, landscapeCenterRatio: 0.75 },
+} as const;
+
+/**
+ * 纯函数:surface 构图 + safe-area 顶 → 气泡 viewport 落位(figma 678:1075;
+ * 断点三分支与 resolveLoginSurfaceMode 同语义,消费端直接传 useLoginSurface() 输出)。
+ */
+export function resolveDeletionBubbleFrame(
+  surface: LoginSurfaceLayout,
+  safeTop: number,
+): LoginDeletionBubbleFrame {
+  const { sideMargin, phone, pad } = LOGIN_DELETION_BUBBLE;
+  if (surface.mode === 'phone') {
+    const width = Math.min(phone.maxWidth, surface.viewportWidth - sideMargin * 2);
+    return { left: (surface.viewportWidth - width) / 2, top: safeTop, width };
+  }
+  const width = pad.width;
+  const center =
+    surface.mode === 'pad-landscape'
+      ? surface.offsetX +
+        surface.stageWidth * pad.landscapeCenterRatio * surface.scale
+      : surface.viewportWidth / 2;
+  const left = Math.max(
+    0,
+    Math.min(center - width / 2, surface.viewportWidth - width),
+  );
+  return { left, top: pad.top, width };
+}
+
 // 态叠层 / 浅底钮白描边 / loading 环底圈色:原 LOGIN_PRESSED_OVERLAY /
 // LOGIN_INVERTED_BORDER / LOGIN_RING_TRACK 字面常量已随暗色实现 PR 并入
 // `LoginSkinColors` 双态色板(overlayButtonPressed / overlayControlPressed /

@@ -160,4 +160,88 @@ describe('mobile account deletion', () => {
       '...(credential.authorizationCode',
     );
   });
+
+  it('renders the deletion status as an opaque overlay bubble with a completed-only underline link (figma 678:1075)', () => {
+    const login = source('app/(auth)/login.tsx');
+    const tokens = source('src/theme/tokens.ts');
+    const panel = login.slice(
+      login.indexOf('function AccountDeletionStatusPanel'),
+      login.indexOf('function socialLabel'),
+    );
+
+    // 浮层定位:frame 由 resolveDeletionBubbleFrame(stage, insets.top) 解析
+    // (safe-area 走 insets,不硬编码状态栏高),面板以 absolute 落在 viewport 坐标。
+    expect(login).toContain('resolveDeletionBubbleFrame(stage, insets.top)');
+    expect(panel).toContain('{ left: frame.left, top: frame.top, width: frame.width }');
+    expect(panel).toContain('styles.deletionBubble');
+
+    // 气泡不再渲染在 680 设计 px 缩放容器内(修「被登录面板覆盖」的结构根因):
+    // 缩放容器开标签到 {stateContent} 之间不得再出现面板引用。
+    const scaledGroupSlice = login.slice(
+      login.indexOf('transform: [{ scale: groupScale }]'),
+      login.indexOf('{stateContent}'),
+    );
+    expect(scaledGroupSlice).not.toContain('AccountDeletionStatusPanel');
+    // 渲染序:登录组之后、协议弹窗之前——盖住立绘/字标/面板/社交行,modal 拦截仍最上层。
+    expect(login.indexOf('frame={deletionBubbleFrame}')).toBeGreaterThan(
+      login.indexOf('transform: [{ scale: groupScale }]'),
+    );
+    expect(login.indexOf('frame={deletionBubbleFrame}')).toBeLessThan(
+      login.indexOf('{consentDialogOpen ? ('),
+    );
+
+    // 三状态:pending/processing 无按钮(调用点 onDismiss 仅 completed 才给),
+    // completed 渲染「我知道了」下划线文字链,保留原 onPress/testID/accessibilityRole。
+    expect(login).toContain(
+      "accountDeletionStatus.status === 'completed'",
+    );
+    expect(login).toContain('() => void auth.clearAccountDeletionReceipt()');
+    expect(panel).toContain('{onDismiss ? (');
+    expect(panel).toContain('<Pressable');
+    expect(panel).toContain('accessibilityRole="button"');
+    expect(panel).toContain('onPress={onDismiss}');
+    expect(panel).toContain('testID="login.accountDeletionDismissButton"');
+    expect(panel).toContain('hitSlop={LOGIN_DELETION_BUBBLE.linkHitSlop}');
+    expect(panel).toContain('styles.deletionBubbleLinkText');
+    expect(login).toContain("textDecorationLine: 'underline'");
+
+    // 气泡样式契约:不透明底 + 1px 描边(走 login 色板新条目)、圆角/padding/排版
+    // 全部消费 LOGIN_DELETION_BUBBLE 常量,无固定高、无阴影/elevation、无动画。
+    expect(login).toContain('backgroundColor: colors.login.deletionBubbleBg');
+    expect(login).toContain('borderColor: colors.login.deletionBubbleBorder');
+    expect(login).toContain('borderRadius: LOGIN_DELETION_BUBBLE.radius');
+    expect(login).toContain('borderWidth: LOGIN_DELETION_BUBBLE.borderWidth');
+    expect(login).toContain('padding: LOGIN_DELETION_BUBBLE.padding');
+    expect(login).toContain('color: colors.login.controlText');
+    expect(login).toContain('color: colors.login.secondaryText');
+    expect(login).toContain('marginTop: LOGIN_DELETION_BUBBLE.titleBodyGap');
+    expect(login).toContain('marginTop: LOGIN_DELETION_BUBBLE.bodyLinkGap');
+    const bubbleStyleSlice = login.slice(
+      login.indexOf('deletionBubble: {'),
+      login.indexOf('stepHeader:'),
+    );
+    expect(bubbleStyleSlice).not.toContain('height');
+    expect(bubbleStyleSlice).not.toContain('shadow');
+    expect(bubbleStyleSlice).not.toContain('elevation');
+    expect(panel).not.toContain('Animated');
+
+    // 旧实现的文档流内静态块与全宽按钮已退役。
+    expect(login).not.toContain('MainWindowActionButton');
+    expect(login).not.toContain('styles.deletionStatus');
+    expect(login).not.toContain('styles.fullButton');
+
+    // 色板契约:底/描边双态值(figma 678:1075,桌面 chat-input 实值);
+    // 标题/链接复用 controlText、正文复用 secondaryText,不新增文字色条目。
+    const lightPalette = tokens.slice(
+      tokens.indexOf('light: {'),
+      tokens.indexOf('dark: {'),
+    );
+    const darkPalette = tokens.slice(tokens.indexOf('dark: {'));
+    expect(lightPalette).toContain("deletionBubbleBg: '#FFFFFF'");
+    expect(lightPalette).toContain("deletionBubbleBorder: '#D7D7D4'");
+    expect(darkPalette).toContain("deletionBubbleBg: '#1F1F1E'");
+    expect(darkPalette).toContain("deletionBubbleBorder: '#3C3C3A'");
+    expect(tokens).not.toContain('deletionBubbleText');
+    expect(tokens).not.toContain('deletionBubbleTitle');
+  });
 });
