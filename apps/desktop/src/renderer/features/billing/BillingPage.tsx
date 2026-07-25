@@ -87,14 +87,7 @@ const SUBSCRIPTION_PURCHASE_BLOCKING_STATUSES: BillingSubscription['status'][] =
   'UNPAID',
   'PAUSED',
 ];
-const SUBSCRIPTION_CANCELLABLE_STATUSES: BillingSubscription['status'][] = [
-  'INCOMPLETE',
-  'TRIALING',
-  'ACTIVE',
-  'PAST_DUE',
-  'UNPAID',
-  'PAUSED',
-];
+const SUBSCRIPTION_CANCELLABLE_STATUSES = SUBSCRIPTION_PURCHASE_BLOCKING_STATUSES;
 
 function decimalParts(value: string): { value: bigint; scale: number } | null {
   const match = /^(0|[1-9]\d{0,14})(?:\.(\d{1,9}))?$/.exec(value.trim());
