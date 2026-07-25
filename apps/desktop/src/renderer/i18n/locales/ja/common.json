@@ -7166,7 +7166,16 @@
         "priceInterval": "{{price}} / {{interval}}",
         "includedCredits": "毎{{interval}} {{amount}} クレジットを付与",
         "renewsAt": "次回更新日: {{date}}",
-        "endsAt": "{{date}} にプラン終了"
+        "endsAt": "{{date}} にプラン終了",
+        "cancelAction": "サブスクリプションを解約",
+        "cancelConfirmTitle": "現在のサブスクリプションを解約しますか？",
+        "cancelConfirmDescription": "この操作による返金やクレジットの即時変更はありません。現在のプランは {{date}} まで利用でき、その後は更新されません。",
+        "cancelConfirmDescriptionWithoutDate": "この操作による返金やクレジットの即時変更はありません。現在のプランは請求期間の終了まで利用でき、その後は更新されません。",
+        "cancelConfirmAction": "解約を確定",
+        "cancelSuccess": "自動更新を停止しました。現在のプランは {{date}} まで利用できます。",
+        "cancelSuccessWithoutDate": "自動更新を停止しました。現在のプランはこの請求期間の終了後に終了します。",
+        "cancelNotSupported": "このサブスクリプションは現在解約できません。",
+        "cancelFailed": "サブスクリプションを解約できませんでした。しばらくしてからもう一度お試しください。"
       },
       "topupCard": {
         "action": "クレジットを購入"
@@ -7235,6 +7244,7 @@
       "errorDescription": "接続を確認して再試行してください。ローカルの代替プランは表示しません。",
       "emptyTitle": "プランはまだありません",
       "emptyDescription": "サーバーで公開中のプランはまだありません。",
+      "currentPlan": "現在のプラン",
       "unavailableReasons": {
         "OFFER_COMING_SOON": "近日提供",
         "NO_AVAILABLE_PAYMENT_CHANNEL": "利用可能な支払い方法なし"
