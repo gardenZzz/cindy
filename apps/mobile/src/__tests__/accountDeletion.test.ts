@@ -269,4 +269,19 @@ describe('mobile account deletion', () => {
     );
     expect(panel).not.toContain('Animated');
   });
+
+  it('hides the bubble from Android screen readers while the consent dialog is modal (PR #464 codex)', () => {
+    const login = source('app/(auth)/login.tsx');
+    const gate = login.slice(
+      login.indexOf('{accountDeletionStatus && deletionBubbleFrame ? ('),
+      login.indexOf('{/* 服务条款和隐私协议确认弹窗'),
+    );
+    // 气泡是协议弹窗的兄弟浮层:accessibilityViewIsModal 只在 iOS 生效,Android 必须
+    // 与登录组同步 no-hide-descendants,否则 TalkBack 仍能读到注销文案、completed 态
+    // 还能激活「我知道了」。两处用同一个条件表达式,避免只改一处漂移。
+    const androidHide =
+      "importantForAccessibility={consentDialogOpen ? 'no-hide-descendants' : 'auto'}";
+    expect(gate).toContain(androidHide);
+    expect(login.match(new RegExp(androidHide.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'g'))).toHaveLength(2);
+  });
 });

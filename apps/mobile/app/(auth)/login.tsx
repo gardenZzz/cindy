@@ -1195,6 +1195,10 @@ export default function LoginScreen() {
         // Animated 值(splash=0 → handoff 渐显 → done=1,同一 usePanelEntrance 输出,
         // 不新造状态机);pointerEvents 仅 done 放行——入场完成前气泡不可见也不可点。
         <Animated.View
+          // Android 读屏:协议弹窗打开时一并隐藏气泡(与上方登录组同口径)——气泡是
+          // 弹窗的兄弟浮层,accessibilityViewIsModal 仅 iOS 生效,不加这行 TalkBack
+          // 仍能读到注销文案、completed 态还能激活「我知道了」(codex 审查 P1)。
+          importantForAccessibility={consentDialogOpen ? 'no-hide-descendants' : 'auto'}
           pointerEvents={handoffPhase === 'done' ? 'auto' : 'none'}
           style={[StyleSheet.absoluteFill, { opacity: panelEntrance.opacity }]}
         >

@@ -10,7 +10,7 @@
     },
     "safeTop": {
       "provenance": {
-        "hash": "sha256:39e47368b6d9a25c0df68a73da3021e87037e82b18c55463d838e72f1ceab052",
+        "hash": "sha256:93df7ee1c49ac7cd5bfab97efb42b8bc487ea7cbdd38381b5722c839467ed90a",
         "locator": "demo chrome:safe-area 顶仿真常量(产品运行时 = insets.top)",
         "source": "../../../apps/mobile/app/(auth)/login.tsx"
       },
@@ -1184,9 +1184,17 @@
       }
     },
     "mobile": {
+      "a11yModalGate": {
+        "provenance": {
+          "hash": "sha256:93df7ee1c49ac7cd5bfab97efb42b8bc487ea7cbdd38381b5722c839467ed90a",
+          "locator": "login.tsx 气泡渲染点 Animated.View importantForAccessibility",
+          "source": "../../../apps/mobile/app/(auth)/login.tsx"
+        },
+        "value": "协议弹窗打开时气泡与登录组同步 importantForAccessibility='no-hide-descendants'——accessibilityViewIsModal 仅 iOS 生效,Android TalkBack 需显式隐藏(PR #464 codex)"
+      },
       "dismissGate": {
         "provenance": {
-          "hash": "sha256:39e47368b6d9a25c0df68a73da3021e87037e82b18c55463d838e72f1ceab052",
+          "hash": "sha256:93df7ee1c49ac7cd5bfab97efb42b8bc487ea7cbdd38381b5722c839467ed90a",
           "locator": "login.tsx:1315-1327 {onDismiss ? <Pressable/> : null}",
           "source": "../../../apps/mobile/app/(auth)/login.tsx"
         },
@@ -1194,7 +1202,7 @@
       },
       "dismissHitSlop": {
         "provenance": {
-          "hash": "sha256:39e47368b6d9a25c0df68a73da3021e87037e82b18c55463d838e72f1ceab052",
+          "hash": "sha256:93df7ee1c49ac7cd5bfab97efb42b8bc487ea7cbdd38381b5722c839467ed90a",
           "locator": "login.tsx hitSlop={LOGIN_DELETION_BUBBLE.linkHitSlop}",
           "source": "../../../apps/mobile/app/(auth)/login.tsx"
         },
@@ -1202,7 +1210,7 @@
       },
       "entranceGate": {
         "provenance": {
-          "hash": "sha256:39e47368b6d9a25c0df68a73da3021e87037e82b18c55463d838e72f1ceab052",
+          "hash": "sha256:93df7ee1c49ac7cd5bfab97efb42b8bc487ea7cbdd38381b5722c839467ed90a",
           "locator": "login.tsx 气泡渲染点 Animated.View pointerEvents/style",
           "source": "../../../apps/mobile/app/(auth)/login.tsx"
         },
@@ -1210,7 +1218,7 @@
       },
       "renderPosition": {
         "provenance": {
-          "hash": "sha256:39e47368b6d9a25c0df68a73da3021e87037e82b18c55463d838e72f1ceab052",
+          "hash": "sha256:93df7ee1c49ac7cd5bfab97efb42b8bc487ea7cbdd38381b5722c839467ed90a",
           "locator": "login.tsx:1140-1197 deletionBubbleFrame + AccountDeletionStatusPanel frame prop",
           "source": "../../../apps/mobile/app/(auth)/login.tsx"
         },
@@ -1218,7 +1226,7 @@
       },
       "styleFacts": {
         "provenance": {
-          "hash": "sha256:39e47368b6d9a25c0df68a73da3021e87037e82b18c55463d838e72f1ceab052",
+          "hash": "sha256:93df7ee1c49ac7cd5bfab97efb42b8bc487ea7cbdd38381b5722c839467ed90a",
           "locator": "login.tsx:1439-1449 makeStyles.deletionBubble",
           "source": "../../../apps/mobile/app/(auth)/login.tsx"
         },
