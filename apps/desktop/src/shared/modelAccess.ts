@@ -94,7 +94,7 @@ export const MODEL_ACCESS_STATUS_CHANNEL = 'model-access:status-change';
 export interface ModelAccessAgentOverride {
   contextWindow?: number;
   efforts?: string[];
-  defaultEffort?: string;
+  defaultEffort?: string | null;
   supportsFastMode?: boolean;
   defaultEnabled?: boolean;
 }
@@ -161,7 +161,7 @@ export interface ModelAccessGatewayModel extends ModelGroupPricing {
   contextWindow?: number;
   maxOutputTokens?: number;
   efforts?: string[];
-  defaultEffort?: string;
+  defaultEffort?: string | null;
   sortOrder?: number;
   /** Fast(加速档)支持;缺省按 true 处理(开了没效果无害,但不能没有)。 */
   supportsFastMode?: boolean;

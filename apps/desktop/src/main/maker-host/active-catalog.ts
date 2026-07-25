@@ -47,7 +47,7 @@ const discoveredByProvider = new Map<string, Partial<Record<AgentKind, CatalogMo
 export interface XdGatewayAgentOverride {
   contextWindow?: number;
   efforts?: string[];
-  defaultEffort?: string;
+  defaultEffort?: string | null;
   supportsFastMode?: boolean;
   defaultEnabled?: boolean;
 }
@@ -62,7 +62,7 @@ export interface XdGatewayModelInfo {
   description?: string;
   contextWindow?: number;
   efforts?: string[];
-  defaultEffort?: string;
+  defaultEffort?: string | null;
   sortOrder?: number;
   /** Fast 支持;缺省按 true(未登记模型的确定性默认:开了没效果无害)。 */
   supportsFastMode?: boolean;
@@ -453,7 +453,8 @@ function computeMerged(): Catalog {
           rawEfforts === undefined
             ? ['low', 'medium', 'high']
             : rawEfforts.filter((e): e is Effort => VALID_EFFORTS.has(e));
-        const rawDefault = ov.defaultEffort ?? gm.defaultEffort;
+        const rawDefault =
+          ov.defaultEffort !== undefined ? ov.defaultEffort : gm.defaultEffort;
         const defaultEffort: Effort | null =
           rawDefault && VALID_EFFORTS.has(rawDefault) && efforts.includes(rawDefault as Effort)
             ? (rawDefault as Effort)

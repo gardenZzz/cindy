@@ -581,7 +581,7 @@ describe('noteAnthropicSdkSupportedModels(登录态门控 + 合并纪律)', () =
     });
   });
 
-  it('HTTP 刷新用当前目录基线替换旧版缓存的三档合成值', async () => {
+  it('磁盘恢复即用当前目录基线替换旧版缓存的三档合成值', async () => {
     const cacheDir = path.join(TEST_USER_DATA, 'model-discovery');
     const cacheFile = path.join(cacheDir, 'anthropic-models.json');
     await fsp.mkdir(cacheDir, { recursive: true });
@@ -592,7 +592,7 @@ describe('noteAnthropicSdkSupportedModels(登录态门控 + 合并纪律)', () =
         models: [
           {
             id: 'claude-fable-5',
-            name: 'Fable 5',
+            name: 'Fable from stale cache',
             group: 'anthropic',
             sortOrder: 0,
             contextWindow: 1_000_000,
@@ -608,7 +608,13 @@ describe('noteAnthropicSdkSupportedModels(登录态门控 + 合并纪律)', () =
       'utf-8',
     );
     await loadAnthropicModelsFromDiskCache();
-    expect(anthropicModel('claude-fable-5')?.efforts).toEqual(['low', 'medium', 'high']);
+    expect(anthropicModel('claude-fable-5')?.efforts).toEqual([
+      'low',
+      'medium',
+      'high',
+      'xhigh',
+      'max',
+    ]);
 
     oauthRefreshMock.getValidClaudeAiOAuth.mockResolvedValue({ accessToken: 'test-token' });
     vi.stubGlobal(
@@ -731,6 +737,54 @@ describe('noteAnthropicSdkSupportedModels(登录态门控 + 合并纪律)', () =
     await loadAnthropicModelsFromDiskCache();
 
     expect(anthropicModel('claude-sonnet-4-5')?.contextWindow).toBe(200_000);
+  });
+
+  it('磁盘缓存按当前目录刷新非明确 effort,同时保留明确能力', async () => {
+    const cacheDir = path.join(TEST_USER_DATA, 'model-discovery');
+    await fsp.mkdir(cacheDir, { recursive: true });
+    await fsp.writeFile(
+      path.join(cacheDir, 'anthropic-models.json'),
+      JSON.stringify({
+        fetchedAt: '2026-07-22T00:00:00.000Z',
+        models: [
+          {
+            id: 'claude-sonnet-5',
+            name: 'Sonnet 5',
+            group: 'anthropic',
+            sortOrder: 0,
+            contextWindow: 1_000_000,
+            efforts: ['low', 'medium', 'high'],
+            defaultEffort: 'high',
+            supportsFastMode: false,
+            status: 'active',
+          },
+          {
+            id: 'claude-opus-5',
+            name: 'Opus 5',
+            group: 'anthropic',
+            sortOrder: 1,
+            contextWindow: 1_000_000,
+            efforts: ['low', 'high'],
+            defaultEffort: 'high',
+            supportsFastMode: false,
+            status: 'active',
+          },
+        ],
+        explicitEffortModelIds: ['claude-opus-5'],
+      }),
+      'utf-8',
+    );
+
+    await loadAnthropicModelsFromDiskCache();
+
+    expect(anthropicModel('claude-sonnet-5')).toMatchObject({
+      efforts: ['low', 'medium', 'high', 'xhigh', 'max'],
+      defaultEffort: 'high',
+    });
+    expect(anthropicModel('claude-opus-5')).toMatchObject({
+      efforts: ['low', 'high'],
+      defaultEffort: 'high',
+    });
   });
 
   it('磁盘缓存恢复 explicitWindows:重启后 SDK 捕获不把 HTTP 明说窗口打回猜测值(review P2 回归)', async () => {

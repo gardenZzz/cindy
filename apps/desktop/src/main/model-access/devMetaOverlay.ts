@@ -62,20 +62,18 @@ function isPlainObject(v: unknown): v is Record<string, unknown> {
  * Gateway 价格。这样本地 overlay 或 null 撤销登记都不会把同快照里的价格静默丢掉。
  */
 function gatewayFields(m: ModelAccessGatewayModel): ModelAccessGatewayModel {
-  const {
-    agents: _agents,
-    name: _name,
-    group: _group,
-    description: _description,
-    icon: _icon,
-    efforts: _efforts,
-    defaultEffort: _defaultEffort,
-    sortOrder: _sortOrder,
-    supportsFastMode: _supportsFastMode,
-    defaultEnabled: _defaultEnabled,
-    perAgent: _perAgent,
-    ...fields
-  } = m;
+  const fields = { ...m };
+  delete fields.agents;
+  delete fields.name;
+  delete fields.group;
+  delete fields.description;
+  delete fields.icon;
+  delete fields.efforts;
+  delete fields.defaultEffort;
+  delete fields.sortOrder;
+  delete fields.supportsFastMode;
+  delete fields.defaultEnabled;
+  delete fields.perAgent;
   return fields;
 }
 
@@ -97,10 +95,13 @@ function readOverrideFields(
     out.efforts = o.efforts as string[];
   }
   if (o.defaultEffort !== undefined) {
-    if (typeof o.defaultEffort !== 'string' || !VALID_EFFORTS.has(o.defaultEffort)) {
+    if (
+      o.defaultEffort !== null &&
+      (typeof o.defaultEffort !== 'string' || !VALID_EFFORTS.has(o.defaultEffort))
+    ) {
       return 'defaultEffort 非法';
     }
-    out.defaultEffort = o.defaultEffort;
+    out.defaultEffort = o.defaultEffort as string | null;
   }
   if (o.supportsFastMode !== undefined) {
     if (typeof o.supportsFastMode !== 'boolean') return 'supportsFastMode 必须是布尔';
@@ -174,7 +175,7 @@ function rebuildModel(m: ModelAccessGatewayModel, meta: MetaEntry): ModelAccessG
     ...(meta.description ? { description: meta.description } : {}),
     ...(meta.icon ? { icon: meta.icon } : {}),
     ...(meta.efforts ? { efforts: meta.efforts } : {}),
-    ...(meta.defaultEffort ? { defaultEffort: meta.defaultEffort } : {}),
+    ...(meta.defaultEffort !== undefined ? { defaultEffort: meta.defaultEffort } : {}),
     ...(meta.sortOrder !== undefined ? { sortOrder: meta.sortOrder } : {}),
     ...(meta.supportsFastMode !== undefined ? { supportsFastMode: meta.supportsFastMode } : {}),
     ...(meta.defaultEnabled !== undefined ? { defaultEnabled: meta.defaultEnabled } : {}),
