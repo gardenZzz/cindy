@@ -16,6 +16,7 @@ import {
   GhostSetupInteractionBridge,
   type GhostSetupInteractionCommand,
   type GhostSetupInteractionResponseTarget,
+  type GhostSetupInteractionSnapshot,
 } from '../ghostSetupInteractionBridge';
 
 function required(revision = 0): GhostSetupAssessment {
@@ -286,6 +287,40 @@ describe('GhostSetupCoordinator', () => {
     h.changeBus.emit('gmail', { source: 'oauth', ref: 'google' });
     await expect(waiting).resolves.toMatchObject({ ok: true });
     expect(h.bridge.pendingSnapshots()).toEqual([]);
+  });
+
+  it('preserves non-empty satisfied steps in the ready terminal snapshot', async () => {
+    const h = harness(required());
+    const waiting = h.coordinator.ensureReady({
+      sessionId: 'session-1',
+      ghostId: 'gmail',
+      tool: 'search',
+    });
+    await vi.waitFor(() => expect(h.bridge.pendingSnapshots()).toHaveLength(1));
+    const initial = h.bridge.pendingSnapshots()[0].request;
+
+    h.setAssessment(ready(1));
+    h.changeBus.emit('gmail', { source: 'oauth', ref: 'google' });
+    await expect(waiting).resolves.toMatchObject({ ok: true });
+
+    const terminalSnapshots = h.broadcast.mock.calls
+      .filter(([channel]) => channel === MAKER_PUSH.INTERACTION_REQUEST)
+      .map(
+        ([, payload]) =>
+          (payload as { request: GhostSetupInteractionSnapshot }).request,
+      )
+      .filter((request) => request.terminal === true);
+    expect(terminalSnapshots).toHaveLength(1);
+    expect(terminalSnapshots[0].steps).toEqual([
+      {
+        id: initial.steps[0].id,
+        groupId: initial.steps[0].groupId,
+        groupMode: initial.steps[0].groupMode,
+        title: initial.steps[0].title,
+        description: initial.steps[0].description,
+        phase: 'satisfied',
+      },
+    ]);
   });
 
   it('run_action is single-flight and only a later ready assessment settles', async () => {
