@@ -212,8 +212,8 @@
         "edit": "编辑自动化"
       },
       "sessionMode": {
-        "bound": "绑定已有对话后,目录、worktree、Agent 和 Fast 模式跟随该对话。",
-        "persistent": "首次触发会创建持续对话,后续触发继续接在同一对话里。",
+        "bound": "绑定已有对话后，目录、worktree、Agent 和 Fast 模式跟随该对话。",
+        "persistent": "首次触发会创建持续对话，后续触发继续接在同一对话里。",
         "fresh": "每次触发都会创建新的对话。"
       },
       "field": {
@@ -230,7 +230,7 @@
         "timezone": "时区"
       },
       "namePlaceholder": "例如：每日项目巡检",
-      "scriptHint": "这是一个仅运行脚本任务,脚本配置只能在桌面端编辑;此处可以改动名称、触发方式、通知等其它字段。",
+      "scriptHint": "这是一个仅运行脚本任务，脚本配置只能在桌面端编辑；此处可以改动名称、触发方式、通知等其它字段。",
       "promptPlaceholder": "写清楚每次自动执行要让 {{appName}} 做什么",
       "trigger": {
         "recurring": "周期",
@@ -257,18 +257,18 @@
       "cancelA11y": "取消编辑自动化"
     },
     "delete": {
-      "counting": "正在统计由这条自动化生成的对话...",
+      "counting": "正在统计由这条自动化生成的对话…",
       "confirmDeleteBoth": "删除任务和对话",
       "confirmArchive": "删除任务并归档对话",
       "confirmTaskOnly": "只删除任务",
       "title": "删除 {{name}}",
-      "copy": "删除自动化任务不会中断已经开始的执行。生成过的对话按下面的选项处理,和桌面端保持一致。",
+      "copy": "删除自动化任务不会中断已经开始的执行。生成过的对话按下面的选项处理，和桌面端保持一致。",
       "optionsA11y": "选择生成对话处理方式",
-      "keepDesc": "只删除这条自动化任务,历史对话继续保留在原列表里。",
+      "keepDesc": "只删除这条自动化任务，历史对话继续保留在原列表里。",
       "keepLabel": "保留生成对话",
-      "archiveDesc": "删除任务后,把由它生成的对话移到归档,后续仍可搜索。",
+      "archiveDesc": "删除任务后，把由它生成的对话移到归档，后续仍可搜索。",
       "archiveLabel": "归档生成对话",
-      "deleteDesc": "删除任务后,把由它生成的对话也标记为删除。这个操作不可从手机端撤销。",
+      "deleteDesc": "删除任务后，把由它生成的对话也标记为删除。这个操作不可从手机端撤销。",
       "deleteLabel": "删除生成对话",
       "cancelA11y": "取消删除自动化",
       "confirmA11y": "确认删除自动化"
@@ -284,7 +284,7 @@
     },
     "runDelete": {
       "title": "删除这条执行记录",
-      "copy": "只会删除这条自动化执行记录,不会删除它打开过的对话,也不会影响后续自动触发。",
+      "copy": "只会删除这条自动化执行记录，不会删除它打开过的对话，也不会影响后续自动触发。",
       "confirmA11y": "确认删除执行记录",
       "confirm": "删除记录",
       "cancelA11y": "取消删除执行记录"
@@ -300,7 +300,7 @@
     },
     "scheduleRowA11y": "自动化任务 {{title}}",
     "detail": {
-      "promptScriptFallback": "仅运行脚本任务,配置只能在桌面端编辑",
+      "promptScriptFallback": "仅运行脚本任务，配置只能在桌面端编辑",
       "promptEmpty": "没有保存任务提示词",
       "deleteA11y": "删除自动化",
       "runNowA11y": "立即执行自动化",

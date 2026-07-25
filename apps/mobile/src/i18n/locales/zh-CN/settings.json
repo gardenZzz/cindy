@@ -33,9 +33,9 @@
   "notifications": {
     "sectionTitle": "通知",
     "taskDone": "任务完成通知",
-    "taskDoneHint": "电脑上的任务完成、出错或需要你回复时,推送到这台手机;完成或需要回复时附带最新回复内容。",
+    "taskDoneHint": "电脑上的任务完成、出错或需要你回复时，推送到这台手机；完成或需要回复时附带最新回复内容。",
     "permissionDenied": "系统通知权限未开启。请到 iOS「设置 → 通知 → {{appName}}」允许通知后重试。",
-    "unregisterQueued": "已关闭。当前网络下注销未完成,将在下次联网时自动补上。"
+    "unregisterQueued": "已关闭。当前网络下注销未完成，将在下次联网时自动补上。"
   },
   "about": {
     "sectionTitle": "关于这台手机",

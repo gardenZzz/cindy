@@ -123,7 +123,7 @@
     "selectProjectNamed": "프로젝트 {{title}} 선택",
     "noProjects": "아직 프로젝트가 없습니다",
     "chooseOtherFolder": "다른 프로젝트 폴더 선택",
-    "readingRemoteDir": "원격 디렉터리를 읽는 중...",
+    "readingRemoteDir": "원격 디렉터리를 읽는 중…",
     "goParentDir": "상위 디렉터리로",
     "parentDir": "상위",
     "useCurrentRemoteDir": "현재 원격 디렉터리 사용",

@@ -12,7 +12,7 @@ export type SessionComposerDensity = 'compact' | 'expanded';
 export type SessionComposerPrimaryAction = 'none' | 'send' | 'stop';
 
 // Mirrors desktop ccAgent.layout.chatPlaceholder for existing session chat input.
-const DESKTOP_SESSION_CHAT_PLACEHOLDER_ZH_CN = '继续聊一聊...';
+const DESKTOP_SESSION_CHAT_PLACEHOLDER_ZH_CN = '继续聊一聊…';
 
 export interface SessionComposerLayoutInput {
   attachmentBusy: boolean;
