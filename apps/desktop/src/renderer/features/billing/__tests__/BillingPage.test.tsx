@@ -15,6 +15,8 @@ const uiMocks = vi.hoisted(() => ({
   toastSuccess: vi.fn(),
 }));
 
+const authState = vi.hoisted(() => ({ dataOwnerId: 'account-fixture' as string | null }));
+
 const checkout = {
   state: {
     open: false,
@@ -59,7 +61,7 @@ vi.mock('@/features/feature-context', () => ({
   useRegisterContentHeader: vi.fn(),
 }));
 vi.mock('@/contexts/AuthContext', () => ({
-  useAuth: () => ({ dataOwnerId: 'account-fixture' }),
+  useAuth: () => ({ dataOwnerId: authState.dataOwnerId }),
 }));
 vi.mock('@/components/ui/confirm-dialog-provider', () => ({
   useConfirmDialog: () => ({ confirm: uiMocks.confirm }),
@@ -83,6 +85,7 @@ beforeEach(() => {
   uiMocks.confirm.mockReset().mockResolvedValue(false);
   uiMocks.toastError.mockReset();
   uiMocks.toastSuccess.mockReset();
+  authState.dataOwnerId = 'account-fixture';
 });
 
 describe('BillingPage remote catalog rendering', () => {
@@ -1401,6 +1404,30 @@ describe('BillingPage plan change', () => {
     expect(billing.cancelCurrentSubscription).not.toHaveBeenCalled();
 
     await act(async () => resolveConfirm(false));
+  });
+
+  it('drops a confirmed cancellation when the account changed while confirming', async () => {
+    const billing = install(billingMocks());
+    let resolveConfirm!: (confirmed: boolean) => void;
+    uiMocks.confirm.mockReturnValueOnce(
+      new Promise<boolean>((resolve) => {
+        resolveConfirm = resolve;
+      }),
+    );
+
+    const view = render(<BillingPage />);
+    fireEvent.click(await screen.findByText('billing.settings.subscriptionCard.cancelAction'));
+    expect(uiMocks.confirm).toHaveBeenCalledTimes(1);
+
+    // 弹窗还开着时账号被换掉:section 按 dataOwnerId 重挂,但弹窗挂在 AuthProvider
+    // 之外仍然存活。此时确认不能落到新账号的订阅上。
+    authState.dataOwnerId = 'account-switched';
+    view.rerender(<BillingPage />);
+    await screen.findByText('billing.settings.subscriptionCard.cancelAction');
+
+    await act(async () => resolveConfirm(true));
+
+    expect(billing.cancelCurrentSubscription).not.toHaveBeenCalled();
   });
 
   it('keeps the loading cancellation accessible and disables competing actions', async () => {
