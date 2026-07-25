@@ -164,8 +164,11 @@ if (!mHitSlopM) throw new Error('mobile dismiss hitSlop 未命中');
 const mGateTag = /<Animated\.View\b[\s\S]*?>\s*<AccountDeletionStatusPanel/.exec(mLoginSrc);
 if (!mGateTag) throw new Error('mobile 气泡浮层包装层(Animated.View + AccountDeletionStatusPanel)未命中');
 const mEntranceGateM = [mGateTag[0]];
-if (!/pointerEvents=\{handoffPhase === 'done' \? 'auto' : 'none'\}/.test(mGateTag[0]))
-  throw new Error('mobile 气泡入场门 pointerEvents(仅 done 放行)未命中');
+if (!/pointerEvents=\{handoffPhase === 'done' \? 'box-none' : 'none'\}/.test(mGateTag[0]))
+  throw new Error("mobile 气泡入场门 pointerEvents(done → box-none)未命中");
+// 全屏包装层禁止 'auto':RN 下 absoluteFill 的 View 即使透明也吃命中区,会挡住登录组
+if (/\? 'auto' : 'none'/.test(mGateTag[0]))
+  throw new Error("mobile 气泡包装层 pointerEvents 出现 'auto'——会挡住下方登录组命中(Greptile P1 回归)");
 if (!/style=\{\[StyleSheet\.absoluteFill, \{ opacity: panelEntrance\.opacity \}\]\}/.test(mGateTag[0]))
   throw new Error('mobile 气泡入场门 opacity=panelEntrance.opacity 未命中');
 // Android 读屏隔离(PR #464 codex):协议弹窗打开时与登录组同步隐藏
@@ -252,7 +255,7 @@ const truth = {
       styleFacts: leaf('不透明底+1px 描边;无 shadow/elevation/固定高(样式块守护断言)', M.loginTsx, 'login.tsx:1439-1449 makeStyles.deletionBubble'),
       dismissHitSlop: leaf('hitSlop {top:12,bottom:12,left:20,right:20} → 热区 47≥44', M.loginTsx, 'login.tsx hitSlop={LOGIN_DELETION_BUBBLE.linkHitSlop}'),
       dismissGate: leaf('仅 completed 态渲染 dismiss Pressable(onDismiss 仅 completed 传入)', M.loginTsx, 'login.tsx:1315-1327 {onDismiss ? <Pressable/> : null}'),
-      entranceGate: leaf("Animated.View 包装:opacity=panelEntrance.opacity(与登录组同一 Animated 值);pointerEvents 仅 handoffPhase==='done' 放行——入场完成前不可见不可点(PR #464 review)", M.loginTsx, 'login.tsx 气泡渲染点 Animated.View pointerEvents/style'),
+      entranceGate: leaf("Animated.View 包装:opacity=panelEntrance.opacity(与登录组同一 Animated 值);pointerEvents 仅 handoffPhase==='done' 放行且取 box-none(全屏包装层不作触摸目标,避免挡住下方登录组命中;入场完成前 none = 不可见不可点)(PR #464 review)", M.loginTsx, 'login.tsx 气泡渲染点 Animated.View pointerEvents/style'),
       a11yModalGate: leaf("协议弹窗打开时气泡与登录组同步 importantForAccessibility='no-hide-descendants'——accessibilityViewIsModal 仅 iOS 生效,Android TalkBack 需显式隐藏(PR #464 codex)", M.loginTsx, 'login.tsx 气泡渲染点 Animated.View importantForAccessibility'),
     },
   },

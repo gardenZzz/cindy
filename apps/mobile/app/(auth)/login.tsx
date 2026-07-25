@@ -1199,7 +1199,10 @@ export default function LoginScreen() {
           // 弹窗的兄弟浮层,accessibilityViewIsModal 仅 iOS 生效,不加这行 TalkBack
           // 仍能读到注销文案、completed 态还能激活「我知道了」(codex 审查 P1)。
           importantForAccessibility={consentDialogOpen ? 'no-hide-descendants' : 'auto'}
-          pointerEvents={handoffPhase === 'done' ? 'auto' : 'none'}
+          // box-none 而非 auto:包装层铺满全屏(absoluteFill),RN 下全屏 View 即使透明
+          // 也会吃掉命中区、挡住下方登录组的输入框/按钮/社交入口(web 的穿透直觉不适用)。
+          // box-none = 自身不作触摸目标、子节点(气泡)照常可点(Greptile 审查 P1)。
+          pointerEvents={handoffPhase === 'done' ? 'box-none' : 'none'}
           style={[StyleSheet.absoluteFill, { opacity: panelEntrance.opacity }]}
         >
           <AccountDeletionStatusPanel
