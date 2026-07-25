@@ -20,6 +20,7 @@ import {
   makeExemptChecker,
   occursIn,
   stripNonProse,
+  normalizeForPunctuation,
 } from '../shared/glossary-rules.mjs';
 import { validateAgainstSchema } from '../shared/json-schema-lite.mjs';
 import { renderGlossaryDoc } from '../shared/glossary-doc.mjs';
@@ -418,5 +419,41 @@ test('validateAgainstSchema: schema 用了未实现的关键字必须报错而�
   assert.throws(
     () => validateAgainstSchema({}, { type: 'object', anyOf: [{ type: 'object' }] }),
     /未实现的关键字 "anyOf"/,
+  );
+});
+
+// ---------------------------------------------------------------------------
+// 标点检查的插值边界
+//
+// stripNonProse 把 {{插值}} 换成空格,于是插值后面的半角标点前是空格而非汉字,
+// 整类违规被静默放过（reportCache 的 `{{total}},上限` 就是这样漏掉的）。
+// 标点检查必须走 normalizeForPunctuation。
+// ---------------------------------------------------------------------------
+
+test('normalizeForPunctuation: 插值后的半角标点能被检出', () => {
+  const raw = '已缓存 {{total}},上限 {{limit}};清掉后会重新拉取。';
+  assert.equal(findHalfWidthPunct(stripNonProse(raw)), null, '这正是原先漏检的成因');
+  assert.equal(findHalfWidthPunct(normalizeForPunctuation(raw)), ',');
+});
+
+test('normalizeForPunctuation: 两个插值之间的标点是格式分隔符,不判违规', () => {
+  // 该用半角还是全角取决于运行期填进去的值,静态扫描判不了,整类排除
+  for (const raw of ['二维码将在 {{minutes}}:{{seconds}} 后过期', '{{label}}: {{path}}']) {
+    assert.equal(findHalfWidthPunct(normalizeForPunctuation(raw)), null, raw);
+  }
+});
+
+test('normalizeForPunctuation: 文件名与 URL 里的冒号不算标点违规', () => {
+  // 这几类替换成空格而非汉字替身,否则 `config.json:` 的路径冒号会被误判
+  assert.equal(findHalfWidthPunct(normalizeForPunctuation('请检查 config.json:12 行')), null);
+  assert.equal(findHalfWidthPunct(normalizeForPunctuation('详见 https://a.example/b:8080 页面')), null);
+});
+
+test('glossary.schema.json: terms 不能为空——空表会让整套门禁静默消失', () => {
+  const schema = JSON.parse(fs.readFileSync(path.join(ROOT, 'i18n', 'glossary.schema.json'), 'utf8'));
+  const errors = validateAgainstSchema({ ...glossary, terms: [] }, schema);
+  assert.ok(
+    errors.some((e) => /terms.*至少需要 1 项|至少需要 1 项/.test(e)),
+    `空 terms 必须被拒绝,实际错误:${JSON.stringify(errors)}`,
   );
 });
