@@ -374,12 +374,24 @@ export function BillingSettingsSection({ accountId }: { accountId: string | null
     [offers],
   );
 
+  const subscriptionPurchaseBlocked =
+    currentSubscription !== null &&
+    SUBSCRIPTION_PURCHASE_BLOCKING_STATUSES.includes(currentSubscription.status);
+  const currentSubscriptionOfferCode = subscriptionPurchaseBlocked
+    ? (currentSubscription.effectivePlan?.offer.code ?? null)
+    : null;
   const selected = useMemo(
     () =>
       offers.find(
-        (entry) => entry.offer.code === selectedOfferCode && isCatalogOfferPurchasable(entry),
+        (entry) =>
+          entry.offer.code === selectedOfferCode &&
+          isCatalogOfferPurchasable(entry) &&
+          !(
+            entry.product.kind === 'SUBSCRIPTION' &&
+            entry.offer.code === currentSubscriptionOfferCode
+          ),
       ) ?? null,
-    [offers, selectedOfferCode],
+    [currentSubscriptionOfferCode, offers, selectedOfferCode],
   );
   const selectedOption = useMemo(
     () =>
@@ -390,10 +402,15 @@ export function BillingSettingsSection({ accountId }: { accountId: string | null
   useEffect(() => {
     if (!selectedOfferCode) return;
     const selectedEntry = offers.find(({ offer }) => offer.code === selectedOfferCode);
-    if (!selectedEntry || !isCatalogOfferPurchasable(selectedEntry)) {
+    if (
+      !selectedEntry ||
+      !isCatalogOfferPurchasable(selectedEntry) ||
+      (selectedEntry.product.kind === 'SUBSCRIPTION' &&
+        selectedEntry.offer.code === currentSubscriptionOfferCode)
+    ) {
       resetSelection();
     }
-  }, [offers, resetSelection, selectedOfferCode]);
+  }, [currentSubscriptionOfferCode, offers, resetSelection, selectedOfferCode]);
 
   useEffect(() => {
     if (!selectedPurchaseOptionId) return;
@@ -428,9 +445,6 @@ export function BillingSettingsSection({ accountId }: { accountId: string | null
     return null;
   }, [billingLocale, customAmount, selected, t]);
 
-  const subscriptionPurchaseBlocked =
-    currentSubscription !== null &&
-    SUBSCRIPTION_PURCHASE_BLOCKING_STATUSES.includes(currentSubscription.status);
   const canCheckout =
     !checkout.recovering &&
     selected !== null &&
@@ -558,7 +572,13 @@ export function BillingSettingsSection({ accountId }: { accountId: string | null
   const selectOffer = (offerCode: string) => {
     if (selectedOfferCode === offerCode) return;
     const entry = offers.find(({ offer }) => offer.code === offerCode);
-    if (!entry || !isCatalogOfferPurchasable(entry)) return;
+    if (
+      !entry ||
+      !isCatalogOfferPurchasable(entry) ||
+      (entry.product.kind === 'SUBSCRIPTION' && entry.offer.code === currentSubscriptionOfferCode)
+    ) {
+      return;
+    }
     setSelectedOfferCode(offerCode);
     // 只有一种支付方式时默认选中,免去一次多余点击。
     setSelectedPurchaseOptionId(
@@ -744,6 +764,7 @@ export function BillingSettingsSection({ accountId }: { accountId: string | null
         customAmount={customAmount}
         amountError={amountError}
         subscriptionPurchaseBlocked={subscriptionPurchaseBlocked}
+        currentSubscriptionOfferCode={currentSubscriptionOfferCode}
         canCheckout={canCheckout}
         onClose={closeSubscriptionDialog}
         onRetry={() => void loadBillingState()}
@@ -764,6 +785,7 @@ export function BillingSettingsSection({ accountId }: { accountId: string | null
         customAmount={customAmount}
         amountError={amountError}
         subscriptionPurchaseBlocked={false}
+        currentSubscriptionOfferCode={null}
         canCheckout={canCheckout}
         onClose={closeTopupDialog}
         onRetry={() => void loadBillingState()}
@@ -1338,6 +1360,7 @@ function BillingOfferDialog({
   customAmount,
   amountError,
   subscriptionPurchaseBlocked,
+  currentSubscriptionOfferCode,
   canCheckout,
   onClose,
   onRetry,
@@ -1356,6 +1379,7 @@ function BillingOfferDialog({
   customAmount: string;
   amountError: string | null;
   subscriptionPurchaseBlocked: boolean;
+  currentSubscriptionOfferCode: string | null;
   canCheckout: boolean;
   onClose: () => void;
   onRetry: () => void;
@@ -1428,21 +1452,28 @@ function BillingOfferDialog({
                     const { product, offer } = entry;
                     const active = selected?.offer.code === offer.code;
                     const unavailableReason = catalogOfferUnavailableReason(entry);
+                    const currentPlan =
+                      kind === 'SUBSCRIPTION' && offer.code === currentSubscriptionOfferCode;
                     return (
                       <button
                         key={offer.code}
                         type="button"
                         onClick={() => onSelectOffer(offer.code)}
-                        disabled={unavailableReason !== null}
+                        disabled={currentPlan || unavailableReason !== null}
                         aria-pressed={active}
+                        aria-current={currentPlan ? 'true' : undefined}
                         className={cn(
                           'flex w-full items-center justify-between gap-4 px-4 py-3 text-left transition-colors',
                           'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset',
                           'focus-visible:ring-[var(--text-primary)]',
-                          'disabled:cursor-not-allowed disabled:opacity-55 disabled:hover:bg-transparent',
-                          active
+                          'disabled:cursor-not-allowed disabled:hover:bg-transparent',
+                          currentPlan
                             ? 'bg-[var(--surface-chip)]'
-                            : 'hover:bg-[var(--surface-hover-soft)]',
+                            : unavailableReason
+                              ? 'opacity-55'
+                              : active
+                                ? 'bg-[var(--surface-chip)]'
+                                : 'hover:bg-[var(--surface-hover-soft)]',
                         )}
                       >
                         <div className="min-w-0 flex-1">
@@ -1450,6 +1481,11 @@ function BillingOfferDialog({
                             <p className="truncate text-13 font-medium text-[var(--text-primary)]">
                               {product.name}
                             </p>
+                            {currentPlan && (
+                              <span className="rounded-full bg-[var(--surface)] px-2 py-0.5 text-10 font-medium text-[var(--text-secondary)]">
+                                {t('billing.catalog.currentPlan')}
+                              </span>
+                            )}
                             {unavailableReason && (
                               <span className="rounded-full bg-[var(--surface-chip)] px-2 py-0.5 text-10 font-medium text-[var(--text-secondary)]">
                                 {t(`billing.catalog.unavailableReasons.${unavailableReason}`)}
@@ -1475,7 +1511,9 @@ function BillingOfferDialog({
                               </p>
                             )}
                           </div>
-                          {unavailableReason === null && <SelectionMark active={active} />}
+                          {!currentPlan && unavailableReason === null && (
+                            <SelectionMark active={active} />
+                          )}
                         </div>
                       </button>
                     );

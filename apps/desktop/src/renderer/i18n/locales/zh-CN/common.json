@@ -7214,6 +7214,7 @@
       "errorDescription": "请检查网络后重试。不会使用本地套餐替代。",
       "emptyTitle": "当前暂无套餐",
       "emptyDescription": "服务端尚未配置公开的套餐。",
+      "currentPlan": "当前套餐",
       "unavailableReasons": {
         "OFFER_COMING_SOON": "敬请期待",
         "NO_AVAILABLE_PAYMENT_CHANNEL": "暂无可用支付方式"
