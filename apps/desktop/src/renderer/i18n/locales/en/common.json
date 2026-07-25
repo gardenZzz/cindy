@@ -646,6 +646,11 @@
       "autoUpdateEnabledToast": "Idle update installation enabled",
       "autoUpdateDisabledToast": "Idle update installation disabled",
       "autoUpdateSaveFailed": "Failed to save auto-update settings",
+      "analyticsLabel": "Usage statistics",
+      "analyticsDescription": "Helps us understand how often Cindy is launched and kept in use. Reports device and usage-environment information — such as your device model, OS version, app version, and a device identifier — plus, once signed in, your account ID; never conversations, files, or prompts. Turning this off stops reporting immediately.",
+      "analyticsEnabledToast": "Usage statistics enabled",
+      "analyticsDisabledToast": "Usage statistics disabled",
+      "analyticsSaveFailed": "Failed to save usage statistics settings",
       "debugLogLabel": "Debug logs",
       "debugLogDescription": "When enabled, emits verbose debug logs: main/maker logger raised to debug level; new Claude Code sessions also log API request URL/status/latency, Node-level DNS/TCP/TLS handshake timing, and SDK internals. Output is large — turn off after troubleshooting. Always on in dev mode.",
       "social": {

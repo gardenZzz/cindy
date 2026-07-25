@@ -1,5 +1,6 @@
 import { EventEmitter } from 'node:events';
 import fs from 'node:fs';
+import path from 'node:path';
 import { PassThrough } from 'node:stream';
 import type { ChildProcessByStdio } from 'node:child_process';
 import type { Readable, Writable } from 'node:stream';
@@ -174,7 +175,14 @@ describe('MacComputerPermissionGuideNativeHost', () => {
 
     await vi.advanceTimersByTimeAsync(0);
     expect(h.spawn).toHaveBeenCalledWith(
-      '/Applications/XDMaker.app/Contents/Resources/tools/computer-permission-guide/xdt-macos-computer-permission-guide-helper',
+      // 实现用 path.join 拼 helper 路径,分隔符跟随宿主平台;这里同样用 path.join,
+      // 让本用例在 Windows 开发机上跑单测门禁时不因 '/' vs '\\' 假红。
+      path.join(
+        '/Applications/XDMaker.app/Contents/Resources',
+        'tools',
+        'computer-permission-guide',
+        'xdt-macos-computer-permission-guide-helper',
+      ),
       ['/tmp/Computer Use.app', 'ja'],
       { stdio: ['pipe', 'pipe', 'pipe'] },
     );
