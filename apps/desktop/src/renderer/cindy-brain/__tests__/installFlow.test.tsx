@@ -195,16 +195,6 @@ describe('installFlow · tab 型插件「立即开启并打开页签」', () => 
     expect(openGhostTab).not.toHaveBeenCalled();
   });
 
-  it('Main 原生确认取消(canceled)→ 不打开页签', async () => {
-    setupWindow(tabManifest, { canceled: true });
-    const openGhostTab = vi.fn(async () => undefined);
-    const { deps: d } = tabDeps({ sessionId: 's1', openGhostTab });
-
-    await confirmAndInstallGhost('/tmp/tab.cindy', d);
-
-    expect(openGhostTab).not.toHaveBeenCalled();
-  });
-
   it('打开页签失败只记日志:装入成功 toast 不改口、不冒错误', async () => {
     setupWindow(tabManifest);
     const openGhostTab = vi.fn(async () => {

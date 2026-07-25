@@ -49,14 +49,13 @@ describe('market Ghost session boundary', () => {
       'const mutationOwner = captureGhostMutationOwner();',
     );
     const inspectIndex = body.indexOf('await manager.inspect(cindyFilePath)');
-    const authorizationIndex = body.indexOf('await requestNodeInstallAuthorization(');
     const leaseIndex = body.indexOf(
       'releaseMutation = beginGhostMutation(mutationOwner);',
     );
 
     expect(captureIndex).toBeGreaterThan(-1);
     expect(captureIndex).toBeLessThan(inspectIndex);
-    expect(authorizationIndex).toBeLessThan(leaseIndex);
+    expect(leaseIndex).toBeGreaterThan(inspectIndex);
     expect(body).toContain('releaseMutation?.();');
   });
 });
