@@ -193,7 +193,7 @@ describe('resolveTurnCost', () => {
     expect(claude.money?.amount).toBe(5);
   });
 
-  it('XD missing price does not revive an SDK guess', () => {
+  it('XD missing price falls back to the SDK number instead of dropping the turn', () => {
     const result = resolveTurnCost({
       rawModel: 'unknown-model',
       tokens: {
@@ -203,6 +203,58 @@ describe('resolveTurnCost', () => {
         cacheCreateTokens: 0,
       },
       sdkCostDelta: 1.23,
+      pricing: {},
+      context: XD_GLOBAL,
+    });
+    expect(result.source).toBe('sdk-fallback');
+    expect(result.money).toMatchObject({
+      amount: 1.23,
+      currency: 'USD',
+      kind: 'actual-cost',
+    });
+  });
+
+  it('XD missing price fallback applies the codex budget multiplier and regionalizes CN', () => {
+    const zeroTokens = {
+      inputTokens: 0,
+      outputTokens: 0,
+      cacheReadTokens: 0,
+      cacheCreateTokens: 0,
+    };
+    const codexFallback = resolveTurnCost({
+      rawModel: 'codex/gpt-5.5',
+      tokens: zeroTokens,
+      sdkCostDelta: 10,
+      pricing: null,
+      context: XD_GLOBAL,
+    });
+    expect(codexFallback.source).toBe('sdk-fallback');
+    expect(codexFallback.money?.amount).toBe(1.5);
+
+    const cnFallback = resolveTurnCost({
+      rawModel: 'unknown-model',
+      tokens: zeroTokens,
+      sdkCostDelta: 1,
+      pricing: {},
+      context: { ...XD_GLOBAL, region: 'cn' },
+    });
+    expect(cnFallback.money).toMatchObject({
+      amount: 6.7,
+      currency: 'CNY',
+      approximate: true,
+    });
+    expect(cnFallback.money?.estimateReasons).toContain('fixed-fx');
+  });
+
+  it('XD missing price with no SDK cost still resolves to null money', () => {
+    const result = resolveTurnCost({
+      rawModel: 'unknown-model',
+      tokens: {
+        inputTokens: 1_000,
+        outputTokens: 100,
+        cacheReadTokens: 0,
+        cacheCreateTokens: 0,
+      },
       pricing: {},
       context: XD_GLOBAL,
     });

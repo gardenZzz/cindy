@@ -65,6 +65,7 @@ import {
   MODEL_PRICING_CHANGED_CHANNEL,
   prewarmModelPricing,
   replaceGatewayModelPricing,
+  trackGatewayModelPricingSync,
 } from '../modelPricing';
 
 let tempUserDataDir: string | null = null;
@@ -340,6 +341,34 @@ describe('pricing cache lifecycle', () => {
     await expect(getModelPricingForModel('openai', 'same-id')).resolves.toMatchObject({
       xd: { 'same-id': { inputPerMtok: 1, outputPerMtok: 2 } },
     });
+  });
+
+  it('bounds the accounting-path wait when a model sync hangs', async () => {
+    replaceGatewayModelPricing([
+      {
+        id: 'gpt-x',
+        inputCostPerToken: 0.000001,
+        outputCostPerToken: 0.000002,
+      },
+    ]);
+    vi.useFakeTimers();
+    try {
+      // 永不 settle 的同步:黑洞网络下 /models fetch 没有超时。
+      trackGatewayModelPricingSync(new Promise(() => {}));
+      let settled = false;
+      const lookup = getModelPricingForModel('xd', 'gpt-x').then((value) => {
+        settled = true;
+        return value;
+      });
+      await vi.advanceTimersByTimeAsync(2_999);
+      expect(settled).toBe(false);
+      await vi.advanceTimersByTimeAsync(1);
+      await expect(lookup).resolves.toMatchObject({
+        xd: { 'gpt-x': { inputPerMtok: 1, outputPerMtok: 2 } },
+      });
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });
 

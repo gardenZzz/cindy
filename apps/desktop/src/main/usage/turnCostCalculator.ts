@@ -130,10 +130,26 @@ export function resolveTurnCost(args: {
 
   if (context.billingRoute === 'xd-gateway') {
     const quote = getModelPriceQuote(pricing, 'xd', model);
+    if (quote) {
+      return {
+        model,
+        money: computePriceQuoteTurnMoney(tokens, quote),
+        source: 'gateway',
+      };
+    }
+    // quote 缺失(冷缓存 / /models 同步失败 / 目录无该模型价):回退 SDK 自报
+    // 数字,真实 gateway 计费不能整轮记 0。codex/ 预算路由的 SDK 数字未含 0.15
+    // 折扣,这里补乘一次 —— gateway 价路径的价表已折好,两路互斥不双重打折。
+    const fallbackUsd =
+      Math.max(0, sdkCostDelta ?? 0) *
+      getCodexBudgetEffectiveCostMultiplier(model);
     return {
       model,
-      money: computePriceQuoteTurnMoney(tokens, quote),
-      source: quote ? 'gateway' : 'sdk-fallback',
+      money:
+        fallbackUsd > 0
+          ? regionalizeUsd(fallbackUsd, context.region, 'fixed-fx')
+          : null,
+      source: 'sdk-fallback',
     };
   }
 
