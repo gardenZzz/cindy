@@ -116,8 +116,23 @@
    否则后人会反复推翻它。
 2. 拿不准时先设 `status: "proposed"`，让 guard 把现状规模统计出来再讨论。
 3. 跑 `pnpm i18n:glossary-doc` 重新生成本文件。
-4. 跑 `pnpm check:i18n-glossary` 看新规则命中多少存量；确认无误报后再
-   `node scripts/check-i18n-glossary.mjs --update-baseline` 冻结。
+4. 跑 `pnpm check:i18n-glossary` 看新规则命中多少存量，逐条核对后清理干净。
+   `--update-baseline` **只能删不能加**——它会拒绝登记新违规；确需冻结一批存量时
+   手动编辑 `i18n/glossary-baseline.json`，让新增条目出现在 diff 里被 review 看到。
+
+## 清理存量：不要用脚本批量替换
+
+guard 只能告诉你「这个词不该用」，回答不了「该换成哪个」——目标译法取决于该 key 的
+英文源，而 sed / 正则看不见语境。**逐条读英文源再决定**。
+
+「额度」同时是 Balance / Quota / Credits 三个英文源的正确译法，「代理」同时是
+Agent / Subagent / Proxy 的译法——无条件替换必然改错其中两类。这类词要用条件禁用
+`{ text, whenEn }` 按英文源拆开，让每条规则的目标译法唯一；目标不唯一的禁用词
+就是误译的温床。
+
+还要当心外部产品的既定术语被产品术语盖掉：macOS 系统设置面板名日文是
+「オートメーション」而非产品的「自動化」，照改会让用户在系统设置里找不到授权项。
+这类走 `exempt`。
 
 **误报排查**：guard 已剥离 `{{插值}}`、URL、文件名，并把连字符视作词边界
 （`ssh-agent` 不会被判成产品 `Agent`）。仍需放行时用 `exempt`：完整路径精确匹配，

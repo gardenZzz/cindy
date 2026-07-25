@@ -28,7 +28,7 @@
  *
  * 用法:
  *   node scripts/check-i18n-glossary.mjs                 # 校验(root: pnpm check:i18n-glossary)
- *   node scripts/check-i18n-glossary.mjs --update-baseline  # 重新冻结存量
+ *   node scripts/check-i18n-glossary.mjs --update-baseline  # 剪枝 baseline(只删不增)
  *   node scripts/check-i18n-glossary.mjs --report        # 打印完整违规明细(不阻断)
  *
  * 已知覆盖缺口(有意为之,记录在案):mobile 存在 i18next 之外的手写四语 catalog
@@ -434,7 +434,7 @@ if (stale.length > 0) {
   }
   if (stale.length > 40) console.error(`  ...(其余 ${stale.length - 40} 条省略)`);
   console.error(
-    '\nbaseline 只减不增。请删除上述条目,或直接重新生成:\n' +
+    '\nbaseline 只减不增。请删除上述条目,或跑剪枝命令自动摘掉已修好的:\n' +
       '  node scripts/check-i18n-glossary.mjs --update-baseline',
   );
 }
