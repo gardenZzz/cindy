@@ -68,6 +68,7 @@ import * as ledger from '../cindy-media/ledger.js';
 import { chatAttachmentOrigin } from '../cindy-media/attachmentGrantGate.js';
 import { resolveGhostAttachmentUrl } from './ghostAttachmentResolve.js';
 import { ghostSetupInteractionSessionId } from './ghostSetupInteractionSurface.js';
+import { t } from '../i18n.js';
 import { createLogger } from '../logger.js';
 
 const log = createLogger('mcp/cindy');
@@ -628,8 +629,7 @@ export function getCindyGhostsMcpDeps(sessionCtx?: LiziMcpSessionContext): Cindy
         return {
           ok: false,
           errorCode: 'GHOST_DISABLED_IN_WORKDIR',
-          message:
-            '用户已在当前工作目录停用该插件;不要重试,改用其它可用方式完成任务,必要时如实转告用户。',
+          message: t('newChat.pluginSetup.targetDisabledInWorkdir'),
         };
       }
       // Runtime setup gate: resolve the target before creating any durable
@@ -688,36 +688,63 @@ export function getCindyGhostsMcpDeps(sessionCtx?: LiziMcpSessionContext): Cindy
         .list()
         .find((g) => g.manifest.id === ghostId);
       if (!refreshed || !isGhostAvailableForActiveSession(ghostId)) {
-        return { ok: false, errorCode: 'GHOST_NOT_FOUND', message: '目标插件已卸载或当前不可用' };
+        return { ok: false, errorCode: 'GHOST_NOT_FOUND', message: t('newChat.pluginSetup.targetNotFound') };
       }
       if (!refreshed.enabled) {
-        return { ok: false, errorCode: 'GHOST_ASLEEP', message: '目标插件已被停用' };
+        return { ok: false, errorCode: 'GHOST_ASLEEP', message: t('newChat.pluginSetup.targetDisabled') };
       }
       if (isGhostDisabledForWorkdir(ghostId, sessionWorkdir)) {
         return {
           ok: false,
           errorCode: 'GHOST_DISABLED_IN_WORKDIR',
-          message: '用户已在当前工作目录停用该插件;不要重试。',
+          message: t('newChat.pluginSetup.targetDisabledInWorkdir'),
         };
       }
       if (
         !grantOnly &&
         !(refreshed.manifest.tools ?? []).some((candidate) => candidate.name === tool)
       ) {
-        return { ok: false, errorCode: 'TOOL_NOT_FOUND', message: `目标插件不再提供工具 ${tool}` };
+        return { ok: false, errorCode: 'TOOL_NOT_FOUND', message: `${t('newChat.pluginSetup.targetToolNotFound')} (${tool})` };
       }
-      const finalAssessment = getGhostSetupAssessment(ghostId);
+      let finalAssessment;
+      try {
+        finalAssessment = getGhostSetupAssessment(ghostId);
+      } catch {
+        return { ok: false, errorCode: 'INTERNAL', message: t('newChat.pluginSetup.assessmentReadFailed') };
+      }
       if (finalAssessment.state !== 'ready') {
         return {
           ok: false,
           errorCode: 'SETUP_REQUIRED',
-          message: '插件配置在调用恢复前发生变化，请完成设置后重试。',
+          message: t('newChat.pluginSetup.setupChangedDuringResume'),
           setup: finalAssessment,
         };
       }
       // 批量预授权(grant_only):只过户不派发。它与普通调用共用上面的
       // Host-authoritative setup gate，确保任何授权副作用之前插件已经 ready。
       if (grantOnly) {
+        // Full pre-grant gate: confirm target, workdir, and setup readiness
+        // BEFORE grantAttachmentUrls creates durable ledger entries.
+        const grantTarget = getGhostManager()
+          .list()
+          .find((g) => g.manifest.id === ghostId);
+        if (!grantTarget || !isGhostAvailableForActiveSession(ghostId)) {
+          return { ok: false, errorCode: 'GHOST_NOT_FOUND', message: t('newChat.pluginSetup.targetNotFound') };
+        }
+        if (!grantTarget.enabled) {
+          return { ok: false, errorCode: 'GHOST_ASLEEP', message: t('newChat.pluginSetup.targetDisabled') };
+        }
+        if (isGhostDisabledForWorkdir(ghostId, sessionWorkdir)) {
+          return { ok: false, errorCode: 'GHOST_DISABLED_IN_WORKDIR', message: t('newChat.pluginSetup.targetDisabledInWorkdir') };
+        }
+        try {
+          const grantOnlyAssessment = getGhostSetupAssessment(ghostId);
+          if (grantOnlyAssessment.state !== 'ready') {
+            return { ok: false, errorCode: 'SETUP_REQUIRED', message: t('newChat.pluginSetup.setupIncomplete'), setup: grantOnlyAssessment };
+          }
+        } catch {
+          return { ok: false, errorCode: 'INTERNAL', message: t('newChat.pluginSetup.assessmentReadFailed') };
+        }
         const grant = await grantAttachmentUrls({
           ghostId,
           urls: attachments!,
@@ -727,6 +754,28 @@ export function getCindyGhostsMcpDeps(sessionCtx?: LiziMcpSessionContext): Cindy
         });
         if (!grant.ok) {
           return { ok: false, errorCode: 'ATTACHMENT_INVALID', message: grant.message };
+        }
+        // Post-grant revalidation: the grant process includes an async user
+        // confirmation step; re-check everything before returning success.
+        const postGrant = getGhostManager()
+          .list()
+          .find((g) => g.manifest.id === ghostId);
+        if (!postGrant || !isGhostAvailableForActiveSession(ghostId)) {
+          return { ok: false, errorCode: 'GHOST_NOT_FOUND', message: t('newChat.pluginSetup.targetNotFound') };
+        }
+        if (!postGrant.enabled) {
+          return { ok: false, errorCode: 'GHOST_ASLEEP', message: t('newChat.pluginSetup.targetDisabled') };
+        }
+        if (isGhostDisabledForWorkdir(ghostId, sessionWorkdir)) {
+          return { ok: false, errorCode: 'GHOST_DISABLED_IN_WORKDIR', message: t('newChat.pluginSetup.targetDisabledInWorkdir') };
+        }
+        try {
+          const postGrantAssessment = getGhostSetupAssessment(ghostId);
+          if (postGrantAssessment.state !== 'ready') {
+            return { ok: false, errorCode: 'SETUP_REQUIRED', message: t('newChat.pluginSetup.setupChangedDuringResume'), setup: postGrantAssessment };
+          }
+        } catch {
+          return { ok: false, errorCode: 'INTERNAL', message: t('newChat.pluginSetup.assessmentReadFailed') };
         }
         log.info('ghost grant-only: batch pre-granted', { ghostId, count: grant.hashes.length });
         return {
@@ -811,14 +860,74 @@ export function getCindyGhostsMcpDeps(sessionCtx?: LiziMcpSessionContext): Cindy
         const { session_context: _dropped, ...rest } = mergedArgs;
         mergedArgs = rest;
       }
-      const targetManifest = getGhostManager()
+      // Pre-dispatch revalidation: attachment grants and dir tickets may have
+      // taken time; confirm the target is still available before committing the
+      // callId and dispatching to the sandbox.
+      const preDispatch = getGhostManager()
         .list()
-        .find((g) => g.manifest.id === ghostId)?.manifest;
-      if (targetManifest?.slots?.includes('session-context')) {
-        mergedArgs = {
-          ...mergedArgs,
-          session_context: await buildGhostSessionContext(sessionIdForConfirm, sessionWorkdir),
+        .find((g) => g.manifest.id === ghostId);
+      if (!preDispatch || !isGhostAvailableForActiveSession(ghostId)) {
+        return { ok: false, errorCode: 'GHOST_NOT_FOUND', message: t('newChat.pluginSetup.targetNotFound') };
+      }
+      if (!preDispatch.enabled) {
+        return { ok: false, errorCode: 'GHOST_ASLEEP', message: t('newChat.pluginSetup.targetDisabled') };
+      }
+      if (isGhostDisabledForWorkdir(ghostId, sessionWorkdir)) {
+        return {
+          ok: false,
+          errorCode: 'GHOST_DISABLED_IN_WORKDIR',
+          message: t('newChat.pluginSetup.targetDisabledInWorkdir'),
         };
+      }
+      if (!(preDispatch.manifest.tools ?? []).some((c) => c.name === tool)) {
+        return { ok: false, errorCode: 'TOOL_NOT_FOUND', message: `${t('newChat.pluginSetup.targetToolNotFound')} (${tool})` };
+      }
+      try {
+        const preDispatchAssessment = getGhostSetupAssessment(ghostId);
+        if (preDispatchAssessment.state !== 'ready') {
+          return {
+            ok: false,
+            errorCode: 'SETUP_REQUIRED',
+            message: t('newChat.pluginSetup.setupChangedDuringResume'),
+            setup: preDispatchAssessment,
+          };
+        }
+      } catch {
+        return { ok: false, errorCode: 'INTERNAL', message: t('newChat.pluginSetup.assessmentReadFailed') };
+      }
+      // Session-context slot: use the revalidated manifest to decide injection.
+      // Re-read manifest after the async buildGhostSessionContext to guard against
+      // a same-ID plugin replacement removing the slot during the await.
+      if (preDispatch.manifest.slots?.includes('session-context')) {
+        const ctx = await buildGhostSessionContext(sessionIdForConfirm, sessionWorkdir);
+        const postCtxManifest = getGhostManager()
+          .list()
+          .find((g) => g.manifest.id === ghostId)?.manifest;
+        if (postCtxManifest?.slots?.includes('session-context')) {
+          mergedArgs = { ...mergedArgs, session_context: ctx };
+        }
+      }
+      // Full revalidation after session-context await (DB query may take time)
+      const postCtx = getGhostManager().list().find((g) => g.manifest.id === ghostId);
+      if (!postCtx || !isGhostAvailableForActiveSession(ghostId)) {
+        return { ok: false, errorCode: 'GHOST_NOT_FOUND', message: t('newChat.pluginSetup.targetNotFound') };
+      }
+      if (!postCtx.enabled) {
+        return { ok: false, errorCode: 'GHOST_ASLEEP', message: t('newChat.pluginSetup.targetDisabled') };
+      }
+      if (isGhostDisabledForWorkdir(ghostId, sessionWorkdir)) {
+        return { ok: false, errorCode: 'GHOST_DISABLED_IN_WORKDIR', message: t('newChat.pluginSetup.targetDisabledInWorkdir') };
+      }
+      if (!(postCtx.manifest.tools ?? []).some((c) => c.name === tool)) {
+        return { ok: false, errorCode: 'TOOL_NOT_FOUND', message: `${t('newChat.pluginSetup.targetToolNotFound')} (${tool})` };
+      }
+      try {
+        const postCtxAssessment = getGhostSetupAssessment(ghostId);
+        if (postCtxAssessment.state !== 'ready') {
+          return { ok: false, errorCode: 'SETUP_REQUIRED', message: t('newChat.pluginSetup.setupChangedDuringResume'), setup: postCtxAssessment };
+        }
+      } catch {
+        return { ok: false, errorCode: 'INTERNAL', message: t('newChat.pluginSetup.assessmentReadFailed') };
       }
       // ── 卡槽③:callId 在这里预铸并登记给卡片服务 ────────────────────
       // 时序契约:register(供片窗开)→ dispatch(意识拿到同一 callId,执行

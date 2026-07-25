@@ -3689,6 +3689,9 @@
     },
     "pluginSetup": {
       "title": "{{name}} の設定",
+      "assessmentReadFailed": "プラグインの設定状態を読み取れませんでした。",
+      "setupIncomplete": "プラグインの設定が完了していません。",
+      "setupChangedDuringResume": "呼び出し再開中にプラグインの設定が変更されました。設定を完了してから再試行してください。",
       "chooseOne": "設定方法を1つ選択してください",
       "restoreAria": "{{name}} の設定を展開",
       "minimizeAria": "{{name}} の設定を折りたたむ",
@@ -3738,7 +3741,20 @@
         "satisfied": "完了",
         "failed": "失敗",
         "cancelled": "キャンセル済み"
-      }
+      },
+      "timeout": "設定がタイムアウトしました",
+      "oauthCancelled": "認証がキャンセルされました",
+      "oauthFailed": "認証に失敗しました：{{detail}}",
+      "pluginUninstalledDuringOauth": "対象プラグインがアンインストールされたか利用不可です",
+      "inlineSecretInvalid": "認証情報の値が無効です",
+      "pluginUnavailable": "対象プラグインがアンインストールされたか利用不可です",
+      "inlineActionExpired": "設定アクションの有効期限が切れました。もう一度お試しください",
+      "inlineSecretDeclChanged": "認証情報の宣言が変更されました。もう一度お試しください",
+      "inlineSecretStoreFailed": "認証情報の保存に失敗しました",
+      "targetNotFound": "対象プラグインがアンインストールされたか現在利用不可です",
+      "targetDisabled": "対象プラグインが無効化されています",
+      "targetDisabledInWorkdir": "ユーザーが現在のワーキングディレクトリでこのプラグインを無効にしています。リトライしないでください。",
+      "targetToolNotFound": "対象プラグインはこのツールを提供していません"
     },
     "createAgent": {
       "quickStart": "クイックスタート",
