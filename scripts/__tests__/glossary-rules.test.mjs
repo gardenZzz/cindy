@@ -21,6 +21,8 @@ import {
   occursIn,
   stripNonProse,
   normalizeForPunctuation,
+  countOccurrences,
+  countHalfWidthPunct,
 } from '../shared/glossary-rules.mjs';
 import { validateAgainstSchema } from '../shared/json-schema-lite.mjs';
 import { renderGlossaryDoc } from '../shared/glossary-doc.mjs';
@@ -566,5 +568,52 @@ test('validateAgainstSchema: 关键字的值形状写错必须报错而不是被
   assert.throws(
     () => validateAgainstSchema({}, { type: 'object', additionalProperties: 'yes' }),
     /additionalProperties 只支持 boolean 或 schema 对象/,
+  );
+  // items 同属「值是 schema」的位置,同样允许 boolean——不能按 object 死判,
+  // 否则合法的 `items: false` 会被误判成 schema 写错
+  assert.throws(
+    () => validateAgainstSchema({}, { type: 'array', items: 'yes' }),
+    /items 只支持 boolean 或 schema 对象/,
+  );
+});
+
+test('normalizeForPunctuation: URL / 邮箱后紧跟半角标点 + 中文时留下正文边界', () => {
+  // TOKEN_TAIL 把逗号留在了 token 外面,但 token 换成空格后逗号前就是空格,
+  // findHalfWidthPunct 认不出左边界,违规照样漏
+  assert.equal(findHalfWidthPunct(normalizeForPunctuation('请访问 https://x.test,返回对话列表')), ',');
+  assert.equal(findHalfWidthPunct(normalizeForPunctuation('联系 a@x.com,重启后重试')), ',');
+  assert.equal(findHalfWidthPunct(normalizeForPunctuation('联系 a@x.com;然后重启')), ';');
+  // 不能误伤 URL 自身的 query string / 端口号 / 路径冒号
+  for (const t of [
+    '见 https://a.test/x?ids=1,2&y=3 页面',
+    '详见 https://a.example/b:8080 页面',
+    '详见 config.json:12 行',
+    '打开 https://a.test/p 查看',
+    '邮件发到 ops@x.com 即可',
+  ]) {
+    assert.equal(findHalfWidthPunct(normalizeForPunctuation(t)), null, t);
+  }
+});
+
+test('countOccurrences: 次数进 fingerprint 才能挡住「已冻结 key 里新增一处」', () => {
+  assert.equal(countOccurrences('这个对话和那个会话', '会话'), 1);
+  assert.equal(countOccurrences('会话结束后新建会话', '会话'), 2);
+  // ASCII 词按词边界,允许复数 s;ssh-agent 不算产品 Agent
+  assert.equal(countOccurrences('创建 Worker 后 worker 会启动', 'Worker'), 2);
+  assert.equal(countOccurrences('用 ssh-agent 转发', 'Agent'), 0);
+  assert.equal(countHalfWidthPunct('先这样,再那样,最后收尾'), 2);
+});
+
+test('validateAgainstSchema: boolean schema 的 false 必须恒失败', () => {
+  // false 被当成「无约束对象」时,items: false 变成不检查、oneOf 的 false 分支
+  // 甚至能算唯一通过的分支,把「禁止一切」翻转成「允许一切」
+  assert.deepEqual(validateAgainstSchema(['x'], { type: 'array', items: true }), []);
+  const errors = validateAgainstSchema(['x'], { type: 'array', items: false });
+  assert.equal(errors.length, 1);
+  assert.match(errors[0], /schema 为 false,此处不允许任何值/);
+  // oneOf 里的 false 分支不能算作通过
+  assert.match(
+    validateAgainstSchema('x', { oneOf: [false, false] }).join(),
+    /oneOf/,
   );
 });

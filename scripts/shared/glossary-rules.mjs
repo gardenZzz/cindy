@@ -86,6 +86,36 @@ export function occursIn(text, term) {
 }
 
 /**
+ * 术语在文案里出现的次数。
+ *
+ * fingerprint 需要它:光靠「locale + key + 规则 + 词」无法区分同一个 key 里命中 1 次还是
+ * 3 次。某个 key 的一处「会话」被冻进 baseline 后,再往同一条文案里加一处「会话」会产出
+ * 完全相同的 fingerprint,新违规就被 baseline 掩盖、CI 照过——这违反 baseline「只减不增」
+ * 的契约。把次数编进 fingerprint,增加一处就是一条新指纹。
+ */
+export function countOccurrences(text, term) {
+  if (/^[\x20-\x7e]+$/.test(term)) {
+    const escaped = term.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    const re = new RegExp(`(?<![${WORD_BOUNDARY}])${escaped}s?(?![${WORD_BOUNDARY}])`, 'gi');
+    return [...text.matchAll(re)].length;
+  }
+  // CJK 词用不重叠的子串计数
+  let n = 0;
+  let from = 0;
+  for (;;) {
+    const i = text.indexOf(term, from);
+    if (i < 0) return n;
+    n += 1;
+    from = i + term.length;
+  }
+}
+
+/** 半角标点在文案里出现的次数(同 countOccurrences,供标点规则的 fingerprint 用)。 */
+export function countHalfWidthPunct(text) {
+  return [...text.matchAll(new RegExp(HALF_WIDTH_AFTER_HAN.source, 'g'))].length;
+}
+
+/**
  * 大小写形态检查:命中术语但拼写形态与标准不符时返回**第一个不符的**实际拼写,否则 null。
  *
  * 必须扫描全部匹配,不能只看第一个:一条文案里常先出现正确形态、后出现错误形态
@@ -186,6 +216,21 @@ export function normalizeForPunctuation(text) {
     .replace(/\{\{[^}]*\}\}/g, PROSE_PLACEHOLDER)
     .replace(/<\/?\d+>/g, PROSE_PLACEHOLDER)
     .replace(/\$t\([^)]*\)/g, PROSE_PLACEHOLDER)
+    // URL / 邮箱在标点检查里也要留下正文边界。
+    //
+    // TOKEN_TAIL 已经正确地把 `https://x.test,返回` 的逗号留在了外面,但若把 token 换成
+    // 空格,就变成「 ,返回」——逗号前面是空格,findHalfWidthPunct 认不出左边界,违规照样
+    // 漏掉。对读者来说 URL 渲染出来就是正文的一部分,和插值一样该用汉字替身。
+    //
+    // 注意只有**紧跟「半角标点 + CJK」**的 token 才替换成汉字替身:其余情形仍替换为空格,
+    // 否则 `config.json:` 这类路径分隔符会被当成正文标点误报(FILENAME_TOKEN 同理,
+    // 它永远替空格)。
+    //
+    // lookahead 里必须带 CJK,不能只写 [,;:!?]:token 匹配是贪婪的,只要 lookahead 能满足
+    // 就会回溯出更短的匹配——`https://a.test/x?ids=1,2` 会被切在 query string 内部的逗号处,
+    // 于是那个逗号被误判成正文标点。带上 CJK 后与 TOKEN_TAIL 自身的截断条件一致,不会回溯。
+    .replace(new RegExp(`${URL_TOKEN.source}(?=[,;:!?][${CJK_CHAR}])`, 'gi'), PROSE_PLACEHOLDER)
+    .replace(new RegExp(`${EMAIL_TOKEN.source}(?=[,;:!?][${CJK_CHAR}])`, 'g'), PROSE_PLACEHOLDER)
     .replace(URL_TOKEN, ' ')
     .replace(EMAIL_TOKEN, ' ')
     .replace(FILENAME_TOKEN, ' ');

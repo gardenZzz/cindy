@@ -59,9 +59,16 @@ const KEYWORD_SHAPE = {
   oneOf: 'array',
   properties: 'object',
   definitions: 'object',
-  items: 'object',
-  // additionalProperties 可以是 boolean 或 schema 对象,单独判
 };
+
+/**
+ * 值本身是一个 schema 的关键字。
+ *
+ * 这些位置允许 boolean schema(draft-07 里 `true` 恒通过、`false` 恒失败),
+ * 所以不能按 'object' 死判——那会把合法的 `items: false` 误判成 schema 写错。
+ * 其余关键字(type / required / …)仍按 KEYWORD_SHAPE 严格校验。
+ */
+const SCHEMA_VALUED = new Set(['items', 'additionalProperties']);
 
 function shapeOf(value) {
   if (Array.isArray(value)) return 'array';
@@ -82,10 +89,10 @@ function assertSupported(node, path = '#') {
           '不要让它被静默忽略',
       );
     }
-    if (key === 'additionalProperties') {
+    if (SCHEMA_VALUED.has(key)) {
       if (typeof value !== 'boolean' && shapeOf(value) !== 'object') {
         throw new Error(
-          `schema ${path}/additionalProperties 只支持 boolean 或 schema 对象,实际是 ${shapeOf(value)}`,
+          `schema ${path}/${key} 只支持 boolean 或 schema 对象,实际是 ${shapeOf(value)}`,
         );
       }
       continue;
@@ -107,7 +114,7 @@ function assertSupported(node, path = '#') {
   if (typeof node.additionalProperties === 'object') {
     assertSupported(node.additionalProperties, `${path}/additionalProperties`);
   }
-  if (node.items) assertSupported(node.items, `${path}/items`);
+  if (node.items !== undefined) assertSupported(node.items, `${path}/items`);
   for (const [i, child] of (node.oneOf ?? []).entries()) {
     assertSupported(child, `${path}/oneOf/${i}`);
   }
@@ -132,6 +139,16 @@ function matchesType(value, expected) {
  * 远程引用这类需要网络的能力。
  */
 function validateNode(value, schema, root, path, errors) {
+  // boolean schema 是合法 draft-07:true 恒通过,false 恒失败。
+  // assertSupported 已经放行它们,这里若不处理,`schema.$ref`/`schema.type` 全是 undefined,
+  // false 就被当成「无约束对象」——`items: false` 变成不检查,`oneOf` 里的 false 分支
+  // 甚至能算作唯一通过的分支,把本意「禁止一切」的约束翻转成「允许一切」。
+  if (schema === true) return;
+  if (schema === false) {
+    errors.push(`${path}: schema 为 false,此处不允许任何值`);
+    return;
+  }
+
   if (schema.$ref) {
     const m = /^#\/definitions\/([^/]+)$/.exec(schema.$ref);
     if (!m) throw new Error(`只支持 #/definitions/X 形式的 $ref,收到 ${schema.$ref}`);
@@ -175,7 +192,9 @@ function validateNode(value, schema, root, path, errors) {
     if (schema.minItems !== undefined && value.length < schema.minItems) {
       errors.push(`${path}: 至少需要 ${schema.minItems} 项`);
     }
-    if (schema.items) {
+    // 必须判 !== undefined:`items: false` 是合法 draft-07(禁止任何元素),
+    // 但它是 falsy,写 `if (schema.items)` 会把这条约束整个跳过。
+    if (schema.items !== undefined) {
       value.forEach((item, i) => validateNode(item, schema.items, root, `${path}[${i}]`, errors));
     }
   }
