@@ -1366,8 +1366,8 @@ describe('BillingPage plan change', () => {
     expect(screen.queryByText('billing.settings.subscriptionCard.cancelAction')).toBeNull();
   });
 
-  it.each(['CANCELED', 'INCOMPLETE_EXPIRED'] as const)(
-    'does not offer cancellation for a terminal %s subscription',
+  it.each(['INCOMPLETE', 'CANCELED', 'INCOMPLETE_EXPIRED'] as const)(
+    'does not offer renewal cancellation for a %s subscription',
     async (status) => {
       const billing = billingMocks();
       billing.getCurrentSubscription = vi.fn(async () => ({
@@ -1403,8 +1403,22 @@ describe('BillingPage plan change', () => {
     await act(async () => resolveConfirm(false));
   });
 
-  it('keeps the loading cancellation accessible and disables refresh during the request', async () => {
-    const billing = install(billingMocks());
+  it('keeps the loading cancellation accessible and disables competing actions', async () => {
+    const billing = billingMocks();
+    billing.getCurrentSubscription = vi.fn(async () => ({
+      subscription: activeSubscription({
+        planChangeId: 'plan_change_pending',
+        changeType: 'DOWNGRADE',
+        status: 'SCHEDULED',
+        quotedAmountMinor: null,
+        quotedCurrency: null,
+        quoteExpiresAt: null,
+        effectiveAt: '2026-08-01T00:00:00.000Z',
+        paymentAction: null,
+        targetPlan: null,
+      }),
+    }));
+    install(billing);
     const canceled = { ...activeSubscription(), cancelAtPeriodEnd: true };
     let resolveCancellation!: (subscription: BillingSubscription) => void;
     billing.cancelCurrentSubscription.mockReturnValueOnce(
@@ -1427,6 +1441,10 @@ describe('BillingPage plan change', () => {
     expect(refreshButton.hasAttribute('disabled')).toBe(true);
     fireEvent.click(refreshButton);
     expect(billing.getCurrentSubscription).toHaveBeenCalledTimes(1);
+    const undoButton = screen.getByText('billing.planChange.undo').closest('button')!;
+    expect(undoButton.hasAttribute('disabled')).toBe(true);
+    fireEvent.click(undoButton);
+    expect(billing.cancelPlanChange).not.toHaveBeenCalled();
 
     await act(async () => resolveCancellation(canceled));
   });
