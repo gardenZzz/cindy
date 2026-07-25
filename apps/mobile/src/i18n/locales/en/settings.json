@@ -84,8 +84,10 @@
   "legal": {
     "sectionTitle": "Legal",
     "privacyPolicy": "Privacy Policy",
+    "userAgreement": "User Agreement",
     "view": "View",
     "openPrivacyPolicy": "Open the privacy policy",
+    "openUserAgreement": "Open the user agreement",
     "appFilingNumber": "App Filing Number"
   },
   "account": {

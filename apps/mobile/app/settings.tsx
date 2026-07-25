@@ -32,6 +32,7 @@ import {
   StatusDot,
 } from '@/components/MobilePrimitives';
 import { AUTH_API_BASE_URL, AUTH_REGION, DESKTOP_PACKAGE_VERSION, DEVICE_LINK_API_BASE_URL, IS_OTA_SELFHOST, REVIEW_MODE } from '@/config/env';
+import { LEGAL_LINKS } from '@/config/legalLinks';
 import { useDeviceLink } from '@/device-link/DeviceLinkContext';
 import { buildMobileDeviceName } from '@/device-link/mobileDeviceIdentity';
 import { formatRemoteError } from '@/device-link/remoteStatus';
@@ -61,9 +62,6 @@ type SelfDeviceNameQueuedWrite =
 const SETTINGS_DEVICE_TIMEOUT_MS = 12_000;
 // 显示语言选项:「跟随系统」在前,4 种具体语言在后(与 desktop LanguageSection 同序)。
 const LANGUAGE_OPTIONS: readonly LocalePreference[] = ['system', ...SUPPORTED_LOCALES];
-const PRIVACY_POLICY_URL = AUTH_REGION === 'cn'
-  ? 'https://cindy.cn/privacy/'
-  : 'https://cindy.app/privacy/';
 
 export default function SettingsScreen() {
   const styles = useThemedStyles(makeStyles);
@@ -189,7 +187,11 @@ export default function SettingsScreen() {
   }, []);
 
   const openPrivacyPolicy = useCallback(() => {
-    void Linking.openURL(PRIVACY_POLICY_URL).catch(() => undefined);
+    void Linking.openURL(LEGAL_LINKS.privacyPolicy).catch(() => undefined);
+  }, []);
+
+  const openUserAgreement = useCallback(() => {
+    void Linking.openURL(LEGAL_LINKS.termsOfService).catch(() => undefined);
   }, []);
 
   const checkForUpdate = useCallback(async () => {
@@ -635,7 +637,8 @@ export default function SettingsScreen() {
           </SettingsGroup>
         ) : null}
 
-        {/* 法律信息:隐私政策始终显示;App 备案号仅国内版显示。 */}
+        {/* 法律信息:隐私政策/用户协议始终显示(链接区域分流走 legalLinks 单点);
+            App 备案号仅国内版显示。 */}
         <SettingsGroup title={t('settings.legal.sectionTitle')}>
           <ActionInfoRow
             accessibilityLabel={t('settings.legal.openPrivacyPolicy')}
@@ -644,6 +647,15 @@ export default function SettingsScreen() {
             label={t('settings.legal.privacyPolicy')}
             onPress={openPrivacyPolicy}
             testID="settings.privacyPolicy"
+            value={t('settings.legal.view')}
+          />
+          <ActionInfoRow
+            accessibilityLabel={t('settings.legal.openUserAgreement')}
+            accessibilityRole="link"
+            key="user-agreement"
+            label={t('settings.legal.userAgreement')}
+            onPress={openUserAgreement}
+            testID="settings.userAgreement"
             value={t('settings.legal.view')}
           />
           {AUTH_REGION === 'cn' ? (
