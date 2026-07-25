@@ -2,6 +2,9 @@ import type { CSSProperties, ReactNode } from 'react';
 import { Maximize2, Minimize2, PictureInPicture2 } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 
+import { CHROME_ACTIONS_GEOMETRY } from '@/components/layout/chromeActionsGeometry';
+import { useMacFullscreen } from '@/hooks/useMacFullscreen';
+
 import { usePanelMaximize } from '../layout/panelMaximize';
 
 /**
@@ -44,6 +47,13 @@ export function PanelChrome({ title, actions, panelKind, onDetach }: PanelChrome
   const maximize = usePanelMaximize();
   const showMaximize = panelKind !== undefined && maximize !== null;
   const isMaximized = showMaximize && maximize.maximizedKind === panelKind;
+  // ChromeActions 按钮簇的窗口坐标(与 ChromeActions.tsx 的 x 同式):
+  // 面板顶带的 no-drag 洞必须钉在这里,见下方洞元素注释。
+  const { isMac, isFullscreen } = useMacFullscreen();
+  const chromeClusterX =
+    isMac && !isFullscreen
+      ? CHROME_ACTIONS_GEOMETRY.macTrafficLightLeft
+      : CHROME_ACTIONS_GEOMETRY.defaultLeft;
   return (
     <>
       {/* 窗口 chrome 让位带(§6 规则 3:顶部 46px 是系统领地,任何面板不得占用)。
@@ -53,7 +63,26 @@ export function PanelChrome({ title, actions, panelKind, onDetach }: PanelChrome
         aria-hidden
         className="h-[46px] shrink-0 border-b border-[var(--border-default)] bg-[var(--panel-bg)]"
         style={{ WebkitAppRegion: 'drag' } as CSSProperties}
-      />
+      >
+        {/* ChromeActions 浮层按钮簇的 no-drag 洞:左栏折叠时本面板可能顶到窗口
+            最左,顶带会盖住左上角折叠/菜单按钮 —— Electron 拖拽区是纯几何
+            (drag 矩形减 no-drag 矩形)且挖洞只在 drag 元素后代上可靠生效,
+            浮层自身的 no-drag 不算数(同 Sidebar 顶行 / ContentHeader spacer)。
+            fixed 定位取窗口坐标:面板不在左上角时矩形与顶带不相交 = 几何
+            no-op,无需感知自己的列位;pointer-events:none 不挡命中(拖拽区
+            注册是几何计算,不依赖 DOM 事件)。 */}
+        <div
+          data-testid="panel-chrome-actions-hit-hole"
+          className="pointer-events-none fixed top-0 h-[46px]"
+          style={
+            {
+              left: chromeClusterX,
+              width: CHROME_ACTIONS_GEOMETRY.clusterWidth,
+              WebkitAppRegion: 'no-drag',
+            } as CSSProperties
+          }
+        />
+      </div>
       <div
         data-panel-drag-handle=""
         className="flex h-[36px] shrink-0 items-center justify-between gap-2 border-b border-[var(--border-default)] bg-[var(--panel-bg)] px-3"
