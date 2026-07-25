@@ -120,14 +120,22 @@ UI 文案的语气与措辞另见 [`DESIGN.md`](../design-rules/DESIGN.md) 的 V
   - `pnpm check:i18n-glossary` 校验译文术语与标点，并检查 `GLOSSARY.md` 是否与术语表同步。
   - 两者互补：前者管「key 齐不齐」，后者管「词译得一不一致」，谁也替代不了谁。改
     i18n 后两个都要跑（CI 已强制）。
-- **已知盲区**：mobile 存在 i18next 之外的手写四语 catalog（`src/auth/loginMessages.ts`
-  等 `.ts` 文件），guard 只扫 locale JSON，不解析这些 TS。改动它们时需人工对照术语表。
+- **影子 catalog**：mobile 有一批不走 i18next 的手写四语 catalog（`src/auth/loginMessages.ts`、
+  `src/session/newSessionMessages.ts`），根脚本只扫 locale JSON、扫不到这些 `.ts`。它们由
+  `apps/mobile/src/__tests__/shadowCatalogGlossary.test.ts` 覆盖——走 vitest 直接 import 运行时
+  对象，复用 `scripts/shared/glossary-rules.mjs` 的同一套判定，随 `test:unit` 阻断。新增同类
+  手写 catalog 时记得加进那个测试的 `collectEntries()`。
 - **批量改术语时必须跑全量 `pnpm test:unit`**：仓库里有若干测试直接断言中文文案
   （`automationGeneratedSessions.test.ts`、`builtinToolsCollabDescriptionI18n.test.ts`、
   mobile 的 `sessionMenu.test.ts` 等）。它们是有意的文案锁，改词后要同步更新期望值，
   不能靠 guard 绿灯就认为改完了。反过来这也是一层兜底——Session→对话 那轮正是
   `mobileCindyVoiceSession.test.ts` 暴露了漏网的「语音识别会话」（ASR WebSocket
   连接，不是产品对话）。
+- **有些 locale 文案是 package 源的镜像**：改 locale 时必须同步改源，否则镜像断言会红。
+  已知两处：`packages/maker-shared/src/sessionOperation.ts` 的 `DESKTOP_SESSION_CHAT_PLACEHOLDER_ZH_CN`
+  （mobile composer placeholder 必须等于 desktop `ccAgent.layout.chatPlaceholder`）、
+  `packages/maker-scheduler/src/builtin-templates.ts`（desktop locale 的 scheduler 模板块要求与
+  package 源逐字一致）。这类断言不是碍事，正是它们保证了跨端文案不漂移。
 - **标点可能不在 locale 里**：部分错误消息由代码拼接（如 `cloudVoiceHttpErrorMessage()`
   给 `composer.voice.refineFailed` 补半角冒号），guard 只扫 locale JSON，改不到也管不到。
   批量改标点后若测试断言与实际值方向相反，先查该文案的冒号究竟来自 locale 还是代码，

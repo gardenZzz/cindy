@@ -162,11 +162,28 @@ for (const term of glossary.terms) {
   for (const locale of locales) {
     const entries = corpus.get(locale);
 
-    // 规则 1:禁用译法
-    for (const bad of term.forbidden?.[locale] ?? []) {
+    // 规则 1:禁用译法。
+    // 条目为字符串时无条件禁用;为 { text, whenEn } 时只在该 key 的**英文源**匹配
+    // whenEn 才禁——因为同一个中文词往往是另一个英文词的正确译法(Directory 该译
+    // 「目录」,但无条件禁「文件夹」会误伤 Folder;Running 禁「进行中」会误伤
+    // In Progress)。没有这个条件,这类术语根本没法进表。
+    for (const entry of term.forbidden?.[locale] ?? []) {
+      const bad = typeof entry === 'string' ? entry : entry.text;
+      const whenEn = typeof entry === 'string' ? null : entry.whenEn;
+      const sourceRe = whenEn
+        ? new RegExp(
+            `(?<![A-Za-z0-9_-])${whenEn.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}s?(?![A-Za-z0-9_-])`,
+            'i',
+          )
+        : null;
+
       for (const [key, value] of entries) {
         if (isExempt(key)) continue;
         if (!occursIn(stripNonProse(value), bad)) continue;
+        if (sourceRe) {
+          const source = corpus.get(glossary.sourceLocale)?.get(key);
+          if (!source || !sourceRe.test(source)) continue;
+        }
         const expected = term.translations?.[locale] || term.en;
         violations.push(
           makeViolation({
@@ -175,7 +192,9 @@ for (const term of glossary.terms) {
             rule: 'forbidden-term',
             detail: `${term.id}:${bad}`,
             severity,
-            hint: `「${bad}」是 ${term.en} 的禁用译法,应为「${expected}」`,
+            hint:
+              `「${bad}」是 ${term.en} 的禁用译法,应为「${expected}」` +
+              (whenEn ? `(仅当英文源含 ${whenEn} 时)` : ''),
           }),
         );
       }

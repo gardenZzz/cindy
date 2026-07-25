@@ -177,7 +177,7 @@
     "learnStarted": "技能学习已启动",
     "learnStartedBody": "蒸馏在桌面端后台进行，完成后请到桌面端查看并评审技能草案。",
     "learnFailed": "技能学习未能启动",
-    "learnBusyBody": "已有一个学习任务在进行中，等它完成后再试。",
+    "learnBusyBody": "已有一个学习任务在运行中，等它完成后再试。",
     "learnFailedBody": "启动失败：{{detail}}",
     "unknownError": "未知错误"
   },

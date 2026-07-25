@@ -27,6 +27,12 @@ function renderTranslation(term, locale) {
   return value;
 }
 
+/** 禁用词条目可能是字符串（无条件）或 { text, whenEn }（仅当英文源匹配时禁用）。 */
+function forbiddenLabel(entry) {
+  if (typeof entry === 'string') return entry;
+  return `${entry.text}（仅当英文含 ${entry.whenEn}）`;
+}
+
 export function renderGlossaryDoc(glossary) {
   const terms = sortTerms(glossary.terms);
   const decided = terms.filter((t) => t.status === 'decided');
@@ -62,7 +68,7 @@ export function renderGlossaryDoc(glossary) {
     for (const term of decided) {
       const cells = locales.map((l) => cell(renderTranslation(term, l)));
       const forbidden = Object.entries(term.forbidden ?? {})
-        .flatMap(([loc, words]) => words.map((w) => `${loc}: ${w}`))
+        .flatMap(([loc, words]) => words.map((w) => `${loc}: ${forbiddenLabel(w)}`))
         .join('；');
       lines.push(`| **${cell(term.en)}** | ${cells.join(' | ')} | ${cell(forbidden) || '—'} |`);
     }
@@ -118,7 +124,7 @@ export function renderGlossaryDoc(glossary) {
       lines.push('');
       lines.push(term.note);
       const forbidden = Object.entries(term.forbidden ?? {})
-        .flatMap(([loc, words]) => words.map((w) => `\`${w}\`（${loc}）`))
+        .flatMap(([loc, words]) => words.map((w) => `\`${forbiddenLabel(w)}\`（${loc}）`))
         .join('、');
       if (forbidden) {
         lines.push('');
