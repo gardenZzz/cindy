@@ -361,7 +361,10 @@ for (const locale of locales) {
           locale,
           key,
           rule: 'punct-halfwidth',
-          detail: `${mark}\u00d7${countHalfWidthPunct(prose)}`,
+          // detail 只表达「半角标点命中总次数」,不与 mark(第一个命中的标点)绑定:
+          // 一条文案里同时有 `,` 和 `:` 时,`,×2` 会读成「两个逗号」,而且指纹会随
+          // 「哪个标点先出现」变化——同样的两处违规换个顺序就成了另一条指纹。
+          detail: `halfwidth\u00d7${countHalfWidthPunct(prose)}`,
           severity: 'error',
           text: value,
           hint: `中文字符后应使用全角「${FULL_WIDTH_PUNCT[mark] ?? mark}」,当前是半角「${mark}」`,

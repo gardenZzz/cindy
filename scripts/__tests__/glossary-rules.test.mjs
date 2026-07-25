@@ -355,8 +355,16 @@ test('glossary-baseline.json: 条目格式合法且无重复', () => {
   assert.equal(new Set(entries).size, entries.length, 'baseline 不应有重复条目');
   for (const entry of entries) {
     const parts = entry.split('\t');
-    assert.equal(parts.length, 4, `baseline 条目 "${entry}" 应为 locale\\tkey\\trule\\tdetail 四段`);
+    // 五段:locale / key / rule / detail / 文案摘要。摘要是后加的(见 makeViolation 注释),
+    // 断言必须跟上——baseline 当前为空会让这条空转通过,而第一条真条目就会让
+    // pnpm test:unit 失败,把 baseline 流程整个卡死。
+    assert.equal(
+      parts.length,
+      5,
+      `baseline 条目 "${entry}" 应为 locale\\tkey\\trule\\tdetail\\tdigest 五段`,
+    );
     assert.ok(glossary.locales.includes(parts[0]), `baseline 条目语言 "${parts[0]}" 不在术语表 locales 内`);
+    assert.match(parts[4], /^[0-9a-f]{12}$/, `baseline 条目摘要格式不对: ${parts[4]}`);
   }
 });
 
@@ -760,4 +768,14 @@ test('normalizeForPunctuation: 文件名后的正文标点与 URL 后的省略�
   assert.equal(hasAsciiEllipsis(normalizeForPunctuation('联系 a@x.com...然后重试')), true);
   // URL 内部的单点不受影响
   assert.equal(hasAsciiEllipsis(normalizeForPunctuation('见 https://a.test/a.b.c 页面')), false);
+});
+
+test('findHalfWidthPunct: 连字符 / 下划线结尾的 code token 后也算左边界', () => {
+  // 代码风格的 token 常以 - 或 _ 收尾:`该 id 使用了官方保留前缀 cindy-,仅随…`
+  // 逗号前是连字符,只认字母数字会整类漏掉
+  assert.equal(findHalfWidthPunct('保留前缀 cindy-,仅随应用内置的插件可用'), ',');
+  assert.equal(findHalfWidthPunct('变量 foo_,然后继续'), ',');
+  // 仍要求右侧是 CJK,纯 ASCII 片段不受影响
+  assert.equal(findHalfWidthPunct('a=1, b=2 的形式'), null);
+  assert.equal(findHalfWidthPunct('GPT-4, Claude 两者'), null);
 });

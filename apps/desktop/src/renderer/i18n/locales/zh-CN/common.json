@@ -1636,7 +1636,7 @@
     "computerUse": {
       "title": "自动操作",
       "description": "让 Agent 使用电脑和已连接设备替你完成任务。浏览器自动化使用独立浏览器；Android 自动化使用 ADB；电脑自动化依赖本机 driver。",
-      "codexRefreshDeferred": "设置已保存，但 Codex 正忙；重启应用后将对 Codex 新对话生效",
+      "codexRefreshDeferred": "设置已保存，但 Codex 正忙；重启应用后将对新的 Codex Agent 会话生效",
       "browser": {
         "title": "自动操作浏览器",
         "description": "一个 Agent 专用的独立浏览器，与你日常的 Chrome 互不影响",
@@ -2452,7 +2452,7 @@
         "fileInvalid": "不是合法的 .cindy 插件文件",
         "alreadyInstalled": "这个插件已经安装",
         "commandConflict": "它的指令和已装插件撞名了，先卸载占用方或让作者改名",
-        "idReserved": "该 id 使用了官方保留前缀 cindy-,仅随应用内置的插件可用",
+        "idReserved": "该 id 使用了官方保留前缀 cindy-，仅随应用内置的插件可用",
         "sourceMissing": "找不到所选文件",
         "generic": "操作失败，请稍后重试",
         "updateIdMismatch": "所选文件是插件「{{id}}」，与当前插件「{{expected}}」不一致"
@@ -4096,7 +4096,7 @@
         "deferred": "已登记切换：下一条消息发出时将切换到 {{agent}} · {{model}}",
         "confirmation": {
           "title": "切换 Agent？",
-          "description": "新 Agent 引擎会通过交接摘要续接，思考内容等不能保证完美继承；切回时仍可继续原引擎对话。切换还会让 prompt 缓存中断一次，可能造成 Token 消耗的增加。",
+          "description": "新 Agent 引擎会通过交接摘要续接，思考内容等不能保证完美继承；切回时仍可继续原引擎会话。切换还会让 prompt 缓存中断一次，可能造成 Token 消耗的增加。",
           "confirm": "切换 Agent",
           "cancel": "保留当前 Agent",
           "dontShowAgain": "下次不再提醒"
