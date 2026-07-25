@@ -1152,9 +1152,6 @@ function PromotionalGrantLedger({
   currency: string;
 }) {
   const { t } = useTranslation();
-  const hasUnavailableHistoricalUsage = usage.promotionalGrants.some(
-    (grant) => grant.usedAmount === null,
-  );
   return (
     <div className="border-t border-[var(--border-default)] px-5 py-5">
       <div className="flex items-start justify-between gap-4">
@@ -1178,11 +1175,6 @@ function PromotionalGrantLedger({
           {t('billing.usage.promotionalDetails.incomplete', {
             count: usage.promotionalGrants.length,
           })}
-        </p>
-      )}
-      {hasUnavailableHistoricalUsage && (
-        <p className="mt-3 rounded-lg bg-[var(--surface-chip)] px-3 py-2 text-11 leading-4 text-[var(--text-secondary)]">
-          {t('billing.usage.promotionalDetails.historicalUsageUnavailable')}
         </p>
       )}
 
@@ -1255,14 +1247,14 @@ function GrantAmount({
   currency,
 }: {
   label: string;
-  amount: string | null;
+  amount: string;
   currency: string;
 }) {
   return (
     <div className="min-w-0 text-right">
       <p className="truncate text-10 text-[var(--text-tertiary)]">{label}</p>
       <p className="mt-0.5 truncate text-11 font-medium tabular-nums text-[var(--text-primary)]">
-        {amount === null ? '—' : formatMoney(amount, currency)}
+        {formatMoney(amount, currency)}
       </p>
     </div>
   );
