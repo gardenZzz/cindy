@@ -547,6 +547,9 @@ interface ChatInputProps {
     worker: CollabWorkerKind;
     onChange: (next: { enabled: boolean; worker: CollabWorkerKind }) => void;
     onOpenDetails?: () => void;
+    onDisabledActivate?: () => void;
+    disabled?: boolean;
+    disabledReason?: string;
   };
 }
 
@@ -5352,7 +5355,17 @@ export function ChatInput({
                     worker={collaboration.worker}
                     onChange={collaboration.onChange}
                     onOpenDetails={collaboration.onOpenDetails}
-                    disabled={disabled}
+                    onDisabledActivate={
+                      !disabled && collaboration.disabled
+                        ? collaboration.onDisabledActivate
+                        : undefined
+                    }
+                    disabled={disabled || collaboration.disabled}
+                    disabledReason={
+                      !disabled && collaboration.disabled
+                        ? collaboration.disabledReason
+                        : undefined
+                    }
                     dense={effectiveDenseToolbar}
                     iconOnly={effectiveDenseToolbar}
                   />
