@@ -6,6 +6,10 @@
  */
 
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import {
+  GHOST_SETUP_MAX_INTERACTION_STEPS,
+  GHOST_SETUP_MAX_STEPS,
+} from '../../shared/ghost';
 import type { AgentInputProjection, AgentInputQueuedMessage } from '../../shared/agentInputQueue';
 import type { Message } from '@/lib/ccAgent.types';
 import type { AttachedFile, MentionedResource } from '@/lib/fileTypes';
@@ -827,27 +831,43 @@ describe('makerChatStore text delta batching', () => {
     expect(makerChatStore.getSnapshot(SESSION_ID).pendingPluginSetup).toBeNull();
   });
 
-  it('accepts all 64 manifest-valid setup steps and rejects a 65th', () => {
+  it('accepts manifest-max and host-reserve step counts, rejects past the transport cap', () => {
     const step = pluginSetupRequest(1).steps[0];
-    emitInteractionRequest({
-      ...pluginSetupRequest(1),
-      steps: Array.from({ length: 64 }, (_, index) => ({
+    const buildSteps = (count: number) =>
+      Array.from({ length: count }, (_, index) => ({
         ...step,
         id: `setup-${index}`,
         action: { ...step.action, id: `oauth:${index}` },
-      })),
-    });
-    expect(makerChatStore.getSnapshot(SESSION_ID).pendingPluginSetup?.steps).toHaveLength(64);
+      }));
 
+    // manifest 合法声明的步数上限(8 组 × 8 条)。
+    emitInteractionRequest({
+      ...pluginSetupRequest(1),
+      steps: buildSteps(GHOST_SETUP_MAX_STEPS),
+    });
+    expect(makerChatStore.getSnapshot(SESSION_ID).pendingPluginSetup?.steps).toHaveLength(
+      GHOST_SETUP_MAX_STEPS,
+    );
+
+    // Host-owned setup provider 可在 manifest 步骤之外追加 Core 步骤,
+    // Main → Renderer 的传输上限是 GHOST_SETUP_MAX_INTERACTION_STEPS
+    // (= manifest 上限 + Host 保留),打满仍须完整过界。
+    makerChatStore.purgeSession(SESSION_ID);
+    emitInteractionRequest({
+      ...pluginSetupRequest(1),
+      requestId: 'plugin-setup-transport-cap',
+      steps: buildSteps(GHOST_SETUP_MAX_INTERACTION_STEPS),
+    });
+    expect(makerChatStore.getSnapshot(SESSION_ID).pendingPluginSetup?.steps).toHaveLength(
+      GHOST_SETUP_MAX_INTERACTION_STEPS,
+    );
+
+    // 超过传输上限:整卡拒收。
     makerChatStore.purgeSession(SESSION_ID);
     emitInteractionRequest({
       ...pluginSetupRequest(1),
       requestId: 'plugin-setup-oversized',
-      steps: Array.from({ length: 65 }, (_, index) => ({
-        ...step,
-        id: `setup-${index}`,
-        action: { ...step.action, id: `oauth:${index}` },
-      })),
+      steps: buildSteps(GHOST_SETUP_MAX_INTERACTION_STEPS + 1),
     });
     expect(makerChatStore.getSnapshot(SESSION_ID).pendingPluginSetup).toBeNull();
   });
