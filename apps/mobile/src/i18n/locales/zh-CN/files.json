@@ -64,7 +64,7 @@
     "oversizeUnknown": "过大",
     "binaryFile": "二进制文件，无法以文本预览",
     "readFailed": "读取失败",
-    "truncated2mb": "文件超过 2 MB,仅显示前 2 MB 内容",
+    "truncated2mb": "文件超过 2 MB，仅显示前 2 MB 内容",
     "truncatedLines": "仅显示前 {{lines}} 行",
     "mdRendered": "渲染",
     "mdSource": "源码",

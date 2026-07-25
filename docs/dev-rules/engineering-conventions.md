@@ -120,11 +120,22 @@ UI 文案的语气与措辞另见 [`DESIGN.md`](../design-rules/DESIGN.md) 的 V
   - `pnpm check:i18n-glossary` 校验译文术语与标点，并检查 `GLOSSARY.md` 是否与术语表同步。
   - 两者互补：前者管「key 齐不齐」，后者管「词译得一不一致」，谁也替代不了谁。改
     i18n 后两个都要跑（CI 已强制）。
-- **影子 catalog**：mobile 有一批不走 i18next 的手写四语 catalog（`src/auth/loginMessages.ts`、
-  `src/session/newSessionMessages.ts`），根脚本只扫 locale JSON、扫不到这些 `.ts`。它们由
-  `apps/mobile/src/__tests__/shadowCatalogGlossary.test.ts` 覆盖——走 vitest 直接 import 运行时
-  对象，复用 `scripts/shared/glossary-rules.mjs` 的同一套判定，随 `test:unit` 阻断。新增同类
-  手写 catalog 时记得加进那个测试的 `collectEntries()`。
+- **影子 catalog**：有几批不走 i18next 的手写四语 catalog，根脚本只扫 locale JSON、扫不到
+  这些 `.ts`。它们由 vitest 直接 import 运行时对象覆盖，复用
+  `scripts/shared/glossary-rules.mjs` 的同一套判定，随 `test:unit` 阻断：
+  - mobile：`src/auth/loginMessages.ts`、`src/session/newSessionMessages.ts`、
+    `src/session/fullAccessConfirmationCopy.ts`（Full access 高风险权限提示）→
+    `apps/mobile/src/__tests__/shadowCatalogGlossary.test.ts`
+  - desktop：`src/main/applicationMenuLabels.ts`（macOS 原生菜单栏）→
+    `apps/desktop/src/main/__tests__/applicationMenuLabels.test.ts`
+
+  新增同类手写 catalog 时记得加进对应测试的 `collectEntries()`。**catalog 要单独成模块**：
+  原先这两份分别嵌在 `bootstrap-electron.ts` 与 `fullAccessConfirmation.ts` 里，测试一 import
+  就会拉起整个 Electron 主进程 / react-native，根本跑不起来——这也是它们长期是盲区的原因。
+- **Slack / IM 侧的文案不在任何 locale 文件里**：`src/main/hook-control/interactions.ts` 的
+  权限卡片按钮是硬编码中文，与应用内 `permissions.alwaysAllowForSession` 是同一个动作。
+  改产品术语时这类「同一动作、两处独立文案」要一起找出来，否则用户在 Slack 和 App 里
+  看到两种说法。
 - **批量改术语时必须跑全量 `pnpm test:unit`**：仓库里有若干测试直接断言中文文案
   （`automationGeneratedSessions.test.ts`、`builtinToolsCollabDescriptionI18n.test.ts`、
   mobile 的 `sessionMenu.test.ts` 等）。它们是有意的文案锁，改词后要同步更新期望值，

@@ -22,7 +22,7 @@
  * runner 校验其属于目标 agent 的能力档位, 合法即用, 非法/缺省落
  * bypassPermissions(hook 无人值守的历史默认); 复用/接管以 session meta 为
  * 权威, options 不覆盖。非 bypass 档下 agent 的权限请求经 interaction.request
- * 以 Slack 卡片呈现(允许一次/本会话总是允许/拒绝), 超时安全默认拒绝。
+ * 以 Slack 卡片呈现(允许一次/本对话总是允许/拒绝), 超时安全默认拒绝。
  */
 
 import path from 'node:path';

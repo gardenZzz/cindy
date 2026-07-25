@@ -1,0 +1,132 @@
+/**
+ * 原生应用菜单四语标签的术语门禁。
+ *
+ * 为什么需要单独一个测试:`scripts/check-i18n-glossary.mjs` 只读 renderer 的 locale
+ * JSON,扫不到这份手写 TS catalog。引入术语表那轮它就整个漏掉了——zh-CN 的 `issues`
+ * 还写着「议题」(Issue 的禁用译法),三语的 `settings` / `checkForUpdates` 还带着
+ * ASCII 三点省略号,而这是 macOS 上常驻屏幕顶端的菜单栏,比大多数界面文案更显眼。
+ *
+ * 判定逻辑复用 scripts/shared/glossary-rules.mjs,与根门禁、mobile 影子 catalog 同一套,
+ * 避免三处各写一份规则后悄悄漂移。
+ */
+import { readFileSync } from 'node:fs';
+import { resolve } from 'node:path';
+
+import { describe, expect, it } from 'vitest';
+
+import {
+  ELLIPSIS_LOCALES,
+  HALFWIDTH_PUNCT_LOCALES,
+  findCaseMismatch,
+  findHalfWidthPunct,
+  hasAsciiEllipsis,
+  makeExemptChecker,
+  normalizeForPunctuation,
+  occursIn,
+  stripNonProse,
+  WORD_BOUNDARY,
+  // eslint-disable-next-line @typescript-eslint/ban-ts-comment
+  // @ts-ignore -- 共享规则是 .mjs,没有类型声明;这里只用它做断言
+} from '../../../../../scripts/shared/glossary-rules.mjs';
+
+import { APPLICATION_MENU_LABELS } from '../applicationMenuLabels';
+
+const REPO_ROOT = resolve(__dirname, '../../../../..');
+
+interface GlossaryTerm {
+  id: string;
+  status: 'decided' | 'proposed';
+  en: string;
+  translations?: Record<string, string>;
+  forbidden?: Record<string, (string | { text: string; whenEn: string })[]>;
+  exempt?: string[];
+  checkCase?: boolean;
+}
+
+const glossary = JSON.parse(
+  readFileSync(resolve(REPO_ROOT, 'i18n/glossary.json'), 'utf8'),
+) as { locales: string[]; sourceLocale: string; terms: GlossaryTerm[] };
+
+/** 摊平成 (locale, key, value)。key 形态与根门禁一致,便于 exempt 复用同一套写法。 */
+const entries = Object.entries(APPLICATION_MENU_LABELS).flatMap(([locale, labels]) =>
+  Object.entries(labels).map(([key, value]) => ({
+    locale,
+    key: `desktop-menu:${key}`,
+    value: value as string,
+  })),
+);
+
+/** key → 英文源文案,供条件禁用按英文源判断。 */
+const sourceByKey = new Map(
+  entries.filter((e) => e.locale === glossary.sourceLocale).map((e) => [e.key, e.value]),
+);
+
+describe('原生应用菜单标签符合术语表', () => {
+  it('摊平后覆盖四种语言', () => {
+    const locales = new Set(entries.map((e) => e.locale));
+    expect([...locales].sort()).toEqual([...glossary.locales].sort());
+    expect(entries.length).toBeGreaterThan(0);
+  });
+
+  it('不使用术语表的禁用译法', () => {
+    const violations: string[] = [];
+    const notes: string[] = [];
+    for (const term of glossary.terms) {
+      const isExempt = makeExemptChecker(term.exempt);
+      for (const { locale, key, value } of entries) {
+        if (isExempt(key)) continue;
+        for (const entry of term.forbidden?.[locale] ?? []) {
+          const bad = typeof entry === 'string' ? entry : entry.text;
+          const whenEn = typeof entry === 'string' ? null : entry.whenEn;
+          if (!occursIn(stripNonProse(value), bad)) continue;
+          if (whenEn) {
+            const source = sourceByKey.get(key);
+            const re = new RegExp(
+              `(?<![${WORD_BOUNDARY}])${whenEn.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}s?(?![${WORD_BOUNDARY}])`,
+              'i',
+            );
+            if (!source || !re.test(stripNonProse(source))) continue;
+          }
+          const line = `${locale} ${key}: 「${bad}」（${term.en}）— ${value}`;
+          // proposed 只提示不阻断,与根门禁的分级一致:那些术语还没拍板,
+          // 但它们在本 catalog 的命中数同样该出现在讨论材料里。
+          if (term.status === 'decided') violations.push(line);
+          else notes.push(line);
+        }
+      }
+    }
+    if (notes.length > 0) console.warn(`[menu-glossary] 待裁决术语命中:\n${notes.join('\n')}`);
+    expect(violations, `原生菜单命中禁用译法:\n${violations.join('\n')}`).toEqual([]);
+  });
+
+  it('保留英文的术语大小写形态统一', () => {
+    const violations: string[] = [];
+    for (const term of glossary.terms) {
+      if (term.status !== 'decided' || term.checkCase === false) continue;
+      const isExempt = makeExemptChecker(term.exempt);
+      for (const { locale, key, value } of entries) {
+        if (isExempt(key)) continue;
+        const standard = term.translations?.[locale];
+        if (!standard || standard !== term.en) continue;
+        const hit = findCaseMismatch(stripNonProse(value), standard);
+        if (hit) violations.push(`${locale} ${key}: 「${hit}」应为「${standard}」`);
+      }
+    }
+    expect(violations, `原生菜单大小写不统一:\n${violations.join('\n')}`).toEqual([]);
+  });
+
+  it('标点风格符合各语言规则', () => {
+    const violations: string[] = [];
+    for (const { locale, key, value } of entries) {
+      const prose = normalizeForPunctuation(value);
+      if (HALFWIDTH_PUNCT_LOCALES.has(locale)) {
+        const mark = findHalfWidthPunct(prose);
+        if (mark) violations.push(`${locale} ${key}: 中文后半角「${mark}」— ${value}`);
+      }
+      if (ELLIPSIS_LOCALES.has(locale) && hasAsciiEllipsis(prose)) {
+        violations.push(`${locale} ${key}: 应使用「…」而非三个半角点 — ${value}`);
+      }
+    }
+    expect(violations, `原生菜单标点不符:\n${violations.join('\n')}`).toEqual([]);
+  });
+});

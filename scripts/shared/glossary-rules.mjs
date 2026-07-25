@@ -14,15 +14,32 @@
  */
 export const WORD_BOUNDARY = 'A-Za-z0-9_-';
 
+/** CJK 全角句读与括号。出现即说明 URL / 邮箱已经结束、后面是正文。 */
+const CJK_PUNCT = '，。；：！？、（）「」【】《》“”‘’…';
+/** 汉字 + 假名 + 谚文。用于「半角分隔符后面是不是中文正文」的判定。 */
+const CJK_CHAR = '\\u4e00-\\u9fff\\u3040-\\u30ff\\uac00-\\ud7af';
+
 /**
- * URL 片段。
+ * URL / 邮箱这类「不参与术语匹配的 token」的收尾规则。
  *
- * 关键是**不能**用 \S+ 收尾:中文正文常紧跟在 URL 后面且中间没有空格
- * (「请访问 https://x.test,返回对话列表」),\S+ 会把全角标点连同后面整句正文一起吞掉,
- * 于是 URL 之后的禁用词、大小写问题全部检测不到,门禁静默放行。
- * 按 CJK 句读与括号截断,只吃掉 URL 本身。
+ * **不能**用 \S+ 收尾:中文正文常紧跟在它们后面且中间没有空格,\S+ 会把标点连同后面
+ * 整句正文一起吞掉,于是之后的禁用词、大小写、标点问题全部检测不到,门禁静默放行。
+ *
+ * 两级截断:
+ *  - 全角句读:一律截断——URL 里不会出现全角标点;
+ *  - 半角 , ; : ! ?:**仅当其后紧跟 CJK 字符时**截断。不能无条件截,否则会切坏合法的
+ *    query string(`?a=1&ids=1,2`)与端口号(`:8080`);而 `https://x.test,返回…`
+ *    这种半角逗号后直接接中文的写法,逗号显然是正文标点而非 URL 的一部分。
  */
-const URL_TOKEN = /\b[a-z][\w-]*:\/\/[^\s，。；：！？、（）「」【】《》“”‘’…]+/gi;
+const TOKEN_TAIL = `(?:(?![${CJK_PUNCT}])(?![,;:!?](?=[${CJK_CHAR}]))\\S)+`;
+
+const URL_TOKEN = new RegExp(`\\b[a-z][\\w-]*://${TOKEN_TAIL}`, 'gi');
+
+/**
+ * 邮箱片段。收尾规则同 URL——原先的 `\S+@\S+\.\S+` 连全角标点都不截,
+ * 「联系 a@x.com，返回worker操作」会被整段剥成「联系 」。
+ */
+const EMAIL_TOKEN = new RegExp(`[^\\s${CJK_PUNCT}]+@${TOKEN_TAIL}`, 'g');
 
 /**
  * 文件名片段。
@@ -51,7 +68,7 @@ export function stripNonProse(text) {
     .replace(/<\/?\d+>/g, ' ')
     .replace(/\$t\([^)]*\)/g, ' ')
     .replace(URL_TOKEN, ' ')
-    .replace(/\S+@\S+\.\S+/g, ' ')
+    .replace(EMAIL_TOKEN, ' ')
     .replace(FILENAME_TOKEN, ' ');
 }
 
@@ -117,12 +134,17 @@ export const HALFWIDTH_PUNCT_LOCALES = new Set(['zh-CN']);
 export const ELLIPSIS_LOCALES = new Set(['zh-CN', 'ja', 'ko']);
 
 /**
- * 中文正文的「左边界」:汉字,以及各类右闭合符号。
+ * 中文正文里的半角标点。两种形态:
  *
- * 只认汉字的话,`(直接替换,不留原文),或…` 这种会漏——半角逗号前面是右括号而非汉字。
- * 右括号 / 右引号 / 右书名号后面接的仍是中文正文,标点该跟中文规则走。
+ *  1. 汉字 / 右闭合符号 + 半角标点。只认汉字的话 `(直接替换,不留原文),或…` 会漏——
+ *     逗号前面是右括号。右括号 / 右引号 / 右书名号后面接的仍是中文正文。
+ *  2. 拉丁字母或数字 + 半角标点 + **紧跟 CJK**。`Keychain,重启` 这类漏了整整一类:
+ *     中文句子里夹的英文产品名、技术词后面同样该用全角。这一支必须要求右边是 CJK,
+ *     否则 `a=1,b=2`、`GPT-4,Claude` 这种纯 ASCII 片段会被误判。
  */
-const HALF_WIDTH_AFTER_HAN = /[一-鿿）)」』】》〉”’][,:;!?]/;
+const HALF_WIDTH_AFTER_HAN = new RegExp(
+  `[一-鿿）)」』】》〉”’][,:;!?]|[A-Za-z0-9][,:;!?](?=[${CJK_CHAR}])`,
+);
 const ASCII_ELLIPSIS = /\.\.\./;
 
 /**
@@ -165,7 +187,7 @@ export function normalizeForPunctuation(text) {
     .replace(/<\/?\d+>/g, PROSE_PLACEHOLDER)
     .replace(/\$t\([^)]*\)/g, PROSE_PLACEHOLDER)
     .replace(URL_TOKEN, ' ')
-    .replace(/\S+@\S+\.\S+/g, ' ')
+    .replace(EMAIL_TOKEN, ' ')
     .replace(FILENAME_TOKEN, ' ');
 }
 
