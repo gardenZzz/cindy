@@ -196,6 +196,38 @@ describe('ghost · 清单校验', () => {
     expect(withPanel({}).ok).toBe(true);
   });
 
+  it('panel.systemButtons:标准头系统按钮开关 —— 布尔白名单键,tab 形态拒装', () => {
+    const withPanel = (panel: Record<string, unknown>) =>
+      validateGhostManifest({ ...goodManifest(), panel: { html: 'panel.html', ...panel } });
+    // 合法:关掉 maximize / detach / 空对象(= 全默认) / 显式 true / 双键并存
+    const off = withPanel({ systemButtons: { maximize: false } });
+    expect(off.ok && (off as { ok: true; manifest: GhostManifest }).manifest.panel?.systemButtons).toEqual({
+      maximize: false,
+    });
+    const detachOff = withPanel({ systemButtons: { detach: false } });
+    expect(
+      detachOff.ok && (detachOff as { ok: true; manifest: GhostManifest }).manifest.panel?.systemButtons,
+    ).toEqual({ detach: false });
+    const bothOff = withPanel({ systemButtons: { maximize: false, detach: false } });
+    expect(
+      bothOff.ok && (bothOff as { ok: true; manifest: GhostManifest }).manifest.panel?.systemButtons,
+    ).toEqual({ maximize: false, detach: false });
+    expect(withPanel({ systemButtons: {} }).ok).toBe(true);
+    expect(withPanel({ systemButtons: { maximize: true, detach: true } }).ok).toBe(true);
+    // 非对象 / 未知键 / 非布尔值:收词明确拒绝(规则 9)
+    expect(withPanel({ systemButtons: 'off' }).ok).toBe(false);
+    expect(withPanel({ systemButtons: { refresh: false } }).ok).toBe(false);
+    expect(withPanel({ systemButtons: { maximize: 'no' } }).ok).toBe(false);
+    expect(withPanel({ systemButtons: { detach: 0 } }).ok).toBe(false);
+    // 页签形态没有标准头:声明即拒(与 minWidth/defaultFraction 同款语义)
+    expect(withPanel({ position: 'tab', systemButtons: { maximize: false } }).ok).toBe(false);
+    // 缺省(不声明)不产出字段
+    const plain = withPanel({});
+    expect(
+      plain.ok && (plain as { ok: true; manifest: GhostManifest }).manifest.panel?.systemButtons,
+    ).toBeUndefined();
+  });
+
   it('author:可选展示名,1–64 字符,原样输出', () => {
     const base = validateGhostManifest({ ...goodManifest(), author: 'Lizi' });
     expect(base.ok && (base as { ok: true; manifest: GhostManifest }).manifest.author).toBe('Lizi');
@@ -586,16 +618,16 @@ describe('ghost · layoutWithGhostPanel(装入即停靠)', () => {
     panel: { html: 'panel.html', minWidth: 240, defaultFraction: 0.18 },
   });
 
-  it('新装缺省 position:停在主聊天窗右侧(默认 right,2026-07-12 定案)', () => {
+  it('新装缺省 position:停在主聊天窗左侧(right 退役,2026-07-25 定案)', () => {
     const next = layoutWithGhostPanel(createDefaultLayout(), manifest());
     expect(next).not.toBeNull();
     const split = next!.content as SplitNode;
     expect(split.children.map((c) => (c.node.type === 'pane' ? c.node.panelKind : '?'))).toEqual([
-      'chat-main',
       'ghost:hello',
+      'chat-main',
       'right-tabs',
     ]);
-    const pane = split.children[1];
+    const pane = split.children[0];
     expect(pane.fraction).toBeCloseTo(0.18, 5);
     expect(pane.node.type === 'pane' && pane.node.minWidth).toBe(240);
     // 全体份额仍归一
@@ -629,8 +661,8 @@ describe('ghost · layoutWithGhostPanel(装入即停靠)', () => {
     const m = manifest();
     delete m.panel!.defaultFraction;
     const next = layoutWithGhostPanel(createDefaultLayout(), m);
-    // 缺省 position=right,面板在 chat-main 之后(下标 1)。
-    expect((next!.content as SplitNode).children[1].fraction).toBeCloseTo(0.2, 5);
+    // 缺省 position=left,面板在 chat-main 之前(下标 0)。
+    expect((next!.content as SplitNode).children[0].fraction).toBeCloseTo(0.2, 5);
   });
 
   it("position: 'tab' → null,不进布局树(页签形态由右侧栏承载)", () => {
@@ -844,15 +876,16 @@ describe('ghost · description(自我介绍)', () => {
 });
 
 describe('ghost · panel.position 校验', () => {
-  it('left/right 通过并进清单;top/bottom 收词但明确拒绝;野值拒', () => {
+  it('left 通过;right 退役兼容归一化为 left;top/bottom 收词但明确拒绝;野值拒', () => {
     const withPos = (position: unknown) => ({
       ...goodManifest(),
       panel: { title: 'Hello', html: 'panel.html', position },
     });
     const left = validateGhostManifest(withPos('left'));
     expect(left.ok && left.manifest.panel?.position).toBe('left');
+    // 旧包兼容:right 不拒装(已装插件每次启动重过校验),归一化为 left。
     const right = validateGhostManifest(withPos('right'));
-    expect(right.ok && right.manifest.panel?.position).toBe('right');
+    expect(right.ok && right.manifest.panel?.position).toBe('left');
 
     for (const pending of ['top', 'bottom']) {
       const v = validateGhostManifest(withPos(pending));
@@ -981,8 +1014,8 @@ describe('ghost · 逐项权限清单', () => {
       panel: { html: 'panel.html' },
     };
     const items = ghostPermissionItems(plain);
-    expect(items.map((i) => i.key)).toEqual(['panel:right', 'code']);
-    expect(items[0]).toMatchObject({ labelKey: 'panelRight', labelArgs: { title: '说明书' } });
+    expect(items.map((i) => i.key)).toEqual(['panel:left', 'code']);
+    expect(items[0]).toMatchObject({ labelKey: 'panelLeft', labelArgs: { title: '说明书' } });
 
     // 页签形态在确认框同样逐项如实展示(labelKey 独立成 panelTab)。
     const tabbed = ghostPermissionItems({ ...plain, panel: { html: 'panel.html', position: 'tab' } });
@@ -1009,10 +1042,10 @@ describe('ghost · 逐项权限清单', () => {
       version: '2.0.0',
       cindy: { image: ['generate'] }, // 移除 edit
       tools: [...(fullChip().tools ?? []), { name: 'style_image', description: '风格化' }], // 新增工具
-      panel: { title: '画廊', html: 'panel.html', position: 'right' }, // 换边
+      panel: { title: '画廊', html: 'panel.html', position: 'tab' }, // 换形态(right 已退役)
     };
     const diff = diffGhostPermissionItems(prev, next);
-    expect(diff.added.map((i) => i.key).sort()).toEqual(['panel:right', 'tool:style_image']);
+    expect(diff.added.map((i) => i.key).sort()).toEqual(['panel:tab', 'tool:style_image']);
     expect(diff.removed.map((i) => i.key).sort()).toEqual(['cindy:image.edit', 'panel:left']);
     expect(diff.unchanged.map((i) => i.key)).toEqual([
       'cindy:image.generate',

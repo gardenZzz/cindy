@@ -179,10 +179,10 @@ describe('installFlow · tab 型插件「立即开启并打开页签」', () => 
     expect(openGhostTab).not.toHaveBeenCalled();
   });
 
-  it('停靠形态(position: right)勾选只带电,不打开页签', async () => {
+  it('停靠形态(position: left)勾选只带电,不打开页签', async () => {
     setupWindow({
       ...tabManifest,
-      panel: { html: 'panel.html', position: 'right' as const },
+      panel: { html: 'panel.html', position: 'left' as const },
     });
     const openGhostTab = vi.fn(async () => undefined);
     const { deps: d, confirmWithCheckbox } = tabDeps({ sessionId: 's1', openGhostTab });

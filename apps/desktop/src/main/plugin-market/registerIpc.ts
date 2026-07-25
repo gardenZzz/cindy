@@ -61,7 +61,6 @@ export function registerPluginMarketIpc(): void {
       return invokePluginMarket(() =>
         service().install(requireString(pluginId, 'pluginId'), {
           allowPermissionExpansion,
-          nodeAuthorizationWebContents: event.sender,
         }),
       );
     },

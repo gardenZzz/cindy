@@ -2365,7 +2365,6 @@
         "nodeResidentDetail": "插件启用期间会一直运行;停用、更新、卸载或退出 Cindy 时关闭。",
         "tool": "工具「{{name}}」",
         "command": "聊天指令 ${{command}}",
-        "panelRight": "面板「{{title}}」· 停靠主聊天区右侧",
         "panelLeft": "面板「{{title}}」· 停靠主聊天区左侧",
         "panelTab": "面板「{{title}}」· 右侧栏页签",
         "code": "可执行代码",
@@ -3085,6 +3084,15 @@
     "toggleSidebar": "切换侧边栏",
     "collapsePanel": "折叠",
     "expandPanel": "展开"
+  },
+  "panelChrome": {
+    "maximizeAria": "撑满内容区",
+    "restoreAria": "还原面板大小",
+    "detachAria": "在独立窗口中打开"
+  },
+  "ghostPanelWindow": {
+    "mergeBack": "合并回主窗口",
+    "unavailable": "该插件面板当前不可用"
   },
   "rightSidebar": {
     "ariaLabel": "右侧边栏",

@@ -2365,7 +2365,6 @@
         "nodeResidentDetail": "プラグインが有効な間は実行を続け、無効化、更新、アンインストール、または Cindy 終了時に停止します。",
         "tool": "ツール「{{name}}」",
         "command": "チャット指令 ${{command}}",
-        "panelRight": "パネル「{{title}}」· チャットの右側にドッキング",
         "panelLeft": "パネル「{{title}}」· チャットの左側にドッキング",
         "panelTab": "パネル「{{title}}」· 右サイドバーのタブ",
         "code": "実行コード",
@@ -3085,6 +3084,15 @@
     "toggleSidebar": "サイドバーを切り替え",
     "collapsePanel": "折りたたみ",
     "expandPanel": "展開"
+  },
+  "panelChrome": {
+    "maximizeAria": "パネルを最大化",
+    "restoreAria": "パネルのサイズを元に戻す",
+    "detachAria": "新しいウィンドウで開く"
+  },
+  "ghostPanelWindow": {
+    "mergeBack": "メインウィンドウに戻す",
+    "unavailable": "このプラグインパネルは現在利用できません"
   },
   "rightSidebar": {
     "ariaLabel": "右サイドバー",

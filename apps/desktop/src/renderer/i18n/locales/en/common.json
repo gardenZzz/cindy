@@ -2366,7 +2366,6 @@
         "nodeResidentDetail": "Runs while the plugin is enabled and stops when disabled, updated, uninstalled, or when Cindy exits.",
         "tool": "Tool \"{{name}}\"",
         "command": "Chat command ${{command}}",
-        "panelRight": "Panel \"{{title}}\" · docked right of the chat",
         "panelLeft": "Panel \"{{title}}\" · docked left of the chat",
         "panelTab": "Panel \"{{title}}\" · tab in the right sidebar",
         "code": "Executable code",
@@ -3086,6 +3085,15 @@
     "toggleSidebar": "Toggle sidebar",
     "collapsePanel": "Collapse",
     "expandPanel": "Expand"
+  },
+  "panelChrome": {
+    "maximizeAria": "Maximize panel",
+    "restoreAria": "Restore panel size",
+    "detachAria": "Open in a new window"
+  },
+  "ghostPanelWindow": {
+    "mergeBack": "Merge back into main window",
+    "unavailable": "This plugin panel is currently unavailable"
   },
   "rightSidebar": {
     "ariaLabel": "Right sidebar",

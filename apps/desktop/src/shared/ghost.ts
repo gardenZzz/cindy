@@ -292,20 +292,24 @@ export const GHOST_LAUNCH_MODES = ['on-demand', 'resident'] as const;
 export type GhostLaunchMode = (typeof GHOST_LAUNCH_MODES)[number];
 
 /**
- * 面板显示形态(相对主聊天窗)。left / right = 顶层布局树停靠 pane;
+ * 面板显示形态(相对主聊天窗)。left = 顶层布局树停靠 pane(缺省);
  * 'tab' = 不进布局树,作为右侧栏(right-tabs)里的每会话单例页签
  * (2026-07-24 定案,注册链路见 renderer/cindy-brain/ghostTabPlugins.tsx)。
- * top / bottom 需要嵌套上下分割(树操作/拖缝/卸载查找全链路),排期中——
- * 校验层先收词并明确拒绝,不静默降级(规则 9)。
+ * right 已退役(2026-07-25 Lizi 定案:右侧是右侧边栏的地盘,插件面板默认
+ * 挤过去体验差;用户想放右边用拖拽换位即可)——旧包声明的 right 在校验期
+ * 归一化为 left(已装插件每次启动都重过校验,硬拒会把存量插件打没;兼容
+ * 语义与 model→cindy 改名同款)。top / bottom 需要嵌套上下分割(树操作/
+ * 拖缝/卸载查找全链路),排期中——校验层先收词并明确拒绝,不静默降级(规则 9)。
  */
-export const GHOST_PANEL_POSITIONS = ['left', 'right', 'tab'] as const;
+export const GHOST_PANEL_POSITIONS = ['left', 'tab'] as const;
 export type GhostPanelPosition = (typeof GHOST_PANEL_POSITIONS)[number];
 
 /** 面板声明(五个卡槽中的「面板」槽,一段意识至多一块)。 */
 export interface GhostPanelDecl {
   /** 面板标准头(PanelChrome)标题;缺省用意识 name。 */
   title?: string;
-  /** 显示形态:left / right 停靠,或 'tab' 右侧栏页签;缺省 = right(2026-07-12 Lizi 定案)。 */
+  /** 显示形态:left 停靠主聊天窗左侧(缺省),或 'tab' 右侧栏页签;
+   *  right 已退役并入 left(2026-07-25 Lizi 定案,见 GHOST_PANEL_POSITIONS 注释)。 */
   position?: GhostPanelPosition;
   /** 面板界面入口(安装目录内相对路径,意识自绘)。 */
   html: string;
@@ -313,6 +317,14 @@ export interface GhostPanelDecl {
   minWidth?: number;
   /** 装入布局时的初始宽度占比(与 layoutTree 的 fraction 同语义)。仅停靠形态有效,'tab' 时禁用。 */
   defaultFraction?: number;
+  /**
+   * 标准头系统按钮开关(2026-07-25):缺省全开,声明 false 逐个关闭。
+   * 当前一批:maximize =「撑满内容区」、detach =「在独立窗口中打开」。
+   * 标准头本体(标题条)恒由主机绘制、不可关——可配置的只是系统按钮;
+   * 'tab' 形态没有标准头,声明本字段拒装。未知键按规则 9 收词明确拒绝,
+   * 新按钮上线时在这里扩键。
+   */
+  systemButtons?: { maximize?: boolean; detach?: boolean };
 }
 
 /**
@@ -1293,11 +1305,11 @@ export function ghostPermissionItems(manifest: GhostManifest): GhostPermissionIt
     });
   }
   if (manifest.panel) {
-    const position = manifest.panel.position ?? 'right';
+    const position = manifest.panel.position ?? 'left';
     items.push({
       key: `panel:${position}`,
       kind: 'panel',
-      labelKey: position === 'left' ? 'panelLeft' : position === 'tab' ? 'panelTab' : 'panelRight',
+      labelKey: position === 'tab' ? 'panelTab' : 'panelLeft',
       labelArgs: { title: manifest.panel.title ?? manifest.name },
     });
   }
@@ -1446,7 +1458,7 @@ export function ghostWebviewEntryPaths(manifest: GhostManifest): string[] {
  * - 树上已有同 kind 的 pane(重装)→ 返回 null:不动树,位置记忆保留、原位复活;
  * - 意识没声明面板 → null;
  * - position:'tab' → null:页签形态不进布局树,由右侧栏页签(ghostTabPlugins)承载;
- * - 否则停在聊天区右侧(index 1),宽度占比/最小宽取清单声明。
+ * - 否则停在聊天区左侧,宽度占比/最小宽取清单声明。
  * 卸下时**不做**逆操作 —— 树数据保留正是"重装复活"的记忆来源(§6 规则 5)。
  */
 export function layoutWithGhostPanel(layout: Layout, manifest: GhostManifest): Layout | null {
@@ -1455,13 +1467,14 @@ export function layoutWithGhostPanel(layout: Layout, manifest: GhostManifest): L
   const kind = ghostPanelKind(manifest.id);
   if (findSplitChildByPanelKind(layout, kind)) return null;
   // 停靠位置(相对主聊天窗):按 chat-main 的实际下标定插入点,不写死
-  // 序号(未来树形态变化不至于错位)。缺省 right(2026-07-12 Lizi 定案)。
+  // 序号(未来树形态变化不至于错位)。停靠恒在聊天区左侧(2026-07-25 Lizi
+  // 定案:right 退役,右侧留给右侧边栏;用户要右侧自己拖拽换位——已在树里
+  // 的 pane 是用户布局记忆,本函数只管首次装入,不搬动存量)。
   const chatIndex =
     layout.content.type === 'split'
       ? layout.content.children.findIndex((c) => c.node.type === 'pane' && c.node.panelKind === 'chat-main')
       : -1;
-  const position = manifest.panel.position ?? 'right';
-  const index = chatIndex < 0 ? 1 : position === 'left' ? chatIndex : chatIndex + 1;
+  const index = chatIndex < 0 ? 0 : chatIndex;
   const result = insertRootSplitPane(
     layout,
     {
@@ -1560,28 +1573,66 @@ export function validateGhostManifest(raw: unknown): ManifestValidation {
     ) {
       return { ok: false, reason: 'panel.defaultFraction 必须是 0.05–0.8 之间的数字' };
     }
+    let systemButtons: GhostPanelDecl['systemButtons'];
+    if (p.systemButtons !== undefined) {
+      const sb = p.systemButtons;
+      if (!isPlainObject(sb)) {
+        return { ok: false, reason: 'panel.systemButtons 必须是对象(如 { "maximize": false })' };
+      }
+      // 收词明确拒绝未知键(规则 9):新系统按钮上线时在白名单里扩键。
+      const knownButtons = ['maximize', 'detach'];
+      for (const key of Object.keys(sb)) {
+        if (!knownButtons.includes(key)) {
+          return { ok: false, reason: `panel.systemButtons 只认 ${knownButtons.join(' / ')},未知键:${key}` };
+        }
+        if (typeof (sb as Record<string, unknown>)[key] !== 'boolean') {
+          return { ok: false, reason: `panel.systemButtons.${key} 必须是布尔值` };
+        }
+      }
+      const maximize = (sb as Record<string, unknown>).maximize;
+      const detach = (sb as Record<string, unknown>).detach;
+      systemButtons = {
+        ...(typeof maximize === 'boolean' ? { maximize } : {}),
+        ...(typeof detach === 'boolean' ? { detach } : {}),
+      };
+    }
+    let position: GhostPanelPosition | undefined;
     if (p.position !== undefined) {
       if (p.position === 'top' || p.position === 'bottom') {
         // 收词但明确拒绝(规则 9 不静默降级):上下停靠等布局引擎嵌套分割就绪后开放。
-        return { ok: false, reason: 'panel.position 的 top / bottom 暂未支持(排期中),当前可用:left / right / tab' };
+        return { ok: false, reason: 'panel.position 的 top / bottom 暂未支持(排期中),当前可用:left / tab' };
       }
-      if (!(GHOST_PANEL_POSITIONS as readonly string[]).includes(p.position as string)) {
-        return { ok: false, reason: `panel.position 必须是 ${GHOST_PANEL_POSITIONS.join(' / ')}` };
-      }
-      // 页签形态没有拖缝宽度语义:收词明确拒绝而非静默忽略(规则 9)。
-      if (p.position === 'tab' && (p.minWidth !== undefined || p.defaultFraction !== undefined)) {
+      if (p.position === 'right') {
+        // right 退役兼容(见 GHOST_PANEL_POSITIONS 注释):旧包归一化为 left,
+        // 不硬拒 —— 已装插件每次启动重过本校验,硬拒等于把存量插件打没。
+        position = 'left';
+      } else if (!(GHOST_PANEL_POSITIONS as readonly string[]).includes(p.position as string)) {
         return {
           ok: false,
-          reason: "panel.minWidth / panel.defaultFraction 仅停靠形态(left / right)有效,position:'tab' 时请移除",
+          reason: `panel.position 必须是 ${GHOST_PANEL_POSITIONS.join(' / ')}(right 已退役,旧包自动并入 left)`,
+        };
+      } else {
+        position = p.position as GhostPanelPosition;
+      }
+      // 页签形态没有拖缝宽度/标准头语义:收词明确拒绝而非静默忽略(规则 9)。
+      if (
+        position === 'tab' &&
+        (p.minWidth !== undefined || p.defaultFraction !== undefined || p.systemButtons !== undefined)
+      ) {
+        return {
+          ok: false,
+          reason:
+            "panel.minWidth / panel.defaultFraction / panel.systemButtons 仅停靠形态(left)有效,position:'tab' 时请移除",
         };
       }
     }
     panel = {
       ...(p.title !== undefined ? { title: p.title as string } : {}),
-      ...(p.position !== undefined ? { position: p.position as GhostPanelPosition } : {}),
+      ...(position !== undefined ? { position } : {}),
       html: p.html as string,
       ...(p.minWidth !== undefined ? { minWidth: p.minWidth as number } : {}),
       ...(p.defaultFraction !== undefined ? { defaultFraction: p.defaultFraction as number } : {}),
+      ...(systemButtons !== undefined ? { systemButtons } : {}),
     };
   }
 

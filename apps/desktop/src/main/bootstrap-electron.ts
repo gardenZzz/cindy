@@ -342,6 +342,14 @@ import {
 import { RsbWindowController } from './right-sidebar-window/controller.js';
 import { createRightSidebarWindow } from './right-sidebar-window/window.js';
 import { registerRsbWindowIpc } from './right-sidebar-window/ipc.js';
+import { GhostPanelWindowsController } from './ghost-panel-window/controller.js';
+import { createGhostPanelWindow } from './ghost-panel-window/window.js';
+import { registerGhostPanelWindowIpc } from './ghost-panel-window/ipc.js';
+import {
+  patchGhostPanelWindowEntry,
+  readGhostPanelWindowsSettings,
+  removeGhostPanelWindowEntry,
+} from './ghost-panel-window/settings-store.js';
 import {
   readRsbWindowSettings,
   writeRsbWindowSettingsPatch,
@@ -535,7 +543,14 @@ import {
 } from './app-shortcuts/index.js';
 import { installNewMakerWindowShortcut } from './app-shortcuts/new-maker-window-shortcut.js';
 import { registerLayoutIpc } from './layout/index.js';
-import { registerGhostIpc, suspendAllGhosts, waitForGhostMutations } from './cindy-brain/index.js';
+import {
+  getGhostManager,
+  isGhostAvailableForActiveSession,
+  registerGhostIpc,
+  setGhostsChangedObserver,
+  suspendAllGhosts,
+  waitForGhostMutations,
+} from './cindy-brain/index.js';
 import { registerPluginMarketIpc } from './plugin-market/registerIpc.js';
 import { findCindyFileInArgv } from './cindy-brain/argv.js';
 import { handleIncomingCindyFile } from './cindy-brain/openFileInstall.js';
@@ -978,6 +993,52 @@ registerRsbWindowIpc({
   controller: rsbWindowController,
   getMainWindow: () => mainWindowRef,
 });
+
+// ── 插件停靠面板独立窗口(ghost panel window)────────────────────────────
+// 每 ghostId 一扇窗:PanelChrome「独立窗口」按钮 → setDetached(id, true) 开窗,
+// 主窗布局树里该 pane 停止渲染(树不动);关窗/合并即回停靠。装/卸/启停广播
+// 经 setGhostsChangedObserver 喂 reconcile,失去资格的窗口即时收掉。
+// deps 同样全 lazy(isQuitting 声明在后),状态机见 ghost-panel-window/controller.ts。
+const ghostPanelWindowsController = new GhostPanelWindowsController({
+  settings: {
+    read: readGhostPanelWindowsSettings,
+    patchEntry: patchGhostPanelWindowEntry,
+    removeEntry: removeGhostPanelWindowEntry,
+  },
+  createWindow: (ghostId) => {
+    const ghost = getGhostManager()
+      .list()
+      .find((g) => g.manifest.id === ghostId);
+    const title = ghost?.manifest.panel?.title ?? ghost?.manifest.name ?? ghostId;
+    return createGhostPanelWindow(ghostId, title);
+  },
+  isGhostDetachable: (ghostId) => {
+    const ghost = getGhostManager()
+      .list()
+      .find((g) => g.manifest.id === ghostId);
+    return (
+      ghost !== undefined &&
+      ghost.enabled !== false &&
+      ghost.manifest.panel !== undefined &&
+      ghost.manifest.panel.position !== 'tab' &&
+      isGhostAvailableForActiveSession(ghostId)
+    );
+  },
+  broadcastState: (state) => {
+    for (const win of BrowserWindow.getAllWindows()) {
+      if (win.isDestroyed()) continue;
+      try {
+        win.webContents.send(MAKER_PUSH.GHOST_PANEL_WINDOW_STATE_CHANGED, state);
+      } catch {
+        // window torn down mid-broadcast — ignore
+      }
+    }
+  },
+  isQuitting: () => isQuitting,
+  log: createLogger('ghost-panel-window-controller'),
+});
+registerGhostPanelWindowIpc(ghostPanelWindowsController);
+setGhostsChangedObserver((ghosts) => ghostPanelWindowsController.reconcile(ghosts));
 
 registerRsbBrowserBridgeIpc({
   registry: getRsbBrowserBridge(),

@@ -2365,7 +2365,6 @@
         "nodeResidentDetail": "플러그인이 활성화된 동안 실행되며 비활성화, 업데이트, 제거 또는 Cindy 종료 시 중지됩니다.",
         "tool": "도구 \"{{name}}\"",
         "command": "채팅 명령 ${{command}}",
-        "panelRight": "패널 \"{{title}}\" · 채팅 오른쪽에 도킹",
         "panelLeft": "패널 \"{{title}}\" · 채팅 왼쪽에 도킹",
         "panelTab": "패널 \"{{title}}\" · 오른쪽 사이드바 탭",
         "code": "실행 코드",
@@ -3085,6 +3084,15 @@
     "toggleSidebar": "사이드바 전환",
     "collapsePanel": "접기",
     "expandPanel": "펼치기"
+  },
+  "panelChrome": {
+    "maximizeAria": "패널 최대화",
+    "restoreAria": "패널 크기 복원",
+    "detachAria": "새 창에서 열기"
+  },
+  "ghostPanelWindow": {
+    "mergeBack": "메인 창으로 되돌리기",
+    "unavailable": "이 플러그인 패널은 현재 사용할 수 없습니다"
   },
   "rightSidebar": {
     "ariaLabel": "오른쪽 사이드바",
