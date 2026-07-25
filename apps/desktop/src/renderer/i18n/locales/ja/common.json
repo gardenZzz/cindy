@@ -4021,6 +4021,9 @@
       "startFailedContinue": "協同の開始に失敗しました。単一セッションとして続行します。",
       "createWorkerRefreshFailed": "Worker の状態を更新できませんでした。もう一度お試しください。",
       "openHint": "Worker を呼んで協同する",
+      "disabledHint": "このプロジェクトでは協同モードが無効です。プロジェクト設定で有効にしてください。",
+      "unavailableHint": "このプロジェクトの協同設定を確認できません。しばらくしてから再試行してください。",
+      "loadingHint": "このプロジェクトの協同設定を確認中です。しばらくしてから再試行してください。",
       "stopHint": "協同を停止",
       "stopAria": "協同を停止",
       "toggleOnAria": "協同モード中、クリックで停止",
@@ -4046,7 +4049,10 @@
         "PROVIDER_ROUTE_UNAVAILABLE_REMOTE": "被操作デバイスでは、選択した Provider とモデルのルートを利用できません。そのデバイスで利用可能なルートを選んで再試行してください。",
         "BUDGET_MODEL_REQUIRES_API_MODE": "この Codex モデルを使うには API key が必要です。設定で構成してから再試行してください。",
         "BUDGET_MODEL_REQUIRES_API_MODE_CONTINUE": "この Codex モデルを使うには API key が必要です。協同は開始されず、このメッセージは単一セッションとして続行します。設定で構成してから再試行してください。",
-        "BUDGET_MODEL_REQUIRES_API_MODE_REMOTE": "被操作デバイスにこの Codex モデル用の API key が設定されていません。被操作デバイスで設定してから再試行してください。"
+        "BUDGET_MODEL_REQUIRES_API_MODE_REMOTE": "被操作デバイスにこの Codex モデル用の API key が設定されていません。被操作デバイスで設定してから再試行してください。",
+        "PRECONDITION_FAILED": "このプロジェクトでは協同モードが無効か、このセッションは協同に対応していません。",
+        "PRECONDITION_FAILED_CONTINUE": "このプロジェクトでは協同モードが無効です。単一セッションとして続行します。",
+        "PRECONDITION_FAILED_REMOTE": "制御中のセッションは協同に対応していません。"
       }
     },
     "chatInput": {
