@@ -204,12 +204,69 @@ test('glossary.json: forbidden 不能与自己的标准译法冲突', () => {
     for (const [locale, words] of Object.entries(term.forbidden ?? {})) {
       const standard = term.translations?.[locale];
       if (!standard) continue;
+      const texts = words.map((w) => (typeof w === 'string' ? w : w.text));
       assert.ok(
-        !words.includes(standard),
+        !texts.includes(standard),
         `术语 ${term.id} 在 ${locale} 把标准译法「${standard}」同时列为禁用,规则自相矛盾`,
       );
     }
   }
+});
+
+test('glossary.json: 声明的译法必须是现状主流，否则要写明为何有意偏离', () => {
+  // 引入术语表时踩过的坑:ja/ko 的译法凭抽样几个 key 就定,结果 5 条是少数派,
+  // 其中 quota 的 ko「쿼터」全仓零出现——纯属凭空造词。更糟的是 automation 的 ja
+  // 把少数派同时写进 translations 与 forbidden,guard 于是输出「X 是禁用译法,应为 X」。
+  // 这条断言把「你凭什么违反数据」显式化:占比不足 35% 就必须给理由。
+  const MIN_RATIO = 0.35;
+  const load = (locale) => {
+    const out = new Map();
+    const flatten = (obj, prefix) => {
+      for (const [k, v] of Object.entries(obj)) {
+        const kp = prefix ? `${prefix}.${k}` : k;
+        if (v && typeof v === 'object' && !Array.isArray(v)) flatten(v, kp);
+        else if (typeof v === 'string') out.set(kp, v);
+      }
+    };
+    flatten(
+      JSON.parse(fs.readFileSync(path.join(ROOT, `apps/desktop/src/renderer/i18n/locales/${locale}/common.json`), 'utf8')),
+      '',
+    );
+    return out;
+  };
+
+  const corpus = Object.fromEntries(glossary.locales.map((l) => [l, load(l)]));
+  const problems = [];
+
+  for (const term of glossary.terms) {
+    if (term.status !== 'decided') continue;
+    const escaped = term.en.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    const re = new RegExp(`(?<![A-Za-z0-9_-])${escaped}s?(?![A-Za-z0-9_-])`, 'i');
+    const keys = [...corpus[glossary.sourceLocale]].filter(([, v]) => re.test(v)).map(([k]) => k);
+    if (keys.length < 8) continue; // 样本太小,占比没有统计意义
+
+    for (const locale of glossary.locales) {
+      if (locale === glossary.sourceLocale) continue;
+      const declared = term.translations?.[locale];
+      if (!declared) continue;
+      // alsoAllowed 是同一裁决下的合法变体（Running 作谓语时用「正在运行」），
+      // 计算主流度时必须算进来,否则分场合译法越多、越会被误判成"声明不是主流"。
+      const accepted = [declared, ...(term.alsoAllowed?.[locale] ?? []).map((v) => v.text)];
+      const hit = keys.filter((k) => {
+        const value = corpus[locale].get(k);
+        return value && accepted.some((a) => value.includes(a));
+      }).length;
+      const ratio = hit / keys.length;
+      if (ratio >= MIN_RATIO) continue;
+      if (term.minorityByDesign?.[locale]?.trim()) continue;
+      problems.push(
+        `${term.id}/${locale}: 声明「${declared}」只覆盖 ${hit}/${keys.length} ` +
+          `(${Math.round(ratio * 100)}%)，既非主流又没写 minorityByDesign 理由`,
+      );
+    }
+  }
+
+  assert.deepEqual(problems, [], `\n${problems.join('\n')}`);
 });
 
 test('glossary.json: 同一 locale 下 forbidden 词不跨术语重复', () => {
@@ -218,7 +275,8 @@ test('glossary.json: 同一 locale 下 forbidden 词不跨术语重复', () => {
   const owner = new Map();
   for (const term of glossary.terms) {
     for (const [locale, words] of Object.entries(term.forbidden ?? {})) {
-      for (const word of words) {
+      for (const entry of words) {
+        const word = typeof entry === 'string' ? entry : entry.text;
         const slot = `${locale}\t${word}`;
         const prev = owner.get(slot);
         assert.equal(

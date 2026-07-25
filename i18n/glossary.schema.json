@@ -68,15 +68,33 @@
         },
         "forbidden": {
           "type": "object",
-          "description": "各语言的禁用译法。命中即违规（decided 阻断 / proposed 警告）。",
+          "description": "各语言的禁用译法。命中即违规（decided 阻断 / proposed 警告）。数组元素有两种形态：字符串＝无条件禁用；对象 { text, whenEn } ＝仅当该 key 的英文源匹配 whenEn 时才禁用。条件形态用于「同一个中文词是另一个英文词的正确译法」的场景——例如 Directory 该译「目录」，但不能无条件禁「文件夹」，否则会误伤 Folder 的正确翻译。",
           "additionalProperties": {
             "type": "array",
-            "items": { "type": "string" }
+            "items": {
+              "oneOf": [
+                { "type": "string" },
+                {
+                  "type": "object",
+                  "required": ["text", "whenEn"],
+                  "additionalProperties": false,
+                  "properties": {
+                    "text": { "type": "string", "description": "禁用的译法" },
+                    "whenEn": { "type": "string", "description": "英文源需匹配的词（按词边界、大小写不敏感匹配）" }
+                  }
+                }
+              ]
+            }
           }
         },
         "note": {
           "type": "string",
           "description": "裁决理由。必填——没有理由的术语裁决会被后人反复推翻。"
+        },
+        "minorityByDesign": {
+          "type": "object",
+          "description": "显式声明「该语言的译法有意偏离现状主流」及理由。单测会校验：凡是声明的译法在现状中占比不足 35%，就必须在这里给出理由，否则判定为凭抽样拍脑袋（引入术语表时 ja/ko 有 5 条栽在这上面，其中 ko 的 쿼터 全仓零出现）。合法的偏离理由通常是「主流译法与另一个术语撞车」。",
+          "additionalProperties": { "type": "string" }
         },
         "checkCase": {
           "type": "boolean",

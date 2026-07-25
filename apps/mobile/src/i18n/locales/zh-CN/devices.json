@@ -75,7 +75,7 @@
     "preview": {
       "needAttention": "{{count}} 个需关注",
       "waiting": "等待处理 {{count}} 个",
-      "automationRunning": "自动化执行中",
+      "automationRunning": "自动化运行中",
       "totalRuns": "共 {{count}} 次运行"
     }
   },
@@ -95,10 +95,10 @@
       "a11y": "按{{label}}分组"
     },
     "metric": {
-      "active": "活动",
+      "active": "活跃",
       "waiting": "待处理",
       "automation": "自动化",
-      "activeA11y": "筛选活动对话",
+      "activeA11y": "筛选活跃对话",
       "waitingA11y": "筛选待处理对话",
       "automationA11y": "筛选自动化对话"
     },
@@ -157,8 +157,8 @@
       "emptyTitle": "这个项目还没有对话"
     },
     "subtitle": {
-      "deviceActive": "{{deviceName}} · {{count}} 个活动对话",
-      "activeAndProjects": "{{count}} 个活动对话 · {{projects}} 个项目"
+      "deviceActive": "{{deviceName}} · {{count}} 个活跃对话",
+      "activeAndProjects": "{{count}} 个活跃对话 · {{projects}} 个项目"
     },
     "row": {
       "a11yAutomationGroup": "自动化对话组 {{title}}",
@@ -173,7 +173,7 @@
       "automationPrefix": "自动化",
       "sessionCount": "{{count}} 个对话",
       "aggregate": "聚合",
-      "running": "执行中",
+      "running": "运行中",
       "unread": "未读 {{count}}"
     },
     "child": {
@@ -304,7 +304,7 @@
       "promptEmpty": "没有保存任务提示词",
       "deleteA11y": "删除自动化",
       "runNowA11y": "立即执行自动化",
-      "running": "执行中",
+      "running": "运行中",
       "resumeA11y": "恢复自动化",
       "pauseA11y": "暂停自动化",
       "resume": "恢复",
