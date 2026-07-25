@@ -186,7 +186,7 @@
         "notInAgent": "未加载到 agent",
         "notInAgentTip": "这把密钥在磁盘上，但没加载到 ssh-agent。点\"解锁\"加载(加密的会让你输 passphrase)。",
         "unlockButton": "解锁",
-        "unlockTip": "把这把密钥加载到 ssh-agent,后续 SSH 连接就不用每次再输 passphrase。",
+        "unlockTip": "把这把密钥加载到 ssh-agent，后续 SSH 连接就不用每次再输 passphrase。",
         "unlockTitle": "解锁 {{name}}",
         "unlockHint": "输入 passphrase 把这把密钥加载到 ssh-agent。我们把它直接喂给 `ssh-add` 后立刻丢弃，不保存。",
         "unlockSubmit": "解锁",
@@ -194,7 +194,7 @@
         "nameLabel": "名字(可选)",
         "nameHint": "保存为 ~/.ssh/<名字>。默认 \"cindy\",有重名时自动加 -1 / -2 …",
         "encryptLabel": "用 passphrase 加密(推荐)",
-        "encryptHint": "passphrase 现在输入一次，然后 ssh-add 会把解密后的密钥缓存在系统 ssh-agent 里。macOS 还会把 passphrase 存到 Keychain,重启后自动恢复。",
+        "encryptHint": "passphrase 现在输入一次，然后 ssh-add 会把解密后的密钥缓存在系统 ssh-agent 里。macOS 还会把 passphrase 存到 Keychain，重启后自动恢复。",
         "passLabel": "Passphrase",
         "passConfirmLabel": "再输一次 Passphrase",
         "passMismatch": "两次 passphrase 不一致",
@@ -205,7 +205,7 @@
         "pubkeyTitle": "公钥内容",
         "runFromTerminal": "在你的终端里运行：",
         "runFromPowerShell": "在 PowerShell 里运行：",
-        "win32InstallNote": "Windows 自带的 OpenSSH 没有 ssh-copy-id,这条命令通过 Git Bash 调用它自带的版本。需要装 Git for Windows(默认安装路径)。如果你没装 Git,请改用下方的手动粘贴方式。",
+        "win32InstallNote": "Windows 自带的 OpenSSH 没有 ssh-copy-id，这条命令通过 Git Bash 调用它自带的版本。需要装 Git for Windows(默认安装路径)。如果你没装 Git，请改用下方的手动粘贴方式。",
         "orPasteManually": "或手动把这段公钥追加到远端的 ~/.ssh/authorized_keys:",
         "pubkeyContent": "公钥内容",
         "copyButton": "复制",
@@ -229,7 +229,7 @@
           "tryThis": "在你的终端里试一下这些命令",
           "close": "关闭",
           "fallbackTitle": "或者干脆不走 agent",
-          "fallbackBody": "你可以在添加 host 时改用「Identity file」方式，{{appName}} 会把密钥文件直接交给 ssh,每次连接时由你输入密码。完全不依赖 agent。安全权衡：每次连接都要输密码，但内存里也不会留任何密钥缓存，安全自负。",
+          "fallbackBody": "你可以在添加 host 时改用「Identity file」方式，{{appName}} 会把密钥文件直接交给 ssh，每次连接时由你输入密码。完全不依赖 agent。安全权衡：每次连接都要输密码，但内存里也不会留任何密钥缓存，安全自负。",
           "reason": {
             "agent_unavailable": "ssh-add 找不到可用的 ssh-agent(可能是 ssh-add 没装、agent 没启动，或 SSH_AUTH_SOCK 没设置)。",
             "bad_passphrase": "ssh-add 拒绝了这个密码。",
@@ -261,7 +261,7 @@
           "pinnedKeyChange": "更换",
           "pinnedKeyClear": "取消钉选",
           "pinnedKeyHintSet": "agent 只会向服务器 offer 这一把 key —— 避免 agent 里 key 太多时撞到 'Too many authentication failures'。",
-          "pinnedKeyHintUnset": "不钉的话 agent 会把已加载的所有密钥挨个 offer;服务端有重试上限(MaxAuthTries,默认 6)，agent 里密钥多了可能没到对的那把就被踢了。",
+          "pinnedKeyHintUnset": "不钉的话 agent 会把已加载的所有密钥挨个 offer；服务端有重试上限(MaxAuthTries，默认 6)，agent 里密钥多了可能没到对的那把就被踢了。",
           "key": "私钥文件",
           "keyHint": "直接读私钥文件。为了不存密码，不支持加密的密钥 —— 仅在 ssh-agent 不可用时使用。"
         },
@@ -310,7 +310,7 @@
         "descFirstPush": "这会把本机的 Codex 凭证装到 {{hostId}} 的 ~/.codex/auth.json。",
         "descOverwrite": "这会覆盖 {{hostId}} 上已有的 Codex 登录态。",
         "descOverwriteWithAge": "这会覆盖 {{hostId}} 上已有的 Codex 登录态(上次更新于 {{when}})。",
-        "warnOverwrite": "远端原有的登录会被替换。如果当下有人正在那台机器上用 Codex,他们会被踢下线。",
+        "warnOverwrite": "远端原有的登录会被替换。如果当下有人正在那台机器上用 Codex，他们会被踢下线。",
         "warnShared": "任何能 SSH 进 {{hostId}} 的人都可以读这个文件，用你的 OpenAI 账号。",
         "daysAgo": "{{n}} 天前",
         "hoursAgo": "{{n}} 小时前",
@@ -1108,7 +1108,7 @@
         "billingLabel": "按 token 计费",
         "disconnectConfirm": {
           "title": "断开 Cindy AI?",
-          "description": "断开后将清除本地保存的 Cindy AI Key,需要重新连接才能继续使用 Cindy AI 提供的模型。"
+          "description": "断开后将清除本地保存的 Cindy AI Key，需要重新连接才能继续使用 Cindy AI 提供的模型。"
         },
         "sync": {
           "syncing": "获取凭据中…",
@@ -1554,7 +1554,7 @@
       "unavailable": "{{shell}} (不可用)",
       "card": {
         "label": "默认 shell",
-        "description": "修改默认只影响新建的终端 tab,已有 tab 不受影响。",
+        "description": "修改默认只影响新建的终端 tab，已有 tab 不受影响。",
         "selectAria": "选择默认终端 shell"
       }
     },
@@ -2121,7 +2121,7 @@
       },
       "tips": {
         "cindy": "Cindy 是官方提供的共享机器人：无需申请任何凭证，连接 Slack 后 @Cindy 即可直接派活。",
-        "personal": "个人机器人用你自己申请的凭证接入飞书 / Discord:机器人完全归你，需要自行创建应用并填写配置。",
+        "personal": "个人机器人用你自己申请的凭证接入飞书 / Discord：机器人完全归你，需要自行创建应用并填写配置。",
         "personalFeishuOnly": "个人机器人用你自己申请的凭证接入飞书：机器人完全归你，需要自行创建应用并填写配置。"
       },
       "defaults": {
@@ -3183,7 +3183,7 @@
       "filterClear": "清除筛选",
       "filterIndexing": "正在索引项目文件…",
       "filterNoMatch": "未匹配到文件",
-      "filterRgUnavailable": "远端机器未安装 ripgrep,文件名筛选不可用",
+      "filterRgUnavailable": "远端机器未安装 ripgrep，文件名筛选不可用",
       "filterIndexFailed": "文件索引失败",
       "filterTruncated": "结果过多，仅显示前 {{limit}} 条；请缩小关键词",
       "deviceTooOld": "对方设备的 {{appName}} 版本过旧，不支持远程文件浏览，请升级后重试",
@@ -5166,7 +5166,7 @@
         "empty": "输入文字开始搜索",
         "searching": "搜索中…",
         "failed": "搜索失败",
-        "rgUnavailable": "远端机器未安装 ripgrep,搜索不可用",
+        "rgUnavailable": "远端机器未安装 ripgrep，搜索不可用",
         "truncated": "{{max}}+ 命中，{{files}} 个文件，缩短查询",
         "noResults": "没有匹配结果",
         "summary_one": "{{count}} 条结果",
@@ -6052,7 +6052,7 @@
   },
   "issueAgent": {
     "command": {
-      "instruction": "我想给 {{appName}} 提交一条反馈。请协助我整理成一个高质量的 GitHub issue:先和我确认反馈类型(bug 还是功能建议)，并追问必要细节(现象、复现步骤或使用场景、期望行为)；信息足够后用 cindy_helper 的 call_tool 调用 submit_github_issue 工具提交(category=feedback,可先 list_tools 查看参数要求；提交前系统会弹确认卡片给我看)。如果提交失败，如实告诉我原因。{{details}}",
+      "instruction": "我想给 {{appName}} 提交一条反馈。请协助我整理成一个高质量的 GitHub issue：先和我确认反馈类型(bug 还是功能建议)，并追问必要细节(现象、复现步骤或使用场景、期望行为)；信息足够后用 cindy_helper 的 call_tool 调用 submit_github_issue 工具提交(category=feedback，可先 list_tools 查看参数要求；提交前系统会弹确认卡片给我看)。如果提交失败，如实告诉我原因。{{details}}",
       "detailsPrefix": "\n我的初始描述：{{details}}"
     },
     "confirm": {

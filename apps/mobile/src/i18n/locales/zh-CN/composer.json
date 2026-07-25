@@ -60,7 +60,7 @@
     "noImageRead": "没有读取到可上传的图片。",
     "emptyImage": "这个图片为空，不能作为附件发送。",
     "imageTooLarge": "图片超过 {{size}} MB，暂不能作为附件发送。",
-    "imageTooLargeSend": "图片超过 {{size}} MB,暂不能发送。",
+    "imageTooLargeSend": "图片超过 {{size}} MB，暂不能发送。",
     "sessionExpiredImage": "登录已过期，请重新登录后再上传图片。",
     "sessionExpiredFile": "登录已过期，请重新登录后再上传附件。",
     "pasteTimeout": "粘贴图片处理超时，请重试。",

@@ -15,6 +15,7 @@ import { resolve } from 'node:path';
 
 import { authErrorMessages, loginMessages } from '@/auth/loginMessages';
 import { newSessionMessages } from '@/session/newSessionMessages';
+import { FULL_ACCESS_CONFIRMATION_COPY } from '@/session/fullAccessConfirmationCopy';
 import {
   ELLIPSIS_LOCALES,
   HALFWIDTH_PUNCT_LOCALES,
@@ -73,6 +74,19 @@ function collectEntries(): { locale: string; key: string; value: string }[] {
     }
   }
 
+  // fullAccessConfirmation: locale → key → string。
+  // 它的 locale 键用 'zh' 而非 'zh-CN'(那份 catalog 按语言前缀而非完整 tag 分支),
+  // 这里映射成术语表的 locale 形态,否则 zh 分支会因为语言键对不上而整段扫不到。
+  for (const [locale, table] of Object.entries(FULL_ACCESS_CONFIRMATION_COPY)) {
+    for (const [key, value] of Object.entries(table)) {
+      out.push({
+        locale: locale === 'zh' ? 'zh-CN' : locale,
+        key: `mobile/fullAccessConfirmation:${key}`,
+        value,
+      });
+    }
+  }
+
   return out;
 }
 
@@ -94,8 +108,11 @@ describe('影子 catalog 术语一致性', () => {
 
   it('不使用术语表的禁用译法', () => {
     const violations: string[] = [];
+    // proposed 术语不能整个跳过:根脚本扫不到这些 TS catalog,一跳过,它们在这份语料里的
+    // 命中数就从「待裁决术语现在有多少处」的统计里彻底消失——而那个数字正是裁决讨论的依据。
+    // 与根门禁同一分级:decided 阻断,proposed 只提示。
+    const notes: string[] = [];
     for (const term of glossary.terms) {
-      if (term.status !== 'decided') continue;
       const isExempt = makeExemptChecker(term.exempt);
       for (const { locale, key, value } of entries) {
         if (isExempt(key)) continue;
@@ -113,26 +130,44 @@ describe('影子 catalog 术语一致性', () => {
             );
             if (!source || !re.test(stripNonProse(source))) continue;
           }
-          const expected = term.translations?.[locale] || term.en;
-          violations.push(`${locale} ${key}: 「${bad}」应为「${expected}」— ${value.slice(0, 40)}`);
+          // 与根门禁一致:只报事实与英文源,不给替换目标。术语表是参考不是替换表——
+          // 该换成什么取决于英文源与这个 key 的用途,得读了语境再定。
+          const source = sourceByKey.get(key);
+          const line =
+            `${locale} ${key}: 「${bad}」是 ${term.en} 条目下的禁用译法` +
+            `\n    译文: ${value.slice(0, 60)}` +
+            (source ? `\n    英文源: ${source.slice(0, 60)}` : '');
+          if (term.status === 'decided') violations.push(line);
+          else notes.push(line);
         }
       }
+    }
+    if (notes.length > 0) {
+      console.warn(`[shadow-glossary] 待裁决术语命中:\n${notes.join('\n')}`);
     }
     expect(violations, `影子 catalog 命中禁用译法:\n${violations.join('\n')}`).toEqual([]);
   });
 
   it('保留英文的术语大小写形态统一', () => {
     const violations: string[] = [];
+    const notes: string[] = [];
     for (const term of glossary.terms) {
-      if (term.status !== 'decided' || term.checkCase === false) continue;
+      if (term.checkCase === false) continue;
       const isExempt = makeExemptChecker(term.exempt);
       for (const { locale, key, value } of entries) {
         if (isExempt(key)) continue;
         const standard = term.translations?.[locale];
         if (!standard || standard !== term.en) continue;
         const hit = findCaseMismatch(stripNonProse(value), standard);
-        if (hit) violations.push(`${locale} ${key}: 「${hit}」应为「${standard}」`);
+        // 大小写的正确目标与语境无关、唯一确定,这里给目标是帮忙不是误导(同根门禁)。
+        if (!hit) continue;
+        const line = `${locale} ${key}: 「${hit}」应为「${standard}」`;
+        if (term.status === 'decided') violations.push(line);
+        else notes.push(line);
       }
+    }
+    if (notes.length > 0) {
+      console.warn(`[shadow-glossary] 待裁决术语大小写:\n${notes.join('\n')}`);
     }
     expect(violations, `影子 catalog 大小写不统一:\n${violations.join('\n')}`).toEqual([]);
   });

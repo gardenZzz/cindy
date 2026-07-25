@@ -397,13 +397,24 @@ if (UPDATE_BASELINE) {
 const baseline = fs.existsSync(BASELINE_PATH) ? readJson(BASELINE_PATH) : { entries: [] };
 const baselineSet = new Set(baseline.entries ?? []);
 
-const current = new Set(violations.map((v) => v.fingerprint));
-const stale = [...baselineSet].filter((fp) => !current.has(fp)).sort();
-const fresh = violations.filter((v) => !baselineSet.has(v.fingerprint));
+// baseline **只屏蔽 error 级违规**,不看 fingerprint 就一律放过。
+//
+// baseline 里存的全是当初 decided 术语的违规。若某个术语后来退回 proposed 重新讨论,
+// 它的违规会降级成 warn,但 fingerprint 不变——按 fingerprint 无差别屏蔽的话,这些
+// 违规既不会作为待裁决告警出现(被当成已知存量),也不会被判为 stale(现状里确实还在),
+// 于是「正在讨论的术语现在有多少处」这个数字凭空消失,而讨论恰恰需要它。
+//
+// 改为只用 error 级违规参与 baseline 比对:warn 永远直接呈现;某条 baseline 条目对应的
+// 术语退回 proposed 后,该条目会被判为 stale,提示把它从账上摘掉——这也正确,因为
+// baseline 的语义就是「已冻结的阻断项」。
+const currentBlocking = new Set(blockingAll.map((v) => v.fingerprint));
+const stale = [...baselineSet].filter((fp) => !currentBlocking.has(fp)).sort();
+const isMasked = (v) => v.severity === 'error' && baselineSet.has(v.fingerprint);
+const fresh = violations.filter((v) => !isMasked(v));
 
 const blocking = fresh.filter((v) => v.severity === 'error');
 const warnings = fresh.filter((v) => v.severity === 'warn');
-const known = violations.filter((v) => baselineSet.has(v.fingerprint));
+const known = violations.filter(isMasked);
 
 // ---------------------------------------------------------------------------
 // 输出
