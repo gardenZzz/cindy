@@ -1,7 +1,7 @@
 {
   "ipcError": {
     "SESSION_RUNNING": "このセッションは現在タスクを実行中です。しばらくしてからもう一度お試しください。",
-    "CREDENTIAL_SWITCH_BUSY": "他の Codex タスクが実行中のため、今回の提供元切り替えは適用されませんでした（セッションは元の提供元のままです）。他のタスクが終わってからもう一度お試しください。",
+    "CREDENTIAL_SWITCH_BUSY": "他の Codex タスクが実行中のため、今回のプロバイダー切り替えは適用されませんでした（セッションは元のプロバイダーのままです）。他のタスクが終わってからもう一度お試しください。",
     "REMOTE_WORKDIR_INVALID": "リモートプロジェクトのパスが無効です。プロジェクトディレクトリを選び直してください。",
     "REMOTE_WORKDIR_NOT_FOUND": "リモートプロジェクトのディレクトリが見つかりません。選び直してください。",
     "REMOTE_WORKDIR_NOT_DIRECTORY": "リモートプロジェクトのパスはディレクトリではありません。プロジェクトディレクトリを選び直してください。",
@@ -82,7 +82,7 @@
     },
     "tabs": {
       "general": "一般",
-      "billing": "使用状況と請求",
+      "billing": "使用量と請求",
       "personalization": "パーソナライズ",
       "apiKeys": "ツールキー",
       "voiceInput": "音声入力",
@@ -104,7 +104,7 @@
     },
     "sections": {
       "user": "ユーザー",
-      "billing": "使用状況と請求",
+      "billing": "使用量と請求",
       "appearance": "外観",
       "notifications": "通知",
       "agentIsland": "Agent Island",
@@ -146,10 +146,10 @@
       },
       "status": {
         "disconnected": "切断",
-        "connecting": "接続中...",
-        "authenticating": "認証中...",
+        "connecting": "接続中…",
+        "authenticating": "認証中…",
         "ready": "準備完了",
-        "reconnecting": "再接続中...",
+        "reconnecting": "再接続中…",
         "failed": "失敗"
       },
       "button": {
@@ -192,7 +192,7 @@
         "unlockSubmit": "アンロック",
         "generateTitle": "新しい SSH 鍵を生成",
         "nameLabel": "名前(省略可)",
-        "nameHint": "~/.ssh/<name> に保存。デフォルトは \"cindy\"、衝突時は -1 / -2 ... を付与。",
+        "nameHint": "~/.ssh/<name> に保存。デフォルトは \"cindy\"、衝突時は -1 / -2 … を付与。",
         "encryptLabel": "passphrase で暗号化する(推奨)",
         "encryptHint": "passphrase は今一度だけ入力し、ssh-add が復号した鍵をシステム ssh-agent にキャッシュします。macOS では Keychain にも保存されるため再起動後も自動復帰します。",
         "passLabel": "Passphrase",
@@ -340,9 +340,9 @@
         "codexSyncNoLocal": "ローカルに Codex 認証情報が見つかりません — まず {{appName}} で Codex にログインしてください"
       },
       "silentInstall": {
-        "starting": "リモート {{hostId}} に {{agent}} をインストール中...",
-        "preparingRuntime": "リモート {{hostId}} のランタイムを準備中...",
-        "installingAgent": "リモート {{hostId}} に {{agent}} をインストール中...",
+        "starting": "リモート {{hostId}} に {{agent}} をインストール中…",
+        "preparingRuntime": "リモート {{hostId}} のランタイムを準備中…",
+        "installingAgent": "リモート {{hostId}} に {{agent}} をインストール中…",
         "failed": "{{hostId}} への {{agent}} インストールに失敗: {{message}}。設定 → リモートマシン → {{hostId}} を展開して完全なログを確認してください。"
       }
     },
@@ -527,7 +527,7 @@
         "victory-fanfare": "勝利のファンファーレ",
         "error-buzz": "エラーブザー",
         "secret-chime": "シークレットチャイム",
-        "custom": "ローカルファイル...",
+        "custom": "ローカルファイル…",
         "customSelected": "ローカルファイル: {{name}}"
       }
     },
@@ -595,7 +595,7 @@
       "workflows": {
         "title": "おすすめのワークフロー",
         "description": "{{appName}} は、目的ごとにスレッドを分けてサイドバーから切り替える使い方と相性が良いです。",
-        "item1": "まず探索: 変更前に、プロジェクト構造・主要ファイル・制約を agent に説明させます。",
+        "item1": "まず探索: 変更前に、プロジェクト構造・主要ファイル・制約を Agent に説明させます。",
         "item2": "小さく進める: 狭い変更を依頼し、結果を確認しながら段階的に完了へ近づけます。",
         "item3": "必要なら並列化: 目的ごとに文脈を分けたいときは別セッションを作成します。"
       },
@@ -711,7 +711,7 @@
         "basics": "基本",
         "refinement": "整え方",
         "preferences": "設定",
-        "usageData": "利用状況"
+        "usageData": "使用量"
       },
       "serviceSource": {
         "label": "音声サービス",
@@ -1177,7 +1177,7 @@
           "claude": "Claude Code",
           "claudeDesc": "Claude Code は Anthropic プロトコルに従います（x-api-key で認証）。この提供元の Claude Code 用 baseURL・キー・モデルを入力します。空欄にするとこの提供元は Claude Code を提供しません。",
           "codex": "Codex",
-          "codexDesc": "Codex は OpenAI Responses プロトコルを使用します。Responses ネイティブの上流、または Chat Completions のみを提供するプロバイダーを Cindy でブリッジする方式を選べます。この提供元の Codex 用ベース URL・キー・モデルを入力します。空欄にすると Codex では利用しません。"
+          "codexDesc": "Codex は OpenAI Responses プロトコルを使用します。Responses ネイティブの上流、または Chat Completions のみを提供するプロバイダーを Cindy でブリッジする方式を選べます。このプロバイダーの Codex 用ベース URL・キー・モデルを入力します。空欄にすると Codex では利用しません。"
         },
         "errors": {
           "nameRequired": "表示名を入力してください",
@@ -1359,9 +1359,9 @@
       "statusAria": "Feishu ボットの状態: {{status}}",
       "status": {
         "needsConfig": "設定が必要",
-        "connecting": "接続中...",
+        "connecting": "接続中…",
         "connected": "接続済み",
-        "reconnecting": "再接続中...",
+        "reconnecting": "再接続中…",
         "conflict": "別のデバイスで使用中",
         "error": "接続失敗"
       },
@@ -1410,7 +1410,7 @@
       "statusAria": "Discord ボットの状態: {{status}}",
       "status": {
         "needsConfig": "設定が必要",
-        "connecting": "接続中...",
+        "connecting": "接続中…",
         "connected": "接続済み",
         "conflict": "別のデバイスで使用中",
         "error": "接続失敗"
@@ -1435,9 +1435,9 @@
       "hideToken": "Token を非表示",
       "formHint": "ユーザー ID は 17-20 桁の数字 snowflake である必要があります。",
       "connect": "接続",
-      "connectingAction": "接続中...",
+      "connectingAction": "接続中…",
       "disconnect": "連携解除",
-      "disconnectingAction": "連携解除中...",
+      "disconnectingAction": "連携解除中…",
       "disconnectAria": "Discord ボットの連携を解除",
       "disconnectConfirm": {
         "title": "Discord ボットの連携を解除しますか？",
@@ -1624,7 +1624,7 @@
       }
     },
     "collaboration": {
-      "loading": "コラボレーション設定を読み込み中...",
+      "loading": "コラボレーション設定を読み込み中…",
       "title": "コラボレーション",
       "workerSoftLimit": "Worker ソフト上限",
       "workerSoftLimitHint": "Worker 数がこのしきい値に達したらソフト警告を表示します。",
@@ -1641,7 +1641,7 @@
         "title": "自動操作ブラウザ",
         "description": "エージェント専用の独立したブラウザ。普段の Chrome とは分離されています",
         "toggleAria": "ブラウザ自動操作を切り替える",
-        "toggleHint": "この切り替えは、以降に開始した agent セッションにのみ反映されます。実行中の会話には影響しません。",
+        "toggleHint": "この切り替えは、以降に開始した Agent セッションにのみ反映されます。実行中の会話には影響しません。",
         "noProjectHint": "プロジェクトのセッションから「設定」を開くと、そのプロジェクトのブラウザ自動操作を切り替えられます。",
         "detected": "{{browser}} を検出しました",
         "notDetected": "ローカルブラウザが見つかりません。Chrome をインストールするとブラウザ自動操作を利用できます。",
@@ -1676,15 +1676,15 @@
         "description": "エージェントが ADB 経由で接続済み Android デバイスを確認し、操作できます",
         "toggleAria": "Android 自動操作を切り替える",
         "refresh": "再確認",
-        "toggleHint": "このマシン全体の切り替えは、以降に開始した agent セッションにのみ反映されます。実行中の会話には影響しません。",
+        "toggleHint": "このマシン全体の切り替えは、以降に開始した Agent セッションにのみ反映されます。実行中の会話には影響しません。",
         "status": {
-          "checking": "ADB の状態を確認しています...",
-          "preparing": "ADB を準備しています...",
+          "checking": "ADB の状態を確認しています…",
+          "preparing": "ADB を準備しています…",
           "ready": "ADB は準備できています。利用可能なデバイス: {{count}}。デフォルト: {{device}}",
           "adbDetail": "{{version}}（{{path}}）",
           "noDevice": "ADB は準備できていますが、許可済みの Android デバイスが接続されていません。",
           "defaultUnavailable": "デフォルトの Android デバイスを利用できません: {{device}}",
-          "multipleDevices": "ADB は準備できています。利用可能なデバイス: {{count}}。agent に device serial を指定してください。",
+          "multipleDevices": "ADB は準備できています。利用可能なデバイス: {{count}}。Agent に device serial を指定してください。",
           "unauthorized": "ADB はデバイスを検出しましたが、USB debugging が許可されていません。",
           "offline": "ADB はデバイスを検出しましたが、デバイスは offline 状態です。",
           "adbNotFound": "ADB が見つかりません。Android 自動操作を有効にすると platform-tools を準備します。必要に応じてカスタム adb パスも設定できます。",
@@ -1705,7 +1705,7 @@
         "adb": {
           "title": "ADB",
           "auto": "ADB の自動解決を使用しています",
-          "preparing": "ADB を準備しています...",
+          "preparing": "ADB を準備しています…",
           "ready": "現在の使用元: {{source}}",
           "prepareFailed": "ADB の準備に失敗しました: {{message}}",
           "placeholder": "カスタム adb パス",
@@ -1750,7 +1750,7 @@
         "daemonRunning": "バックグラウンドサービスは実行中です",
         "daemonStopped": "バックグラウンドサービスは停止中です。使用時に自動起動します",
         "notDetected": "cua-driver が検出されません。初回有効化時に自動でインストールされます。権限を付与すると、コンピュータの直接操作を利用できます。",
-        "installing": "cua-driver をインストール中...",
+        "installing": "cua-driver をインストール中…",
         "authorizing": "システム権限を待っています。Cua Driver の権限ウィンドウで「アクセシビリティ」と「画面収録」を許可してください。",
         "permissionIntro": {
           "title": "コンピュータ自動操作を有効化",
@@ -1792,10 +1792,10 @@
           "recheck": "再確認",
           "moreDetails": "詳細情報",
           "hideDetails": "詳細を閉じる",
-          "windowsHint": "Windows では追加のシステム権限は不要です。agent が作業している間は、対象アプリを現在のアクティブなデスクトップ上で表示したままにしてください。",
+          "windowsHint": "Windows では追加のシステム権限は不要です。Agent が作業している間は、対象アプリを現在のアクティブなデスクトップ上で表示したままにしてください。",
           "linuxHint": "Linux では macOS の TCC 権限は使いません。現在のデスクトップセッションでウィンドウ取得と入力自動化が許可されていることを確認してください。"
         },
-        "toggleHint": "この切り替えは、以降に開始した agent セッションにのみ反映されます。実行中の会話には影響しません。",
+        "toggleHint": "この切り替えは、以降に開始した Agent セッションにのみ反映されます。実行中の会話には影響しません。",
         "noProjectHint": "プロジェクトのセッションから「設定」を開くと、そのプロジェクトのコンピュータ直接操作を切り替えられます。",
         "update": {
           "available": "新しいバージョン v{{version}} が利用可能です。更新後、システム権限の再許可が必要になる場合があります。",
@@ -1827,7 +1827,7 @@
       "description": "新しい会話のデフォルトを設定するか、プロジェクトごとに上書きします。プロジェクト設定が優先されます。",
       "empty": "利用可能なツールはありません。",
       "toggleAria": "{{name}} ツールを切り替え",
-      "toggleHint": "変更は新規または再起動した agent セッションにのみ反映され、実行中のセッションには影響しません。",
+      "toggleHint": "変更は新規または再起動した Agent セッションにのみ反映され、実行中のセッションには影響しません。",
       "loadFailed": "ツール一覧の読み込みに失敗しました",
       "scopePicker": {
         "ariaLabel": "組み込みツール設定の適用範囲を切り替え",
@@ -1867,11 +1867,11 @@
         },
         "memory": {
           "name": "Cindy メモリ",
-          "description": "セッションをまたいでコンテキストを保持する agent 横断の長期メモリ"
+          "description": "セッションをまたいでコンテキストを保持する Agent 横断の長期メモリ"
         },
         "xdt_helper": {
           "name": "Cindy Helper",
-          "description": "ホスト機能の開示 — 利用可能なツールとモデルを agent に伝える"
+          "description": "ホスト機能の開示 — 利用可能なツールとモデルを Agent に伝える"
         },
         "collab": {
           "name": "コラボモード",
@@ -2044,6 +2044,7 @@
       "prefs": {
         "agentLabel": "Agent",
         "modelLabel": "モデル",
+        "effortLabel": "推論強度",
         "permissionLabel": "権限モード",
         "providerSlack": "Slack",
         "providerTelegram": "Telegram",
@@ -2859,7 +2860,7 @@
     "emailPlaceholder": "メールアドレスを入力",
     "invalidEmail": "正しいメールアドレスを入力してください",
     "invalidPhone": "正しい電話番号を入力してください",
-    "working": "お待ちください...",
+    "working": "お待ちください…",
     "continue": "続行",
     "or": "または",
     "socialButton": "{{provider}} で続行",
@@ -2880,7 +2881,7 @@
     "ssoRequired": "この組織は SSO ログインが必要です",
     "ssoEntry": "企業 SSO でサインイン",
     "localModeEntry": "ログインをスキップ",
-    "localModeOpening": "ローカルモードを開いています...",
+    "localModeOpening": "ローカルモードを開いています…",
     "returnToLocalMode": "ローカルモードに戻る",
     "localModeDescription": "Cindy アカウントは不要です。データはこのデバイスに保存され、クラウドモデル、デバイス間アクセス、マーケットサービスは利用できません。",
     "consentStatement": "<terms>利用規約</terms>と<privacy>プライバシーポリシー</privacy>を読み、同意します",
@@ -2900,7 +2901,7 @@
     "enterCode": "認証コードを入力",
     "codeSentTo": "{{identifier}} にコードを送信しました",
     "codePlaceholder": "6 桁のコード",
-    "verifying": "確認中...",
+    "verifying": "確認中…",
     "signIn": "ログイン",
     "resendCode": "コードを再送信",
     "resendCountdown": "{{n}} 秒後に再送信できます",
@@ -2962,11 +2963,11 @@
   },
   "splash": {
     "tips": {
-      "checkingUpdate": "更新を確認中...",
-      "updating": "Cindyを更新中...",
-      "updateDone": "更新完了、まもなく自動的に再起動します...",
-      "checkingEnv": "実行環境を確認中...",
-      "waking": "Cindyを起こしています...",
+      "checkingUpdate": "更新を確認中…",
+      "updating": "Cindyを更新中…",
+      "updateDone": "更新完了、まもなく自動的に再起動します…",
+      "checkingEnv": "実行環境を確認中…",
+      "waking": "Cindyを起こしています…",
       "envFailed": "環境の初期化に失敗しました。クリックして再試行してください"
     },
     "downloadStats": "{{percent}}% · {{speed}} MB/s · {{done}} MB / {{total}} MB",
@@ -3008,7 +3009,7 @@
     "xai": {
       "requestsLine": "レート制限（リクエスト）: 残り {{remaining}}/{{limit}}",
       "tokensLine": "レート制限（トークン）: 残り {{remaining}}/{{limit}}",
-      "noQuotaDetail": "xAI はサブスクリプション残量の詳細を提供していないため、価値の推定のみ表示します"
+      "noQuotaDetail": "xAI はサブスクリプションクォータの詳細を提供していないため、価値の推定のみ表示します"
     },
     "dailyLimitLabel": "本日 {{spend}}/{{limit}}",
     "monthlyLimitLabel": "周期 {{spend}}/{{limit}}",
@@ -3618,7 +3619,7 @@
     "horizontalTabbarAria": "メインビュー切り替え",
     "tabs": {
       "projects": "プロジェクト",
-      "skillhub": "スキルハブ",
+      "skillhub": "SkillHub",
       "plugins": "プラグイン",
       "issues": "問題"
     },
@@ -3665,7 +3666,7 @@
         "cancel": "不要"
       },
       "running": {
-        "title": "設定を変換中...",
+        "title": "設定を変換中…",
         "description": "{{targetAgent}} 用のワークスペース設定を書き込んでいます。ウィンドウを閉じないでください。",
         "primary": "変換",
         "cancel": "不要"
@@ -3684,7 +3685,7 @@
   },
   "findInPage": {
     "dialogAriaLabel": "ページ内検索",
-    "placeholder": "検索...",
+    "placeholder": "検索…",
     "previous": "前へ",
     "next": "次へ",
     "close": "閉じる"
@@ -3825,13 +3826,13 @@
       "add": "プロジェクトを追加",
       "cancel": "キャンセル",
       "empty": "「設定 → リモート接続」で被制御デバイスに接続するか、「設定 → リモートマシン」で SSH ホストを追加してください。",
-      "loading": "読み込み中...",
+      "loading": "読み込み中…",
       "noSubdirs": "サブフォルダはありません",
       "doubleClickHint": "ダブルクリックで入る",
       "tabExisting": "既存のプロジェクト",
       "tabBrowse": "フォルダーを参照",
       "existingEmpty": "その端末にはまだプロジェクトがありません。フォルダーを参照して追加してください。",
-      "existingLoading": "プロジェクトを読み込み中...",
+      "existingLoading": "プロジェクトを読み込み中…",
       "confirmCreate": {
         "title": "リモートディレクトリを作成?",
         "description": "{{path}} は {{hostId}} に存在しません。今すぐ作成しますか?",
@@ -3869,7 +3870,7 @@
       "trigger": {
         "placeholder": "モデルを選択",
         "aria": "モデルを選択。現在：{{model}}",
-        "ariaWithEffort": "モデルを選択。現在：{{model}}、推論レベル：{{effort}}"
+        "ariaWithEffort": "モデルを選択。現在：{{model}}、推論強度：{{effort}}"
       },
       "category": {
         "anthropic": "Anthropic",
@@ -3885,8 +3886,8 @@
         "other": "その他"
       },
       "search": {
-        "placeholder": "{{source}} のモデルを検索...",
-        "placeholderAll": "モデルを検索...",
+        "placeholder": "{{source}} のモデルを検索…",
+        "placeholderAll": "モデルを検索…",
         "noResults": "一致するモデルがありません"
       },
       "meta": {
@@ -4005,7 +4006,7 @@
       "steerAction": "割り込み",
       "steerRunningTip": "実行中のタスクを中断せずに割り込み送信します。現在の操作が完了した後に優先して処理されます",
       "steerPausedTip": "タスクを続行し、このメッセージを優先して処理します",
-      "steeringAction": "割り込み中...",
+      "steeringAction": "割り込み中…",
       "steerAria": "実行中のタスクに割り込み、キューの {{index}} 番目のメッセージを優先して処理",
       "steeringAria": "キューの {{index}} 番目のメッセージを割り込み送信中",
       "editAction": "編集",
@@ -4047,10 +4048,10 @@
       "stopConfirmDesc": "Worker セッションが破棄されます。実行中の場合はすぐに停止し、今回の実行結果は失われます。続行しますか？",
       "stopConfirmConfirm": "終了する",
       "stopConfirmCancel": "キャンセル",
-      "archiveWorkerConfirmTitle": "worker {{role}} #{{label}} をアーカイブしますか?",
-      "archiveWorkerConfirmTitleName": "worker {{name}} をアーカイブしますか?",
-      "archiveWorkerConfirmDesc": "この操作は worker の SDK session を停止し、sidebar から非表示にします。履歴データは archived 状態で保持されます。現在の UI では復元できないため、誤ってアーカイブした場合は worker を作成し直してタスクを割り当ててください。",
-      "archiveWorkerConfirmConfirm": "worker をアーカイブ",
+      "archiveWorkerConfirmTitle": "Worker {{role}} #{{label}} をアーカイブしますか?",
+      "archiveWorkerConfirmTitleName": "Worker {{name}} をアーカイブしますか?",
+      "archiveWorkerConfirmDesc": "この操作は Worker の SDK session を停止し、sidebar から非表示にします。履歴データは archived 状態で保持されます。現在の UI では復元できないため、誤ってアーカイブした場合は Worker を作成し直してタスクを割り当ててください。",
+      "archiveWorkerConfirmConfirm": "Worker をアーカイブ",
       "archiveWorkerConfirmCancel": "キャンセル",
       "errors": {
         "INVALID_PARAMS": "選択したモデルまたは協同設定は利用できません。選び直して再試行してください。",
@@ -4098,8 +4099,8 @@
       "attachmentRejection": {
         "dismiss": "閉じる"
       },
-      "credentialSwitchDeferred": "モデル提供元を切り替えました。現在のタスク終了後に有効になります。",
-      "credentialSwitchApplied": "モデル提供元の切り替えが有効になりました。",
+      "credentialSwitchDeferred": "モデルプロバイダーを切り替えました。現在のタスク終了後に有効になります。",
+      "credentialSwitchApplied": "モデルプロバイダーの切り替えが有効になりました。",
       "modelSwitchContextGuard": {
         "title": "切替先モデルのコンテキストウィンドウが小さいです",
         "warnToast": "このセッションは {{used}} のコンテキストを使用中です。切替後は切替先モデルのウィンドウ（{{total}}）の約 {{pct}}% を占めます",
@@ -4191,7 +4192,7 @@
       "error": "音声入力に失敗しました"
     },
     "hint": "もう一度ショートカットで入力",
-    "placeholder": "話し始めてください...",
+    "placeholder": "話し始めてください…",
     "pasteHint": "自動入力に失敗しました。認識テキストをコピーして手動で入力してください。",
     "pasteErrors": {
       "empty": "入力できる音声テキストがありません。",
@@ -4341,7 +4342,7 @@
       "syncAuthDaemonRestartFailed": "認証情報はリモートに送信されましたが、古い daemon が再起動されませんでした — リモートに再接続してから再試行してください",
       "invalidEncryptedContent": "プロバイダーを変更したため、以前の暗号化が使用できなくなりました。このセッションは元のプロバイダーでのみ続行できます。または Fork をクリックしてプロトコル暗号化コンテンツを破棄し、新しいセッションで続行してください。",
       "forkStripEncrypted": "Fork して切り離す",
-      "forkStripEncryptedRunning": "Fork 中...",
+      "forkStripEncryptedRunning": "Fork 中…",
       "forkStripEncryptedTitle": "暗号化推論を除いた新しいセッションを Fork で作成",
       "codexSessionExpiredLogin": "ChatGPT に再接続",
       "codexSessionReconnected": "ChatGPT に再接続しました。「再試行」をクリックして続行してください。",
@@ -4473,7 +4474,7 @@
       "openSystemFailed": "システムで開けませんでした",
       "copyAll": "全文をコピー",
       "cannotRead": "ファイルを読み取れません",
-      "loading": "ファイルを読み込み中...",
+      "loading": "ファイルを読み込み中…",
       "oversizeTitle": "ファイルが大きすぎてプレビューできません",
       "oversizeBody": "このファイルは {{size}} で、{{limit}}MB のプレビュー上限を超えています。システムの既定アプリで開いてください。",
       "openInSystem": "システムアプリで開く",
@@ -4610,7 +4611,7 @@
     "systemCard": {
       "context": {
         "title": "コンテキスト使用量",
-        "loading": "読み込み中...",
+        "loading": "読み込み中…",
         "noLiveSession": "利用できるコンテキストデータはまだありません。Claude Code セッション開始後にもう一度お試しください。",
         "unsupportedAgent": "{{agent}} はまだコンテキスト使用量表示に対応していません。",
         "percentFull": "{{pct}}% 使用中",
@@ -4761,7 +4762,7 @@
         "title": "このメッセージまで戻しますか？",
         "titleError": "このメッセージまで戻せません",
         "errorDescription": "この Session ではファイルの checkpointing が有効になっていないため、ツールで変更されたファイルを戻せません。",
-        "calculating": "rewind の影響を計算中...",
+        "calculating": "rewind の影響を計算中…",
         "noChanges": "ロールバックが必要なファイル変更はありません",
         "continueWillTruncate": "続行しても以降の会話は切り詰められます",
         "noPerFileDiff": "この SDK バージョンはファイル単位の diff プレビューに対応していません",
@@ -4784,7 +4785,7 @@
     },
     "upgradeBanner": {
       "description": "{{hostId}} の cc-manager に新しいバージョンがあります — アップグレードするとこのホスト上のすべての Claude Code リモートセッションが中断されます",
-      "upgrading": "{{hostId}} の cc-manager をアップグレード中...",
+      "upgrading": "{{hostId}} の cc-manager をアップグレード中…",
       "upgrade": "今すぐアップグレード",
       "upgradeTitle": "新しい cc-manager をダウンロードして再起動（現在のセッションは中断されます）",
       "dismissTitle": "あとで（次回起動時に再度通知）",
@@ -4827,8 +4828,8 @@
       }
     },
     "credentialSwitchWait": {
-      "waiting": "他の Codex タスクが別のモデル提供元で実行中です。終了後、このセッションで選択した提供元でこのメッセージを自動送信します。",
-      "waitingForNamed": "「{{titles}}」が別のモデル提供元で実行中です。終了後、このセッションで選択した提供元でこのメッセージを自動送信します。",
+      "waiting": "他の Codex タスクが別のモデルプロバイダーで実行中です。終了後、このセッションで選択したプロバイダーでこのメッセージを自動送信します。",
+      "waitingForNamed": "「{{titles}}」が別のモデルプロバイダーで実行中です。終了後、このセッションで選択したプロバイダーでこのメッセージを自動送信します。",
       "cancel": "キャンセル",
       "cancelTitle": "待機をやめてこのメッセージを削除"
     },
@@ -4889,7 +4890,7 @@
       "unnamedSession": "名称未設定セッション",
       "moreActions": "その他の操作",
       "newSession": "新規セッション",
-      "loading": "読み込み中..."
+      "loading": "読み込み中…"
     },
     "time": {
       "yesterday": "昨日",
@@ -4934,7 +4935,7 @@
         "confirm": "設定を開く",
         "cancel": "キャンセル"
       },
-      "chatPlaceholder": "続けてやり取りしましょう...",
+      "chatPlaceholder": "続けてやり取りしましょう…",
       "chatDropAreaAria": "チャットのファイルドロップ領域",
       "openWorkingDirAria": "作業ディレクトリをシステムのファイルマネージャーで開く",
       "projectContextLoaded": "プロジェクトナレッジベースを読み込みました",
@@ -4942,7 +4943,7 @@
         "compactHint": "クリックでコンテキストを圧縮",
         "codexAutoHint": "Codex はサーバー側で自動圧縮されるため、手動での圧縮はできません",
         "confirmTitle": "コンテキストを圧縮しますか?",
-        "confirmDescription": "現在の使用量: {{used}} / {{total}}({{pct}}%)。コンテキストを静かに圧縮し、agent が会話履歴を要約してコンテキスト領域を解放します。",
+        "confirmDescription": "現在の使用量: {{used}} / {{total}}({{pct}}%)。コンテキストを静かに圧縮し、Agent が会話履歴を要約してコンテキスト領域を解放します。",
         "confirmAction": "圧縮",
         "confirmCancel": "キャンセル"
       },
@@ -5270,7 +5271,7 @@
           "merged": "マージ済み",
           "closed": "クローズ済み"
         },
-        "needsToken": "ローカルの gh CLI が未ログインです。agent に gh auth login を一度実行させると PR の状態が表示されます",
+        "needsToken": "ローカルの gh CLI が未ログインです。Agent に gh auth login を一度実行させると PR の状態が表示されます",
         "statusUnknown": "状態の取得に失敗しました",
         "openAria": "PR #{{number}} をブラウザで開く",
         "unresolved": "未解決のレビューコメント: {{count}} 件"
@@ -5347,7 +5348,7 @@
       },
       "docSearch": {
         "ariaLabel": "ドキュメント内検索",
-        "placeholder": "検索...",
+        "placeholder": "検索…",
         "prev": "前へ",
         "next": "次へ",
         "close": "閉じる",
@@ -5446,10 +5447,10 @@
     },
     "search": {
       "open": "検索",
-      "placeholder": "タイトルまたは内容を検索...",
+      "placeholder": "タイトルまたは内容を検索…",
       "clear": "検索をクリア",
       "empty": "キーワードを入力して会話のタイトルと内容を検索",
-      "searching": "検索中...",
+      "searching": "検索中…",
       "failed": "検索に失敗しました",
       "noResults": "一致する会話がありません",
       "jumpFailed": "会話を開きましたが、一致したメッセージへ移動できませんでした",
@@ -5492,14 +5493,14 @@
   },
   "scheduler": {
     "page": {
-      "title": "オートメーション",
+      "title": "自動化",
       "totalCount": "合計 {{count}} 件",
       "totalCountWithDir": "{{dir}} · 合計 {{count}} 件",
       "loadFailed": "読み込みに失敗しました: {{error}}"
     },
     "empty": {
-      "promptHeading": "オートメーションがまだありません",
-      "promptDescription": "cron オートメーションを作成して、Claude Code または Codex にプロンプトをスケジュール実行させましょう。"
+      "promptHeading": "自動化がまだありません",
+      "promptDescription": "cron 自動化を作成して、Claude Code または Codex にプロンプトをスケジュール実行させましょう。"
     },
     "template": {
       "useTemplate": "初心者ヘルプ",
@@ -5521,8 +5522,8 @@
     "projectAutomation": {
       "toast": {
         "summary": "追加 {{inserted}} · 更新 {{updated}} · 削除 {{deleted}}",
-        "installed": "{{projectName}} のプロジェクトオートメーションをインストールしました（{{summary}}）",
-        "updated": "{{projectName}} のプロジェクトオートメーションを更新しました（{{summary}}）"
+        "installed": "{{projectName}} のプロジェクト自動化をインストールしました（{{summary}}）",
+        "updated": "{{projectName}} のプロジェクト自動化を更新しました（{{summary}}）"
       },
       "cell": {
         "tag": "プロジェクト",
@@ -5530,7 +5531,7 @@
       }
     },
     "button": {
-      "newAutomation": "新しいオートメーション",
+      "newAutomation": "新しい自動化",
       "runNow": "今すぐ実行",
       "close": "閉じる",
       "edit": "編集",
@@ -5548,18 +5549,18 @@
       },
       "section": {
         "otherGroup": "その他",
-        "createProject": "このプロジェクトに新しいオートメーション",
-        "createProjectAria": "このプロジェクトに新しいオートメーションを作成（作業ディレクトリ自動入力）",
+        "createProject": "このプロジェクトに新しい自動化",
+        "createProjectAria": "このプロジェクトに新しい自動化を作成（作業ディレクトリ自動入力）",
         "openConfig": "設定ファイルを開く",
-        "openConfigAria": "プロジェクトオートメーション設定を開く",
+        "openConfigAria": "プロジェクト自動化設定を開く",
         "openConfigFailed": "ファイルを開けませんでした",
         "reload": "再読み込み",
-        "reloadAria": "プロジェクトオートメーションを再読み込み"
+        "reloadAria": "プロジェクト自動化を再読み込み"
       },
       "promote": {
-        "menu": "プロジェクトオートメーションに昇格",
+        "menu": "プロジェクト自動化に昇格",
         "noWorkingDir": "作業ディレクトリのないスケジュールは昇格できません",
-        "success": "プロジェクトオートメーションに昇格しました"
+        "success": "プロジェクト自動化に昇格しました"
       },
       "editProject": {
         "menu": "設定を編集"
@@ -5571,7 +5572,7 @@
       },
       "removeProject": {
         "menu": "プロジェクトから削除",
-        "confirmTitle": "プロジェクトオートメーションから削除しますか？",
+        "confirmTitle": "プロジェクト自動化から削除しますか？",
         "confirmDescription": ".cindy/automations/schedules.json から \"{{name}}\" を削除します。commit 後はすべての共同作業者に影響します。",
         "confirm": "削除",
         "demote": "削除して個人用コピーを保持",
@@ -5593,7 +5594,7 @@
         "rename": "名前を変更",
         "resume": "再開",
         "pause": "一時停止",
-        "deleteAutomation": "オートメーションを削除"
+        "deleteAutomation": "自動化を削除"
       }
     },
     "detail": {
@@ -5605,7 +5606,7 @@
       "menu": {
         "resume": "再開",
         "pause": "一時停止",
-        "deleteAutomation": "オートメーションを削除"
+        "deleteAutomation": "自動化を削除"
       },
       "openWorkdirFailed": "フォルダを開けませんでした"
     },
@@ -5665,16 +5666,16 @@
     },
     "editor": {
       "promptDialog": {
-        "titleEdit": "オートメーションを編集",
-        "titleCreate": "オートメーションを作成",
-        "titleProjectCreate": "新しいプロジェクトオートメーション",
-        "titleProjectEdit": "プロジェクトオートメーションを編集",
+        "titleEdit": "自動化を編集",
+        "titleCreate": "自動化を作成",
+        "titleProjectCreate": "新しいプロジェクト自動化",
+        "titleProjectEdit": "プロジェクト自動化を編集",
         "subtitle": "Claude または Codex でプロンプトをスケジュール実行します。",
         "save": "保存",
         "create": "作成",
-        "saveAria": "オートメーションを保存",
-        "createAria": "オートメーションを作成",
-        "namePlaceholder": "このオートメーションに名前を付ける",
+        "saveAria": "自動化を保存",
+        "createAria": "自動化を作成",
+        "namePlaceholder": "この自動化に名前を付ける",
         "promptPlaceholder": "例: Sentry で新しいクラッシュを見つけ、主要なリグレッションを要約する。"
       },
       "executionMode": {
@@ -5754,7 +5755,7 @@
       "preRunHook": {
         "label": "事前チェック",
         "enable": "有効化",
-        "tooltip": "タスクの起動時にこのスクリプトを先に実行します。終了コード 0 で今回の実行を許可し、終了コード 2 で今回をスキップします（agent は起動せず、トークンも消費しません）。スクリプトのエラーやタイムアウト時は実行を阻止し、失敗結果を記録します。スクリプトはタスクの作業ディレクトリで実行されます。Windows では明示的なインタープリタ（例: node check.mjs）を指定してください。",
+        "tooltip": "タスクの起動時にこのスクリプトを先に実行します。終了コード 0 で今回の実行を許可し、終了コード 2 で今回をスキップします（Agent は起動せず、トークンも消費しません）。スクリプトのエラーやタイムアウト時は実行を阻止し、失敗結果を記録します。スクリプトはタスクの作業ディレクトリで実行されます。Windows では明示的なインタープリタ（例: node check.mjs）を指定してください。",
         "infoAria": "事前チェックのルールを表示",
         "protocol": "スクリプトの書き方:終了コード 0 = 今回タスクを実行、終了コード 2 = 今回はスキップ(使用量を消費しません)。その他の終了コード、エラー、タイムアウトは実行を阻止します",
         "commandPlaceholder": "node scripts/schedule-checks/check.mjs",
@@ -5874,7 +5875,7 @@
         "modelListAria": "モデル一覧",
         "modelSelectorAria": "モデルセレクター",
         "categoryListAria": "{{category}} モデル",
-        "effortListAria": "Effort レベル"
+        "effortListAria": "推論強度"
       }
     },
     "toast": {
@@ -5890,9 +5891,9 @@
       "restartFailed": "再開に失敗しました: {{error}}"
     },
     "deleteDialog": {
-      "title": "オートメーション「{{name}}」を削除しますか？",
-      "titleFallback": "オートメーションを削除しますか？",
-      "description": "今後のトリガーは停止されます。このオートメーションがすでに生成した会話の扱いを選択してください。",
+      "title": "自動化「{{name}}」を削除しますか？",
+      "titleFallback": "自動化を削除しますか？",
+      "description": "今後のトリガーは停止されます。この自動化がすでに生成した会話の扱いを選択してください。",
       "sessionCountPending": "生成済みの会話を確認しています…",
       "sessionCount": "生成済みの会話 {{count}} 件",
       "inflightCount": "現在 {{count}} 件の実行中タスクがあり、削除すると停止されます",
@@ -5900,33 +5901,33 @@
       "option": {
         "keep": {
           "title": "会話を保持",
-          "description": "オートメーションタスクのみ削除し、会話はサイドバーに残します。"
+          "description": "自動化タスクのみ削除し、会話はサイドバーに残します。"
         },
         "archive": {
           "title": "会話をアーカイブ",
-          "description": "オートメーションタスクを削除し、生成された会話をアーカイブへ移動します。"
+          "description": "自動化タスクを削除し、生成された会話をアーカイブへ移動します。"
         },
         "delete": {
           "title": "会話を削除",
-          "description": "オートメーションタスクと生成された会話を削除します。この操作は元に戻せません。"
+          "description": "自動化タスクと生成された会話を削除します。この操作は元に戻せません。"
         }
       },
-      "confirm": "オートメーションを削除",
-      "confirmDeleteSessions": "オートメーションと会話を削除",
-      "sessionUpdatePartial": "オートメーションは削除されましたが、{{fail}} 件の会話を処理できませんでした"
+      "confirm": "自動化を削除",
+      "confirmDeleteSessions": "自動化と会話を削除",
+      "sessionUpdatePartial": "自動化は削除されましたが、{{fail}} 件の会話を処理できませんでした"
     },
     "confirm": {
       "delete": {
-        "title": "オートメーション「{{name}}」を削除しますか？",
+        "title": "自動化「{{name}}」を削除しますか？",
         "description": "今後のトリガーは停止されますが、既存の実行履歴は保持されます。この操作は元に戻せません。",
-        "withInflight": "このオートメーションは現在 {{count}} 件の実行が進行中です。削除すると直ちに停止され、進行中の作業が中断される可能性があります。続行しますか？",
+        "withInflight": "この自動化は現在 {{count}} 件の実行が進行中です。削除すると直ちに停止され、進行中の作業が中断される可能性があります。続行しますか？",
         "confirm": "削除",
         "confirmWithInflight": "停止して削除",
         "cancel": "キャンセル"
       },
       "pause": {
-        "title": "オートメーション「{{name}}」を一時停止しますか？",
-        "withInflight": "このオートメーションは現在 {{count}} 件の実行が進行中です。一時停止すると直ちに停止され、進行中の作業が中断される可能性があります。続行しますか？",
+        "title": "自動化「{{name}}」を一時停止しますか？",
+        "withInflight": "この自動化は現在 {{count}} 件の実行が進行中です。一時停止すると直ちに停止され、進行中の作業が中断される可能性があります。続行しますか？",
         "confirm": "一時停止",
         "cancel": "キャンセル"
       },
@@ -6272,7 +6273,7 @@
     },
     "welcome": {
       "scanning": "ローカルの skill をスキャン中…",
-      "emptyTitle": "このマシンに skill / command / agent がありません",
+      "emptyTitle": "このマシンに skill / command / Agent がありません",
       "emptyHint": "<code>~/.claude/{{dirs}}/</code> にファイルを作成するとここに表示されます",
       "selectPrompt": "左側から一つ選んで閲覧を開始",
       "totalCount_one": "全 {{count}} 件",
@@ -6287,7 +6288,7 @@
       "badgeAvailableAria": "{{count}} 件利用可能",
       "localSkills": "ローカルスキル",
       "scopeGlobal": "グローバル",
-      "marketSelectPrompt": "右側で技能を選択してください",
+      "marketSelectPrompt": "右側でスキルを選択してください",
       "marketNotInstalled": "<strong>{{name}}</strong> はローカルに未インストール",
       "marketInstalledHeading": "インストール済み場所",
       "marketUpdatable": "更新可能",
@@ -6301,9 +6302,9 @@
       "frontmatterTitle": "Frontmatter",
       "filesTitle": "ファイル",
       "filesEmpty": "（空）",
-      "usageTitle": "使用状況",
+      "usageTitle": "使用量",
       "usageLoading": "集計中…",
-      "usageFailed": "使用状況の集計に失敗しました：{{message}}",
+      "usageFailed": "使用量の集計に失敗しました：{{message}}",
       "usageEmpty": "直近 30 日間のこの端末での使用記録はありません",
       "usageDiagnose": "この Skill を診断",
       "usageDiagnosisStarting": "診断セッションを作成中…",
@@ -6359,7 +6360,7 @@
       "backToSkillhub": "SkillHub に戻る",
       "openDirAria": "ディレクトリを開く",
       "showInFolderAria": "ファイルマネージャで表示",
-      "resizeUsageFilesColumn": "使用状況とファイル一覧の幅を調整",
+      "resizeUsageFilesColumn": "使用量とファイル一覧の幅を調整",
       "loadingContent": "コンテンツを読み込み中…",
       "readFailed": "コンテンツを読めません",
       "readFailedAfterSave": "保存しましたが再読み込みに失敗しました",
@@ -6437,8 +6438,8 @@
       "categoryAll": "すべて",
       "categoryLabel": "カテゴリ: {{name}}",
       "loadFailed": "読み込み失敗：{{error}}",
-      "loading": "読み込み中...",
-      "noResults": "一致する技能が見つかりません",
+      "loading": "読み込み中…",
+      "noResults": "一致するスキルが見つかりません",
       "installFailedToast": "{{name}} のインストール失敗：{{message}}",
       "installError": "不明なエラー"
     },
@@ -6525,7 +6526,7 @@
       "renameFailed": "ローカルの改名に失敗：{{error}}",
       "skillNameLabel": "SkillName",
       "skillNamePlaceholder": "my-skill",
-      "skillNameRequired": "技能名は必須です",
+      "skillNameRequired": "スキル名は必須です",
       "skillNameFormat": "形式：[a-z0-9-]+",
       "displayNameLabel": "表示名",
       "displayNamePlaceholder": "My Skill",
@@ -6540,7 +6541,7 @@
       "categoryLabel": "カテゴリ",
       "categoryAuto": "自動",
       "categoryPlaceholder": "カテゴリを選択",
-      "categoryLoading": "カテゴリを読み込み中...",
+      "categoryLoading": "カテゴリを読み込み中…",
       "categoryLoadFailed": "カテゴリの読み込みに失敗しました。再試行してください",
       "categoryEmpty": "利用可能なカテゴリがありません",
       "categoryRequired": "公開前にカテゴリを選択してください",
@@ -6779,7 +6780,7 @@
     "workingDirPlaceholder": "右のボタンでディレクトリを選択",
     "selectButton": "選択…",
     "modelLabel": "モデル:",
-    "effortLabel": "強度:",
+    "effortLabel": "推論強度:",
     "permissionLabel": "権限:",
     "warningHint": "⚠ マークのモード（ask/default/plan/acceptEdits）はステージ 1 で UI 承認ポップアップ未接続、実験ページの hook はツール呼び出しを自動 deny します — 実テストには auto / bypassPermissions のみ推奨。",
     "createSession": "セッションを作成",
@@ -6920,7 +6921,7 @@
       "agentLabel": "Agent",
       "modelLabel": "モデル",
       "noAvailableModels": "利用可能な {{agent}} モデルがありません。設定でプロバイダーの接続と認証情報を確認してください。",
-      "effortLabel": "Effort",
+      "effortLabel": "推論強度",
       "initialTaskLabel": "初期タスク",
       "optional": "（任意）",
       "initialTaskPlaceholder": "この Worker に渡す任意の最初のタスク",
@@ -6937,7 +6938,7 @@
       "hardLimitHint": "ハード上限 {{count}} に達しました。既存 Worker をアーカイブすると追加できます。",
       "softLimitHint": "ソフト上限 {{count}} を超えています。Worker が多いほどメモリ使用量が増えます。",
       "settingsCollaboration": "設定 · コラボレーション",
-      "layoutMenuLabel": "worker リストの表示方式",
+      "layoutMenuLabel": "Worker リストの表示方式",
       "layoutTabs": "タブ",
       "layoutDropdown": "ドロップダウン",
       "errorBadge": "エラー",
@@ -7169,7 +7170,7 @@
   "billing": {
     "sidebar": "クレジットとプラン",
     "settings": {
-      "title": "使用状況と請求",
+      "title": "使用量と請求",
       "subscriptionCard": {
         "title": "現在のプラン",
         "empty": "有効なサブスクリプションはありません",
@@ -7208,11 +7209,11 @@
       "unavailable": "残高を取得できません。更新してもう一度お試しください。"
     },
     "usage": {
-      "title": "クレジット使用状況",
+      "title": "クレジット使用量",
       "observedAt": "クレジット更新: {{date}}",
       "poolDetail": "使用済み {{used}} · 合計 {{total}}",
       "remaining": "残り",
-      "progressLabel": "{{label}}の使用状況",
+      "progressLabel": "{{label}}の使用量",
       "historyUnavailable": "使用履歴が完全ではないため、残りのクレジットのみ表示しています。",
       "detailsUnavailable": "使用量の詳細を取得できないため、現在の残高のみ表示しています。",
       "promotionalDetails": {

@@ -47,6 +47,10 @@
 - 新增或修改任何界面、组件、布局、样式、动效或 UI 文案前，必须先读权威设计规范
   `docs/design-rules/DESIGN.md`；设计文档索引见
   `docs/design-rules/cindy-design-system.md`。
+- 新增或修改任何 UI 文案里的**产品术语**前，必须先查术语表 `i18n/GLOSSARY.md`：已裁决
+  的术语照用，不自造译法；表里没有或拿不准的，在 `i18n/glossary.json` 加
+  `status: "proposed"` 条目再讨论。门禁为 `pnpm check:i18n-glossary`，规则见
+  `docs/dev-rules/engineering-conventions.md` §5.1。
 - 所有新增或修改的 UI 必须同时完成 Light 与 Dark 两种模式；只实现或只验证一种模式，
   视为未完成。具体实现与验收要求以 `docs/design-rules/DESIGN.md` 的双模式交付门槛
   为准。

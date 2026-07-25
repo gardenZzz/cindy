@@ -962,11 +962,11 @@ describe('automation-generated sessions', () => {
     expect(runHistoryCardSource).toContain("run.costAttribution === 'legacy'");
     expect(zh.scheduler.cell.totalCost).toBe('开销 {{cost}}');
     expect(zh.scheduler.cell.totalValue).toBe('价值 {{value}}');
-    expect(zh.scheduler.runs.sessionCost).toBe('会话开销 {{cost}}');
-    expect(zh.scheduler.runs.sessionValue).toBe('会话价值 {{value}}');
+    expect(zh.scheduler.runs.sessionCost).toBe('对话开销 {{cost}}');
+    expect(zh.scheduler.runs.sessionValue).toBe('对话价值 {{value}}');
     expect(zh.scheduler.runs.runCost).toBe('本次开销 {{cost}}');
     expect(zh.scheduler.runs.legacyCostUnavailable).toBe('历史费用无法拆分');
-    expect(zh.scheduler.runs.persistentSessionGroup).toBe('持续会话 {{session}} · {{count}} 次运行');
+    expect(zh.scheduler.runs.persistentSessionGroup).toBe('持续对话 {{session}} · {{count}} 次运行');
     expect(zh.scheduler.runs.expandRemainingRuns).toBe('展开另外 {{count}} 次');
   });
 

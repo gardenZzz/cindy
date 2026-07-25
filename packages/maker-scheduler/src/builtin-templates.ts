@@ -31,10 +31,10 @@ export const BUILTIN_TEMPLATES: ScheduleTemplate[] = [
   {
     id: 'nightly-test-heal',
     name: '夜间自愈测试',
-    description: '每晚跑测试，失败项在隔离工作区尝试最小修复',
+    description: '每晚跑测试，失败项在隔离 worktree 尝试最小修复',
     category: 'dev-automation',
     source: 'builtin',
-    prompt: `运行项目的测试套件，如果有失败项，在隔离工作区尝试给出最小修复。
+    prompt: `运行项目的测试套件，如果有失败项，在隔离 worktree 尝试给出最小修复。
 约束：
 - 先按仓库文档或 package 脚本确定标准测试命令，再完整运行
 - 只修复有明确失败证据的问题，采用影响面最小的改法，避免顺手重构

@@ -1139,6 +1139,11 @@ protocol.registerSchemesAsPrivileged([
 
 import started from 'electron-squirrel-startup';
 
+import {
+  APPLICATION_MENU_LABELS,
+  type ApplicationMenuLocale,
+} from './applicationMenuLabels.js';
+
 if (started) {
   app.quit();
 }
@@ -1189,91 +1194,7 @@ if (started) {
 const SYSTEM_PATH_BLOCKLIST: string[] = buildSystemPathBlocklist();
 
 // ApplicationMenuCommand 从 ../shared/applicationMenuCommands 单点导入。
-type ApplicationMenuLocale = SupportedLocale;
-
-interface ApplicationMenuLabels {
-  about: string;
-  hide: string;
-  quit: string;
-  settings: string;
-  checkForUpdates: string;
-  fileMenu: string;
-  newMaker: string;
-  viewMenu: string;
-  toggleSidebar: string;
-  windowMenu: string;
-  helpMenu: string;
-  help: string;
-  releaseNotes: string;
-  issues: string;
-}
-
-const APPLICATION_MENU_LABELS: Record<ApplicationMenuLocale, ApplicationMenuLabels> = {
-  'zh-CN': {
-    about: '关于 {{appName}}',
-    hide: '隐藏 {{appName}}',
-    quit: '退出 {{appName}}',
-    settings: '设置...',
-    checkForUpdates: '检查更新...',
-    fileMenu: '文件',
-    newMaker: '新建 Maker',
-    viewMenu: '显示',
-    toggleSidebar: '切换侧边栏',
-    windowMenu: '窗口',
-    helpMenu: '帮助',
-    help: '帮助',
-    releaseNotes: '最新更新介绍',
-    issues: '议题',
-  },
-  en: {
-    about: 'About {{appName}}',
-    hide: 'Hide {{appName}}',
-    quit: 'Quit {{appName}}',
-    settings: 'Settings...',
-    checkForUpdates: 'Check for Updates...',
-    fileMenu: 'File',
-    newMaker: 'New Maker',
-    viewMenu: 'View',
-    toggleSidebar: 'Toggle Sidebar',
-    windowMenu: 'Window',
-    helpMenu: 'Help',
-    help: 'Help',
-    releaseNotes: "What's New",
-    issues: 'Issues',
-  },
-  ja: {
-    about: '{{appName}} について',
-    hide: '{{appName}}を隠す',
-    quit: '{{appName}}を終了',
-    settings: '設定...',
-    checkForUpdates: 'アップデートを確認...',
-    fileMenu: 'ファイル',
-    newMaker: '新規 Maker',
-    viewMenu: '表示',
-    toggleSidebar: 'サイドバーを切り替え',
-    windowMenu: 'ウインドウ',
-    helpMenu: 'ヘルプ',
-    help: 'ヘルプ',
-    releaseNotes: '最新情報',
-    issues: '問題',
-  },
-  ko: {
-    about: '{{appName}} 정보',
-    hide: '{{appName}} 가리기',
-    quit: '{{appName}} 종료',
-    settings: '설정...',
-    checkForUpdates: '업데이트 확인...',
-    fileMenu: '파일',
-    newMaker: '새 Maker',
-    viewMenu: '보기',
-    toggleSidebar: '사이드바 토글',
-    windowMenu: '윈도우',
-    helpMenu: '도움말',
-    help: '도움말',
-    releaseNotes: '최신 업데이트',
-    issues: '이슈',
-  },
-};
+// 应用菜单四语标签抽到 ./applicationMenuLabels,使术语门禁能直接 import 扫描(见该文件注释)。
 
 function resolveApplicationMenuLocale(raw: string | null | undefined): ApplicationMenuLocale {
   return resolveSystemLocale(raw);

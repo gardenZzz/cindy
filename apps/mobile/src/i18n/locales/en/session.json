@@ -123,7 +123,7 @@
     "selectProjectNamed": "Select project {{title}}",
     "noProjects": "No projects yet",
     "chooseOtherFolder": "Choose another project folder",
-    "readingRemoteDir": "Reading remote directory...",
+    "readingRemoteDir": "Reading remote directory…",
     "goParentDir": "Go to parent directory",
     "parentDir": "Parent",
     "useCurrentRemoteDir": "Use current remote directory",
