@@ -2,7 +2,7 @@
   "$schema": "http://json-schema.org/draft-07/schema#",
   "$id": "https://github.com/makecindy/cindy/i18n/glossary.schema.json",
   "title": "Cindy i18n Glossary",
-  "description": "产品术语表正本。desktop / mobile / 脚本 / AI agent 共用的唯一事实源。",
+  "description": "产品术语表正本。desktop / mobile / 脚本 / AI agent 共用的唯一事实源。定位是**参考**：它回答「这个词该不该用」，不回答「该换成哪个」——后者取决于该 key 的英文源与用途，必须逐条读语境判断，不得用于脚本批量替换。",
   "type": "object",
   "required": ["version", "locales", "sourceLocale", "terms"],
   "additionalProperties": false,
@@ -53,7 +53,7 @@
         },
         "translations": {
           "type": "object",
-          "description": "各语言的首选译法（默认场景用它）。保留英文原词的术语直接把 en 原样写进来（如 Agent 的 zh-CN 就是 \"Agent\"），不要用空字符串——那个约定从未被任何条目使用，却让 guard、文档生成、单测三处各自对 \"\" 有不同解读。刻意不放进 required：status=proposed 的术语正是「已知不一致但还没拍板译法」，要求它先填译法等于否定 proposed 这个状态本身。「decided 必须给全所有非源语言译法」这条真正的不变量由单测按 status 精确约束。",
+          "description": "各语言的首选译法。注意这是**参考值不是替换目标**——同一个中文词常对应多个英文概念，具体某条文案该怎么译取决于它的英文源与该 key 的用途，禁止拿本字段做脚本批量替换。默认场景用它。保留英文原词的术语直接把 en 原样写进来（如 Agent 的 zh-CN 就是 \"Agent\"），不要用空字符串——那个约定从未被任何条目使用，却让 guard、文档生成、单测三处各自对 \"\" 有不同解读。刻意不放进 required：status=proposed 的术语正是「已知不一致但还没拍板译法」，要求它先填译法等于否定 proposed 这个状态本身。「decided 必须给全所有非源语言译法」这条真正的不变量由单测按 status 精确约束。",
           "additionalProperties": { "type": "string", "minLength": 1 }
         },
         "alsoAllowed": {
