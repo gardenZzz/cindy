@@ -581,6 +581,25 @@
   "cindyModelMeta": {
     "version": 1,
     "models": {
+      "claude-opus-5": {
+        "agents": [
+          "claude-code"
+        ],
+        "name": "Opus 5",
+        "group": "anthropic",
+        "description": "Latest Opus for ambitious work",
+        "contextWindow": 1000000,
+        "efforts": [
+          "low",
+          "medium",
+          "high",
+          "xhigh",
+          "max"
+        ],
+        "defaultEffort": "high",
+        "sortOrder": 0,
+        "supportsFastMode": false
+      },
       "claude-fable-5": {
         "agents": [
           "claude-code"
@@ -597,7 +616,7 @@
           "max"
         ],
         "defaultEffort": "high",
-        "sortOrder": 0,
+        "sortOrder": 1,
         "supportsFastMode": false
       },
       "claude-opus-4-8": {
@@ -616,7 +635,7 @@
           "max"
         ],
         "defaultEffort": "high",
-        "sortOrder": 1,
+        "sortOrder": 2,
         "supportsFastMode": false
       },
       "claude-opus-4-7": {
@@ -635,7 +654,7 @@
           "max"
         ],
         "defaultEffort": "high",
-        "sortOrder": 2,
+        "sortOrder": 3,
         "supportsFastMode": false,
         "defaultEnabled": false
       },
@@ -654,7 +673,25 @@
           "max"
         ],
         "defaultEffort": "high",
-        "sortOrder": 3,
+        "sortOrder": 4,
+        "supportsFastMode": false,
+        "defaultEnabled": false
+      },
+      "claude-opus-4-5": {
+        "agents": [
+          "claude-code"
+        ],
+        "name": "Opus 4.5",
+        "group": "anthropic",
+        "description": "Earlier Opus generation",
+        "contextWindow": 200000,
+        "efforts": [
+          "low",
+          "medium",
+          "high"
+        ],
+        "defaultEffort": "high",
+        "sortOrder": 5,
         "supportsFastMode": false,
         "defaultEnabled": false
       },
@@ -669,10 +706,12 @@
         "efforts": [
           "low",
           "medium",
-          "high"
+          "high",
+          "xhigh",
+          "max"
         ],
         "defaultEffort": "high",
-        "sortOrder": 4,
+        "sortOrder": 6,
         "supportsFastMode": false
       },
       "claude-sonnet-4-6": {
@@ -686,10 +725,25 @@
         "efforts": [
           "low",
           "medium",
-          "high"
+          "high",
+          "max"
         ],
         "defaultEffort": "high",
-        "sortOrder": 5,
+        "sortOrder": 7,
+        "supportsFastMode": false,
+        "defaultEnabled": false
+      },
+      "claude-sonnet-4-5": {
+        "agents": [
+          "claude-code"
+        ],
+        "name": "Sonnet 4.5",
+        "group": "anthropic",
+        "description": "Earlier Sonnet generation",
+        "contextWindow": 200000,
+        "efforts": [],
+        "defaultEffort": null,
+        "sortOrder": 8,
         "supportsFastMode": false,
         "defaultEnabled": false
       },
@@ -702,7 +756,8 @@
         "description": "Fastest for quick answers",
         "contextWindow": 200000,
         "efforts": [],
-        "sortOrder": 6,
+        "defaultEffort": null,
+        "sortOrder": 9,
         "supportsFastMode": false,
         "defaultEnabled": false
       },

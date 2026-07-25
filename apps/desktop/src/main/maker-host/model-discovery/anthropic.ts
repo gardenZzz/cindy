@@ -30,9 +30,10 @@
  * 作废一切在途写回,并让新账号拉取不被旧 single-flight 吞掉。磁盘缓存写删经同一
  * 串行队列 + 原子 rename,保证登出删缓存不会被较早的 SDK 持久化反向覆盖。
  *
- * contextWindow 规则(Anthropic 无任何动态通道下发窗口,2026-07-19 与 Lizi 定案):
- *   HTTP 响应带 max_input_tokens 用之;否则默认 1M,仅 id 含 "haiku" 例外 200k。
- *   猜错 1M 的后果是该模型请求被拒(带 [1m] 后缀),由会话报错 + usage 校准暴露。
+ * contextWindow 规则:
+ *   HTTP 响应带 max_input_tokens 用之;否则读取当前 cindyModelMeta 的已知窗口；
+ *   目录未知时默认 1M,仅 id 含 "haiku" 例外 200k。这样已知旧模型不会被错误提升到
+ *   1M,未来新模型仍可在目录更新前按当代默认工作。
  *
  * 磁盘缓存:`<userData>/model-discovery/anthropic-models.json`
  * ({ fetchedAt, models, explicitEffortModelIds, explicitFastModeModelIds });只缓存动态获取的
@@ -48,6 +49,7 @@ import type { CatalogModel, Effort } from '@cindy/model-providers';
 import { createLogger } from '../../logger.js';
 import {
   getActiveCatalog,
+  getCindyModelContextWindow,
   getCindyModelEffortBaseline,
   setAnthropicDiscoveredModels,
 } from '../active-catalog.js';
@@ -102,9 +104,11 @@ function normalizeModelId(raw: string): string {
   return raw.replace(/-20\d{6}$/, '');
 }
 
-/** contextWindow 规则:默认 1M,仅 haiku 系例外 200k(定案见文件头)。 */
+/** contextWindow 规则:HTTP 明示 > 目录已知值 > 未知模型启发式(默认 1M,Haiku 200k)。 */
 function contextWindowFor(id: string, explicit?: number): number {
   if (typeof explicit === 'number' && explicit > 0) return explicit;
+  const catalogWindow = getCindyModelContextWindow(id);
+  if (catalogWindow !== null) return catalogWindow;
   return /haiku/.test(id) ? 200_000 : 1_000_000;
 }
 
@@ -219,11 +223,17 @@ export interface SdkMappedModel {
   hasFastModeInfo: boolean;
 }
 
-/** 动态通道无能力信息时:产品目录基线优先,未知模型才合成 3 档(haiku 0 档)。 */
+/**
+ * 动态通道无能力信息时:产品目录基线优先；未知非 Haiku 模型按当代旗舰能力合成
+ * 5 档，让新 Opus / Sonnet 上线后无需等客户端目录更新即可使用 xhigh / max。
+ * Haiku 保持 0 档；上游后续明确返回能力时仍会逐字段覆盖此临时基线。
+ */
 function fallbackEffortBaseline(id: string): { efforts: Effort[]; defaultEffort: Effort | null } {
   const catalogBaseline = getCindyModelEffortBaseline(id);
   if (catalogBaseline) return catalogBaseline;
-  const efforts: Effort[] = /haiku/.test(id) ? [] : ['low', 'medium', 'high'];
+  const efforts: Effort[] = /haiku/.test(id)
+    ? []
+    : ['low', 'medium', 'high', 'xhigh', 'max'];
   return { efforts, defaultEffort: pickDefaultEffort(efforts) };
 }
 
@@ -360,8 +370,8 @@ function mergeCapabilitiesWithPrevious(
 /**
  * HTTP `GET /v1/models` 单页条目数组 → 映射结果。纯函数,对响应形状容错:
  * 能力字段(capabilities.efforts / fast_mode)是 Anthropic 侧未固化的扩展,逐字段识别；
- * effort 认不出时按 cindyModelMeta 能力基线合成,目录也没有才回落 3 档
- * (low/medium/high,默认 high),haiku 系例外 0 档。fastMode 未知时先为 false,
+ * effort 认不出时按 cindyModelMeta 能力基线合成,目录也没有才回落当代旗舰 5 档
+ * (low/medium/high/xhigh/max,默认 high),haiku 系例外 0 档。fastMode 未知时先为 false,
  * 合并阶段会保留已明确探测过的旧值。
  */
 export function mapAnthropicHttpModels(raw: unknown): HttpMappedModel[] {
@@ -533,7 +543,14 @@ export async function loadAnthropicModelsFromDiskCache(): Promise<void> {
         Array.isArray((m as CatalogModel).efforts),
     );
     if (valid.length === 0) return;
-    const validIds = new Set(valid.map((model) => model.id));
+    // Cache versions before explicitWindows did not distinguish an HTTP-declared
+    // window from the mapper's old fallback. Recompute only non-explicit windows
+    // so catalog corrections take effect immediately after an app upgrade.
+    const normalized = valid.map((model) => ({
+      ...model,
+      contextWindow: contextWindowFor(model.id, explicitWindows.get(model.id)),
+    }));
+    const validIds = new Set(normalized.map((model) => model.id));
     const restoreIds = (value: unknown): Set<string> => {
       const restored = new Set<string>();
       if (Array.isArray(value)) {
@@ -552,13 +569,13 @@ export async function loadAnthropicModelsFromDiskCache(): Promise<void> {
       (raw as { explicitFastModeModelIds?: unknown }).explicitFastModeModelIds,
     );
     await applyModels(
-      valid,
+      normalized,
       false,
       generation,
       restoredExplicitEffortIds,
       restoredExplicitFastModeIds,
     );
-    log.info(`anthropic models loaded from disk cache: ${valid.length}`);
+    log.info(`anthropic models loaded from disk cache: ${normalized.length}`);
   } catch {
     /* 缓存缺失 / 损坏:等动态通道,不影响启动 */
   }

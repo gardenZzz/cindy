@@ -620,7 +620,7 @@ const CODEX_EFFORTS: EffortDescriptor[] = [
   { id: 'low', displayName: 'Low', description: 'Fast responses with minimal reasoning' },
   { id: 'medium', displayName: 'Medium', description: 'Balanced reasoning depth' },
   { id: 'high', displayName: 'High', description: 'Deeper reasoning for harder tasks' },
-  { id: 'xhigh', displayName: 'Extra', description: 'Extended reasoning budget' },
+  { id: 'xhigh', displayName: 'Extra High', description: 'Extended reasoning budget' },
   // max/ultra 仅部分模型支持(如 GPT-5.6 Sol);实际是否可选由该模型目录 efforts 决定,
   // 这里只提供 agent 级档名/描述兜底(桌面 i18n effortLevels.* 优先)。
   { id: 'max', displayName: 'Max', description: 'Very high reasoning budget (model-dependent)' },
