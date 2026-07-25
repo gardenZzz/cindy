@@ -35,6 +35,7 @@
  * (src/auth/loginMessages.ts 等 .ts 文件),本脚本只扫 locale JSON,不解析这些 TS。
  * 它们由各自的编译期 Record 类型 + parity 单测保证结构,但术语一致性目前是盲区。
  */
+import crypto from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -192,11 +193,17 @@ function truncate(text, max) {
 /**
  * 一条违规。fingerprint 用于 baseline 比对,必须稳定。
  *
- * detail 里带**命中次数**:否则同一个 key 里 1 处「会话」与 3 处「会话」产出相同指纹,
- * 一处被冻进 baseline 后再往同一条文案加一处,新违规会被静默掩盖、CI 照过——
- * 那就破了 baseline「只减不增」的契约。带上次数,增加一处就是一条新指纹。
+ * detail 里带**命中次数**,fingerprint 再带**该条文案的摘要**。两者缺一不可:
+ *  - 只带词不带次数:1 处「会话」与 3 处「会话」同指纹,冻结一处后再加一处即被掩盖;
+ *  - 只带次数不带摘要:同一个 key 里「修掉一处、又在别处新增一处」时次数不变
+ *    (`甲,乙` → `甲，乙,丙` 仍是 `,×1`),违规照样被掩盖,仍然破「只减不增」。
+ *
+ * 摘要是**整条文案**的哈希:任何改动都会让旧 baseline 条目失效、被判为 stale,
+ * 迫使人重新确认这条文案的现状。代价是无关改动也要摘一次账,但比「悄悄放过新违规」
+ * 安全得多——baseline 的全部意义就是「已知且冻结」,文案变了就不再是同一件事。
  */
-function makeViolation({ locale, key, rule, detail, severity, hint }) {
+function makeViolation({ locale, key, rule, detail, severity, hint, text }) {
+  const digest = crypto.createHash('sha256').update(text ?? '').digest('hex').slice(0, 12);
   return {
     locale,
     key,
@@ -204,7 +211,7 @@ function makeViolation({ locale, key, rule, detail, severity, hint }) {
     detail,
     severity,
     hint,
-    fingerprint: `${locale}\t${key}\t${rule}\t${detail}`,
+    fingerprint: `${locale}\t${key}\t${rule}\t${detail}\t${digest}`,
   };
 }
 
@@ -270,6 +277,7 @@ for (const term of glossary.terms) {
             rule: 'forbidden-term',
             detail: `${term.id}:${bad}\u00d7${badCount}`,
             severity,
+            text: value,
             hint:
               `「${bad}」是 ${term.en} 条目下的禁用译法` +
               (whenEn ? `(该 key 的英文源含 ${whenEn})` : '') +
@@ -310,6 +318,7 @@ for (const term of glossary.terms) {
           rule: 'term-case',
           detail: `${term.id}:${hit}\u00d7${hitCount}`,
           severity,
+          text: value,
           // 这条给出确定目标是可以的:大小写形态与语境无关,worker 在任何句子里都该写
           // Worker,答案唯一。禁用译法则不同——同一个中文词对应多个英文概念,目标不唯一,
           // 所以那边只报事实、不给目标(见规则 1)。标点同理,答案也唯一。
@@ -354,6 +363,7 @@ for (const locale of locales) {
           rule: 'punct-halfwidth',
           detail: `${mark}\u00d7${countHalfWidthPunct(prose)}`,
           severity: 'error',
+          text: value,
           hint: `中文字符后应使用全角「${FULL_WIDTH_PUNCT[mark] ?? mark}」,当前是半角「${mark}」`,
         }),
       );
@@ -367,6 +377,7 @@ for (const locale of locales) {
           rule: 'punct-ellipsis',
           detail: `...×${(prose.match(/\.\.\./g) ?? []).length}`,
           severity: 'error',
+          text: value,
           hint: '省略号应使用「…」而非三个半角点',
         }),
       );

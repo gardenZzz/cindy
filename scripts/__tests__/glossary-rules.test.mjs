@@ -689,3 +689,35 @@ test('stripNonProse: 较长扩展名的文件名同样要剥离', () => {
   }
   assert.ok(stripNonProse('已用 1.5 GB').includes('1.5'));
 });
+
+test('空术语不能让计数函数挂死', () => {
+  // 空串走 CJK 分支时 indexOf('', from) 永远返回 from、term.length 为 0,循环不推进
+  // ——门禁会挂死而不是报错。CI 里 check:i18n-glossary 排在单测之前,一个手滑的 ""
+  // 就能卡住整条流水线。schema 的 minLength 是第一道防线,这里是第二道。
+  assert.equal(countOccurrences('任意文案', ''), 0);
+  assert.equal(occursIn('任意文案', ''), false);
+  assert.equal(countCaseMismatches('任意文案', ''), 0);
+});
+
+test('glossary.schema.json: 禁用词不允许为空串', () => {
+  const schema = JSON.parse(fs.readFileSync(path.join(ROOT, 'i18n', 'glossary.schema.json'), 'utf8'));
+  const bad = {
+    ...glossary,
+    terms: [{ ...glossary.terms[0], forbidden: { 'zh-CN': [''] } }],
+  };
+  assert.ok(
+    validateAgainstSchema(bad, schema).length > 0,
+    '空禁用词必须在 schema 阶段就被拒,不能让它走到计数函数',
+  );
+});
+
+test('findHalfWidthPunct: 闭合的半角引号也算左边界,但要求右侧是中文', () => {
+  // 中文文案常写 `默认 "cindy",有重名时…`,闭合引号后那个逗号是正文标点
+  assert.equal(findHalfWidthPunct('默认 "cindy",有重名时加后缀'), ',');
+  assert.equal(findHalfWidthPunct("用 'plugin',再重启"), ',');
+  assert.equal(findHalfWidthPunct('见 `worker`,然后继续'), ',');
+  // 半角引号常用来包英文,右侧不是中文时不判违规
+  assert.equal(findHalfWidthPunct('英文 "note", then continue'), null);
+  // 全角括号那一支不要求右侧是中文（已对 26 处实例逐条核对）
+  assert.equal(findHalfWidthPunct('(直接替换,不留原文),或用卡片'), ',');
+});
