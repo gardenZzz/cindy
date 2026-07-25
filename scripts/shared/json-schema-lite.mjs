@@ -1,0 +1,157 @@
+/**
+ * JSON Schema draft-07 的**受限子集**校验器,零依赖。
+ *
+ * 为什么不用 ajv:本仓 scripts/ 一贯只用 node 内置模块(唯一例外是 ws)。ajv 目前能在
+ * 根 node_modules 里解析到,但它只是别的包提升上来的传递依赖——把 CI 阻断门禁架在
+ * 「碰巧被提升」的包上,lockfile 一变就会静默失效。
+ *
+ * 安全前提:**遇到不认识的关键字立即抛错**(compile 阶段),而不是忽略。
+ * 子集校验器最危险的失败模式是「schema 写了约束、校验器看不懂、于是默默放行」——
+ * 那正是本模块要解决的问题本身。宁可让加新关键字的人被迫来这里补实现。
+ */
+
+/** 本模块实现的关键字。不在此列的一律报错,详见文件头。 */
+const SUPPORTED = new Set([
+  '$schema',
+  '$id',
+  '$ref',
+  'title',
+  'description',
+  'type',
+  'required',
+  'properties',
+  'additionalProperties',
+  'items',
+  'enum',
+  'pattern',
+  'minItems',
+  'minLength',
+  'oneOf',
+  'definitions',
+]);
+
+/** 纯注解性关键字,不参与校验。 */
+const ANNOTATIONS = new Set(['$schema', '$id', 'title', 'description', 'definitions']);
+
+/** 递归检查 schema 自身只用了已实现的关键字。 */
+function assertSupported(node, path = '#') {
+  if (node === true || node === false) return;
+  if (typeof node !== 'object' || node === null) {
+    throw new Error(`schema ${path} 不是对象`);
+  }
+  for (const key of Object.keys(node)) {
+    if (!SUPPORTED.has(key)) {
+      throw new Error(
+        `schema ${path} 使用了未实现的关键字 "${key}"——请在 scripts/shared/json-schema-lite.mjs 里补上实现,` +
+          '不要让它被静默忽略',
+      );
+    }
+  }
+  for (const [key, child] of Object.entries(node.properties ?? {})) {
+    assertSupported(child, `${path}/properties/${key}`);
+  }
+  for (const [key, child] of Object.entries(node.definitions ?? {})) {
+    assertSupported(child, `${path}/definitions/${key}`);
+  }
+  if (typeof node.additionalProperties === 'object') {
+    assertSupported(node.additionalProperties, `${path}/additionalProperties`);
+  }
+  if (node.items) assertSupported(node.items, `${path}/items`);
+  for (const [i, child] of (node.oneOf ?? []).entries()) {
+    assertSupported(child, `${path}/oneOf/${i}`);
+  }
+}
+
+function typeOf(value) {
+  if (Array.isArray(value)) return 'array';
+  if (value === null) return 'null';
+  if (Number.isInteger(value)) return 'integer';
+  return typeof value;
+}
+
+function matchesType(value, expected) {
+  if (expected === 'integer') return Number.isInteger(value);
+  if (expected === 'number') return typeof value === 'number';
+  return typeOf(value) === expected || (expected === 'number' && typeOf(value) === 'integer');
+}
+
+/**
+ * 校验 value 是否符合 schema,返回错误信息数组(空数组＝通过)。
+ * root 用于解析 `$ref`,只支持 `#/definitions/X` 这一种形态——够用,且不引入
+ * 远程引用这类需要网络的能力。
+ */
+function validateNode(value, schema, root, path, errors) {
+  if (schema.$ref) {
+    const m = /^#\/definitions\/([^/]+)$/.exec(schema.$ref);
+    if (!m) throw new Error(`只支持 #/definitions/X 形式的 $ref,收到 ${schema.$ref}`);
+    const target = root.definitions?.[m[1]];
+    if (!target) throw new Error(`$ref 指向不存在的定义:${schema.$ref}`);
+    validateNode(value, target, root, path, errors);
+    return;
+  }
+
+  if (schema.type && !matchesType(value, schema.type)) {
+    errors.push(`${path}: 期望 ${schema.type},实际 ${typeOf(value)}`);
+    return;
+  }
+
+  if (schema.enum && !schema.enum.includes(value)) {
+    errors.push(`${path}: 取值必须是 ${schema.enum.join(' / ')} 之一,实际 ${JSON.stringify(value)}`);
+  }
+
+  if (typeof value === 'string') {
+    if (schema.pattern && !new RegExp(schema.pattern).test(value)) {
+      errors.push(`${path}: "${value}" 不匹配 ${schema.pattern}`);
+    }
+    if (schema.minLength !== undefined && value.length < schema.minLength) {
+      errors.push(`${path}: 长度需 ≥ ${schema.minLength}`);
+    }
+  }
+
+  if (Array.isArray(value)) {
+    if (schema.minItems !== undefined && value.length < schema.minItems) {
+      errors.push(`${path}: 至少需要 ${schema.minItems} 项`);
+    }
+    if (schema.items) {
+      value.forEach((item, i) => validateNode(item, schema.items, root, `${path}[${i}]`, errors));
+    }
+  }
+
+  if (schema.oneOf) {
+    const passed = schema.oneOf.filter((branch) => {
+      const sub = [];
+      validateNode(value, branch, root, path, sub);
+      return sub.length === 0;
+    });
+    if (passed.length !== 1) {
+      errors.push(`${path}: 需恰好匹配 oneOf 的一个分支,实际匹配 ${passed.length} 个`);
+    }
+  }
+
+  if (typeOf(value) === 'object') {
+    for (const key of schema.required ?? []) {
+      if (!(key in value)) errors.push(`${path}: 缺少必填字段 "${key}"`);
+    }
+    const known = new Set(Object.keys(schema.properties ?? {}));
+    for (const [key, child] of Object.entries(value)) {
+      const childPath = `${path}.${key}`;
+      if (known.has(key)) {
+        validateNode(child, schema.properties[key], root, childPath, errors);
+      } else if (schema.additionalProperties === false) {
+        errors.push(
+          `${childPath}: 未知字段 "${key}"——拼错的字段名(如 forbiden)会让整条规则静默失效`,
+        );
+      } else if (typeof schema.additionalProperties === 'object') {
+        validateNode(child, schema.additionalProperties, root, childPath, errors);
+      }
+    }
+  }
+}
+
+/** 校验 data 是否符合 schema。返回人读错误信息数组,空数组＝通过。 */
+export function validateAgainstSchema(data, schema) {
+  assertSupported(schema);
+  const errors = [];
+  validateNode(data, schema, schema, '$', errors);
+  return errors;
+}

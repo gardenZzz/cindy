@@ -40,6 +40,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 import { renderGlossaryDoc } from './shared/glossary-doc.mjs';
+import { validateAgainstSchema } from './shared/json-schema-lite.mjs';
 import {
   ELLIPSIS_LOCALES,
   FULL_WIDTH_PUNCT,
@@ -54,6 +55,7 @@ import {
 
 const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const GLOSSARY_PATH = path.join(repoRoot, 'i18n', 'glossary.json');
+const SCHEMA_PATH = path.join(repoRoot, 'i18n', 'glossary.schema.json');
 const BASELINE_PATH = path.join(repoRoot, 'i18n', 'glossary-baseline.json');
 const DOC_PATH = path.join(repoRoot, 'i18n', 'GLOSSARY.md');
 const DESKTOP_LOCALES = path.join(repoRoot, 'apps', 'desktop', 'src', 'renderer', 'i18n', 'locales');
@@ -87,6 +89,17 @@ if (glossary.version !== SUPPORTED_SCHEMA_VERSION) {
   fail(
     `glossary.json version=${glossary.version},本脚本只支持 ${SUPPORTED_SCHEMA_VERSION}。` +
       `升级 schema 时必须同步更新本脚本,不要让版本静默漂移。`,
+  );
+}
+
+// 先按 schema 全量校验再扫语料。glossary.schema.json 长期只服务编辑器补全,从没有
+// 任何代码真正执行过它——那意味着把 forbidden 拼成 forbiden 时,该条术语的规则会
+// 整条消失而 CI 全绿。术语表是唯一事实源,它自身的正确性必须先于它校验别人。
+const schemaErrors = validateAgainstSchema(glossary, readJson(SCHEMA_PATH));
+if (schemaErrors.length > 0) {
+  fail(
+    `i18n/glossary.json 不符合 i18n/glossary.schema.json:\n` +
+      schemaErrors.map((e) => `  - ${e}`).join('\n'),
   );
 }
 

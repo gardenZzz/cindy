@@ -132,14 +132,16 @@
           "会话"
         ]
       },
-      "note": "面向用户一律叫「对话」——「会话」太生硬难懂（2026-07 裁决）。代码与内部标识仍用 Session，本条只约束 UI 文案。Chat 合并到同一个词，见 chat 条目。落地时把 440 处「会话」+ 22 处「聊天」统一改为「对话」。ja / ko 沿用既有音译，不受本条约束。豁免的 4 处是同形异义的技术 session（登录态、WebSocket 语音连接），与产品对话无关——同类的还有 Linux Computer Use 提示里的「桌面会话」——那是 OS 桌面会话（窗口读取与输入自动化的授权范围）。注意 login.errors 的「绑定会话」指账号绑定态，scheduler 的「绑定对话」才是产品对话，两者同名不同义，靠 key 精确区分。",
+      "note": "面向用户一律叫「对话」——「会话」太生硬难懂（2026-07 裁决）。代码与内部标识仍用 Session，本条只约束 UI 文案。Chat 合并到同一个词，见 chat 条目。落地时把 440 处「会话」+ 22 处「聊天」统一改为「对话」。ja / ko 沿用既有音译，不受本条约束。豁免的 6 处是同形异义的技术 session（登录态、WebSocket 语音连接），与产品对话无关——同类的还有 Linux Computer Use 提示里的「桌面会话」——那是 OS 桌面会话（窗口读取与输入自动化的授权范围）。注意 login.errors 的「绑定会话」指账号绑定态，scheduler 的「绑定对话」才是产品对话，两者同名不同义，靠 key 精确区分。",
       "exempt": [
-        "desktop:login.errors.INVALID_LOGIN_TICKET",
         "desktop:login.errors.INVALID_BIND_TICKET",
+        "desktop:login.errors.INVALID_LOGIN_TICKET",
+        "desktop:settings.computerUse.directControl.permissions.linuxHint",
+        "mobile/composer:voice.invalidSession",
         "mobile/composer:voice.missingConnectionProvider",
+        "mobile/composer:voice.missingRefinerTargetProvider",
         "mobile/composer:voice.sessionExpiredOrForbidden",
-        "mobile/composer:voice.sessionNotConnected",
-        "desktop:settings.computerUse.directControl.permissions.linuxHint"
+        "mobile/composer:voice.sessionNotConnected"
       ]
     },
     {
@@ -603,7 +605,10 @@
           }
         ]
       },
-      "note": "对话 / 设备状态用「活跃」（现状 21:7）。mobile/devices 同一屏上筛选 chip 写「活跃」、指标磁贴写「活动」。条件禁用：「活动」是 Activity 的正确译法，无条件禁会误伤「活动记录」这类。"
+      "note": "对话 / 设备状态用「活跃」（现状 21:7）。mobile/devices 同一屏上筛选 chip 写「活跃」、指标磁贴写「活动」。条件禁用：「活动」是 Activity 的正确译法，无条件禁会误伤「活动记录」这类。豁免 Windows Computer Use 提示：那里的 active desktop 指「当前接收输入、显示目标应用的 Windows 桌面」，是 OS 概念，中文既定说法为「当前活动桌面」，与产品的活跃度无关。",
+      "exempt": [
+        "desktop:settings.computerUse.directControl.permissions.windowsHint"
+      ]
     },
     {
       "id": "worktree",
@@ -627,7 +632,10 @@
           }
         ]
       },
-      "note": "Git worktree 是外部工具的既定概念，四语一律保留英文小写原词（现状 21 处最多）。desktop:chat 一个模块里就有 worktree / 工作区 / 工作树 三种写法。特别要紧的是「工作区」——它同时被用于 worktree、Workspace、working tree 三个不同英文概念，必须让出来只表示 Workspace；working directory 用「工作目录」。条件禁用只在英文源含 Worktree 时生效，不影响 Workspace 的正常翻译。"
+      "note": "Git worktree 是外部工具的既定概念，四语一律保留英文小写原词（现状 21 处最多）。desktop:chat 一个模块里就有 worktree / 工作区 / 工作树 三种写法。特别要紧的是「工作区」——它同时被用于 worktree、Workspace、working tree 三个不同英文概念，必须让出来只表示 Workspace；working directory 用「工作目录」。条件禁用只在英文源含 Worktree 时生效，不影响 Workspace 的正常翻译。豁免导入提示那一句：英文原文同时出现 worktree 与 main workspace，条件禁用是按整句英文判定的，无法区分句内两个概念——那里的「主工作区」正是 Workspace，必须保留，否则会把「不影响主工作区」这条安全边界说成「不影响主 worktree」。",
+      "exempt": [
+        "desktop:sessionShare.import.useWorktreeHint"
+      ]
     },
     {
       "id": "directory",

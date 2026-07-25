@@ -81,7 +81,7 @@
     "refineStreamFailed": "语音润色流式返回失败。",
     "refineNoContent": "语音润色没有返回有效内容。",
     "refineInvalidJson": "语音润色返回了无效 JSON: {{snippet}}",
-    "invalidSession": "语音服务返回了无效对话。",
+    "invalidSession": "语音服务返回了无效会话。",
     "managedRefineUnsupported": "当前 {{appName}} 语音服务暂不支持托管润色。",
     "sessionNotConnected": "语音识别会话尚未连接。",
     "loginRequired": "请先登录 {{appName}} 后再使用语音输入。",
@@ -95,7 +95,7 @@
     "volcengineMissingResourceId": "Volcengine ASR 配置缺少 resourceId。",
     "sessionExpiredOrForbidden": "{{appName}} 语音会话已失效或没有权限（WebSocket {{status}}）。请确认登录状态后重试。",
     "incomplete": "语音输入未完成，请重试。",
-    "missingRefinerTargetProvider": "手机版语音润色需要 {{appName}} 语音对话(缺少 refinerTargetProvider)。",
+    "missingRefinerTargetProvider": "手机版语音润色需要 {{appName}} 语音会话(缺少 refinerTargetProvider)。",
     "emptyTranscript": "检测到语音但未识别出文本，请重试。",
     "micPermission": "麦克风权限未开启，请在系统设置里允许 {{appName}} 使用麦克风。",
     "realtimeAudioUnavailable": "当前安装包不支持实时语音输入，请安装包含原生录音模块的测试版。"
