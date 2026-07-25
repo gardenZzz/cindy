@@ -19,6 +19,7 @@ import {
   isValidGhostId,
   layoutWithGhostPanel,
   type GhostHostNoticeKey,
+  type GhostImageAspectRatio,
   type GhostManifest,
   type GhostSetupAllowedAction,
   type GhostSetupAssessment,
@@ -1498,6 +1499,17 @@ async function runGhostVideo(params: {
   return { buffer: r.buffer, mimeType: r.mimeType };
 }
 
+/**
+ * 意识画幅意图 → XD Gateway size。三档尺寸是 gpt-image 系的原生枚举
+ * (1024x1024 / 1536x1024 / 1024x1536,比例即枚举名);Gemini 系由网关按
+ * 比例转译。意识侧枚举扩值域时此表必须同步补齐(Record 穷尽性由类型锁住)。
+ */
+const GHOST_ASPECT_TO_GATEWAY_SIZE: Record<GhostImageAspectRatio, string> = {
+  '1:1': '1024x1024',
+  '3:2': '1536x1024',
+  '2:3': '1024x1536',
+};
+
 /** XD Gateway 图片响应 → 字节 + mime(gen / edit 同一解码口径)。 */
 function decodeImageResponse(res: {
   data: Array<{ b64_json?: string }>;
@@ -1519,10 +1531,15 @@ export function getGhostCindySlot(): GhostCindySlot {
         getAppCapabilities().canUseCindyGateway ? findAvailableGhost(id) : null,
       // model 已在 modelSlot 按白名单校验(白名单 = GatewayImageModel 全集),
       // 这里收窄类型是安全的。
-      generateImage: async ({ prompt, model }) => {
+      generateImage: async ({ prompt, model, aspectRatio }) => {
         try {
           return decodeImageResponse(
-            await getCindyProxyMediaService().backend.generateImage({ model: model as GatewayImageModel, prompt }),
+            await getCindyProxyMediaService().backend.generateImage({
+              model: model as GatewayImageModel,
+              prompt,
+              // 不带画幅意图时不传 size,网关缺省 'auto'(模型自定)。
+              ...(aspectRatio ? { size: GHOST_ASPECT_TO_GATEWAY_SIZE[aspectRatio] } : {}),
+            }),
           );
         } catch (err) {
           humanizeImageChannelError(err);
