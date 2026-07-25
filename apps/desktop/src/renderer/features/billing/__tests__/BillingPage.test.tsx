@@ -343,9 +343,7 @@ describe('BillingPage remote catalog rendering', () => {
     expect(screen.getByText('billing.balance.promotional')).toBeTruthy();
     expect(
       screen.getByText(
-        new Intl.NumberFormat(undefined, { style: 'currency', currency: 'CNY' }).format(
-          12.345678901,
-        ),
+        new Intl.NumberFormat('en', { style: 'currency', currency: 'CNY' }).format(12.345678901),
       ),
     ).toBeTruthy();
     expect(screen.getByText('billing.usage.detailsUnavailable')).toBeTruthy();
@@ -449,11 +447,11 @@ describe('BillingPage remote catalog rendering', () => {
 
     const offerNames = await screen.findAllByText('Ordered top-up');
     const offerButtons = offerNames.map((name) => name.closest('button')!);
-    const twenty = new Intl.NumberFormat(undefined, {
+    const twenty = new Intl.NumberFormat('en', {
       style: 'currency',
       currency: 'CNY',
     }).format(20);
-    const hundred = new Intl.NumberFormat(undefined, {
+    const hundred = new Intl.NumberFormat('en', {
       style: 'currency',
       currency: 'CNY',
     }).format(100);
@@ -619,7 +617,7 @@ describe('BillingPage remote catalog rendering', () => {
     expect(screen.getByText('billing.usage.promotionalDetails.states.voided')).toBeTruthy();
 
     const grantRows = within(screen.getByRole('list')).getAllByRole('listitem');
-    const formatter = new Intl.NumberFormat(undefined, { style: 'currency', currency: 'CNY' });
+    const formatter = new Intl.NumberFormat('en', { style: 'currency', currency: 'CNY' });
     for (const [row, usedAmount] of [
       [grantRows[0], 4],
       [grantRows[1], 2],
@@ -693,7 +691,7 @@ describe('BillingPage remote catalog rendering', () => {
     expect(await screen.findByText('billing.balance.notProvisioned')).toBeTruthy();
     expect(
       screen.queryByText(
-        new Intl.NumberFormat(undefined, { style: 'currency', currency: 'CNY' }).format(0),
+        new Intl.NumberFormat('en', { style: 'currency', currency: 'CNY' }).format(0),
       ),
     ).toBeNull();
     await waitFor(() =>
