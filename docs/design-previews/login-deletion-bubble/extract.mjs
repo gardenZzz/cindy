@@ -80,7 +80,7 @@ const loginPageSrc = readSrc(P.loginPage);
 const colorsSrc = readSrc(P.colors);
 
 // 结构事实:气泡 class 串(浮层定位/尺寸/颜色 token 消费)
-const bubbleClassM = /className="(absolute left-1\/2 top-\[72px\] z-30 w-\[min\(670px,calc\(100vw-48px\)\)\] -translate-x-1\/2 break-words rounded-\[22px\] border border-\[var\(--chat-input-border\)\] bg-\[var\(--login-deletion-bubble-bg\)\] p-5 text-center)"/.exec(loginPageSrc);
+const bubbleClassM = /className="(absolute left-1\/2 top-\[72px\] z-30 w-\[min\(670px,calc\(100vw-48px\)\)\] -translate-x-1\/2 break-words rounded-\[22px\] border border-\[var\(--login-deletion-bubble-border\)\] bg-\[var\(--login-deletion-bubble-bg\)\] p-5 text-center)"/.exec(loginPageSrc);
 if (!bubbleClassM) throw new Error('desktop 气泡 section className 未命中(源码已变?)');
 const bubbleTitleClassM = /<h2 className="(text-\[20px\] font-normal leading-\[23px\] text-\[var\(--login-control-text\)\])"/.exec(loginPageSrc);
 const bubbleCopyClassM = /<p className="(mt-\[5px\] text-\[20px\] font-normal leading-\[23px\] text-\[var\(--login-secondary-text\)\])"/.exec(loginPageSrc);
@@ -95,36 +95,16 @@ if (!dismissGateM) throw new Error('desktop dismiss 仅 completed 结构未命�
 const dismissClassM = /'(mt-\[11px\] -mb-\[11px\] border-0 bg-transparent px-3 py-\[11px\])',/.exec(loginPageSrc);
 if (!dismissClassM) throw new Error('desktop dismiss 热区扩张 className 未命中');
 
-// 颜色 token:login-deletion-bubble-bg 的 var 链解析到实值
-const bubbleBgRefs = extractRegisterColor(colorsSrc, 'login-deletion-bubble-bg');
-if (bubbleBgRefs.light !== 'var(--chat-input-bg)' || bubbleBgRefs.dark !== 'var(--surface)')
-  throw new Error('login-deletion-bubble-bg 的 var 链前提变化(应为 chat-input-bg/surface)');
-const chatInputBg = extractRegisterColor(colorsSrc, 'chat-input-bg');
-const surface = extractRegisterColor(colorsSrc, 'surface');
-const chatInputBorder = extractRegisterColor(colorsSrc, 'chat-input-border');
+// 颜色 token:固定值(login skin 不随扩展主题,Fix A——弃用 var 链 alias,
+// 与 mobile loginPalettes.deletionBubbleBg/Border 逐值一致)
+const bubbleBg = extractRegisterColor(colorsSrc, 'login-deletion-bubble-bg');
+const bubbleBorder = extractRegisterColor(colorsSrc, 'login-deletion-bubble-border');
+if (bubbleBg.light.startsWith('var(') || bubbleBg.dark.startsWith('var('))
+  throw new Error('login-deletion-bubble-bg 应为固定值(Fix A:login skin 不随扩展主题,禁 alias)');
+if (bubbleBorder.light.startsWith('var(') || bubbleBorder.dark.startsWith('var('))
+  throw new Error('login-deletion-bubble-border 应为固定值(Fix A 新增 token,禁 alias)');
 const controlText = extractRegisterColor(colorsSrc, 'login-control-text');
 const secondaryText = extractRegisterColor(colorsSrc, 'login-secondary-text');
-// var 链递归解析(如 chat-input-bg.light='var(--surface-elevated)' → surface-elevated.light)
-function resolveVarChain(value) {
-  const m = /^var\(--([\w-]+)\)$/.exec(value);
-  if (!m) return { value, chain: [value] };
-  const hop = extractRegisterColor(colorsSrc, m[1]);
-  // 只取与调用侧同模式的那一跳由调用方挑;这里返回两模式供挑
-  return { value, chain: [value, `var(--${m[1]})`], ref: hop };
-}
-const deskBubbleBgLight = resolveVarChain(chatInputBg.light);
-const deskBubbleBgLightFinal = deskBubbleBgLight.ref ? deskBubbleBgLight.ref.light : deskBubbleBgLight.value;
-const deskBgLightLocator = deskBubbleBgLight.ref
-  ? `login-deletion-bubble-bg.light=var(--chat-input-bg) → chat-input-bg.light=${chatInputBg.light} → ${deskBubbleBgLight.chain[1]} → ${deskBubbleBgLightFinal}`
-  : "login-deletion-bubble-bg.light=var(--chat-input-bg) → registerColor('chat-input-bg').light";
-const deskBorderLight = resolveVarChain(chatInputBorder.light);
-const deskBorderDark = resolveVarChain(chatInputBorder.dark);
-const deskBorderLightFinal = deskBorderLight.ref ? deskBorderLight.ref.light : deskBorderLight.value;
-const deskBorderDarkFinal = deskBorderDark.ref ? deskBorderDark.ref.dark : deskBorderDark.value;
-const deskBorderLocator = (hop, final) =>
-  hop.ref
-    ? `chat-input-border=${hop.value} → ${hop.chain[1]} → ${final}`
-    : "chat-input-border(直接消费 var(--chat-input-border))";
 
 const DESK_COPY_LOCALES = ['zh-CN', 'en', 'ja', 'ko'];
 const deskCopy = {};
@@ -281,12 +261,12 @@ const truth = {
     ),
     colors: {
       bubbleBg: {
-        light: leaf(deskBubbleBgLightFinal, P.colors, deskBgLightLocator),
-        dark: leaf(surface.dark, P.colors, "login-deletion-bubble-bg.dark=var(--surface) → registerColor('surface').dark"),
+        light: leaf(bubbleBg.light, P.colors, "registerColor('login-deletion-bubble-bg').light(固定值,Fix A 弃 alias)"),
+        dark: leaf(bubbleBg.dark, P.colors, "registerColor('login-deletion-bubble-bg').dark(固定值)"),
       },
       bubbleBorder: {
-        light: leaf(deskBorderLightFinal, P.colors, deskBorderLocator(deskBorderLight, deskBorderLightFinal)),
-        dark: leaf(deskBorderDarkFinal, P.colors, deskBorderLocator(deskBorderDark, deskBorderDarkFinal)),
+        light: leaf(bubbleBorder.light, P.colors, "registerColor('login-deletion-bubble-border').light(Fix A 新增 token)"),
+        dark: leaf(bubbleBorder.dark, P.colors, "registerColor('login-deletion-bubble-border').dark"),
       },
       titleText: {
         light: leaf(controlText.light, P.colors, "registerColor('login-control-text').light"),

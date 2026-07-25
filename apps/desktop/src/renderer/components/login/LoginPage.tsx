@@ -1086,7 +1086,7 @@ function AccountDeletionStatusPanel({
   return (
     <section
       aria-label={t(titleKey)}
-      className="absolute left-1/2 top-[72px] z-30 w-[min(670px,calc(100vw-48px))] -translate-x-1/2 break-words rounded-[22px] border border-[var(--chat-input-border)] bg-[var(--login-deletion-bubble-bg)] p-5 text-center"
+      className="absolute left-1/2 top-[72px] z-30 w-[min(670px,calc(100vw-48px))] -translate-x-1/2 break-words rounded-[22px] border border-[var(--login-deletion-bubble-border)] bg-[var(--login-deletion-bubble-bg)] p-5 text-center"
       style={style}
     >
       <h2 className="text-[20px] font-normal leading-[23px] text-[var(--login-control-text)]">{t(titleKey)}</h2>
