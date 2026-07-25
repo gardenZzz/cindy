@@ -5,7 +5,7 @@
   "oauthBrokerApiBaseUrl": "https://oauth-broker.cindy.app",
   "ossApiBaseUrl": "https://oss.cindy.app",
   "heartbeatUrl": "https://heartbeat.cindy.app",
-  "telegramHookWsUrl": "",
+  "telegramHookWsUrl": "wss://telegram-hook.cindy.app",
   "slackHookWsUrl": "wss://slack-hook.cindy.app",
   "websiteUrl": "https://cindy.app",
   "modelAccessApiBaseUrl": "https://model-access.cindy.app",
