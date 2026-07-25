@@ -71,6 +71,7 @@ import { GhostOauthAccountManager, type GhostOauthDecl } from './ghostOauthAccou
 import { reclaimLoopbackPort } from './portReclaim.js';
 import { GhostConnectionManager } from './ghostConnections.js';
 import { getResolvedMainLocale, t } from '../i18n.js';
+import { reconcileGhostSkillLinks } from './skillSlot.js';
 import { assertTrustedAppRendererEvent } from '../security/trustedAppRenderer.js';
 import {
   FILO_GOOGLE_GHOST_ID,
@@ -2033,6 +2034,9 @@ export function registerGhostIpc(): void {
   ipcRegistered = true;
   const manager = getGhostManager();
   const runtime = getGhostRuntime();
+  // 启动即对账一次 skill 槽链接:上次会话崩溃/异常退出留下的悬空链接、
+  // 换账号后的期望态变化,都在这里自愈(后续变更由 ghosts:changed 广播驱动)。
+  scheduleGhostSkillReconcile();
   setGhostSandboxDevToolsDisabled(app.isPackaged);
   setGhostAppContextProvider(currentGhostAppContext);
   // 面板唤醒电子脑(cindy-ghost://<id>/wake 供片分支):面板零桥,唤醒经它
@@ -3130,6 +3134,47 @@ function broadcastGhostsChanged(ghosts: InstalledGhost[]): void {
       });
     }
   }
+  // skill 槽共享链接对账:装/卸/启停/换版全走本广播,一处挂接全覆盖。
+  // 异步合并执行,不阻塞广播;用全量 list() 而非 per-session 过滤后的 visible
+  // (链接对账关心"装了什么",与当前会话可见性无关)。
+  scheduleGhostSkillReconcile();
+}
+
+// —— skill 槽链接对账调度:合并突发广播(in-flight + pending 双标志),
+//    永不并发两趟 fs 对账;失败仅 warn,幂等设计靠下一次广播/启动自愈。
+let skillReconcileInFlight = false;
+let skillReconcilePending = false;
+function scheduleGhostSkillReconcile(): void {
+  skillReconcilePending = true;
+  if (skillReconcileInFlight) return;
+  skillReconcileInFlight = true;
+  void (async () => {
+    try {
+      while (skillReconcilePending) {
+        skillReconcilePending = false;
+        try {
+          const result = await reconcileGhostSkillLinks({
+            ghosts: getGhostManager().list(),
+            brainRoot: brainRootDir(),
+          });
+          if (result.warnings.length > 0) {
+            log.warn('ghost skill reconcile warnings', { warnings: result.warnings });
+          }
+          if (result.changed) {
+            log.info('ghost skill links reconciled', {
+              actions: result.actions.filter((a) => a.op !== 'kept'),
+            });
+          }
+        } catch (err) {
+          log.warn('ghost skill reconcile failed', {
+            error: err instanceof Error ? err.message : String(err),
+          });
+        }
+      }
+    } finally {
+      skillReconcileInFlight = false;
+    }
+  })();
 }
 
 let ghostsChangedObserver: ((ghosts: InstalledGhost[]) => void) | null = null;
