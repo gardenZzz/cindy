@@ -45,6 +45,7 @@ import {
   ELLIPSIS_LOCALES,
   FULL_WIDTH_PUNCT,
   HALFWIDTH_PUNCT_LOCALES,
+  WORD_BOUNDARY,
   findCaseMismatch,
   findHalfWidthPunct,
   hasAsciiEllipsis,
@@ -190,9 +191,12 @@ for (const term of glossary.terms) {
     for (const entry of term.forbidden?.[locale] ?? []) {
       const bad = typeof entry === 'string' ? entry : entry.text;
       const whenEn = typeof entry === 'string' ? null : entry.whenEn;
+      // 词边界必须复用 WORD_BOUNDARY:whenEn 的匹配口径要和 occursIn / findCaseMismatch
+      // 完全一致,否则边界规则演进时(例如再往里加一类字符)两处会悄悄漂移,
+      // 出现「术语命中了但条件禁用没生效」这种最难查的不一致。
       const sourceRe = whenEn
         ? new RegExp(
-            `(?<![A-Za-z0-9_-])${whenEn.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}s?(?![A-Za-z0-9_-])`,
+            `(?<![${WORD_BOUNDARY}])${whenEn.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}s?(?![${WORD_BOUNDARY}])`,
             'i',
           )
         : null;

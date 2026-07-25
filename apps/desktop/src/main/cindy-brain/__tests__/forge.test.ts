@@ -456,10 +456,13 @@ describe('FORGE_GUIDE', () => {
       'panel.position',
       '右侧栏页签',
       // 2026-07-25 标准头系统按钮:主机画标题条,systemButtons 逐个关
-      // (maximize 撑满 / detach 独立窗口);§2 样例与 §5 面板章节同步。
+      // (maximize 撑满 / detach 独立窗口 / minimize 气泡);§2 样例与 §5
+      // 面板章节同步。
       'systemButtons',
       '撑满内容区',
       '在独立窗口中打开',
+      'minimize',
+      '最小化为浮动气泡',
     ]) {
       expect(FORGE_GUIDE).toContain(marker);
     }
