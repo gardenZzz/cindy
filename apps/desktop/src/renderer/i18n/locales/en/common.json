@@ -146,10 +146,10 @@
       },
       "status": {
         "disconnected": "Disconnected",
-        "connecting": "Connecting...",
-        "authenticating": "Authenticating...",
+        "connecting": "Connecting…",
+        "authenticating": "Authenticating…",
         "ready": "Ready",
-        "reconnecting": "Reconnecting...",
+        "reconnecting": "Reconnecting…",
         "failed": "Failed"
       },
       "button": {
@@ -178,7 +178,7 @@
         "close": "Close",
         "done": "Done",
         "pickOrGenerate": "Pick an existing key, or generate a new one",
-        "loading": "Scanning ~/.ssh/...",
+        "loading": "Scanning ~/.ssh/…",
         "empty": "No SSH keys found in ~/.ssh/. Click \"Generate new\" to create one.",
         "generateButton": "Generate new",
         "cancelGenerate": "Cancel",
@@ -192,7 +192,7 @@
         "unlockSubmit": "Unlock",
         "generateTitle": "Generate a new SSH key",
         "nameLabel": "Name (optional)",
-        "nameHint": "Saved as ~/.ssh/<name>. Defaults to \"cindy\", suffixes with -1, -2... on collision.",
+        "nameHint": "Saved as ~/.ssh/<name>. Defaults to \"cindy\", suffixes with -1, -2… on collision.",
         "encryptLabel": "Encrypt with a passphrase (recommended)",
         "encryptHint": "Passphrase is typed once now, then ssh-add caches the decrypted key in your system's ssh-agent. macOS also persists the passphrase in Keychain so it survives reboots.",
         "passLabel": "Passphrase",
@@ -340,9 +340,9 @@
         "codexSyncNoLocal": "No local Codex credentials found — log in to Codex in {{appName}} first"
       },
       "silentInstall": {
-        "starting": "Installing {{agent}} on remote {{hostId}}...",
-        "preparingRuntime": "Preparing runtime on {{hostId}}...",
-        "installingAgent": "Installing {{agent}} on remote {{hostId}}...",
+        "starting": "Installing {{agent}} on remote {{hostId}}…",
+        "preparingRuntime": "Preparing runtime on {{hostId}}…",
+        "installingAgent": "Installing {{agent}} on remote {{hostId}}…",
         "failed": "Failed to install {{agent}} on {{hostId}}: {{message}}. Open Settings → Remote → expand {{hostId}} for the full log."
       }
     },
@@ -527,7 +527,7 @@
         "victory-fanfare": "Victory fanfare",
         "error-buzz": "Error buzz",
         "secret-chime": "Secret chime",
-        "custom": "Local file...",
+        "custom": "Local file…",
         "customSelected": "Local file: {{name}}"
       }
     },
@@ -1360,9 +1360,9 @@
       "statusAria": "FeiShu Bot status: {{status}}",
       "status": {
         "needsConfig": "Needs configuration",
-        "connecting": "Connecting...",
+        "connecting": "Connecting…",
         "connected": "Connected",
-        "reconnecting": "Reconnecting...",
+        "reconnecting": "Reconnecting…",
         "conflict": "Used by another device",
         "error": "Connection failed"
       },
@@ -1411,7 +1411,7 @@
       "statusAria": "Discord bot status: {{status}}",
       "status": {
         "needsConfig": "Needs configuration",
-        "connecting": "Connecting...",
+        "connecting": "Connecting…",
         "connected": "Connected",
         "conflict": "In use on another device",
         "error": "Connection failed"
@@ -1436,9 +1436,9 @@
       "hideToken": "Hide token",
       "formHint": "User ID must be a 17-20 digit numeric snowflake.",
       "connect": "Connect",
-      "connectingAction": "Connecting...",
+      "connectingAction": "Connecting…",
       "disconnect": "Unbind",
-      "disconnectingAction": "Unbinding...",
+      "disconnectingAction": "Unbinding…",
       "disconnectAria": "Unbind Discord Bot",
       "disconnectConfirm": {
         "title": "Unbind Discord Bot?",
@@ -1625,7 +1625,7 @@
       }
     },
     "collaboration": {
-      "loading": "Loading collaboration settings...",
+      "loading": "Loading collaboration settings…",
       "title": "Collaboration",
       "workerSoftLimit": "Worker Soft Limit",
       "workerSoftLimitHint": "Soft warning when number of workers reaches this threshold.",
@@ -1679,8 +1679,8 @@
         "refresh": "Recheck",
         "toggleHint": "This machine-wide toggle only applies to agent sessions started afterward; it does not affect a conversation that is already running.",
         "status": {
-          "checking": "Checking ADB status...",
-          "preparing": "Preparing ADB...",
+          "checking": "Checking ADB status…",
+          "preparing": "Preparing ADB…",
           "ready": "ADB ready. Ready devices: {{count}}. Default: {{device}}",
           "adbDetail": "{{version}} at {{path}}",
           "noDevice": "ADB ready. No authorized Android device is connected.",
@@ -1706,7 +1706,7 @@
         "adb": {
           "title": "ADB",
           "auto": "Automatic ADB resolution is active",
-          "preparing": "Preparing ADB...",
+          "preparing": "Preparing ADB…",
           "ready": "Current source: {{source}}",
           "prepareFailed": "ADB preparation failed: {{message}}",
           "placeholder": "Custom adb path",
@@ -1751,7 +1751,7 @@
         "daemonRunning": "daemon running",
         "daemonStopped": "daemon stopped; it will start automatically on use",
         "notDetected": "cua-driver was not detected. It will be installed automatically the first time you enable this; grant permissions afterward to use direct computer control.",
-        "installing": "Installing cua-driver...",
+        "installing": "Installing cua-driver…",
         "authorizing": "Waiting for system permissions. Complete Accessibility and Screen Recording in the Cua Driver permission window.",
         "permissionIntro": {
           "title": "Enable computer automation",
@@ -2845,7 +2845,7 @@
     "emailPlaceholder": "Enter your email",
     "invalidEmail": "Please enter a valid email address",
     "invalidPhone": "Please enter a valid phone number",
-    "working": "Please wait...",
+    "working": "Please wait…",
     "continue": "Continue",
     "or": "or",
     "socialButton": "Continue with {{provider}}",
@@ -2866,7 +2866,7 @@
     "ssoRequired": "This organization requires SSO sign-in",
     "ssoEntry": "Sign in with enterprise SSO",
     "localModeEntry": "Skip Sign-In",
-    "localModeOpening": "Opening local mode...",
+    "localModeOpening": "Opening local mode…",
     "returnToLocalMode": "Return to local mode",
     "localModeDescription": "No Cindy account required. Data stays on this device; cloud models, cross-device access, and marketplace services are unavailable.",
     "consentStatement": "I have read and agree to the <terms>Terms of Service</terms> and <privacy>Privacy Policy</privacy>",
@@ -2886,7 +2886,7 @@
     "enterCode": "Enter verification code",
     "codeSentTo": "We sent a code to {{identifier}}",
     "codePlaceholder": "6-digit code",
-    "verifying": "Verifying...",
+    "verifying": "Verifying…",
     "signIn": "Sign in",
     "resendCode": "Resend code",
     "resendCountdown": "{{n}} seconds until resend",
@@ -2948,11 +2948,11 @@
   },
   "splash": {
     "tips": {
-      "checkingUpdate": "Checking for updates...",
-      "updating": "Updating Cindy...",
-      "updateDone": "Update complete, restarting shortly...",
-      "checkingEnv": "Checking runtime environment...",
-      "waking": "Waking Cindy...",
+      "checkingUpdate": "Checking for updates…",
+      "updating": "Updating Cindy…",
+      "updateDone": "Update complete, restarting shortly…",
+      "checkingEnv": "Checking runtime environment…",
+      "waking": "Waking Cindy…",
       "envFailed": "Environment setup failed — click to retry"
     },
     "downloadStats": "{{percent}}% · {{speed}} MB/s · {{done}} MB / {{total}} MB",
@@ -3627,7 +3627,7 @@
         "cancel": "No thanks"
       },
       "running": {
-        "title": "Converting config...",
+        "title": "Converting config…",
         "description": "Writing workspace config for {{targetAgent}}. Please do not close the window.",
         "primary": "Convert",
         "cancel": "No thanks"
@@ -3646,7 +3646,7 @@
   },
   "findInPage": {
     "dialogAriaLabel": "Find in page",
-    "placeholder": "Find...",
+    "placeholder": "Find…",
     "previous": "Previous",
     "next": "Next",
     "close": "Close"
@@ -3787,13 +3787,13 @@
       "add": "Add project",
       "cancel": "Cancel",
       "empty": "Connect a controllable device under Settings → Remote connection, or add an SSH host under Settings → Remote machines first.",
-      "loading": "Loading...",
+      "loading": "Loading…",
       "noSubdirs": "No subfolders here",
       "doubleClickHint": "Double-click to enter",
       "tabExisting": "Existing projects",
       "tabBrowse": "Browse folders",
       "existingEmpty": "No projects on that machine yet — browse folders to add one.",
-      "existingLoading": "Loading projects...",
+      "existingLoading": "Loading projects…",
       "confirmCreate": {
         "title": "Create remote directory?",
         "description": "{{path}} does not exist on {{hostId}}. Create it now?",
@@ -3847,8 +3847,8 @@
         "other": "Other"
       },
       "search": {
-        "placeholder": "Search {{source}} models...",
-        "placeholderAll": "Search models...",
+        "placeholder": "Search {{source}} models…",
+        "placeholderAll": "Search models…",
         "noResults": "No matching models"
       },
       "meta": {
@@ -3967,7 +3967,7 @@
       "steerAction": "Steer",
       "steerRunningTip": "Steer this message into the running task without interrupting it; handled once the current action finishes",
       "steerPausedTip": "Continue the task and handle this message first",
-      "steeringAction": "Steering...",
+      "steeringAction": "Steering…",
       "steerAria": "Steer queued message {{index}} into the running task",
       "steeringAria": "Queued message {{index}} is being steered",
       "editAction": "Edit",
@@ -4147,7 +4147,7 @@
       "error": "Voice input failed"
     },
     "hint": "Press shortcut again to input",
-    "placeholder": "Start speaking...",
+    "placeholder": "Start speaking…",
     "pasteHint": "Automatic input failed. Copy the transcript and enter it manually.",
     "pasteErrors": {
       "empty": "There is no voice input text to enter.",
@@ -4191,7 +4191,7 @@
       "approved": "Approved",
       "revisionRequested": "Revision requested",
       "expired": "Expired",
-      "pendingHint": "Agent is waiting for plan approval...",
+      "pendingHint": "Agent is waiting for plan approval…",
       "collapse": "Collapse plan",
       "showFull": "Show full plan",
       "feedbackLabel": "Feedback:",
@@ -4297,7 +4297,7 @@
       "syncAuthDaemonRestartFailed": "Credentials pushed, but the old daemon did not restart — reconnect to the remote before retrying",
       "invalidEncryptedContent": "Switching providers made the previous encryption unusable. This session can only continue under the original provider, or click Fork to drop the protocol-encrypted content and continue in a new session.",
       "forkStripEncrypted": "Fork and strip",
-      "forkStripEncryptedRunning": "Forking...",
+      "forkStripEncryptedRunning": "Forking…",
       "forkStripEncryptedTitle": "Fork and strip into a new session",
       "codexSessionExpiredLogin": "Reconnect ChatGPT",
       "codexSessionReconnected": "ChatGPT is reconnected. Click “Retry” to continue.",
@@ -4429,7 +4429,7 @@
       "openSystemFailed": "Cannot open in system",
       "copyAll": "Copy all",
       "cannotRead": "Unable to read file",
-      "loading": "Loading file...",
+      "loading": "Loading file…",
       "oversizeTitle": "File too large to preview",
       "oversizeBody": "This file is {{size}}, exceeding the {{limit}}MB preview limit. Please open it with the system default application.",
       "openInSystem": "Open in system",
@@ -4566,7 +4566,7 @@
     "systemCard": {
       "context": {
         "title": "Context Usage",
-        "loading": "Loading...",
+        "loading": "Loading…",
         "noLiveSession": "No context data is available yet. Try again after the Claude Code session starts.",
         "unsupportedAgent": "{{agent}} does not support context usage yet.",
         "percentFull": "{{pct}}% Full",
@@ -4717,7 +4717,7 @@
         "title": "Rewind to this message?",
         "titleError": "Cannot rewind to this message",
         "errorDescription": "File checkpointing is not enabled for this Session — files modified by tools cannot be rolled back.",
-        "calculating": "Calculating rewind impact...",
+        "calculating": "Calculating rewind impact…",
         "noChanges": "No file changes to roll back",
         "continueWillTruncate": "Continuing will still truncate later conversation",
         "noPerFileDiff": "This SDK version does not support per-file diff preview",
@@ -4740,7 +4740,7 @@
     },
     "upgradeBanner": {
       "description": "A new cc-manager version is available on {{hostId}} — upgrading will interrupt all active Claude Code remote sessions on this host",
-      "upgrading": "Upgrading cc-manager on {{hostId}}...",
+      "upgrading": "Upgrading cc-manager on {{hostId}}…",
       "upgrade": "Upgrade now",
       "upgradeTitle": "Download and restart cc-manager (will interrupt current sessions)",
       "dismissTitle": "Not now (will prompt again on next launch)",
@@ -4854,7 +4854,7 @@
       "unnamedSession": "Untitled session",
       "moreActions": "More actions",
       "newSession": "New session",
-      "loading": "Loading..."
+      "loading": "Loading…"
     },
     "time": {
       "yesterday": "Yesterday",
@@ -4899,7 +4899,7 @@
         "confirm": "Open Settings",
         "cancel": "Cancel"
       },
-      "chatPlaceholder": "Let's keep chatting...",
+      "chatPlaceholder": "Let's keep chatting…",
       "chatDropAreaAria": "Chat file drop area",
       "openWorkingDirAria": "Open working directory in the system file manager",
       "projectContextLoaded": "Project Knowledge Base loaded",
@@ -5312,7 +5312,7 @@
       },
       "docSearch": {
         "ariaLabel": "Find in document",
-        "placeholder": "Find...",
+        "placeholder": "Find…",
         "prev": "Previous",
         "next": "Next",
         "close": "Close",
@@ -5411,10 +5411,10 @@
     },
     "search": {
       "open": "Search",
-      "placeholder": "Search titles or content...",
+      "placeholder": "Search titles or content…",
       "clear": "Clear search",
       "empty": "Type to search chat titles and content",
-      "searching": "Searching...",
+      "searching": "Searching…",
       "failed": "Search failed",
       "noResults": "No matching chats",
       "jumpFailed": "Opened the chat, but could not jump to the matching message",
@@ -6244,7 +6244,7 @@
       "totalCount_other": "{{count}} items"
     },
     "sidebar": {
-      "loading": "loading ...",
+      "loading": "loading…",
       "skillHub": "Skill Hub",
       "backToLocal": "Back To Local",
       "openInExplorer": "Open in file manager",
@@ -6402,7 +6402,7 @@
       "categoryAll": "All",
       "categoryLabel": "Category: {{name}}",
       "loadFailed": "Load failed: {{error}}",
-      "loading": "Loading...",
+      "loading": "Loading…",
       "noResults": "No matching skills",
       "installFailedToast": "{{name}} install failed: {{message}}",
       "installError": "Unknown error"
@@ -6505,7 +6505,7 @@
       "categoryLabel": "Category",
       "categoryAuto": "Auto",
       "categoryPlaceholder": "Select a category",
-      "categoryLoading": "Loading categories...",
+      "categoryLoading": "Loading categories…",
       "categoryLoadFailed": "Failed to load categories. Please retry.",
       "categoryEmpty": "No categories are available",
       "categoryRequired": "Select a category before publishing",
@@ -6754,7 +6754,7 @@
     "statusField": "Status:",
     "errorField": "Error:",
     "sendNotAccepted": "Send was not accepted and no turn started. Check the working directory or session state, then try again.",
-    "messagePlaceholder": "Type message...",
+    "messagePlaceholder": "Type message…",
     "imagePathPlaceholder": "Image absolute path (D5 - test Codex image)",
     "send": "Send",
     "abort": "Abort",

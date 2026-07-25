@@ -36,10 +36,16 @@ const TOKEN_TAIL = `(?:(?![${CJK_PUNCT}])(?![,;:!?](?=[${CJK_CHAR}]))\\S)+`;
 const URL_TOKEN = new RegExp(`\\b[a-z][\\w-]*://${TOKEN_TAIL}`, 'gi');
 
 /**
- * 邮箱片段。收尾规则同 URL——原先的 `\S+@\S+\.\S+` 连全角标点都不截,
+ * 邮箱片段。
+ *
+ * 收尾用 TOKEN_TAIL,理由同 URL——原先的 `\S+@\S+\.\S+` 连全角标点都不截,
  * 「联系 a@x.com，返回worker操作」会被整段剥成「联系 」。
+ *
+ * local part(@ 前面那段)必须限定在邮箱合法字符里,**不能**用「除空白与全角标点之外的
+ * 一切」:那样会把紧贴在地址前面的中文正文一起吃掉——`返回worker联系a@x.com` 整条被剥成
+ * 一个空格,里面小写的 worker 违规随之消失。中文文案里地址常与正文无空格相接。
  */
-const EMAIL_TOKEN = new RegExp(`[^\\s${CJK_PUNCT}]+@${TOKEN_TAIL}`, 'g');
+const EMAIL_TOKEN = new RegExp(`[A-Za-z0-9._%+-]+@${TOKEN_TAIL}`, 'g');
 
 /**
  * 文件名片段。
@@ -159,9 +165,11 @@ export function makeExemptChecker(list) {
  *    **ja 不适用**——日文 UI 惯例本就用半角冒号,实测半角 124:78 反而是主流,
  *    套用中文规则会制造 124 处假阳性。ko 同理不适用。
  *  - 省略号:zh-CN 140:44、ja 138:46、ko 138:46,三语一致以「…」为主流 → 全部适用。
+ *    **en 同样适用**——不是靠现状数据,而是 DESIGN.md §11 Voice & Content 明文规定
+ *    英文也用省略号字符「…」而非三个半角点。原先漏掉 en,等于让门禁替既有违规背书。
  */
 export const HALFWIDTH_PUNCT_LOCALES = new Set(['zh-CN']);
-export const ELLIPSIS_LOCALES = new Set(['zh-CN', 'ja', 'ko']);
+export const ELLIPSIS_LOCALES = new Set(['en', 'zh-CN', 'ja', 'ko']);
 
 /**
  * 中文正文里的半角标点。两种形态:

@@ -590,7 +590,7 @@
         "title": "快速开始",
         "step1": "先新建一个对话，告诉 Claude Code 或 Codex 你要完成的目标。",
         "step2": "如果你的工作和项目代码有关，先选择工作目录，再让它读文件、解释代码或修改实现。",
-        "step3": "把对话区当作一个持续的工作对话：提出任务、查看结果、根据结果继续推进。"
+        "step3": "把对话区当作持续推进工作的地方：提出任务、查看结果、根据结果继续推进。"
       },
       "workflows": {
         "title": "推荐工作流",
@@ -1641,7 +1641,7 @@
         "title": "自动操作浏览器",
         "description": "一个 Agent 专用的独立浏览器，与你日常的 Chrome 互不影响",
         "toggleAria": "切换浏览器自动化",
-        "toggleHint": "这个开关只对之后新建的 Agent 对话生效；正在进行的对话不受影响。",
+        "toggleHint": "这个开关只对之后新建的 Agent 会话生效；已在运行的对话不受影响。",
         "noProjectHint": "从项目对话中打开「设置」可针对该项目开关浏览器自动化。",
         "detected": "已检测到 {{browser}}",
         "notDetected": "未检测到本机浏览器。安装 Chrome 后即可使用浏览器自动化。",
@@ -1676,7 +1676,7 @@
         "description": "让 Agent 通过 ADB 检查并操作已连接的 Android 设备",
         "toggleAria": "切换 Android 自动化",
         "refresh": "重新检查",
-        "toggleHint": "这个全局开关只对之后新建的 Agent 对话生效；正在进行的对话不受影响。",
+        "toggleHint": "这个全局开关只对之后新建的 Agent 会话生效；已在运行的对话不受影响。",
         "status": {
           "checking": "正在检查 ADB 状态…",
           "preparing": "正在准备 ADB…",
@@ -1795,7 +1795,7 @@
           "windowsHint": "Windows 不需要额外系统授权。使用时请保持目标应用在当前活动桌面中可见，Agent 会接管前台操作。",
           "linuxHint": "Linux 不需要 macOS 的 TCC 授权；请确保当前桌面会话允许窗口读取和输入自动化。"
         },
-        "toggleHint": "这个开关只对之后新建的 Agent 对话生效；正在进行的对话不受影响。",
+        "toggleHint": "这个开关只对之后新建的 Agent 会话生效；已在运行的对话不受影响。",
         "noProjectHint": "从项目对话中打开「设置」可针对该项目开关直接电脑控制。",
         "update": {
           "available": "发现新版本 v{{version}}，更新后如系统权限失效需重新授权。",
@@ -1827,7 +1827,7 @@
       "description": "设置新对话默认值，或为指定项目添加覆盖。项目设置优先于用户默认值。",
       "empty": "暂无可用的工具。",
       "toggleAria": "切换 {{name}} 工具",
-      "toggleHint": "变更仅对新建或重新启动的 Agent 对话生效，不影响正在运行的对话。",
+      "toggleHint": "变更仅对新建或重启的 Agent 会话生效，正在运行的 Agent 会话不受影响。",
       "loadFailed": "加载工具列表失败",
       "scopePicker": {
         "ariaLabel": "切换内置工具设置的作用域",
@@ -3753,7 +3753,7 @@
       "inlineSecretStoreFailed": "凭证保存失败",
       "targetNotFound": "目标插件已卸载或当前不可用",
       "targetDisabled": "目标插件已被停用",
-      "targetDisabledInWorkdir": "用户已在当前工作目录停用该插件;不要重试。",
+      "targetDisabledInWorkdir": "用户已在当前工作目录停用该插件；不要重试。",
       "targetToolNotFound": "目标插件不再提供该工具"
     },
     "createAgent": {
@@ -4691,7 +4691,7 @@
       "editSend": "发送",
       "editRollbackHint": "发送将撤销上一轮对 {{count}} 个文件的改动",
       "forkErrors": {
-        "unsupportedHistory": "目标位置对应的历史引擎对话已不可用，无法从这里开启新对话",
+        "unsupportedHistory": "目标位置对应的历史引擎会话已不可用，无法从这里开启新对话",
         "noPriorAssistant": "请在 AI 回复之后的消息上开启新对话",
         "sourceNeverRan": "原对话尚未运行，无法开启新对话",
         "codexStateUnavailable": "Codex 对话状态不可用，无法开启新对话。{{detail}}",
