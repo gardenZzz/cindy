@@ -55,7 +55,7 @@ describe('GhostPermissionList(装入全量清单)', () => {
     expect(screen.getByText(/perm\.tool:.*gen_image/)).toBeTruthy();
     expect(screen.getByText('根据描述出图')).toBeTruthy(); // 作者自由文本如实展示
     expect(screen.getByText(/perm\.command:.*画图/)).toBeTruthy();
-    expect(screen.getByText(/perm\.panelRight:.*画廊/)).toBeTruthy();
+    expect(screen.getByText(/perm\.panelLeft:.*画廊/)).toBeTruthy();
     expect(screen.getByText('settings.ghosts.perm.code')).toBeTruthy();
     expect(screen.getByText('settings.ghosts.perm.codeDetail')).toBeTruthy(); // 主机固定说明走 i18n
   });

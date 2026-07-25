@@ -368,6 +368,11 @@ describe('FORGE_GUIDE', () => {
       '面板(panel.html/css/js)',
       'panel.position',
       '右侧栏页签',
+      // 2026-07-25 标准头系统按钮:主机画标题条,systemButtons 逐个关
+      // (maximize 撑满 / detach 独立窗口);§2 样例与 §5 面板章节同步。
+      'systemButtons',
+      '撑满内容区',
+      '在独立窗口中打开',
     ]) {
       expect(FORGE_GUIDE).toContain(marker);
     }

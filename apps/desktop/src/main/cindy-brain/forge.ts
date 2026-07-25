@@ -675,12 +675,19 @@ my-ghost/
   "command": "画图",            // 可选:用户 $画图 显式点名(与已装意识查重,冲突拒装)
   "tools": [ /* 见 §3 */ ],
   "cindy": { "image": ["generate", "edit"] },   // 声明了 cindy 槽时必写:能力详单,见下
-  "panel": { "title": "面板标题", "html": "panel.html", "position": "right",
-             "minWidth": 240, "defaultFraction": 0.24 },
-  // panel.position:面板显示形态。right(缺省)/ left = 停靠主聊天窗两侧;
+  "panel": { "title": "面板标题", "html": "panel.html", "position": "left",
+             "minWidth": 240, "defaultFraction": 0.24,
+             "systemButtons": { "maximize": false } },
+  // panel.position:面板显示形态。left(缺省)= 停靠主聊天窗左侧;
   // "tab" = 右侧栏页签(与文件/审查/终端同一容器,每会话至多一个,用户从
   // 空态列表或「+」菜单打开;此形态没有拖缝宽度,声明 minWidth /
-  // defaultFraction 会被拒装,请移除)。top/bottom 暂未支持(排期中)
+  // defaultFraction 会被拒装,请移除)。right 已退役(右侧是右侧边栏的地盘;
+  // 旧包声明 right 自动并入 left,用户想放右边可自己拖拽换位)。
+  // top/bottom 暂未支持(排期中)
+  // panel.systemButtons(可选,仅停靠形态):标准头系统按钮开关,缺省全开、
+  // 声明 false 逐个关闭。当前一批:maximize(撑满内容区)、detach(在独立
+  // 窗口中打开)。标题条本体恒由主机绘制、关不掉;未知键拒装;
+  // position:"tab" 时声明本字段拒装
   "settingsHtml": "settings.html",  // 可选:设置页「自定义设置区」自绘界面(见 §4.8;声明了用户填的凭证时必填——凭证收单界面,见 §4.7)
   "settingsHeight": 360             // 可选:固定高度 px(160–800);缺省 = 随内容自适应(矮内容真收矮,高至 800);内容会动态增减时才声明,避免抖动
 }
@@ -2116,14 +2123,23 @@ if (!opened.ok) console.warn(opened.errorCode, opened.message);
 
 ## 5. 面板(panel.html/css/js)
 
-- 显示形态由 \`panel.position\` 决定:\`right\`(缺省)/ \`left\` = 停靠主聊天窗两侧
-  的常驻面板;\`"tab"\` = 右侧栏页签——与文件/审查/终端同一容器,每会话至多
-  一个页签,由用户从右侧栏空态列表或「+」菜单打开。当用户在会话视图内装入
+- 显示形态由 \`panel.position\` 决定:\`left\`(缺省)= 停靠主聊天窗左侧的常驻
+  面板(\`right\` 已退役:右侧是右侧边栏的地盘,旧包声明 right 自动并入 left,
+  用户想放右边可自己拖拽换位);\`"tab"\` = 右侧栏页签——与文件/审查/终端同一
+  容器,每会话至多一个页签,由用户从右侧栏空态列表或「+」菜单打开。当用户在会话视图内装入
   tab 型插件并勾选「立即开启」时,装入完成后会自动展开右侧栏并打开/聚焦该
   页签;从插件页(无会话路由)装入或未勾选时,仍由用户手动从空态/「+」菜单
   打开。页签形态没有拖缝宽度语义,声明 \`minWidth\` / \`defaultFraction\` 会被
   拒装。两种形态的面板代码完全一样(同一 panel.html,供片/主题/媒体规则不变),
   只是宿主容器不同;页签形态请把界面做成自适应宽度;
+- 停靠形态的**标题条(标准头)由主机绘制**:标题(\`panel.title\`)+ 一批系统
+  按钮(当前:「撑满内容区」与「在独立窗口中打开」——用户可把你的面板抽进
+  自己的 OS 窗口,关窗/合并即回停靠原位,面板代码零感知;后续新增的系统按钮
+  也长在这里)。你的 panel.html 只画标题条以下的部分,**不要自己再画一条
+  标题栏**。不想要某颗系统按钮时在身份卡声明
+  \`"systemButtons": { "maximize": false, "detach": false }\` 逐个关闭(缺省
+  全开;标题条本体关不掉;未知键拒装;\`position:"tab"\` 没有标准头,声明本
+  字段拒装);
 - 与电子脑同源,用 \`BroadcastChannel('<自定名>')\` 通信(电子脑发,面板收);
 - 取自己的媒体:\`cindy-ghost://<id>/media/<指纹><后缀>\`(主机查账验归属,别人的图 404);
 - 重启回放:\`fetch('cindy-ghost://<id>/gallery')\` 返回本意识作品清单 \`[{src, caption}]\`;
@@ -2214,6 +2230,7 @@ if (!opened.ok) console.warn(opened.errorCode, opened.message);
 - \`id\` 不合法(大写/下划线/超长)· 声明了 command 但没有 tools · command 与已装意识撞名
 - 声明了 tool 槽但缺 tools(或反之)· panel.html 声明了但 slots 没有 "panel"
 - settingsHtml 路径不合法/文件不在包里 · settingsHeight 越界(160–800)或没配 settingsHtml 单独声明
+- panel.systemButtons 格式错(不是对象、未知键、值非布尔,或 position:"tab" 时声明——页签形态没有标准头)
 - keywords(已废弃字段,旧包兼容保留,新意识别写)有单字词 · kind 写了但不是 "chip"(可省略) · schemaVersion 不是 2
 - cindy 详单格式错(未知类目/动作、空数组、有详单但 slots 没有 "cindy")
 - agent 详单格式错(有详单但 slots 没有 "agent"，或 background 不是 true；只需点击触发时应省略 agent 字段)

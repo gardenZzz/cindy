@@ -539,6 +539,18 @@ export const MAKER_INVOKE = {
   RSB_WINDOW_READY: 'maker:rsb-window:ready',
   RSB_WINDOW_SEND_COMMAND: 'maker:rsb-window:send-command',
   /**
+   * 插件停靠面板独立窗口(ghost panel window)——每 ghostId 一扇窗。
+   * 状态机见 main/ghost-panel-window/controller.ts。
+   *  - GET_STATE: 拉全量 { <ghostId>: { detached, lastOpen, open } }
+   *  - OPEN(ghostId): 幂等开(已开则 focus);资格不符清条目
+   *  - SET_DETACHED(ghostId, boolean): true 开窗抽离,false 关窗回停靠;返回新全量 state
+   * 首帧同步读走裸 sendSync 通道 'ghost-panel-window:get-state-sync'
+   * (与 layout:get / ghosts:list 同模式,规则 7 首帧无跳变)。
+   */
+  GHOST_PANEL_WINDOW_GET_STATE: 'maker:ghost-panel-window:get-state',
+  GHOST_PANEL_WINDOW_OPEN: 'maker:ghost-panel-window:open',
+  GHOST_PANEL_WINDOW_SET_DETACHED: 'maker:ghost-panel-window:set-detached',
+  /**
    * 会话内 /goal 自主续跑(goal-host)——
    *  - GOAL_SET: 设/替换目标并立刻发首轮。入参 { sessionId, objective, agentKind, budgetTokens? }(budgetTokens 留空=不设预算)
    *  - GOAL_CLEAR: 用户清除目标(删行 + 停续跑 + 推 null 状态)
@@ -696,6 +708,11 @@ export const MAKER_PUSH = {
   RSB_WINDOW_CONTEXT_CHANGED: 'maker:rsb-window:context-changed',
   /** main → 子窗口命令(如 open-terminal),只发子窗口。payload = RsbWindowCommand。 */
   RSB_WINDOW_COMMAND: 'maker:rsb-window:command',
+  /**
+   * 插件面板独立窗口状态广播(全量 GhostPanelWindowsState)——发所有窗口
+   * (主窗布局过滤 + 各子窗口自身都消费)。
+   */
+  GHOST_PANEL_WINDOW_STATE_CHANGED: 'maker:ghost-panel-window:state-changed',
 } as const;
 
 /**

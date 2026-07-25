@@ -1826,7 +1826,6 @@ export async function installOrUpdateMarketGhostPackage(
     ghostId: string;
     version: string;
     initiallyEnabled?: boolean;
-    nodeAuthorizationWebContents?: WebContents;
   },
 ): Promise<InstalledGhost> {
   const mutationOwner = captureGhostMutationOwner();
@@ -3116,6 +3115,30 @@ function broadcastGhostsChanged(ghosts: InstalledGhost[]): void {
     if (window.isDestroyed()) return;
     window.webContents.send('ghosts:changed', { ghosts: visible });
   });
+  // 与 renderer 同一份可见清单喂给观察者(独立窗口 controller reconcile 等);
+  // 观察者异常不拖垮广播本体。
+  if (ghostsChangedObserver) {
+    try {
+      ghostsChangedObserver(visible);
+    } catch (err) {
+      log.warn('ghosts-changed observer failed', {
+        error: err instanceof Error ? err.message : String(err),
+      });
+    }
+  }
+}
+
+let ghostsChangedObserver: ((ghosts: InstalledGhost[]) => void) | null = null;
+
+/**
+ * bootstrap 注入:装/卸/启停/换版广播的 main 侧同步观察者(当前消费方:插件面板
+ * 独立窗口 controller 的 reconcile)。保持 cindy-brain 不反向依赖窗口模块
+ * (与 setGhostAgentTurnRunner 同款倒置)。
+ */
+export function setGhostsChangedObserver(
+  observer: ((ghosts: InstalledGhost[]) => void) | null,
+): void {
+  ghostsChangedObserver = observer;
 }
 
 /** Plugin 顶部快捷行的 host-owned MRU 快照，多窗口同步。 */

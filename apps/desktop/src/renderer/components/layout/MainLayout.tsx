@@ -820,6 +820,18 @@ export function MainLayout() {
         void window.electronAPI.rightSidebarWindow.open().catch(() => undefined);
       }
     });
+    // 插件面板独立窗口的重启恢复(同款语义,按 ghostId 逐个):detached &&
+    // lastOpen 的条目重开。open 走 main 复验资格(卸载/停用过的自动清)。
+    try {
+      const ghostWindows = window.electronAPI.ghostPanelWindow?.getStateSync() ?? {};
+      for (const [ghostId, entry] of Object.entries(ghostWindows)) {
+        if (entry.detached && entry.lastOpen && !entry.open) {
+          void window.electronAPI.ghostPanelWindow.open(ghostId).catch(() => undefined);
+        }
+      }
+    } catch {
+      // 桥不可用(测试环境)= 没有可恢复窗口
+    }
   }, []);
 
   // 4) 「在新窗口打开」入口(mac 浮层 / win TabBar 按钮共用):开偏好 + 弹出。

@@ -232,7 +232,6 @@ export class PluginMarketService {
     pluginId: string,
     options?: {
       allowPermissionExpansion?: boolean;
-      nodeAuthorizationWebContents?: WebContents;
     },
   ): Promise<{ ghost: InstalledGhost }> {
     if (!isValidPluginResourceId(pluginId)) {
@@ -261,9 +260,6 @@ export class PluginMarketService {
           {
             allowPermissionExpansion:
               options?.allowPermissionExpansion === true,
-            ...(options?.nodeAuthorizationWebContents
-              ? { nodeAuthorizationWebContents: options.nodeAuthorizationWebContents }
-              : {}),
           },
           owner,
           ledger,
@@ -336,7 +332,6 @@ export class PluginMarketService {
     options: {
       allowPermissionExpansion?: boolean;
       initiallyEnabled?: boolean;
-      nodeAuthorizationWebContents?: WebContents;
     } = {},
     owner = captureMarketOwner(),
     ledger = this.ledgerForOwner(owner),
@@ -388,9 +383,6 @@ export class PluginMarketService {
         ghostId: plugin.ghostId,
         version: plugin.currentRelease.version,
         initiallyEnabled: options.initiallyEnabled === true,
-        ...(options.nodeAuthorizationWebContents
-          ? { nodeAuthorizationWebContents: options.nodeAuthorizationWebContents }
-          : {}),
       });
       // Once the package directory is committed, finish provenance against the
       // owner captured at operation start even if the active session changes.
