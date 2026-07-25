@@ -132,8 +132,9 @@
           "会话"
         ]
       },
-      "note": "面向用户一律叫「对话」——「会话」太生硬难懂（2026-07 裁决）。代码与内部标识仍用 Session，本条只约束 UI 文案。Chat 合并到同一个词，见 chat 条目。落地时把 440 处「会话」+ 22 处「聊天」统一改为「对话」。ja / ko 沿用既有音译，不受本条约束。豁免的 6 处是同形异义的技术 session（登录态、WebSocket 语音连接），与产品对话无关——同类的还有 Linux Computer Use 提示里的「桌面会话」——那是 OS 桌面会话（窗口读取与输入自动化的授权范围）。注意 login.errors 的「绑定会话」指账号绑定态，scheduler 的「绑定对话」才是产品对话，两者同名不同义，靠 key 精确区分。还豁免 archiveWorkerConfirmDesc:归档 Worker 时 orcaTeamService.archiveWorker() 先关掉它的 SDK 运行时 session,再归档存下来的产品对话——一句话里是两个生命周期,统称「对话」会让用户以为聊天记录也被停掉了。",
+      "note": "面向用户一律叫「对话」——「会话」太生硬难懂（2026-07 裁决）。代码与内部标识仍用 Session，本条只约束 UI 文案。Chat 合并到同一个词，见 chat 条目。落地时把 440 处「会话」+ 22 处「聊天」统一改为「对话」。ja / ko 沿用既有音译，不受本条约束。豁免的 6 处是同形异义的技术 session（登录态、WebSocket 语音连接），与产品对话无关——同类的还有 Linux Computer Use 提示里的「桌面会话」——那是 OS 桌面会话（窗口读取与输入自动化的授权范围）。注意 login.errors 的「绑定会话」指账号绑定态，scheduler 的「绑定对话」才是产品对话，两者同名不同义，靠 key 精确区分。还豁免 archiveWorkerConfirmDesc:归档 Worker 时 orcaTeamService.archiveWorker() 先关掉它的 SDK 运行时 session,再归档存下来的产品对话——一句话里是两个生命周期,统称「对话」会让用户以为聊天记录也被停掉了。还豁免 stopBashTitle:它停后台任务但显式保留底层 session 进程,「对话进程」是个不存在的东西,还会模糊它与相邻的「关闭后台进程」的区别。",
       "exempt": [
+        "desktop:chat.backgroundActivity.stopBashTitle",
         "desktop:login.errors.INVALID_BIND_TICKET",
         "desktop:login.errors.INVALID_LOGIN_TICKET",
         "desktop:newChat.collaboration.archiveWorkerConfirmDesc",
