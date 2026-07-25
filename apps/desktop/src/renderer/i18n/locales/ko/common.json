@@ -11,7 +11,7 @@
     "AUTH_INVALID": "API 키가 유효하지 않거나 만료되었습니다(401). 키를 확인한 후 다시 시도하세요",
     "AUTH_FORBIDDEN": "키는 유효하지만 접근 권한이 없습니다(403). 요금제 또는 모델 권한을 확인하세요",
     "RATE_LIMITED": "요청이 제한되었습니다(429). 잠시 후 다시 시도하세요",
-    "QUOTA_EXCEEDED": "할당량 또는 잔액이 부족합니다. 공급자 계정을 확인하세요",
+    "QUOTA_EXCEEDED": "할당량 또는 잔액이 부족합니다. 제공자 계정을 확인하세요",
     "MODEL_NOT_FOUND": "모델이 존재하지 않거나 사용 권한이 없습니다. 모델 ID를 확인하세요",
     "ENDPOINT_NOT_FOUND": "엔드포인트를 찾을 수 없습니다(404). 기본 URL을 확인하세요",
     "CONTEXT_TOO_LONG": "컨텍스트가 모델의 길이 제한을 초과했습니다",
@@ -20,7 +20,7 @@
     "UPSTREAM_UNREACHABLE": "엔드포인트에 연결할 수 없습니다. 네트워크와 기본 URL을 확인하세요",
     "TIMEOUT": "연결 시간이 초과되었습니다. 네트워크와 기본 URL을 확인하세요",
     "UNKNOWN": "알 수 없는 오류입니다. 자세한 내용은 로그를 확인하세요",
-    "upstreamToast": "공급자 \"{{provider}}\" 요청 실패: {{message}}"
+    "upstreamToast": "제공자 \"{{provider}}\" 요청 실패: {{message}}"
   },
   "appError": {
     "title": "화면에 오류가 발생했습니다",
@@ -748,7 +748,7 @@
           "codexMissing": "Codex에 로그인하지 않아 이 모델을 사용할 수 없습니다.",
           "elevenlabsMissing": "ElevenLabs 키(환경 변수)가 설정되지 않아 이 모델을 사용할 수 없습니다."
         },
-        "manageProviders": "모델 공급자 열기",
+        "manageProviders": "모델 제공자 열기",
         "reset": "기본값으로 복원"
       },
       "historyToggle": {
@@ -1172,9 +1172,9 @@
         },
         "protocol": {
           "claude": "Claude Code",
-          "claudeDesc": "Claude Code는 Anthropic 프로토콜을 따릅니다(x-api-key 인증). 이 공급자의 Claude Code용 baseURL・키・모델을 입력하세요. 비워 두면 이 공급자는 Claude Code를 제공하지 않습니다.",
+          "claudeDesc": "Claude Code는 Anthropic 프로토콜을 따릅니다(x-api-key 인증). 이 제공자의 Claude Code용 baseURL・키・모델을 입력하세요. 비워 두면 이 제공자는 Claude Code를 제공하지 않습니다.",
           "codex": "Codex",
-          "codexDesc": "Codex는 OpenAI Responses 프로토콜을 사용합니다. Responses를 네이티브로 지원하는 업스트림이나 Chat Completions만 지원하는 제공자를 Cindy로 브리지하는 방식을 선택할 수 있습니다. 이 공급자의 Codex용 기본 URL, 키와 모델을 입력하세요. 비워 두면 Codex에서 사용하지 않습니다."
+          "codexDesc": "Codex는 OpenAI Responses 프로토콜을 사용합니다. Responses를 네이티브로 지원하는 업스트림이나 Chat Completions만 지원하는 제공자를 Cindy로 브리지하는 방식을 선택할 수 있습니다. 이 제공자의 Codex용 기본 URL, 키와 모델을 입력하세요. 비워 두면 Codex에서 사용하지 않습니다."
         },
         "errors": {
           "nameRequired": "표시 이름을 입력하세요",
@@ -1223,7 +1223,7 @@
           "label": "인증 방식",
           "apiKey": "API 키",
           "oauth": "OAuth 구독 인증",
-          "oauthHelp": "OAuth 로그인을 제공하는 구독형 공급자용입니다. 저장 후 공급자 목록에서 \"인증\"을 눌러 브라우저로 로그인하세요. 자격 증명은 이 기기에만 암호화되어 저장됩니다.",
+          "oauthHelp": "OAuth 로그인을 제공하는 구독형 제공자용입니다. 저장 후 제공자 목록에서 \"인증\"을 눌러 브라우저로 로그인하세요. 자격 증명은 이 기기에만 암호화되어 저장됩니다.",
           "fields": {
             "authorizeUrl": "인증 엔드포인트 (Authorize URL)",
             "tokenUrl": "토큰 엔드포인트 (Token URL)",
@@ -1270,11 +1270,11 @@
           "cancel": "취소"
         }
       },
-      "addProvider": "공급자 추가",
+      "addProvider": "제공자 추가",
       "detail": {
         "singleAgentNote": "{{agent}} 전용",
         "emptyModels": "인증하면 사용 가능한 모델이 자동으로 검색됩니다",
-        "emptyList": "왼쪽 아래 '공급자 추가'에서 첫 모델 소스를 연결하세요",
+        "emptyList": "왼쪽 아래 '제공자 추가'에서 첫 모델 소스를 연결하세요",
         "emptyModelsConnected": "연결됨 — 사용 가능한 모델을 검색하는 중입니다. 계속 비어 있으면 잠시 후 다시 시도해 주세요."
       },
       "detect": {
@@ -1284,32 +1284,32 @@
         "hintInstalled": "이 기기에 {{cli}}이(가) 설치되어 있습니다"
       },
       "wizard": {
-        "title": "공급자 추가",
+        "title": "제공자 추가",
         "titleWith": "추가 · {{name}}",
         "closeAria": "닫기",
-        "stepPick": "공급자 선택",
+        "stepPick": "제공자 선택",
         "stepConnect": "연결",
         "stepModels": "모델 선택",
-        "searchPlaceholder": "공급자 검색…",
+        "searchPlaceholder": "제공자 검색…",
         "groupSubscription": "구독 인증 · 추천",
-        "groupApiKey": "API 키 공급자 · 프리셋은 카탈로그와 함께 업데이트",
+        "groupApiKey": "API 키 제공자 · 프리셋은 카탈로그와 함께 업데이트",
         "groupCustom": "사용자 지정",
         "metaOAuth": "구독 인증",
         "metaApiKey": "API 키",
         "customTitle": "사용자 지정 엔드포인트",
         "customMeta": "OpenAI / Anthropic 호환 모델 소스를 연결",
-        "pickHint": "인증 방식은 공급자 정의에 따라 결정됩니다. OAuth 엔드포인트와 기본 URL은 프리셋에 포함되어 직접 입력할 필요가 없습니다.",
+        "pickHint": "인증 방식은 제공자 정의에 따라 결정됩니다. OAuth 엔드포인트와 기본 URL은 프리셋에 포함되어 직접 입력할 필요가 없습니다.",
         "oauthDesc": "브라우저에서 구독 인증을 완료합니다. API 키가 필요 없습니다",
         "authorizedToast": "{{name}}에 연결되었습니다",
         "authorizeFailed": "{{name}} 인증에 실패했습니다. 다시 시도해 주세요",
         "nameLabel": "표시 이름",
-        "onlyAgentNote": "이 공급자는 {{agent}}만 지원합니다",
+        "onlyAgentNote": "이 제공자는 {{agent}}만 지원합니다",
         "bridgedNote": "Cindy 브리지 (Chat Completions)",
         "docsLink": "연동 문서 보기",
         "fetching": "연결을 확인하고 모델 목록을 가져오는 중…",
         "fetchFailed": "모델 목록을 가져오지 못했습니다. 프리셋 추천 모델로 추가를 완료한 뒤 나중에 상세에서 새로고침할 수 있습니다",
         "recommended": "추천",
-        "modelsHint": "선택한 모델은 대화 모델 선택기에 표시되며 사용 가능한 모든 CLI에 동시에 적용됩니다. 공급자 상세에서 언제든지 조정할 수 있습니다.",
+        "modelsHint": "선택한 모델은 대화 모델 선택기에 표시되며 사용 가능한 모든 CLI에 동시에 적용됩니다. 제공자 상세에서 언제든지 조정할 수 있습니다.",
         "noModelSelected": "모델을 하나 이상 선택해 주세요",
         "createdToast": "{{name}}을(를) 추가했습니다",
         "createFailed": "추가하지 못했습니다. 다시 시도해 주세요",
@@ -1860,7 +1860,7 @@
     "silentEncryptedRetry": {
       "cell": {
         "label": "프로토콜 암호화 콘텐츠를 버리고 재시도",
-        "description": "공급자를 전환할 때(예: 저가 GPT → 공식 GPT) 기록에 있는 이전 공급자의 암호화된 추론을 자동으로 버리고 조용히 다시 보내 세션 중단을 방지합니다. 처음 발생한 후 다음 모델 전환 전까지 유지됩니다. 대가로 버려진 턴은 모델이 다시 추론하여 토큰을 다소 더 사용합니다. 기본값은 켜짐."
+        "description": "제공자를 전환할 때(예: 저가 GPT → 공식 GPT) 기록에 있는 이전 제공자의 암호화된 추론을 자동으로 버리고 조용히 다시 보내 세션 중단을 방지합니다. 처음 발생한 후 다음 모델 전환 전까지 유지됩니다. 대가로 버려진 턴은 모델이 다시 추론하여 토큰을 다소 더 사용합니다. 기본값은 켜짐."
       },
       "toggleAria": "\"프로토콜 암호화 콘텐츠를 버리고 재시도\" 전환",
       "toast": {
@@ -1894,7 +1894,7 @@
         "hook": "Cindy IM 봇"
       },
       "hook": {
-        "description": "Slack과 Telegram을 하나의 Cindy에 연결합니다. 메시지는 이 기기로 전달되며 프로젝트 목록과 세션 실행기를 공유합니다. 계정 연동과 설정은 공급자별로 분리됩니다.",
+        "description": "Slack과 Telegram을 하나의 Cindy에 연결합니다. 메시지는 이 기기로 전달되며 프로젝트 목록과 세션 실행기를 공유합니다. 계정 연동과 설정은 제공자별로 분리됩니다.",
         "slackDescription": "Slack 워크스페이스를 연결하고 Slack에서 Cindy에게 작업을 맡기세요.",
         "slackDisabledHint": "스위치를 켜면 Slack 인증이 시작됩니다. 연결이 완료되면 Slack에서 작업을 맡길 수 있습니다.",
         "slackBoundHint": "연결이 완료되었습니다. 스위치를 끄면 연결이 해제되며 다시 켜려면 재인증이 필요합니다.",
@@ -3551,7 +3551,7 @@
     "horizontalTabbarAria": "메인 뷰 전환",
     "tabs": {
       "projects": "프로젝트",
-      "skillhub": "스킬 허브",
+      "skillhub": "SkillHub",
       "plugins": "플러그인",
       "issues": "이슈"
     },
@@ -3989,8 +3989,8 @@
   },
   "onboarding": {
     "connectProvider": {
-      "title": "모델 제공업체를 연결하고 시작하세요",
-      "desc": "아직 사용 가능한 모델이 없습니다. 제공업체를 연결하면 대화를 시작할 수 있습니다.",
+      "title": "모델 제공자를 연결하고 시작하세요",
+      "desc": "아직 사용 가능한 모델이 없습니다. 제공자를 연결하면 대화를 시작할 수 있습니다.",
       "recommendedLabel": "추천",
       "cindy": {
         "title": "Cindy AI",
@@ -3998,13 +3998,13 @@
         "loginTitle": "Cindy 로그인",
         "loginDesc": "로그인하면 공식 Cindy AI 서비스가 활성화되어 모든 모델을 사용할 수 있습니다"
       },
-      "othersToggle": "기타 제공업체 ({{count}})",
+      "othersToggle": "기타 제공자 ({{count}})",
       "presetSub": "API 키를 입력하여 연결",
       "dismiss": "나중에",
       "haveApiKey": "API 키가 있어요",
       "banner": {
-        "text": "사용 가능한 모델이 없습니다. 제공업체를 연결하면 대화할 수 있습니다.",
-        "connectCta": "제공업체 연결",
+        "text": "사용 가능한 모델이 없습니다. 제공자를 연결하면 대화할 수 있습니다.",
+        "connectCta": "제공자 연결",
         "loginCta": "Cindy 로그인",
         "dismissAria": "닫기"
       },
@@ -4171,7 +4171,7 @@
       "syncAuthSuccess": "동기화되었습니다 — 「다시 시도」를 클릭하여 다시 보내세요",
       "syncAuthFailed": "동기화 실패: {{msg}}",
       "syncAuthDaemonRestartFailed": "자격 증명이 원격에 푸시되었지만 이전 daemon이 재시작되지 않았습니다 — 원격에 다시 연결한 후 재시도하세요",
-      "invalidEncryptedContent": "공급자 변경으로 이전 암호화를 사용할 수 없습니다. 이 세션은 원래 공급자에서만 계속할 수 있으며, 또는 Fork를 클릭하여 프로토콜 암호화 콘텐츠를 버리고 새 세션에서 계속할 수 있습니다.",
+      "invalidEncryptedContent": "제공자 변경으로 이전 암호화를 사용할 수 없습니다. 이 세션은 원래 제공자에서만 계속할 수 있으며, 또는 Fork를 클릭하여 프로토콜 암호화 콘텐츠를 버리고 새 세션에서 계속할 수 있습니다.",
       "forkStripEncrypted": "Fork 및 분리",
       "forkStripEncryptedRunning": "Fork 중…",
       "forkStripEncryptedTitle": "암호화 추론을 제거한 새 세션으로 Fork",
@@ -5323,14 +5323,14 @@
   },
   "scheduler": {
     "page": {
-      "title": "오토메이션",
+      "title": "자동화",
       "totalCount": "총 {{count}}개",
       "totalCountWithDir": "{{dir}} · 총 {{count}}개",
       "loadFailed": "로드 실패: {{error}}"
     },
     "empty": {
-      "promptHeading": "오토메이션이 아직 없습니다",
-      "promptDescription": "cron 오토메이션을 만들어 Claude Code 또는 Codex로 프롬프트를 일정에 따라 실행하세요."
+      "promptHeading": "자동화이 아직 없습니다",
+      "promptDescription": "cron 자동화을 만들어 Claude Code 또는 Codex로 프롬프트를 일정에 따라 실행하세요."
     },
     "template": {
       "useTemplate": "초보자 도움말",
@@ -5352,8 +5352,8 @@
     "projectAutomation": {
       "toast": {
         "summary": "추가 {{inserted}} · 업데이트 {{updated}} · 삭제 {{deleted}}",
-        "installed": "{{projectName}} 프로젝트 오토메이션이 설치되었습니다 ({{summary}})",
-        "updated": "{{projectName}} 프로젝트 오토메이션이 업데이트되었습니다 ({{summary}})"
+        "installed": "{{projectName}} 프로젝트 자동화이 설치되었습니다 ({{summary}})",
+        "updated": "{{projectName}} 프로젝트 자동화이 업데이트되었습니다 ({{summary}})"
       },
       "cell": {
         "tag": "프로젝트",
@@ -5361,7 +5361,7 @@
       }
     },
     "button": {
-      "newAutomation": "새 오토메이션",
+      "newAutomation": "새 자동화",
       "runNow": "지금 실행",
       "close": "닫기",
       "edit": "편집",
@@ -5379,18 +5379,18 @@
       },
       "section": {
         "otherGroup": "기타",
-        "createProject": "이 프로젝트에 새 오토메이션",
-        "createProjectAria": "이 프로젝트에 새 오토메이션 만들기 (작업 디렉터리 자동 입력)",
+        "createProject": "이 프로젝트에 새 자동화",
+        "createProjectAria": "이 프로젝트에 새 자동화 만들기 (작업 디렉터리 자동 입력)",
         "openConfig": "설정 파일 열기",
-        "openConfigAria": "프로젝트 오토메이션 설정 열기",
+        "openConfigAria": "프로젝트 자동화 설정 열기",
         "openConfigFailed": "파일 열기 실패",
         "reload": "다시 로드",
-        "reloadAria": "프로젝트 오토메이션 다시 로드"
+        "reloadAria": "프로젝트 자동화 다시 로드"
       },
       "promote": {
-        "menu": "프로젝트 오토메이션으로 승격",
+        "menu": "프로젝트 자동화으로 승격",
         "noWorkingDir": "작업 디렉터리가 없는 일정은 승격할 수 없습니다",
-        "success": "프로젝트 오토메이션으로 승격되었습니다"
+        "success": "프로젝트 자동화으로 승격되었습니다"
       },
       "editProject": {
         "menu": "설정 편집"
@@ -5402,7 +5402,7 @@
       },
       "removeProject": {
         "menu": "프로젝트에서 제거",
-        "confirmTitle": "프로젝트 오토메이션에서 제거할까요?",
+        "confirmTitle": "프로젝트 자동화에서 제거할까요?",
         "confirmDescription": ".cindy/automations/schedules.json에서 \"{{name}}\"을 제거합니다. commit 후 모든 협업자에게 영향을 줍니다.",
         "confirm": "제거",
         "demote": "제거하고 개인 복사본 유지",
@@ -5424,7 +5424,7 @@
         "rename": "이름 변경",
         "resume": "재개",
         "pause": "일시 중지",
-        "deleteAutomation": "오토메이션 삭제"
+        "deleteAutomation": "자동화 삭제"
       }
     },
     "detail": {
@@ -5436,7 +5436,7 @@
       "menu": {
         "resume": "재개",
         "pause": "일시 중지",
-        "deleteAutomation": "오토메이션 삭제"
+        "deleteAutomation": "자동화 삭제"
       },
       "openWorkdirFailed": "폴더를 열지 못했습니다"
     },
@@ -5496,16 +5496,16 @@
     },
     "editor": {
       "promptDialog": {
-        "titleEdit": "오토메이션 편집",
-        "titleCreate": "오토메이션 만들기",
-        "titleProjectCreate": "새 프로젝트 오토메이션",
-        "titleProjectEdit": "프로젝트 오토메이션 편집",
+        "titleEdit": "자동화 편집",
+        "titleCreate": "자동화 만들기",
+        "titleProjectCreate": "새 프로젝트 자동화",
+        "titleProjectEdit": "프로젝트 자동화 편집",
         "subtitle": "Claude 또는 Codex로 프롬프트를 일정에 따라 실행합니다.",
         "save": "저장",
         "create": "만들기",
-        "saveAria": "오토메이션 저장",
-        "createAria": "오토메이션 만들기",
-        "namePlaceholder": "이 오토메이션의 이름을 지정하세요",
+        "saveAria": "자동화 저장",
+        "createAria": "자동화 만들기",
+        "namePlaceholder": "이 자동화의 이름을 지정하세요",
         "promptPlaceholder": "예: Sentry에서 새로운 크래시를 찾아 주요 회귀를 요약합니다."
       },
       "executionMode": {
@@ -5604,15 +5604,15 @@
         "aiDone": "스크립트를 {{path}}에 저장했습니다. '테스트'로 확인하는 것을 권장합니다",
         "aiFailure": {
           "no_candidate": "현재 사용할 수 있는 경량 모델이 없습니다. OpenAI 또는 Cindy AI를 연결한 뒤 다시 시도하세요.",
-          "all_candidates_failed": "모든 경량 모델 요청이 실패했습니다. 공급자 연결을 확인한 뒤 다시 시도하세요.",
-          "empty_response": "경량 모델이 사용할 수 있는 내용을 반환하지 않았습니다. 다시 시도하거나 공급자 연결을 확인하세요.",
+          "all_candidates_failed": "모든 경량 모델 요청이 실패했습니다. 제공자 연결을 확인한 뒤 다시 시도하세요.",
+          "empty_response": "경량 모델이 사용할 수 있는 내용을 반환하지 않았습니다. 다시 시도하거나 제공자 연결을 확인하세요.",
           "timeout": "경량 모델 요청 시간이 초과되었습니다. 연결을 확인한 뒤 다시 시도하세요.",
           "checkedCandidates": "확인한 후보:",
-          "openProviders": "모델 공급자 열기",
+          "openProviders": "모델 제공자 열기",
           "attemptReason": {
             "unsupportedTransport": "이 작업에서 지원되지 않음",
             "agentUnavailable": "Codex를 사용할 수 없음",
-            "modelUnavailable": "선택한 공급자에서 모델을 사용할 수 없음",
+            "modelUnavailable": "선택한 제공자에서 모델을 사용할 수 없음",
             "notAuthenticated": "OpenAI 로그인 필요",
             "authProbeFailed": "OpenAI 로그인 상태를 확인할 수 없음",
             "apiKeyMissing": "Cindy AI Key를 사용할 수 없음",
@@ -5721,9 +5721,9 @@
       "restartFailed": "재시작 실패: {{error}}"
     },
     "deleteDialog": {
-      "title": "오토메이션 \"{{name}}\"을(를) 삭제하시겠습니까?",
-      "titleFallback": "오토메이션을 삭제하시겠습니까?",
-      "description": "향후 트리거가 중지됩니다. 이 오토메이션이 이미 생성한 대화를 어떻게 처리할지 선택하세요.",
+      "title": "자동화 \"{{name}}\"을(를) 삭제하시겠습니까?",
+      "titleFallback": "자동화을 삭제하시겠습니까?",
+      "description": "향후 트리거가 중지됩니다. 이 자동화이 이미 생성한 대화를 어떻게 처리할지 선택하세요.",
       "sessionCountPending": "생성된 대화를 확인하는 중…",
       "sessionCount": "생성된 대화 {{count}}개",
       "inflightCount": "현재 {{count}}건의 실행이 진행 중이며 삭제하면 중지됩니다",
@@ -5731,33 +5731,33 @@
       "option": {
         "keep": {
           "title": "대화 유지",
-          "description": "오토메이션 작업만 삭제하고 대화는 사이드바에 유지합니다."
+          "description": "자동화 작업만 삭제하고 대화는 사이드바에 유지합니다."
         },
         "archive": {
           "title": "대화 보관",
-          "description": "오토메이션 작업을 삭제하고 생성된 대화를 보관함으로 이동합니다."
+          "description": "자동화 작업을 삭제하고 생성된 대화를 보관함으로 이동합니다."
         },
         "delete": {
           "title": "대화 삭제",
-          "description": "오토메이션 작업과 생성된 대화를 삭제합니다. 이 작업은 되돌릴 수 없습니다."
+          "description": "자동화 작업과 생성된 대화를 삭제합니다. 이 작업은 되돌릴 수 없습니다."
         }
       },
-      "confirm": "오토메이션 삭제",
-      "confirmDeleteSessions": "오토메이션과 대화 삭제",
-      "sessionUpdatePartial": "오토메이션은 삭제되었지만 {{fail}}개 대화를 처리하지 못했습니다"
+      "confirm": "자동화 삭제",
+      "confirmDeleteSessions": "자동화과 대화 삭제",
+      "sessionUpdatePartial": "자동화은 삭제되었지만 {{fail}}개 대화를 처리하지 못했습니다"
     },
     "confirm": {
       "delete": {
-        "title": "오토메이션 \"{{name}}\"을(를) 삭제하시겠습니까?",
+        "title": "자동화 \"{{name}}\"을(를) 삭제하시겠습니까?",
         "description": "향후 트리거가 중지되며 기존 실행 기록은 유지됩니다. 이 작업은 되돌릴 수 없습니다.",
-        "withInflight": "이 오토메이션에는 현재 {{count}}건의 실행이 진행 중입니다. 삭제하면 즉시 중지되며 진행 중인 작업이 손실될 수 있습니다. 계속하시겠습니까?",
+        "withInflight": "이 자동화에는 현재 {{count}}건의 실행이 진행 중입니다. 삭제하면 즉시 중지되며 진행 중인 작업이 손실될 수 있습니다. 계속하시겠습니까?",
         "confirm": "삭제",
         "confirmWithInflight": "중지하고 삭제",
         "cancel": "취소"
       },
       "pause": {
-        "title": "오토메이션 \"{{name}}\"을(를) 일시중지하시겠습니까?",
-        "withInflight": "이 오토메이션에는 현재 {{count}}건의 실행이 진행 중입니다. 일시중지하면 즉시 중지되며 진행 중인 작업이 손실될 수 있습니다. 계속하시겠습니까?",
+        "title": "자동화 \"{{name}}\"을(를) 일시중지하시겠습니까?",
+        "withInflight": "이 자동화에는 현재 {{count}}건의 실행이 진행 중입니다. 일시중지하면 즉시 중지되며 진행 중인 작업이 손실될 수 있습니다. 계속하시겠습니까?",
         "confirm": "일시중지",
         "cancel": "취소"
       },
@@ -6117,7 +6117,7 @@
       "badgeAvailableAria": "{{count}} 개 사용 가능",
       "localSkills": "로컬 스킬",
       "scopeGlobal": "전역",
-      "marketSelectPrompt": "오른쪽에서 기술을 선택하세요",
+      "marketSelectPrompt": "오른쪽에서 스킬을 선택하세요",
       "marketNotInstalled": "<strong>{{name}}</strong> 이(가) 로컬에 설치되어 있지 않습니다",
       "marketInstalledHeading": "설치된 위치",
       "marketUpdatable": "업데이트 가능",
@@ -6131,9 +6131,9 @@
       "frontmatterTitle": "Frontmatter",
       "filesTitle": "파일",
       "filesEmpty": "（비어 있음）",
-      "usageTitle": "사용 현황",
+      "usageTitle": "사용량",
       "usageLoading": "집계 중…",
-      "usageFailed": "사용 현황 집계 실패: {{message}}",
+      "usageFailed": "사용량 집계 실패: {{message}}",
       "usageEmpty": "최근 30일 동안 이 기기의 사용 기록이 없습니다",
       "usageDiagnose": "이 Skill 진단",
       "usageDiagnosisStarting": "진단 세션 생성 중…",
@@ -6189,7 +6189,7 @@
       "backToSkillhub": "SkillHub 로 돌아가기",
       "openDirAria": "디렉토리 열기",
       "showInFolderAria": "파일 매니저에서 보기",
-      "resizeUsageFilesColumn": "사용 현황 및 파일 목록 너비 조정",
+      "resizeUsageFilesColumn": "사용량 및 파일 목록 너비 조정",
       "loadingContent": "콘텐츠 읽는 중…",
       "readFailed": "콘텐츠를 읽을 수 없습니다",
       "readFailedAfterSave": "저장은 성공했지만 다시 읽기에 실패했습니다",
@@ -6268,7 +6268,7 @@
       "categoryLabel": "분류: {{name}}",
       "loadFailed": "로드 실패: {{error}}",
       "loading": "로딩 중…",
-      "noResults": "일치하는 기술이 없습니다",
+      "noResults": "일치하는 스킬이 없습니다",
       "installFailedToast": "{{name}} 설치 실패: {{message}}",
       "installError": "알 수 없는 오류"
     },
@@ -6355,7 +6355,7 @@
       "renameFailed": "로컬 이름 변경 실패: {{error}}",
       "skillNameLabel": "SkillName",
       "skillNamePlaceholder": "my-skill",
-      "skillNameRequired": "기술 이름은 필수입니다",
+      "skillNameRequired": "스킬 이름은 필수입니다",
       "skillNameFormat": "형식: [a-z0-9-]+",
       "displayNameLabel": "표시 이름",
       "displayNamePlaceholder": "My Skill",
@@ -6749,7 +6749,7 @@
       "customRolePredefinedError": "사용자 지정 역할에는 기본 역할 이름을 사용할 수 없습니다",
       "agentLabel": "Agent",
       "modelLabel": "모델",
-      "noAvailableModels": "사용 가능한 {{agent}} 모델이 없습니다. 설정에서 공급자 연결과 자격 증명을 확인하세요.",
+      "noAvailableModels": "사용 가능한 {{agent}} 모델이 없습니다. 설정에서 제공자 연결과 자격 증명을 확인하세요.",
       "effortLabel": "추론 강도",
       "initialTaskLabel": "초기 작업",
       "optional": "(선택)",
@@ -7195,7 +7195,7 @@
       "confirmingTitle": "변경 제출 중",
       "confirmingBody": "플랜 변경을 서버에 제출하는 중…",
       "pendingProviderTitle": "요금제 변경 처리 중",
-      "pendingProviderBody": "결제 제공업체에서 변경을 처리하고 있습니다. Cindy가 결과를 계속 확인합니다…",
+      "pendingProviderBody": "결제 제공자에서 변경을 처리하고 있습니다. Cindy가 결과를 계속 확인합니다…",
       "awaitingTitle": "차액 결제",
       "scheduledTitle": "다운그레이드 예약됨",
       "scheduledBody": "새 플랜은 {{date}}에 적용됩니다. 그때까지 현재 플랜이 유지됩니다.",

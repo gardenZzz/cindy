@@ -1,7 +1,7 @@
 {
   "ipcError": {
     "SESSION_RUNNING": "このセッションは現在タスクを実行中です。しばらくしてからもう一度お試しください。",
-    "CREDENTIAL_SWITCH_BUSY": "他の Codex タスクが実行中のため、今回の提供元切り替えは適用されませんでした（セッションは元の提供元のままです）。他のタスクが終わってからもう一度お試しください。",
+    "CREDENTIAL_SWITCH_BUSY": "他の Codex タスクが実行中のため、今回のプロバイダー切り替えは適用されませんでした（セッションは元のプロバイダーのままです）。他のタスクが終わってからもう一度お試しください。",
     "REMOTE_WORKDIR_INVALID": "リモートプロジェクトのパスが無効です。プロジェクトディレクトリを選び直してください。",
     "REMOTE_WORKDIR_NOT_FOUND": "リモートプロジェクトのディレクトリが見つかりません。選び直してください。",
     "REMOTE_WORKDIR_NOT_DIRECTORY": "リモートプロジェクトのパスはディレクトリではありません。プロジェクトディレクトリを選び直してください。",
@@ -82,7 +82,7 @@
     },
     "tabs": {
       "general": "一般",
-      "billing": "使用状況と請求",
+      "billing": "使用量と請求",
       "personalization": "パーソナライズ",
       "apiKeys": "ツールキー",
       "voiceInput": "音声入力",
@@ -104,7 +104,7 @@
     },
     "sections": {
       "user": "ユーザー",
-      "billing": "使用状況と請求",
+      "billing": "使用量と請求",
       "appearance": "外観",
       "notifications": "通知",
       "agentIsland": "Agent Island",
@@ -706,7 +706,7 @@
         "basics": "基本",
         "refinement": "整え方",
         "preferences": "設定",
-        "usageData": "利用状況"
+        "usageData": "使用量"
       },
       "serviceSource": {
         "label": "音声サービス",
@@ -1172,9 +1172,9 @@
         },
         "protocol": {
           "claude": "Claude Code",
-          "claudeDesc": "Claude Code は Anthropic プロトコルに従います（x-api-key で認証）。この提供元の Claude Code 用 baseURL・キー・モデルを入力します。空欄にするとこの提供元は Claude Code を提供しません。",
+          "claudeDesc": "Claude Code は Anthropic プロトコルに従います（x-api-key で認証）。このプロバイダーの Claude Code 用 baseURL・キー・モデルを入力します。空欄にするとこのプロバイダーは Claude Code を提供しません。",
           "codex": "Codex",
-          "codexDesc": "Codex は OpenAI Responses プロトコルを使用します。Responses ネイティブの上流、または Chat Completions のみを提供するプロバイダーを Cindy でブリッジする方式を選べます。この提供元の Codex 用ベース URL・キー・モデルを入力します。空欄にすると Codex では利用しません。"
+          "codexDesc": "Codex は OpenAI Responses プロトコルを使用します。Responses ネイティブの上流、または Chat Completions のみを提供するプロバイダーを Cindy でブリッジする方式を選べます。このプロバイダーの Codex 用ベース URL・キー・モデルを入力します。空欄にすると Codex では利用しません。"
         },
         "errors": {
           "nameRequired": "表示名を入力してください",
@@ -2224,13 +2224,13 @@
         "addPlugin": "プラグインを追加",
         "addPluginAria": "プラグイン追加オプション",
         "createWithCindy": "Cindy で作成",
-        "createPrompt": "Cindy プラグインを作成したいです。まず ghost_forge_guide を呼び出して完全な仕様を読み、すぐに実装を始めないでください。質問から始め、毎回一つの重要な判断に集中しながら、解決する課題、対象ユーザー、操作フロー、必要なツールと接続、権限の境界、受け入れ条件を段階的に確認してください。設計を確認した後、仕様に沿って実装と検証を行い、最後に ghost_forge_pack を呼び出してプラグインをパッケージ化し、インストールしてください。",
+        "createPrompt": "Cindy プラグインを作成したいです。まず ghost_forge_guide を呼び出して完全な仕様を読み、すぐに実装を始めないでください。質問から始め、毎回一つの重要な判断に集中しながら、解決するIssue、対象ユーザー、操作フロー、必要なツールと接続、権限の境界、受け入れ条件を段階的に確認してください。設計を確認した後、仕様に沿って実装と検証を行い、最後に ghost_forge_pack を呼び出してプラグインをパッケージ化し、インストールしてください。",
         "installedTitle": "インストール済みプラグイン",
         "installedExpand": "インストール済みプラグインをさらに {{count}} 件表示",
         "installedCollapse": "追加のインストール済みプラグインを隠す",
         "allTitle": "すべてのプラグイン",
         "filterAll": "すべて",
-        "filtersAria": "提供元でプラグインを絞り込む",
+        "filtersAria": "プロバイダーでプラグインを絞り込む",
         "origin": {
           "public": "公開",
           "organization": "チーム共有",
@@ -2241,7 +2241,7 @@
         "useAria": "{{name}} を使用"
       },
       "market": {
-        "scopeAria": "プラグインの提供元を絞り込む",
+        "scopeAria": "プラグインのプロバイダーを絞り込む",
         "scope": {
           "all": "すべて",
           "public": "公開",
@@ -2678,7 +2678,7 @@
         "sourceVcf": "vCard ファイル",
         "sourceVcfDesc": ".vcf(連絡先エクスポートの標準形式)",
         "emptySource": "このソースにインポート可能な連絡先がありません",
-        "permissionDenied": "連絡先へのアクセスが拒否されました — システム設定 → プライバシーとセキュリティ → オートメーション で許可してください",
+        "permissionDenied": "連絡先へのアクセスが拒否されました — システム設定 → プライバシーとセキュリティ → 自動化 で許可してください",
         "systemReadFailed": "システム連絡先の読み取りに失敗しました",
         "vcfParseFailed": "vCard ファイルの解析に失敗しました",
         "selectedCount": "{{checked}} / {{total}} 件選択中",
@@ -2694,7 +2694,7 @@
       },
       "ipcError": {
         "IDENTITY_CONFLICT": "このIDは既に別の連絡先に登録されています。既存のプロフィールを更新するか、先に統合してください。",
-        "PERMISSION_DENIED": "連絡先へのアクセスが許可されていません。システム設定 > プライバシーとセキュリティ > オートメーション で許可してください。",
+        "PERMISSION_DENIED": "連絡先へのアクセスが許可されていません。システム設定 > プライバシーとセキュリティ > 自動化 で許可してください。",
         "UNSUPPORTED_CAPABILITY": "この操作は現在のプラットフォームではサポートされていません。",
         "NOT_FOUND": "対象が存在しないか、既に削除されています。",
         "ALREADY_EXISTS": "同名または同内容の項目が既に存在します。",
@@ -2953,7 +2953,7 @@
     "xai": {
       "requestsLine": "レート制限（リクエスト）: 残り {{remaining}}/{{limit}}",
       "tokensLine": "レート制限（トークン）: 残り {{remaining}}/{{limit}}",
-      "noQuotaDetail": "xAI はサブスクリプション残量の詳細を提供していないため、価値の推定のみ表示します"
+      "noQuotaDetail": "xAI はサブスクリプションクォータの詳細を提供していないため、価値の推定のみ表示します"
     },
     "dailyLimitLabel": "本日 {{spend}}/{{limit}}",
     "monthlyLimitLabel": "周期 {{spend}}/{{limit}}",
@@ -3551,7 +3551,7 @@
     "horizontalTabbarAria": "メインビュー切り替え",
     "tabs": {
       "projects": "プロジェクト",
-      "skillhub": "スキルハブ",
+      "skillhub": "SkillHub",
       "plugins": "プラグイン",
       "issues": "問題"
     },
@@ -3707,7 +3707,7 @@
       "trigger": {
         "placeholder": "モデルを選択",
         "aria": "モデルを選択。現在：{{model}}",
-        "ariaWithEffort": "モデルを選択。現在：{{model}}、推論レベル：{{effort}}"
+        "ariaWithEffort": "モデルを選択。現在：{{model}}、推論強度：{{effort}}"
       },
       "category": {
         "anthropic": "Anthropic",
@@ -3930,8 +3930,8 @@
       "attachmentRejection": {
         "dismiss": "閉じる"
       },
-      "credentialSwitchDeferred": "モデル提供元を切り替えました。現在のタスク終了後に有効になります。",
-      "credentialSwitchApplied": "モデル提供元の切り替えが有効になりました。",
+      "credentialSwitchDeferred": "モデルプロバイダーを切り替えました。現在のタスク終了後に有効になります。",
+      "credentialSwitchApplied": "モデルプロバイダーの切り替えが有効になりました。",
       "modelSwitchContextGuard": {
         "title": "切替先モデルのコンテキストウィンドウが小さいです",
         "warnToast": "このセッションは {{used}} のコンテキストを使用中です。切替後は切替先モデルのウィンドウ（{{total}}）の約 {{pct}}% を占めます",
@@ -4054,7 +4054,7 @@
     "closeWithShortcut": "閉じて破棄（{{shortcut}}）",
     "codexRequired": "音声入力を使用するには、先に {{appName}} で Codex に接続してください。",
     "apiKeyRequired": "音声入力を使用するには、先に API Key を設定してください。",
-    "cindyServiceUnavailable": "Cindy 音声サービスを利用できません。ネットワークを確認するか、サービス提供元を切り替えてください。",
+    "cindyServiceUnavailable": "Cindy 音声サービスを利用できません。ネットワークを確認するか、サービスプロバイダーを切り替えてください。",
     "asrServiceUnavailable": "音声認識サービスに接続できません。ネットワークを確認してから再試行してください。",
     "emptyTranscript": "音声は検出されましたが、テキストを認識できませんでした。もう一度お試しください。"
   },
@@ -4659,8 +4659,8 @@
       }
     },
     "credentialSwitchWait": {
-      "waiting": "他の Codex タスクが別のモデル提供元で実行中です。終了後、このセッションで選択した提供元でこのメッセージを自動送信します。",
-      "waitingForNamed": "「{{titles}}」が別のモデル提供元で実行中です。終了後、このセッションで選択した提供元でこのメッセージを自動送信します。",
+      "waiting": "他の Codex タスクが別のモデルプロバイダーで実行中です。終了後、このセッションで選択したプロバイダーでこのメッセージを自動送信します。",
+      "waitingForNamed": "「{{titles}}」が別のモデルプロバイダーで実行中です。終了後、このセッションで選択したプロバイダーでこのメッセージを自動送信します。",
       "cancel": "キャンセル",
       "cancelTitle": "待機をやめてこのメッセージを削除"
     },
@@ -5323,14 +5323,14 @@
   },
   "scheduler": {
     "page": {
-      "title": "オートメーション",
+      "title": "自動化",
       "totalCount": "合計 {{count}} 件",
       "totalCountWithDir": "{{dir}} · 合計 {{count}} 件",
       "loadFailed": "読み込みに失敗しました: {{error}}"
     },
     "empty": {
-      "promptHeading": "オートメーションがまだありません",
-      "promptDescription": "cron オートメーションを作成して、Claude Code または Codex にプロンプトをスケジュール実行させましょう。"
+      "promptHeading": "自動化がまだありません",
+      "promptDescription": "cron 自動化を作成して、Claude Code または Codex にプロンプトをスケジュール実行させましょう。"
     },
     "template": {
       "useTemplate": "初心者ヘルプ",
@@ -5352,8 +5352,8 @@
     "projectAutomation": {
       "toast": {
         "summary": "追加 {{inserted}} · 更新 {{updated}} · 削除 {{deleted}}",
-        "installed": "{{projectName}} のプロジェクトオートメーションをインストールしました（{{summary}}）",
-        "updated": "{{projectName}} のプロジェクトオートメーションを更新しました（{{summary}}）"
+        "installed": "{{projectName}} のプロジェクト自動化をインストールしました（{{summary}}）",
+        "updated": "{{projectName}} のプロジェクト自動化を更新しました（{{summary}}）"
       },
       "cell": {
         "tag": "プロジェクト",
@@ -5361,7 +5361,7 @@
       }
     },
     "button": {
-      "newAutomation": "新しいオートメーション",
+      "newAutomation": "新しい自動化",
       "runNow": "今すぐ実行",
       "close": "閉じる",
       "edit": "編集",
@@ -5379,18 +5379,18 @@
       },
       "section": {
         "otherGroup": "その他",
-        "createProject": "このプロジェクトに新しいオートメーション",
-        "createProjectAria": "このプロジェクトに新しいオートメーションを作成（作業ディレクトリ自動入力）",
+        "createProject": "このプロジェクトに新しい自動化",
+        "createProjectAria": "このプロジェクトに新しい自動化を作成（作業ディレクトリ自動入力）",
         "openConfig": "設定ファイルを開く",
-        "openConfigAria": "プロジェクトオートメーション設定を開く",
+        "openConfigAria": "プロジェクト自動化設定を開く",
         "openConfigFailed": "ファイルを開けませんでした",
         "reload": "再読み込み",
-        "reloadAria": "プロジェクトオートメーションを再読み込み"
+        "reloadAria": "プロジェクト自動化を再読み込み"
       },
       "promote": {
-        "menu": "プロジェクトオートメーションに昇格",
+        "menu": "プロジェクト自動化に昇格",
         "noWorkingDir": "作業ディレクトリのないスケジュールは昇格できません",
-        "success": "プロジェクトオートメーションに昇格しました"
+        "success": "プロジェクト自動化に昇格しました"
       },
       "editProject": {
         "menu": "設定を編集"
@@ -5402,7 +5402,7 @@
       },
       "removeProject": {
         "menu": "プロジェクトから削除",
-        "confirmTitle": "プロジェクトオートメーションから削除しますか？",
+        "confirmTitle": "プロジェクト自動化から削除しますか？",
         "confirmDescription": ".cindy/automations/schedules.json から \"{{name}}\" を削除します。commit 後はすべての共同作業者に影響します。",
         "confirm": "削除",
         "demote": "削除して個人用コピーを保持",
@@ -5424,7 +5424,7 @@
         "rename": "名前を変更",
         "resume": "再開",
         "pause": "一時停止",
-        "deleteAutomation": "オートメーションを削除"
+        "deleteAutomation": "自動化を削除"
       }
     },
     "detail": {
@@ -5436,7 +5436,7 @@
       "menu": {
         "resume": "再開",
         "pause": "一時停止",
-        "deleteAutomation": "オートメーションを削除"
+        "deleteAutomation": "自動化を削除"
       },
       "openWorkdirFailed": "フォルダを開けませんでした"
     },
@@ -5496,16 +5496,16 @@
     },
     "editor": {
       "promptDialog": {
-        "titleEdit": "オートメーションを編集",
-        "titleCreate": "オートメーションを作成",
-        "titleProjectCreate": "新しいプロジェクトオートメーション",
-        "titleProjectEdit": "プロジェクトオートメーションを編集",
+        "titleEdit": "自動化を編集",
+        "titleCreate": "自動化を作成",
+        "titleProjectCreate": "新しいプロジェクト自動化",
+        "titleProjectEdit": "プロジェクト自動化を編集",
         "subtitle": "Claude または Codex でプロンプトをスケジュール実行します。",
         "save": "保存",
         "create": "作成",
-        "saveAria": "オートメーションを保存",
-        "createAria": "オートメーションを作成",
-        "namePlaceholder": "このオートメーションに名前を付ける",
+        "saveAria": "自動化を保存",
+        "createAria": "自動化を作成",
+        "namePlaceholder": "この自動化に名前を付ける",
         "promptPlaceholder": "例: Sentry で新しいクラッシュを見つけ、主要なリグレッションを要約する。"
       },
       "executionMode": {
@@ -5533,8 +5533,8 @@
         "capabilitiesSearch": "機能を検索",
         "capabilitiesEmpty": "一致する機能がありません",
         "capabilityDescs": {
-          "jira_read": "Jira 課題の照会・読み取り（キー指定 / JQL 検索）",
-          "jira_comment": "Jira 課題へのコメント追加",
+          "jira_read": "Jira Issueの照会・読み取り（キー指定 / JQL 検索）",
+          "jira_comment": "Jira Issueへのコメント追加",
           "sessions_dispatch": "{{appName}} セッションの作成・再開とメッセージ送信",
           "feishu_read": "最近アクティブなチャットの一覧取得;指定チャット(グループ/DM)の最新メッセージ取得"
         },
@@ -5721,9 +5721,9 @@
       "restartFailed": "再開に失敗しました: {{error}}"
     },
     "deleteDialog": {
-      "title": "オートメーション「{{name}}」を削除しますか？",
-      "titleFallback": "オートメーションを削除しますか？",
-      "description": "今後のトリガーは停止されます。このオートメーションがすでに生成した会話の扱いを選択してください。",
+      "title": "自動化「{{name}}」を削除しますか？",
+      "titleFallback": "自動化を削除しますか？",
+      "description": "今後のトリガーは停止されます。この自動化がすでに生成した会話の扱いを選択してください。",
       "sessionCountPending": "生成済みの会話を確認しています…",
       "sessionCount": "生成済みの会話 {{count}} 件",
       "inflightCount": "現在 {{count}} 件の実行中タスクがあり、削除すると停止されます",
@@ -5731,33 +5731,33 @@
       "option": {
         "keep": {
           "title": "会話を保持",
-          "description": "オートメーションタスクのみ削除し、会話はサイドバーに残します。"
+          "description": "自動化タスクのみ削除し、会話はサイドバーに残します。"
         },
         "archive": {
           "title": "会話をアーカイブ",
-          "description": "オートメーションタスクを削除し、生成された会話をアーカイブへ移動します。"
+          "description": "自動化タスクを削除し、生成された会話をアーカイブへ移動します。"
         },
         "delete": {
           "title": "会話を削除",
-          "description": "オートメーションタスクと生成された会話を削除します。この操作は元に戻せません。"
+          "description": "自動化タスクと生成された会話を削除します。この操作は元に戻せません。"
         }
       },
-      "confirm": "オートメーションを削除",
-      "confirmDeleteSessions": "オートメーションと会話を削除",
-      "sessionUpdatePartial": "オートメーションは削除されましたが、{{fail}} 件の会話を処理できませんでした"
+      "confirm": "自動化を削除",
+      "confirmDeleteSessions": "自動化と会話を削除",
+      "sessionUpdatePartial": "自動化は削除されましたが、{{fail}} 件の会話を処理できませんでした"
     },
     "confirm": {
       "delete": {
-        "title": "オートメーション「{{name}}」を削除しますか？",
+        "title": "自動化「{{name}}」を削除しますか？",
         "description": "今後のトリガーは停止されますが、既存の実行履歴は保持されます。この操作は元に戻せません。",
-        "withInflight": "このオートメーションは現在 {{count}} 件の実行が進行中です。削除すると直ちに停止され、進行中の作業が中断される可能性があります。続行しますか？",
+        "withInflight": "この自動化は現在 {{count}} 件の実行が進行中です。削除すると直ちに停止され、進行中の作業が中断される可能性があります。続行しますか？",
         "confirm": "削除",
         "confirmWithInflight": "停止して削除",
         "cancel": "キャンセル"
       },
       "pause": {
-        "title": "オートメーション「{{name}}」を一時停止しますか？",
-        "withInflight": "このオートメーションは現在 {{count}} 件の実行が進行中です。一時停止すると直ちに停止され、進行中の作業が中断される可能性があります。続行しますか？",
+        "title": "自動化「{{name}}」を一時停止しますか？",
+        "withInflight": "この自動化は現在 {{count}} 件の実行が進行中です。一時停止すると直ちに停止され、進行中の作業が中断される可能性があります。続行しますか？",
         "confirm": "一時停止",
         "cancel": "キャンセル"
       },
@@ -6117,7 +6117,7 @@
       "badgeAvailableAria": "{{count}} 件利用可能",
       "localSkills": "ローカルスキル",
       "scopeGlobal": "グローバル",
-      "marketSelectPrompt": "右側で技能を選択してください",
+      "marketSelectPrompt": "右側でスキルを選択してください",
       "marketNotInstalled": "<strong>{{name}}</strong> はローカルに未インストール",
       "marketInstalledHeading": "インストール済み場所",
       "marketUpdatable": "更新可能",
@@ -6131,9 +6131,9 @@
       "frontmatterTitle": "Frontmatter",
       "filesTitle": "ファイル",
       "filesEmpty": "（空）",
-      "usageTitle": "使用状況",
+      "usageTitle": "使用量",
       "usageLoading": "集計中…",
-      "usageFailed": "使用状況の集計に失敗しました：{{message}}",
+      "usageFailed": "使用量の集計に失敗しました：{{message}}",
       "usageEmpty": "直近 30 日間のこの端末での使用記録はありません",
       "usageDiagnose": "この Skill を診断",
       "usageDiagnosisStarting": "診断セッションを作成中…",
@@ -6189,7 +6189,7 @@
       "backToSkillhub": "SkillHub に戻る",
       "openDirAria": "ディレクトリを開く",
       "showInFolderAria": "ファイルマネージャで表示",
-      "resizeUsageFilesColumn": "使用状況とファイル一覧の幅を調整",
+      "resizeUsageFilesColumn": "使用量とファイル一覧の幅を調整",
       "loadingContent": "コンテンツを読み込み中…",
       "readFailed": "コンテンツを読めません",
       "readFailedAfterSave": "保存しましたが再読み込みに失敗しました",
@@ -6268,7 +6268,7 @@
       "categoryLabel": "カテゴリ: {{name}}",
       "loadFailed": "読み込み失敗：{{error}}",
       "loading": "読み込み中…",
-      "noResults": "一致する技能が見つかりません",
+      "noResults": "一致するスキルが見つかりません",
       "installFailedToast": "{{name}} のインストール失敗：{{message}}",
       "installError": "不明なエラー"
     },
@@ -6355,7 +6355,7 @@
       "renameFailed": "ローカルの改名に失敗：{{error}}",
       "skillNameLabel": "SkillName",
       "skillNamePlaceholder": "my-skill",
-      "skillNameRequired": "技能名は必須です",
+      "skillNameRequired": "スキル名は必須です",
       "skillNameFormat": "形式：[a-z0-9-]+",
       "displayNameLabel": "表示名",
       "displayNamePlaceholder": "My Skill",
@@ -6964,7 +6964,7 @@
       "passwordPlaceholder": "パスワード",
       "unlock": "ロック解除",
       "previewMeta": "{{agent}} · {{count}} 件のメッセージ · {{exportedAt}} にエクスポート",
-      "riskWarning": "このファイルは外部から共有されたものです。提供元が信頼できることを確認してください。インポートした履歴は AI のその後の動作に影響する可能性があり、会話を続けると AI はローカルファイルの読み書きやコマンドの実行を行うことができます。",
+      "riskWarning": "このファイルは外部から共有されたものです。プロバイダーが信頼できることを確認してください。インポートした履歴は AI のその後の動作に影響する可能性があり、会話を続けると AI はローカルファイルの読み書きやコマンドの実行を行うことができます。",
       "workdirHint": "元のセッションの作業ディレクトリは {{originalDir}} です。このマシン上の対応するディレクトリを選択してください。",
       "workdirEmpty": "ディレクトリが未選択です",
       "pickWorkdir": "ディレクトリを選択",
@@ -6999,7 +6999,7 @@
   "billing": {
     "sidebar": "クレジットとプラン",
     "settings": {
-      "title": "使用状況と請求",
+      "title": "使用量と請求",
       "subtitle": "利用可能なクレジットと現在のプランを確認し、必要に応じてクレジットを購入できます。",
       "subscriptionCard": {
         "title": "現在のプラン",
@@ -7036,7 +7036,7 @@
       "used": "使用済み",
       "total": "合計",
       "remaining": "残り",
-      "progressLabel": "{{label}}の使用状況",
+      "progressLabel": "{{label}}の使用量",
       "historyUnavailable": "使用履歴が完全ではないため、残りのクレジットのみ表示しています。",
       "percentUsed": "{{percent}}% 使用済み",
       "detailsUnavailable": "使用量の詳細を取得できないため、現在の残高のみ表示しています。",
@@ -7134,7 +7134,7 @@
       "alipay": "Alipay",
       "stripe": "カード"
     },
-    "securityNotice": "支払いは選択した事業者が安全に処理し、Cindyは支払い認証情報を保存しません",
+    "securityNotice": "支払いは選択したプロバイダーが安全に処理し、Cindyは支払い認証情報を保存しません",
     "currentSubscription": {
       "title": "現在のサブスクリプション",
       "purchaseBlocked": "未終了のサブスクリプションがあります。既存のサブスクリプションを処理してから新しいプランを購入してください。"
