@@ -47,11 +47,18 @@ const glossary = JSON.parse(
   readFileSync(resolve(REPO_ROOT, 'i18n/glossary.json'), 'utf8'),
 ) as { locales: string[]; sourceLocale: string; terms: GlossaryTerm[] };
 
-/** 摊平成 (locale, key, value)。key 形态与根门禁一致,便于 exempt 复用同一套写法。 */
+/**
+ * 摊平成 (locale, key, value)。
+ *
+ * 前缀必须是 `desktop:`——glossary.json 的 exempt 用 `^(desktop|mobile/xxx):` 校验格式,
+ * 也按这个前缀匹配。用 `desktop-menu:` 之类的自造前缀会让 exempt 对这份 catalog 完全
+ * 失效(而 note 里还写着"可复用同一套写法"),将来给某个菜单项加豁免时会白写一条。
+ * 用 `menu.` 子命名空间区分来源。
+ */
 const entries = Object.entries(APPLICATION_MENU_LABELS).flatMap(([locale, labels]) =>
   Object.entries(labels).map(([key, value]) => ({
     locale,
-    key: `desktop-menu:${key}`,
+    key: `desktop:menu.${key}`,
     value: value as string,
   })),
 );
@@ -101,17 +108,24 @@ describe('原生应用菜单标签符合术语表', () => {
 
   it('保留英文的术语大小写形态统一', () => {
     const violations: string[] = [];
+    // 与 forbidden 用例同一分级:proposed 也扫,只是降级为告警。跳过的话,菜单文案里
+    // 「待裁决术语当前命中多少处」的数据就没了,而根门禁是会统计的。
+    const notes: string[] = [];
     for (const term of glossary.terms) {
-      if (term.status !== 'decided' || term.checkCase === false) continue;
+      if (term.checkCase === false) continue;
       const isExempt = makeExemptChecker(term.exempt);
       for (const { locale, key, value } of entries) {
         if (isExempt(key)) continue;
         const standard = term.translations?.[locale];
         if (!standard || standard !== term.en) continue;
         const hit = findCaseMismatch(stripNonProse(value), standard);
-        if (hit) violations.push(`${locale} ${key}: 「${hit}」应为「${standard}」`);
+        if (!hit) continue;
+        const line = `${locale} ${key}: 「${hit}」应为「${standard}」`;
+        if (term.status === 'decided') violations.push(line);
+        else notes.push(line);
       }
     }
+    if (notes.length > 0) console.warn(`[menu-glossary] 待裁决术语大小写:\n${notes.join('\n')}`);
     expect(violations, `原生菜单大小写不统一:\n${violations.join('\n')}`).toEqual([]);
   });
 

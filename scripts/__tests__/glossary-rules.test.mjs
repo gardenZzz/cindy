@@ -531,3 +531,12 @@ test('GLOSSARY.md 必须声明「参考，不是替换表」', () => {
   assert.ok(doc.includes('不是替换表'), 'GLOSSARY.md 缺少定位声明');
   assert.ok(doc.includes('禁止拿本表做脚本批量替换'), 'GLOSSARY.md 缺少批量替换禁令');
 });
+
+test('validateAgainstSchema: schema 的 pattern 写坏时报可读错误而不是抛栈', () => {
+  // 直接 new RegExp 会把异常抛出校验流程,调用方拿不到带 path 的错误、
+  // check-i18n-glossary 会崩栈而不是走 fail()
+  const schema = { type: 'object', properties: { id: { type: 'string', pattern: '[' } } };
+  const errors = validateAgainstSchema({ id: 'x' }, schema);
+  assert.equal(errors.length, 1);
+  assert.match(errors[0], /\$\.id: schema 的 pattern 不是合法正则/);
+});
