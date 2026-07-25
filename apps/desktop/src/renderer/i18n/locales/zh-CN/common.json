@@ -1580,7 +1580,7 @@
       "title": "个性化",
       "subtitle": "自定义提示词",
       "description": "为你的助手提供额外的指令和上下文。",
-      "placeholder": "在这里输入自定义指令，会追加到 Claude / Codex 的系统提示词末尾。\n\n· 仅对 {{appName}} 内嵌对话生效；老对话维持启动时快照，修改后下一次新对话才应用。\n· 想让所有 Claude Code 对话(含终端直跑、其他 IDE)硬性生效：在 ~/.claude/settings.json 里配 SessionStart hook(harness 级强制)。\n· Codex CLI 可在 ~/.codex/hooks.json 配 SessionStart hook 强制注入(harness 级，和 CC 同款)；或通过 ~/.codex/AGENTS.md 自动加载(软约束，模型可能忽略)。",
+      "placeholder": "在这里输入自定义指令，会追加到 Claude / Codex 的系统提示词末尾。\n\n· 仅对 {{appName}} 内嵌的 Agent 会话生效；已有会话维持启动时快照，修改后下一个新会话才应用。\n· 想让所有 Claude Code 会话(含终端直跑、其他 IDE)硬性生效：在 ~/.claude/settings.json 里配 SessionStart hook(harness 级强制)。\n· Codex CLI 可在 ~/.codex/hooks.json 配 SessionStart hook 强制注入(harness 级，和 CC 同款)；或通过 ~/.codex/AGENTS.md 自动加载(软约束，模型可能忽略)。",
       "ariaLabel": "自定义指令",
       "save": "保存",
       "overLimit": " — 已超出长度限制",

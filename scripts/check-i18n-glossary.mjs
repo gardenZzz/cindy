@@ -319,14 +319,18 @@ for (const term of glossary.terms) {
 
 // --- 规则 3:标点风格 ---
 // 各 locale 的适用范围与数据依据见 shared/glossary-rules.mjs 的常量注释。
-// 标点规则的豁免。
+// 标点规则的豁免——**只豁免半角标点这一条,不豁免省略号**。
 //
 // 术语规则的 exempt 挂在术语条目上,标点规则不属于任何术语,需要独立清单。
 // 唯一的正当用途:整条文案不是给人读的中文正文,而是机器可读的结构化文本
 // ——例如 GitHub issue 正文模板里的 `locale: {{locale}}` 元数据行,那里的冒号是
 // key-value 分隔符,必须半角。这类形态与「无效 JSON: {{snippet}}」外形完全相同,
 // 静态扫描区分不了,只能按 key 声明。
-const isPunctuationExempt = makeExemptChecker(glossary.punctuationExempt);
+//
+// 但豁免范围必须精确到规则:那条模板豁免的理由只涉及「冒号必须半角」,与省略号无关。
+// 若一刀关掉整个标点段,该 key 就能在四种语言里悄悄引入 `...`,把刚加上的省略号门禁
+// 从这个 key 上摘掉——豁免的作用域应当只覆盖它实际论证过的那条规则。
+const isHalfWidthExempt = makeExemptChecker(glossary.punctuationExempt);
 
 for (const locale of locales) {
   const checkHalfWidth = HALFWIDTH_PUNCT_LOCALES.has(locale);
@@ -334,12 +338,11 @@ for (const locale of locales) {
   if (!checkHalfWidth && !checkEllipsis) continue;
 
   for (const [key, value] of corpus.get(locale)) {
-    if (isPunctuationExempt(key)) continue;
     // 标点检查走 normalizeForPunctuation 而非 stripNonProse:后者把 {{插值}} 换成空格,
     // 「{{total}},上限」剥离后逗号前是空格,违规会被静默放过。
     const prose = normalizeForPunctuation(value);
 
-    const mark = checkHalfWidth ? findHalfWidthPunct(prose) : null;
+    const mark = checkHalfWidth && !isHalfWidthExempt(key) ? findHalfWidthPunct(prose) : null;
     if (mark) {
       violations.push(
         makeViolation({
