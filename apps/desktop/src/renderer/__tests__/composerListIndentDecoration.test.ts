@@ -13,6 +13,10 @@ import {
   listPrefixIndentStyle,
 } from '@/components/new-chat/ComposerListIndentDecoration';
 import { CjkPunctDecoration } from '@/components/new-chat/CjkPunctDecoration';
+import {
+  setSlashCommandRoster,
+  SlashCommandDecoration,
+} from '@/components/new-chat/SlashCommandDecoration';
 
 /**
  * composer 列表行缩进 decoration:
@@ -111,7 +115,7 @@ describe('buildListIndentDecorations', () => {
     expect(buildListIndentDecorations(ed.state.doc).find()).toHaveLength(0);
   });
 
-  it('leaves lines containing inline atoms untouched so chips keep their inline geometry', () => {
+  it('uses prefix-only fallback so inline atoms keep their geometry', () => {
     editor = new Editor({
       element: document.createElement('div'),
       extensions: [Document, Paragraph, Text, HardBreak, TestAtom, ComposerListIndentDecoration],
@@ -129,7 +133,10 @@ describe('buildListIndentDecorations', () => {
         ],
       },
     });
-    expect(buildListIndentDecorations(editor.state.doc).find()).toHaveLength(0);
+    expect(buildListIndentDecorations(editor.state.doc).find()).toHaveLength(1);
+    expect(
+      editor.view.dom.querySelector('span.composer-list-prefix-indent')?.textContent,
+    ).toBe('- ');
     expect(
       editor.view.dom
         .querySelector('[data-test-atom]')
@@ -177,6 +184,49 @@ describe('ComposerListIndentDecoration in a real editor', () => {
     expect(editor.view.dom.querySelectorAll('span[style*="font-family"]')).not.toHaveLength(0);
   });
 
+  it('uses prefix-only fallback for CJK punctuation in hardBreak-separated list lines', () => {
+    const ed = makeEditor(['- 中文，内容', '2. plain']);
+    expect(
+      Array.from(ed.view.dom.querySelectorAll('span.composer-list-prefix-indent')).map(
+        (node) => node.textContent,
+      ),
+    ).toEqual(['- ']);
+    expect(indentSpans(ed)).toEqual(['2. plain']);
+  });
+
+  it('keeps slash-command pills inline by falling back to prefix-only decoration', () => {
+    editor = new Editor({
+      element: document.createElement('div'),
+      extensions: [
+        Document,
+        Paragraph,
+        Text,
+        HardBreak,
+        SlashCommandDecoration,
+        ComposerListIndentDecoration,
+      ],
+      content: {
+        type: 'doc',
+        content: [
+          {
+            type: 'paragraph',
+            content: [
+              { type: 'text', text: '- /foo details' },
+              { type: 'hardBreak' },
+              { type: 'text', text: '2. plain' },
+            ],
+          },
+        ],
+      },
+    });
+    setSlashCommandRoster(editor, [{ name: 'foo', description: 'test command' }]);
+    expect(
+      editor.view.dom.querySelector('span.composer-list-prefix-indent')?.textContent,
+    ).toBe('- ');
+    expect(editor.view.dom.querySelector('span.slash-cmd-pill')?.textContent).toBe('/foo');
+    expect(indentSpans(editor)).toEqual(['2. plain']);
+  });
+
   it('appears the moment the prefix becomes complete, and disappears when broken', () => {
     const ed = makeEditor(['1.']);
     expect(indentSpans(ed)).toHaveLength(0);
@@ -205,6 +255,7 @@ describe('wiring contract', () => {
   it('globals.css defines the indent class', () => {
     const css = readFileSync(resolve(__dirname, '..', 'styles', 'globals.css'), 'utf8');
     expect(css).toContain('.ProseMirror .composer-list-block-indent');
+    expect(css).toContain('.ProseMirror .composer-list-prefix-indent');
     expect(css).toContain('.ProseMirror span.composer-list-line-indent');
     expect(css).toContain('display: inline-block;');
     expect(css).toContain('width: 100%;');

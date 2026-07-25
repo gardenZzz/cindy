@@ -29,6 +29,7 @@ const PLUGIN_KEY = new PluginKey<DecorationSet>('composerListIndentDecoration');
 /** 行内一个非文本 inline 节点(mention chip 等)的占位符,与 applyListContinuation 一致。 */
 const ATOM_PLACEHOLDER = '\uFFFC';
 const CJK_PUNCTUATION_RE = /[\u3000-\u303f\uff00-\uffef]/;
+const SLASH_COMMAND_RUN_RE = /(?:^|\s)\/\S+/;
 
 /**
  * 将列表前缀换算成当前字体下的近似宽度。
@@ -120,22 +121,28 @@ export function buildListIndentDecorations(doc: PMNode): DecorationSet {
     const addLineDecoration = (line: (typeof lines)[number]) => {
       const match = matchListPrefix(line.text);
       // Inline decorations apply their attributes to every covered inline node.
-      // A mixed text/atom line would split the full-width wrapper around the atom
-      // and turn chips into blocks, so leave those lines untouched.
-      // Tab-indented and CJK-punctuated lines are also skipped in the inline
-      // fallback: their rendered width cannot be represented safely by a split
-      // inline wrapper.
-      if (
-        !match ||
-        line.hasInlineAtom ||
-        line.text.slice(0, match.prefixLength).includes('\t') ||
-        CJK_PUNCTUATION_RE.test(line.text)
-      ) {
+      // Mixed decoration ranges therefore use a prefix-only fallback below.
+      if (!match || line.text.slice(0, match.prefixLength).includes('\t')) {
         return;
       }
       const from = contentBase + line.start;
       const to = contentBase + line.end;
       const prefix = line.text.slice(0, match.prefixLength);
+      const hasOverlappingInlineDecoration =
+        line.hasInlineAtom ||
+        CJK_PUNCTUATION_RE.test(line.text) ||
+        SLASH_COMMAND_RUN_RE.test(line.text.slice(match.prefixLength));
+      if (hasOverlappingInlineDecoration) {
+        // Keep list-mode feedback without wrapping an inline decoration range.
+        // Prefix-only styling cannot be split by CJK punctuation, slash-command
+        // pills, or inline atoms, and is safer than producing multiple blocks.
+        decorations.push(
+          Decoration.inline(from, from + match.prefixLength, {
+            class: 'composer-list-prefix-indent',
+          }),
+        );
+        return;
+      }
       decorations.push(
         Decoration.inline(from, to, {
           class: 'composer-list-line-indent',
@@ -150,17 +157,22 @@ export function buildListIndentDecorations(doc: PMNode): DecorationSet {
       const prefix = match ? line.text.slice(0, match.prefixLength) : '';
       // A node decoration stays on the paragraph even when CjkPunctDecoration
       // adds nested inline spans, so punctuation cannot split the list wrapper.
-      if (
-        line &&
-        match &&
-        !line.hasInlineAtom &&
-        !prefix.includes('\t')
-      ) {
+      if (line && match && !prefix.includes('\t') && !line.hasInlineAtom) {
         decorations.push(
           Decoration.node(blockPos, blockPos + block.nodeSize, {
             class: 'composer-list-block-indent',
             style: listPrefixIndentStyle(prefix),
           }),
+        );
+      } else if (line && match && !prefix.includes('\t')) {
+        decorations.push(
+          Decoration.inline(
+            contentBase + line.start,
+            contentBase + line.start + match.prefixLength,
+            {
+              class: 'composer-list-prefix-indent',
+            },
+          ),
         );
       }
     } else {

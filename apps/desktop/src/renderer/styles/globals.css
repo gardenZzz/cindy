@@ -358,6 +358,9 @@ html:lang(ko) {
   text-indent: var(--composer-list-hang-negative, -1.25em);
   overflow-wrap: anywhere;
 }
+.ProseMirror .composer-list-prefix-indent {
+  padding-left: 1em;
+}
 .ProseMirror span.composer-list-line-indent {
   display: inline-block;
   box-sizing: border-box;
