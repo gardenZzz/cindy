@@ -2101,9 +2101,11 @@
       },
       "defaults": {
         "title": "新規会話設定",
-        "description": "Feishu、Slack、または Discord から開始する新規会話では、この Agent とモデル設定を使用します。変更は新規会話にのみ適用されます。既存の Discord DM に適用するには /new を送信してください。",
-        "localDescription": "Feishu または Discord から開始する新規会話では、この Agent とモデル設定を使用します。変更は新規会話にのみ適用されます。既存の Discord DM に適用するには /new を送信してください。",
-        "feishuOnlyDescription": "Feishu から開始する新規会話では、この Agent とモデル設定を使用します。変更は新規会話にのみ適用されます。",
+        "channelDescriptions": {
+          "feishu": "Feishu の新規会話では、この Agent とモデルを使用します。既存の DM には /new で適用します。",
+          "slack": "Slack の新しいスレッドでは、この Agent とモデルを使用します。",
+          "discord": "Discord の新規会話では、この Agent とモデルを使用します。既存の DM には /new で適用します。"
+        },
         "agentLabel": "Agent",
         "modelLabel": "モデル設定",
         "loading": "新規会話設定を読み込み中…",

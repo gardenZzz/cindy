@@ -42,6 +42,7 @@ import {
   type ModelAccessStatus as ModelAccessStatusPayload,
 } from '../shared/modelAccess';
 import type {
+  ImDefaultSettingsChannel,
   ImDefaultSettingsPatch,
   ImDefaultSettingsState,
 } from '../shared/imDefaultSettings';
@@ -3979,15 +3980,16 @@ contextBridge.exposeInMainWorld('electronAPI', {
     }> =>
       ipcRenderer.invoke('maker:memory:reset-settings'),
 
-    /** IM 新会话默认 agent/model/effort/provider。仅影响新 IM session 和 Feishu `/new`。 */
-    imDefaultSettingsGet: (): Promise<ImDefaultSettingsState> =>
-      ipcRenderer.invoke('maker:im-default-settings:get'),
+    /** IM 新会话默认 agent/model/effort/provider。传 channel 时按渠道独立读写。 */
+    imDefaultSettingsGet: (channel?: ImDefaultSettingsChannel): Promise<ImDefaultSettingsState> =>
+      ipcRenderer.invoke('maker:im-default-settings:get', channel),
     imDefaultSettingsSet: (
       patch: ImDefaultSettingsPatch,
+      channel?: ImDefaultSettingsChannel,
     ): Promise<ImDefaultSettingsState> =>
-      ipcRenderer.invoke('maker:im-default-settings:set', patch),
-    imDefaultSettingsReset: (): Promise<ImDefaultSettingsState> =>
-      ipcRenderer.invoke('maker:im-default-settings:reset'),
+      ipcRenderer.invoke('maker:im-default-settings:set', patch, channel),
+    imDefaultSettingsReset: (channel?: ImDefaultSettingsChannel): Promise<ImDefaultSettingsState> =>
+      ipcRenderer.invoke('maker:im-default-settings:reset', channel),
 
     /** 子代理模型覆盖。null 表示不注入覆盖，仅对新建 agent 会话生效。 */
     subagentModelSettingsGet: (): Promise<SubagentModelSettingsState> =>

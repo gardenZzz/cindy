@@ -367,6 +367,7 @@ import {
 import {
   readImDefaultSettingsState,
   resetImDefaultSettings,
+  resetImDefaultSettingsChannel,
   writeImDefaultSettingsPatch,
 } from './im/defaultSettingsStore.js';
 import { hasClaudeAiOAuth } from './maker-host/claude-credentials-store.js';
@@ -485,8 +486,10 @@ import {
   IM_DEFAULT_SETTINGS,
   isImDefaultAgentKind,
   isImDefaultEffort,
+  isImDefaultSettingsChannel,
   type ImDefaultAgentKind,
   type ImDefaultAgentSettings,
+  type ImDefaultSettingsChannel,
   type ImDefaultSettingsPatch,
 } from '../shared/imDefaultSettings.js';
 import {
@@ -532,11 +535,7 @@ import {
 } from './app-shortcuts/index.js';
 import { installNewMakerWindowShortcut } from './app-shortcuts/new-maker-window-shortcut.js';
 import { registerLayoutIpc } from './layout/index.js';
-import {
-  registerGhostIpc,
-  suspendAllGhosts,
-  waitForGhostMutations,
-} from './cindy-brain/index.js';
+import { registerGhostIpc, suspendAllGhosts, waitForGhostMutations } from './cindy-brain/index.js';
 import { registerPluginMarketIpc } from './plugin-market/registerIpc.js';
 import { findCindyFileInArgv } from './cindy-brain/argv.js';
 import { handleIncomingCindyFile } from './cindy-brain/openFileInstall.js';
@@ -2458,16 +2457,25 @@ const registerIpcHandlers = () => {
       }
     },
   );
-  ipcMain.handle(MAKER_IPC_INVOKE.IM_DEFAULT_SETTINGS_GET, async () => {
-    return imDefaultSettingsWire();
+  ipcMain.handle(MAKER_IPC_INVOKE.IM_DEFAULT_SETTINGS_GET, async (_e, rawChannel: unknown) => {
+    return imDefaultSettingsWire(parseImDefaultSettingsChannel(rawChannel));
   });
-  ipcMain.handle(MAKER_IPC_INVOKE.IM_DEFAULT_SETTINGS_SET, async (_e, patch: unknown) => {
-    writeImDefaultSettingsPatch(parseImDefaultSettingsPatch(patch));
-    return imDefaultSettingsWire();
-  });
-  ipcMain.handle(MAKER_IPC_INVOKE.IM_DEFAULT_SETTINGS_RESET, async () => {
-    resetImDefaultSettings();
-    return imDefaultSettingsWire();
+  ipcMain.handle(
+    MAKER_IPC_INVOKE.IM_DEFAULT_SETTINGS_SET,
+    async (_e, patch: unknown, rawChannel: unknown) => {
+      const channel = parseImDefaultSettingsChannel(rawChannel);
+      writeImDefaultSettingsPatch(parseImDefaultSettingsPatch(patch), channel);
+      return imDefaultSettingsWire(channel);
+    },
+  );
+  ipcMain.handle(MAKER_IPC_INVOKE.IM_DEFAULT_SETTINGS_RESET, async (_e, rawChannel: unknown) => {
+    const channel = parseImDefaultSettingsChannel(rawChannel);
+    if (channel) {
+      resetImDefaultSettingsChannel(channel);
+    } else {
+      resetImDefaultSettings();
+    }
+    return imDefaultSettingsWire(channel);
   });
   ipcMain.handle(MAKER_IPC_INVOKE.SUBAGENT_MODEL_SETTINGS_GET, async () => {
     return subagentModelSettingsWire();
@@ -3273,7 +3281,9 @@ const registerIpcHandlers = () => {
         markDesktopDevStartupFailed(
           'AUTH_INIT_FAILED',
           err instanceof Error ? err.message : String(err),
-          { phase: 'auth:initialize' },
+          {
+            phase: 'auth:initialize',
+          },
         );
       }
       throw err;
@@ -4424,7 +4434,10 @@ const registerIpcHandlers = () => {
           // 错误,无法区分"file:// 编码问题"还是"文件 / 权限问题",难排障。
           createLogger('shell:open-file-in-browser').warn(
             'openExternal failed, fallback to openPath',
-            { fileUrl, error: String(e) },
+            {
+              fileUrl,
+              error: String(e),
+            },
           );
           const errMsg = await shell.openPath(filePath);
           if (errMsg) return { success: false, error: errMsg };
@@ -5640,14 +5653,22 @@ function memorySettingsWire() {
   };
 }
 
-function imDefaultSettingsWire() {
-  const state = readImDefaultSettingsState();
+function imDefaultSettingsWire(channel?: ImDefaultSettingsChannel) {
+  const state = readImDefaultSettingsState(channel);
   return {
     ...state.value,
     isCustomized: state.isCustomized,
     customizedKeys: state.customizedKeys,
     defaults: state.defaults,
   };
+}
+
+function parseImDefaultSettingsChannel(raw: unknown): ImDefaultSettingsChannel | undefined {
+  if (raw === undefined || raw === null) return undefined;
+  if (!isImDefaultSettingsChannel(raw)) {
+    throwIpcError('INVALID_PARAMS', 'im default settings channel invalid');
+  }
+  return raw;
 }
 
 function subagentModelSettingsWire() {

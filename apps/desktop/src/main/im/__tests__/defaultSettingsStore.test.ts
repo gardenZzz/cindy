@@ -34,7 +34,9 @@ import { IM_DEFAULT_SETTINGS } from '../../../shared/imDefaultSettings.js';
 import {
   __testing,
   readImDefaultSettings,
+  readImDefaultSettingsState,
   resetImDefaultSettings,
+  resetImDefaultSettingsChannel,
   writeImDefaultSettingsPatch,
 } from '../defaultSettingsStore';
 
@@ -85,11 +87,14 @@ describe('im default settings store', () => {
     });
 
     expect(JSON.parse(fs.readFileSync(settingsFile(), 'utf-8'))).toEqual({
-      agents: {
-        codex: {
-          providerId: 'openai',
-          model: 'gpt-5.5',
-          effort: 'high',
+      schemaVersion: 2,
+      global: {
+        agents: {
+          codex: {
+            providerId: 'openai',
+            model: 'gpt-5.5',
+            effort: 'high',
+          },
         },
       },
     });
@@ -117,16 +122,19 @@ describe('im default settings store', () => {
     });
 
     expect(JSON.parse(fs.readFileSync(settingsFile(), 'utf-8'))).toEqual({
-      agents: {
-        'claude-code': {
-          providerId: 'anthropic',
-          model: 'claude-sonnet-4-8',
-          effort: 'xhigh',
-        },
-        codex: {
-          providerId: 'openai',
-          model: 'gpt-5.5',
-          effort: 'high',
+      schemaVersion: 2,
+      global: {
+        agents: {
+          'claude-code': {
+            providerId: 'anthropic',
+            model: 'claude-sonnet-4-8',
+            effort: 'xhigh',
+          },
+          codex: {
+            providerId: 'openai',
+            model: 'gpt-5.5',
+            effort: 'high',
+          },
         },
       },
     });
@@ -149,6 +157,55 @@ describe('im default settings store', () => {
 
     scopeMocks.owner = 'cloud-a';
     expect(readImDefaultSettings().agentKind).toBe('codex');
-    expect(JSON.parse(fs.readFileSync(settingsFile(), 'utf-8'))).toEqual({ agentKind: 'codex' });
+    expect(JSON.parse(fs.readFileSync(settingsFile(), 'utf-8'))).toEqual({
+      schemaVersion: 2,
+      global: { agentKind: 'codex' },
+    });
+  });
+
+  it('migrates a legacy global override into independent channel routes', () => {
+    const migrated = __testing.normalizeDocument({
+      ...IM_DEFAULT_SETTINGS,
+      agentKind: 'codex',
+      agents: {
+        ...IM_DEFAULT_SETTINGS.agents,
+        codex: {
+          providerId: 'openai',
+          model: 'gpt-5.5',
+          effort: 'high',
+        },
+      },
+    });
+
+    expect(migrated.global.agentKind).toBe('codex');
+    expect(migrated.channels.feishu).toEqual(migrated.global);
+    expect(migrated.channels.discord).toEqual(migrated.global);
+    expect(migrated.channels.slack).toEqual(migrated.global);
+  });
+
+  it('writes and resets one channel without changing another channel', () => {
+    writeImDefaultSettingsPatch({ agentKind: 'codex' }, 'feishu');
+    writeImDefaultSettingsPatch(
+      {
+        agents: {
+          'claude-code': {
+            providerId: 'anthropic',
+            model: 'claude-sonnet-4-8',
+            effort: 'high',
+          },
+        },
+      },
+      'discord',
+    );
+
+    expect(readImDefaultSettings('feishu').agentKind).toBe('codex');
+    expect(readImDefaultSettings('discord').agentKind).toBe('claude-code');
+    expect(readImDefaultSettings('discord').agents['claude-code'].model).toBe('claude-sonnet-4-8');
+
+    resetImDefaultSettingsChannel('feishu');
+
+    expect(readImDefaultSettingsState('feishu').isCustomized).toBe(false);
+    expect(readImDefaultSettings('feishu')).toEqual(IM_DEFAULT_SETTINGS);
+    expect(readImDefaultSettings('discord').agents['claude-code'].model).toBe('claude-sonnet-4-8');
   });
 });
