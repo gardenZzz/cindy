@@ -482,9 +482,10 @@ export function BillingSettingsSection({ accountId }: { accountId: string | null
       const canceled = await billingApi.cancelCurrentSubscription();
       setCurrentSubscription(canceled);
       setSubscriptionError(false);
+      const canceledPeriodEndAt = formatBillingDate(canceled.currentPeriodEndAt, billingLocale);
       toast.success(
-        periodEndAt
-          ? t('billing.settings.subscriptionCard.cancelSuccess', { date: periodEndAt })
+        canceledPeriodEndAt
+          ? t('billing.settings.subscriptionCard.cancelSuccess', { date: canceledPeriodEndAt })
           : t('billing.settings.subscriptionCard.cancelSuccessWithoutDate'),
       );
     } catch (error) {
@@ -497,7 +498,14 @@ export function BillingSettingsSection({ accountId }: { accountId: string | null
     } finally {
       setCancelingSubscription(false);
     }
-  }, [cancelingSubscription, confirm, currentPlanFacts?.periodEndAt, currentSubscription, t]);
+  }, [
+    billingLocale,
+    cancelingSubscription,
+    confirm,
+    currentPlanFacts?.periodEndAt,
+    currentSubscription,
+    t,
+  ]);
 
   // UI candidates only. The quote is the authority on whether a target is
   // actually reachable; this filter just avoids offering obviously invalid

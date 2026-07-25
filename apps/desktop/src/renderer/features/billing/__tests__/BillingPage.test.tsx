@@ -1181,6 +1181,7 @@ describe('BillingPage plan change', () => {
     const billing = install(billingMocks());
     billing.cancelCurrentSubscription.mockResolvedValue({
       ...activeSubscription(),
+      currentPeriodEndAt: '2026-09-01T00:00:00.000Z',
       cancelAtPeriodEnd: true,
     });
     uiMocks.confirm.mockResolvedValueOnce(true);
@@ -1196,7 +1197,9 @@ describe('BillingPage plan change', () => {
       }),
     );
     expect(billing.getBalance).toHaveBeenCalledTimes(1);
-    expect(uiMocks.toastSuccess).toHaveBeenCalledTimes(1);
+    expect(uiMocks.toastSuccess).toHaveBeenCalledWith(
+      expect.stringContaining('"date":"Sep 1, 2026"'),
+    );
     expect(
       screen.getByText((text) => text.startsWith('billing.settings.subscriptionCard.endsAt')),
     ).toBeTruthy();
