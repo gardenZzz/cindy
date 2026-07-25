@@ -87,7 +87,8 @@ const SUBSCRIPTION_PURCHASE_BLOCKING_STATUSES: BillingSubscription['status'][] =
   'UNPAID',
   'PAUSED',
 ];
-const SUBSCRIPTION_CANCELLABLE_STATUSES = SUBSCRIPTION_PURCHASE_BLOCKING_STATUSES;
+const SUBSCRIPTION_CANCELLABLE_STATUSES: BillingSubscription['status'][] =
+  SUBSCRIPTION_PURCHASE_BLOCKING_STATUSES.filter((status) => status !== 'INCOMPLETE');
 
 // This list only controls which card action opens the plan-change flow. It is
 // intentionally separate from the new-purchase guard above: INCOMPLETE still
@@ -1064,6 +1065,7 @@ function SubscriptionOverviewCard({
         <PendingPlanChangeBanner
           pending={pendingPlanChange}
           targetName={pendingTargetName}
+          disabled={actionDisabled}
           onResume={onResumePending}
           onUndo={onCancelPending}
         />
@@ -1075,11 +1077,13 @@ function SubscriptionOverviewCard({
 function PendingPlanChangeBanner({
   pending,
   targetName,
+  disabled,
   onResume,
   onUndo,
 }: {
   pending: BillingPendingPlanChange;
   targetName: string | null;
+  disabled: boolean;
   onResume: () => void;
   onUndo: () => void;
 }) {
@@ -1109,7 +1113,8 @@ function PendingPlanChangeBanner({
         <button
           type="button"
           onClick={onUndo}
-          className="h-8 shrink-0 select-none rounded-full border border-[var(--border-default)] px-3.5 text-12 font-medium text-[var(--text-primary)] transition-colors hover:bg-[var(--surface-hover-soft)]"
+          disabled={disabled}
+          className="h-8 shrink-0 select-none rounded-full border border-[var(--border-default)] px-3.5 text-12 font-medium text-[var(--text-primary)] transition-colors hover:bg-[var(--surface-hover-soft)] disabled:cursor-not-allowed disabled:opacity-40"
         >
           {t('billing.planChange.undo')}
         </button>
@@ -1117,7 +1122,8 @@ function PendingPlanChangeBanner({
         <button
           type="button"
           onClick={onResume}
-          className="h-8 shrink-0 select-none rounded-full border border-[var(--border-default)] px-3.5 text-12 font-medium text-[var(--text-primary)] transition-colors hover:bg-[var(--surface-hover-soft)]"
+          disabled={disabled}
+          className="h-8 shrink-0 select-none rounded-full border border-[var(--border-default)] px-3.5 text-12 font-medium text-[var(--text-primary)] transition-colors hover:bg-[var(--surface-hover-soft)] disabled:cursor-not-allowed disabled:opacity-40"
         >
           {t('billing.planChange.resume')}
         </button>
