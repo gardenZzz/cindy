@@ -1537,7 +1537,7 @@
       "description": "分别设置 Claude Code 和 Codex 执行子任务时使用的默认模型。设置按入口生效，不会为每个模型单独保存。",
       "unspecified": "不指定（跟随原逻辑）",
       "codexUnavailable": "当前 Codex 版本暂不支持安全覆盖",
-      "hint": "可选模型取决于已连接的模型来源；留空表示使用 Agent 原本的默认设置。Claude Code 的修改从新建对话开始生效，Codex 当前版本暂不支持覆盖 Subagent 模型。",
+      "hint": "可选模型取决于已连接的模型来源；留空表示使用 Agent 原本的默认设置。Claude Code 的修改从新建的 Agent 会话开始生效，Codex 当前版本暂不支持覆盖 Subagent 模型。",
       "saveFailed": "保存 Subagent 模型失败"
     },
     "compaction": {
@@ -3004,7 +3004,7 @@
       "noUsageDetail": "本对话尚未产生用量。",
       "unavailableLabel": "用量暂不可用",
       "unavailableDetail": "用量数据暂时不可用。",
-      "waitingDetail": "Codex 用量会在下一次对话完成后更新。",
+      "waitingDetail": "Codex 用量会在下一轮完成后更新。",
       "sessionTokensLine": "本对话已用 {{tokens}} token",
       "sessionValueLabel": "本对话价值 {{cost}}",
       "planCreditsLine": "{{plan}} · 剩余 {{credits}} credits",
@@ -3022,7 +3022,7 @@
       "daysWindow": "{{days}}天"
     },
     "claude": {
-      "waitingDetail": "Claude 订阅余量会在下一次对话完成后更新。",
+      "waitingDetail": "Claude 订阅余量会在下一轮完成后更新。",
       "weeklyLabel": "周限",
       "modelWeeklyLabel": "{{model}} 周限",
       "windowSegment": "{{label}} 剩余 {{remaining}}",

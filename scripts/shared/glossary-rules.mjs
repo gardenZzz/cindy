@@ -32,8 +32,11 @@ const CJK_CHAR = '\\u4e00-\\u9fff\\u3040-\\u30ff\\uac00-\\ud7af';
  *    后面的标点违规随之漏检。不能无条件截,否则会切坏合法的
  *    query string(`?a=1&ids=1,2`)与端口号(`:8080`);而 `https://x.test,返回…`
  *    这种半角逗号后直接接中文的写法,逗号显然是正文标点而非 URL 的一部分。
+ *  - 连续三个点:一律截断。`Open https://x.test...` / `联系 a@x.com...然后重试` 里的
+ *    `...` 是正文省略号,被 token 吃掉后省略号门禁就查不到了。URL 里不会出现连续三个点
+ *    (路径分隔与单个点不受影响)。
  */
-const TOKEN_TAIL = `(?:(?![${CJK_PUNCT}])(?![,;:!?](?=\\s*[${CJK_CHAR}]))\\S)+`;
+const TOKEN_TAIL = `(?:(?![${CJK_PUNCT}])(?!\\.\\.\\.)(?![,;:!?](?=\\s*[${CJK_CHAR}]))\\S)+`;
 
 const URL_TOKEN = new RegExp(`\\b[a-z][\\w-]*://${TOKEN_TAIL}`, 'gi');
 
@@ -58,13 +61,13 @@ const EMAIL_TOKEN = new RegExp(`[A-Za-z0-9._%+-]+@${TOKEN_TAIL}`, 'g');
  *
  * 两个约束防止误伤:
  *  - 扩展名必须是纯小写字母 → `1.5`、`v1.0`、`2.0 GB` 不会被当成文件名吃掉
- *    (那会让「1.5,上限」这类半角标点违规漏检);长度放到 12 是因为仓库实际支持
- *    `.markdown`(8)、`.properties`(10)、`.webmanifest`(11) 这些较长扩展名
- *    (见 packages/maker-shared/src/filePreview.ts),卡在 6 位会让 `worker.markdown`
- *    留在正文里被误报成产品 Worker;
+ *    (那会让「1.5,上限」这类半角标点违规漏检);**不设长度上限**——仓库实际支持的
+ *    扩展名里有 `.webmanifest`(11)、`.gitattributes`(13)、`.browserslistrc`(14)、
+ *    `.prettierignore`(14)(见 packages/maker-shared/src/filePreview.ts),任何具体数字
+ *    都会随支持列表变化而失准,只靠「纯小写字母」这一条约束即可;
  *  - 词干必须含至少一个字母 → 纯数字的 `12.34` 同理排除。
  */
-const FILENAME_TOKEN = /\b[A-Za-z0-9_-]*[A-Za-z][A-Za-z0-9_-]*\.[a-z]{1,12}\b/g;
+const FILENAME_TOKEN = /\b[A-Za-z0-9_-]*[A-Za-z][A-Za-z0-9_-]*\.[a-z]+\b/g;
 
 /**
  * 剥离不该参与术语匹配的片段,避免误报:
@@ -140,6 +143,19 @@ export function countHalfWidthPunct(text) {
 }
 
 /**
+ * 剥掉匹配尾部那个「可选复数 s」——**只在匹配确实比标准长时才剥**。
+ *
+ * 匹配用的正则带 `s?`,于是标准词本身以 s 结尾时(`Credits`、`Full access`),
+ * 无条件 `replace(/s$/, '')` 会把词固有的那个 s 也削掉,拼写完全正确的文案反被判成
+ * 违规(实测 findCaseMismatch('Full access', 'Full access') 返回 'Full acces')。
+ * 目前保留英文的术语恰好都不以 s 结尾,所以还没爆——但只要有人加一条以 s 结尾的
+ * 术语,正确文案就会被门禁全面拒绝。
+ */
+function stripPluralSuffix(match, standard) {
+  return match.length > standard.length ? match.replace(/s$/, '') : match;
+}
+
+/**
  * 大小写形态检查:命中术语但拼写形态与标准不符时返回**第一个不符的**实际拼写,否则 null。
  *
  * 必须扫描全部匹配,不能只看第一个:一条文案里常先出现正确形态、后出现错误形态
@@ -151,7 +167,7 @@ export function findCaseMismatch(text, standard) {
   const escaped = standard.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
   const re = new RegExp(`(?<![${WORD_BOUNDARY}])${escaped}s?(?![${WORD_BOUNDARY}])`, 'gi');
   for (const m of text.matchAll(re)) {
-    const hit = m[0].replace(/s$/, '');
+    const hit = stripPluralSuffix(m[0], standard);
     if (hit !== standard) return hit;
   }
   return null;
@@ -170,7 +186,7 @@ export function countCaseMismatches(text, standard) {
   const re = new RegExp(`(?<![${WORD_BOUNDARY}])${escaped}s?(?![${WORD_BOUNDARY}])`, 'gi');
   let n = 0;
   for (const m of text.matchAll(re)) {
-    if (m[0].replace(/s$/, '') !== standard) n += 1;
+    if (stripPluralSuffix(m[0], standard) !== standard) n += 1;
   }
   return n;
 }
@@ -283,6 +299,13 @@ export function normalizeForPunctuation(text) {
     // 于是那个逗号被误判成正文标点。带上 CJK 后与 TOKEN_TAIL 自身的截断条件一致,不会回溯。
     .replace(new RegExp(`${URL_TOKEN.source}(?=[,;:!?]\\s*[${CJK_CHAR}])`, 'gi'), PROSE_PLACEHOLDER)
     .replace(new RegExp(`${EMAIL_TOKEN.source}(?=[,;:!?]\\s*[${CJK_CHAR}])`, 'g'), PROSE_PLACEHOLDER)
+    // 文件名同理:`编辑 config.json,然后重试` 里的逗号是正文标点,把文件名换成空格
+    // 就没有左边界、违规漏检。仍然只在「紧跟半角标点 + CJK」时才用汉字替身,
+    // 所以 `config.json:12` 这类路径/行号里的冒号不受影响。
+    .replace(
+      new RegExp(`${FILENAME_TOKEN.source}(?=[,;:!?]\\s*[${CJK_CHAR}])`, 'g'),
+      PROSE_PLACEHOLDER,
+    )
     .replace(URL_TOKEN, ' ')
     .replace(EMAIL_TOKEN, ' ')
     .replace(FILENAME_TOKEN, ' ');
