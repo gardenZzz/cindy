@@ -1191,15 +1191,23 @@ export default function LoginScreen() {
         </View>
       </View>
       {accountDeletionStatus && deletionBubbleFrame ? (
-        <AccountDeletionStatusPanel
-          frame={deletionBubbleFrame}
-          onDismiss={
-            accountDeletionStatus.status === 'completed'
-              ? () => void auth.clearAccountDeletionReceipt()
-              : undefined
-          }
-          status={accountDeletionStatus}
-        />
+        // 入场门(PR #464 review,与桌面同口径):opacity 结构性跟随面板入场的
+        // Animated 值(splash=0 → handoff 渐显 → done=1,同一 usePanelEntrance 输出,
+        // 不新造状态机);pointerEvents 仅 done 放行——入场完成前气泡不可见也不可点。
+        <Animated.View
+          pointerEvents={handoffPhase === 'done' ? 'auto' : 'none'}
+          style={[StyleSheet.absoluteFill, { opacity: panelEntrance.opacity }]}
+        >
+          <AccountDeletionStatusPanel
+            frame={deletionBubbleFrame}
+            onDismiss={
+              accountDeletionStatus.status === 'completed'
+                ? () => void auth.clearAccountDeletionReceipt()
+                : undefined
+            }
+            status={accountDeletionStatus}
+          />
+        </Animated.View>
       ) : null}
       {/* 服务条款和隐私协议确认弹窗(figma 602:822/602:1249):个人登录链路在
           radio 未勾选时统一拦截;同意=勾选并续接,不同意=留在登录页。stage 内

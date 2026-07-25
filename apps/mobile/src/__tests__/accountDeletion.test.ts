@@ -244,4 +244,29 @@ describe('mobile account deletion', () => {
     expect(tokens).not.toContain('deletionBubbleText');
     expect(tokens).not.toContain('deletionBubbleTitle');
   });
+
+  it('gates the bubble behind panel entrance (PR #464 review: hidden & non-interactive until done)', () => {
+    const login = source('app/(auth)/login.tsx');
+    // 结构性跟随:气泡包在 Animated.View 里,opacity = panelEntrance.opacity(与登录组
+    // 同一个 usePanelEntrance Animated 值,不新造状态机);pointerEvents 仅
+    // handoffPhase === 'done' 放行——splash/handoff 期间气泡不可见也不可点。
+    const gate = login.slice(
+      login.indexOf('{accountDeletionStatus && deletionBubbleFrame ? ('),
+      login.indexOf('{/* 服务条款和隐私协议确认弹窗'),
+    );
+    expect(gate).toContain('<Animated.View');
+    expect(gate).toContain(
+      "pointerEvents={handoffPhase === 'done' ? 'auto' : 'none'}",
+    );
+    expect(gate).toContain('{ opacity: panelEntrance.opacity }');
+    expect(gate).toContain('StyleSheet.absoluteFill');
+    // 入场完成后(done)才允许交互;disabled/条件渲染等替代形态未引入。
+    expect(gate).not.toContain('disabled=');
+    // 气泡本体仍不引入 Animated(动画只在包装层,组件保持纯静态)。
+    const panel = login.slice(
+      login.indexOf('function AccountDeletionStatusPanel'),
+      login.indexOf('function socialLabel'),
+    );
+    expect(panel).not.toContain('Animated');
+  });
 });
