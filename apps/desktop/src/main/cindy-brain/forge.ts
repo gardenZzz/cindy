@@ -556,8 +556,8 @@ export async function packGhostDir(dir: string): Promise<ForgePackResult> {
     }
     const manifest = v.manifest;
 
-    // 2) locale 资源必须真实、可解析且完整覆盖已声明字段。与装入侧使用
-    // 同一 validator，避免 Forge 能打包、安装却被拒的契约漂移。
+    // 2) locale 资源必须真实、可解析且提供的条目合法(缺译回退原文,不拒)。
+    // 与装入侧使用同一 validator，避免 Forge 能打包、安装却被拒的契约漂移。
     const localeValidation = validateGhostLocaleResourcesInDirectory(dir, manifest);
     if (!localeValidation.ok) {
       return {
@@ -767,8 +767,10 @@ my-ghost/
 \`zh-CN / en / ja / ko\`；插件没提供宿主当前语言时固定使用英文，因此只要声明
 \`locales\` 就必须提供 \`en\`。
 
-每个 locale JSON 完整覆盖清单中已有的可本地化字段；工具按稳定的 tool name 对齐，
-协议键、工具名和参数名不翻译：
+locale JSON 覆盖清单中已有的可本地化字段。**翻译是可选项**：提供的条目必须合法，
+未提供的条目在运行时回退原 manifest 文案(通常是英文)；完整翻译(含每个工具参数
+的 title / description)是高质量插件的推荐标准，但不是打包/装入门槛。工具按稳定的
+tool name 对齐，协议键、工具名和参数名不翻译：
 
 \`\`\`json
 {
@@ -808,16 +810,17 @@ my-ghost/
 }
 \`\`\`
 
-若原清单声明了 \`description\`、\`whenToUse\`、\`tools\`、\`panel.title\`、
-\`network.secrets / connections\`、\`node.secretBindings\` 或 \`setup\` 的 kv 标签，
-每个 locale 文件都必须完整提供对应文案；凭证、连接、Node 凭证和 kv 项按稳定 key 对齐。
-工具参数 schema 中已有的 \`title / description\` 用 JSON Pointer 对齐（如
-\`/properties/query\`；根节点用空字符串 \`""\`），参数名、类型、枚举和协议结构不翻译。
-缺译、未知 key、多余字段、文件缺失、路径大小写与磁盘不一致、无效 JSON 或单文件超过
-64KB 都会在 Forge 打包期、内置播种期与安装期拒绝。清单列表、详情页、Panel 标题、
-安装/配置提示和 Agent 工具目录都消费同一份本地化结果。
+可翻译字段：\`name\`、\`description\`、\`whenToUse\`、\`tools\`(工具 description 与参数
+文案)、\`panel.title\`、\`network.secrets / connections\`、\`node.secretBindings\`、
+\`setup\` 的 kv 标签；凭证、连接、Node 凭证和 kv 项按稳定 key 对齐(提供某个 key 的
+条目时 label 必填,hint 可选)。工具参数 schema 中已有的 \`title / description\` 用
+JSON Pointer 对齐（如 \`/properties/query\`；根节点用空字符串 \`""\`），参数名、类型、
+枚举和协议结构不翻译。缺译不拒绝，只回退原文；但**翻译错位仍是硬错误**——未知
+key、未知字段、原清单没有的条目、类型或长度不合格、文件缺失、路径大小写与磁盘
+不一致、无效 JSON 或单文件超过 64KB 都会在 Forge 打包期、内置播种期与安装期拒绝。
+清单列表、详情页、Panel 标题、安装/配置提示和 Agent 工具目录都消费同一份本地化结果。
 
-十四个卡槽:\`tool\`(注册工具给 AI)、\`cindy\`(请 Cindy 本体代办:出图/改图)、\`agent\`(让
+十五个卡槽:\`tool\`(注册工具给 AI)、\`cindy\`(请 Cindy 本体代办:出图/改图)、\`agent\`(让
 当前 Agent 开始一个普通用户回合,见 §4.11)、\`panel\`(常驻
 面板)、\`card\`(聊天卡片:自绘工具调用的过程与结果,见 §4.5)、\`subscribe\`(旁听会话
 事件 + 拦截用户消息,见 §4.6)、\`network\`(访问自带服务的域名白名单 HTTP,主机代发,
@@ -827,7 +830,8 @@ Node 工作进程或 stdio MCP,见 §4.12)、\`session-context\`(派活时主机
 可信 session_id / workdir / 只读状态注入 args,见 §4.13)、\`pick\`(请主机弹系统选文件夹窗口,
 用户亲选即授权,见 §4.14)、\`preview\`(请主机在右侧栏内置浏览器打开白名单网站的
 预览标签,见 §4.15)、\`skill\`(捆绑 Agent Skills:随包 SKILL.md 技能,启用后
-Claude Code 与 Codex 都能发现,见 §4.16)。
+Claude Code 与 Codex 都能发现,见 §4.16)、\`workspace\`(请主机为项目目录在
+侧边栏创建/复用会话入口,见 §4.17)。
 
 **agent 能力详单**:在 \`slots\` 加 \`"agent"\`，默认只允许在用户真实点击你的
 聊天卡片后发起一次 Agent 回合；这一档不写配套字段。若确实需要没有当次点击也能
@@ -2312,12 +2316,60 @@ SKILL.md 硬规则(打包与装入双侧强制,任一不满足直接拒):
 信任与作用域(如实告知用户,也请作者自重):
 
 - 技能指令由**主 Agent 以用户全部权限执行**,对所有项目、所有会话生效,
-  **不受插件沙箱约束**——这是十四个卡槽里信任面最高的能力,装入确认框会把
+  **不受插件沙箱约束**——这是十五个卡槽里信任面最高的能力,装入确认框会把
   每个技能置顶逐条列出;
 - 技能跟随插件的**全局**启用状态:仅在某个工作目录停用插件**不会**隐藏技能,
   只有全局停用或卸载才撤链(本期只有全局作用域);
 - \`skill.items\` 的字段不参与 locales 本地化(必须与 SKILL.md 逐字一致,而
   SKILL.md 只有一份)。
+## 4.17 创建工作区会话(workspace 槽)
+
+需要把某个项目目录变成侧边栏里的会话入口("打开项目"/仓库列表这类场景)时,
+声明 \`workspace\` 槽,经管子请主机**确保**该目录下存在一个会话:目录下已有
+active 会话直接复用(created:false),没有才创建一个空会话,创建/命中后显示在
+侧边栏对应工作区分组里。
+
+面板里由用户点击发起(推荐,用户在系统窗口亲选目录即授权):
+
+\`\`\`js
+const ensured = await cindy.workspace({
+  kind: 'ensure-session',
+  mode: 'pick',                    // 主机弹系统选文件夹窗口
+  title: '选择要打开的项目目录',    // 用途说明(≤100 字),也用作新会话标题
+  focus: true                      // 可选:创建/命中后跳转聚焦到该会话,缺省只落侧边栏
+});
+if (ensured.ok) {
+  // ensured.sessionId —— 会话 id
+  // ensured.created   —— true = 新建;false = 命中已有会话复用
+  // ensured.name      —— 目录名(展示用;绝对路径不会给你)
+}
+\`\`\`
+
+处理 ghost_call 工具调用期间已经拿到目录路径时,可改用 dir 模式,带上本单 callId:
+
+\`\`\`js
+// main.js 的 tool-call 处理器里(msg.callId 是主机随单下发的)
+const ensured = await cindy.workspace({
+  kind: 'ensure-session',
+  mode: 'dir',
+  dir: '/Users/me/projects/demo',  // 本机绝对路径
+  callId: msg.callId               // 主机铸造的上下文凭证,只在本单在途期间有效
+});
+\`\`\`
+
+规则与红线:
+
+- \`mode:'pick'\` 的授权动作是用户亲手选中,取消回 CANCELLED——**尊重取消,不要
+  循环重弹**;绝对路径不回沙箱,你只拿到目录名与会话 id;
+- \`mode:'dir'\` 只能在处理 ghost_call 期间用:callId 配对失败回 PERMISSION_DENIED;
+  目录在发起会话的工作目录内自动放行,之外弹确认卡由用户决定(拒绝/超时回
+  CANCELLED,不要重试,如确有需要先与用户沟通);目录必须真实存在
+  (DIR_NOT_FOUND / NOT_DIRECTORY);
+- 只支持本机目录,远程(SSH)工作区一律拒;
+- 同一插件两次请求最小间隔 3 秒、全局同时只有一个窗口/确认卡在场(RATE_LIMITED /
+  BUSY);
+- 创建的是**空会话**:不拉起 agent、不发消息、不自动开始任何任务;要让 Agent
+  立即干活请配合 agent 槽(§4.11)。
 
 ## 5. 面板(panel.html/css/js)
 

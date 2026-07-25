@@ -540,3 +540,31 @@ test('validateAgainstSchema: schema 的 pattern 写坏时报可读错误而不�
   assert.equal(errors.length, 1);
   assert.match(errors[0], /\$\.id: schema 的 pattern 不是合法正则/);
 });
+
+test('validateAgainstSchema: 关键字的值形状写错必须报错而不是被曲解', () => {
+  // type: ["string","null"] 是合法 draft-07,但本模块只实现字符串形态——
+  // 拿数组去比对会永远不等,那条 type 约束就在「看似生效」的外表下彻底失效
+  assert.throws(
+    () => validateAgainstSchema({}, { type: 'object', properties: { a: { type: ['string', 'null'] } } }),
+    /"type" 应是 string,实际是 array/,
+  );
+  // properties 写成数组
+  assert.throws(
+    () => validateAgainstSchema({}, { type: 'object', properties: [] }),
+    /"properties" 应是 object,实际是 array/,
+  );
+  // required 写成字符串
+  assert.throws(
+    () => validateAgainstSchema({}, { type: 'object', required: 'id' }),
+    /"required" 应是 array,实际是 string/,
+  );
+  // additionalProperties 允许 boolean 与 schema 对象两种,其余报错
+  assert.doesNotThrow(() => validateAgainstSchema({}, { type: 'object', additionalProperties: false }));
+  assert.doesNotThrow(() =>
+    validateAgainstSchema({}, { type: 'object', additionalProperties: { type: 'string' } }),
+  );
+  assert.throws(
+    () => validateAgainstSchema({}, { type: 'object', additionalProperties: 'yes' }),
+    /additionalProperties 只支持 boolean 或 schema 对象/,
+  );
+});
