@@ -902,9 +902,19 @@ The execution rulebook for subsequent desktop / mobile UI updates. Sources: the 
 | `sso-org`（`identifier` 局部子视图，非共享 step） | 输入企业 ID / 组织 slug / 已验证域名跳转 SSO（`ssoOrgMode`） | `LoginInput` + `LoginPrimaryButton` + `LoginTextLinkSlot`（ssoOrgHint） |
 | `account-selection` | 服务端返回 ≥2 membership，用户选一个 | account row + `LoginTitleBlock`（`chooseAccount`） |
 | `binding` | 身份未绑 membership，补绑 phone / email（`codeRequested` 两子态；**无重发钮**，桌面 harness 锁定） | `LoginInput` / `LoginSkinPhoneInput` → `LoginInput`(center) + `LoginPrimaryButton` |
-| `account-deletion`（状态面板） | 账号删除**状态展示**（发起流程在 Settings 的 `AccountDeletionSection`；登录页仅在存在删除回执时于面板内展示 status，非主状态机 step） | `AccountDeletionStatusPanel`（登录皮容器内） |
+| `account-deletion`（状态浮层） | 账号删除**状态展示**（发起流程在 Settings 的 `AccountDeletionSection`；登录页仅在存在删除回执时以**根层浮层气泡**展示 status，非主状态机 step；详见下方「注销状态浮层气泡」） | `AccountDeletionStatusPanel`（**登录皮容器外**的根层浮层，非面板内） |
 | `browser-redirect` | 社交 / SSO 跳浏览器验证，等待回调 | `LoginLoadingRing` + `LoginPrimaryButton`（取消）+ `LoginTitleBlock` |
 | `completed` / `error` | 登录成功 / 失败（含 browser 回调终态页） | 成功无面板（进主界面）；error = `LoginTitleBlock` + `LoginPrimaryButton`（重试）+ `LoginErrorText`；browser 回调页 `oauthResultPage`（系统浏览器独立 HTML，main 侧内联常量,色值与 `--login-callback-*` token 同源——renderer CSS var 不可达,改值需两处同步） |
+
+**注销状态浮层气泡（figma 678:1075「注销状态」组件集，2026-07-26 定形）**：账号注销状态**不在登录面板内**，而是登录屏根容器的 absolute 浮层——历史实现曾把它放在登录皮容器（`LoginStage`）的文档流首子位置，被 `absolute; top:0` 的不透明登录面板 100% 覆盖（`pending` / `processing` / `completed` 三态全中，修复前证据见 `docs/design-previews/deletion-banner-repro/`）；**改回面板内即重现该缺陷，不得回退**。
+
+- **层级与布局**：不占布局流、不推挤下方内容，**允许盖住立绘与字标**（设计意图，figma iPhone 帧即压立绘 91px）；桌面 `z-30`（低于顶部拖拽条 `z-40`、协议弹窗 `z-50`），移动端靠渲染序位于登录组之后、协议弹窗之前。不随 `loginScale` / stage 缩放，不随键盘位移。
+- **显隐**：跟随面板入场——opacity 复用登录组同一入场动画值，入场完成前不可见且不可点击（桌面 `panelHidden` / 移动端 `handoffPhase === 'done'` 门控 `pointerEvents`），避免冷启动带注销回执时气泡先于登录 UI 出现在 splash 上。协议弹窗打开时，Android 需与登录组同步 `importantForAccessibility="no-hide-descendants"`（`accessibilityViewIsModal` 仅 iOS 生效，否则 TalkBack 可穿透读到状态文案并激活「我知道了」）。
+- **几何**：桌面 距窗口顶 72、水平居中、宽 `min(670, 100vw − 48)`；phone 贴 safe-area 顶（间距 0）、宽 `min(335, 屏宽 − 40)` 居中；pad 距顶 72、宽 556，横屏中轴取登录 stage 右半屏中心（0.75）与字标同轴、竖屏取屏幕中心，`left` 钳制在屏内。高度**由内容撑开**，禁止固定高。
+- **视觉**：圆角 22、四边 padding 20、1px 描边、**不透明底**（浮层压立绘必须不透明，不靠阴影 / 模糊）；无图标、无阴影、无动效。标题与正文同为 20px / 行高 23 / Regular 400、全部居中（长文案居中换行），仅以颜色区分层级（标题 `--login-control-text` / 正文 `--login-secondary-text`）；标题↔正文 5、正文↔「我知道了」22、**「我知道了」↔气泡底固定 20**（= 下 padding，文案拉长该距不变）。
+- **「我知道了」**（仅 `completed` 态）：下划线文字链（非按钮），点击热区扩至 ≥44×44，视觉不变。
+- **颜色**：底 `--login-deletion-bubble-bg`（#FFFFFF / #1F1F1E）、描边 `--login-deletion-bubble-border`（#D7D7D4 / #3C3C3A），均为**固定亮 / 暗二值**——与 §16.2「`--login-*` 只分 light / dark、不随扩展主题」一致，**不得**改用 `var(--surface)` / `var(--chat-input-*)` 等会被扩展主题 override 的 alias（同 `--login-bg-base` 的改判先例）；移动端色板逐值一致。
+- **状态与文案**：`pending`（预计删除日期 + 重新登录可取消）/ `processing`（等待期结束、正在删除）/ `completed`（已删除 + 「我知道了」）三态；`cancelled` 在轮询侧拦截、不渲染气泡（改为登录后的一次性「注销已取消」提示）。四语言（zh-CN / en / ja / ko）× light / dark 全覆盖。
 
 ### 16.5 深色模式与主题跟随
 
