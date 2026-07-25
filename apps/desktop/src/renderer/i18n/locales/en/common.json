@@ -7100,7 +7100,6 @@
     "sidebar": "Credits & plans",
     "settings": {
       "title": "Usage and billing",
-      "subtitle": "Review your available credits and current plan, or buy more credits as needed.",
       "subscriptionCard": {
         "title": "Current plan",
         "empty": "No active subscription",
@@ -7115,10 +7114,6 @@
         "endsAt": "Plan ends {{date}}"
       },
       "topupCard": {
-        "title": "Credits",
-        "description": "Purchase credits for usage-based models and features.",
-        "cardTitle": "Buy credits as needed",
-        "cardDescription": "Add to your available credits as needed. The checkout page shows the final amount.",
         "action": "Buy credits"
       }
     },
@@ -7132,17 +7127,16 @@
       "unavailable": "Balance is temporarily unavailable. Refresh to try again."
     },
     "usage": {
+      "title": "Credit usage",
       "observedAt": "Balance updated {{date}}",
       "used": "Used",
       "total": "Total",
       "remaining": "Remaining",
       "progressLabel": "{{label}} usage",
       "historyUnavailable": "Usage history is incomplete. Only the remaining balance is available.",
-      "percentUsed": "{{percent}}% used",
       "detailsUnavailable": "Usage details are temporarily unavailable. Current balances are shown instead.",
       "promotionalDetails": {
         "title": "Promotional Credit Details",
-        "description": "Current grants and the total balance use the same credit snapshot. Used amounts include model consumption only.",
         "count": "{{count}} grants",
         "empty": "No promotional credit grants are available.",
         "incomplete": "There are many grant records. Only the latest {{count}} are shown.",
@@ -7161,31 +7155,15 @@
     },
     "dialogs": {
       "subscription": {
-        "title": "Choose a subscription plan",
-        "description": "Server-published subscription plans are shown. Plans that cannot be purchased yet include a status."
+        "title": "Choose a subscription plan"
       },
       "topup": {
-        "title": "Buy credits",
-        "description": "Server-published credit products are shown. Products that cannot be purchased yet include a status."
+        "title": "Buy credits"
       }
     },
-    "eyebrow": "Account & usage",
-    "title": "Choose the plan that fits",
-    "subtitle": "Plans and payment methods are delivered by the server. Choose a plan first to see its currently supported payment methods.",
     "steps": {
-      "offer": {
-        "title": "Choose a plan",
-        "description": "Server-published credit and subscription offers are shown."
-      },
       "channel": {
-        "title": "Choose a payment method",
-        "description": "Supported payment methods can differ by plan.",
-        "selectOfferFirst": "Choose a plan to see its supported payment methods"
-      },
-      "confirm": {
-        "title": "Review and pay",
-        "description": "Review the plan and payment method before creating payment.",
-        "selectChannelFirst": "Choose a payment method to continue"
+        "title": "Choose a payment method"
       }
     },
     "actions": {
@@ -7205,10 +7183,6 @@
         "OFFER_COMING_SOON": "Coming Soon",
         "NO_AVAILABLE_PAYMENT_CHANNEL": "No Payment Method Available"
       }
-    },
-    "offerKinds": {
-      "topup": "Credit top-up",
-      "subscription": "Subscription"
     },
     "amount": {
       "custom": "Custom amount",
@@ -7281,8 +7255,6 @@
     },
     "planChange": {
       "targetTitle": "Change subscription plan",
-      "targetDescription": "Plan changes keep your current payment method. The final price and effective time are confirmed on the next step.",
-      "targetDescriptionWithCurrent": "Current plan: {{plan}}. Plan changes keep your current payment method; the final price and effective time are confirmed on the next step.",
       "upgradeBadge": "Upgrade",
       "downgradeBadge": "Downgrade",
       "emptyTitle": "No plans available to switch to",
