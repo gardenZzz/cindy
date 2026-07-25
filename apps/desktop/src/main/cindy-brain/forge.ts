@@ -1113,6 +1113,11 @@ const r = await cindy.send({ type: 'cindy-request', kind: 'gen_image', prompt: '
 //     交卷 note,让用户看得见"这单是谁画的"。
 //     width/height = 图片真实像素宽高(仅图片代办;主机解析不出时缺省)——供
 //     聊天卡片时用它按比例精确声明卡高(见 §4.5),别拿去写进交卷文案。
+// 生图可选画幅 aspectRatio:'1:1' 方图 / '3:2' 横图 / '2:3' 竖图,不传 = 模型自定:
+//   { kind: 'gen_image', prompt: '一只猫', aspectRatio: '3:2' }
+//   比例是意图声明(同 tier 哲学),主机翻译成该模型支持的具体尺寸,真实像素
+//   以返回的 width/height 为准。**仅生图收**——改图跟随源图画幅、视频不收比例,
+//   带上会被拒;用户没提横竖要求时别自作主张,不传让模型自定。
 // 改图(需详单含 "edit";源图必须是本意识名下的,1–4 张——含用户过户给你的
 // args.attachments 指纹):
 //   { kind: 'edit_image', prompt, hashes: ['<指纹>'] }
