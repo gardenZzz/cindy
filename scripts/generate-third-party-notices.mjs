@@ -1200,10 +1200,11 @@ function assertTrackedBinariesRegistered() {
     ".woff",
     ".woff2",
   ]);
+  // cindy-updater.exe 不在列:它已不入仓(Windows 打包时现场 cargo build 生成,
+  // 见 .gitignore)。若有人绕过 ignore 把它提交回来,这里会主动拦下要求登记。
   const registeredPrefixes = [
     "apps/android-platform-tools-bin/",
     "apps/desktop/native/sqlite-vec/",
-    "apps/desktop/resources/cindy-updater.exe",
     "apps/mobile/assets/fonts/JetBrainsMono-",
   ];
   const files = execFileSync("git", ["ls-files", "-z"], {
