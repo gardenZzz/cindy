@@ -235,6 +235,10 @@ import {
   installPowerEventDiagnostics,
   installWindowResponsivenessDiagnostics,
 } from './powerWakeDiagnostics';
+import {
+  broadcastVoiceInputPowerState,
+  installVoiceInputPowerRelease,
+} from './voice-input/powerReleaseNotifier';
 import { reapClaudeOrphansSync } from './claude-orphan-reaper';
 import { initAppBadgeService, clearAllSessionAttention } from './appBadgeService';
 import { initNotificationService } from './notificationService';
@@ -777,6 +781,7 @@ const authBoundaryLog = createLogger('auth-boundary');
 // 主窗 renderer 加载失败可观测性 + dev 启动看门狗(见 renderer-boot-guard.ts 顶部注释)。
 const rendererGuardLog = createLogger('renderer-guard');
 const updatePresentationLog = createLogger('update-presentation');
+const voicePowerBroadcastLog = createLogger('voice-input-power');
 let rendererBootGuard: RendererBootGuard | null = null;
 
 const lifecycleDbClientManager = createLifecycleDbClientManager({
@@ -5555,6 +5560,20 @@ app.on('ready', async () => {
   // 睡醒白屏取证:suspend/resume/lock/unlock 全部落日志,给 renderer 侧
   // render-watchdog 的漂移/无帧日志提供时间锚点。
   installPowerEventDiagnostics({ powerMonitor });
+
+  // 挂起/锁屏时通知 renderer 释放语音输入的保活麦克风(用户已离开,再占着采集
+  // 设备只剩隐私指示灯常亮和 idle-sleep assertion 的代价)。
+  installVoiceInputPowerRelease({
+    powerMonitor,
+    broadcast: (channel, payload) => {
+      broadcastVoiceInputPowerState(
+        BrowserWindow.getAllWindows(),
+        channel,
+        payload,
+        voicePowerBroadcastLog,
+      );
+    },
+  });
 
   // ── System resume: refresh tokens after sleep/hibernate ──
   powerMonitor.on('resume', () => {

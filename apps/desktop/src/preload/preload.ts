@@ -26,6 +26,7 @@ import {
 } from '../shared/windowBehavior';
 import { SELECTION_CONTEXT_MENU_ADD_TO_CHAT_CHANNEL } from '../shared/selectionContextMenu';
 import { SESSION_ATTENTION_CLEARED_CHANNEL } from '../shared/sessionAttention';
+import { VOICE_INPUT_POWER_STATE_CHANNEL } from '../shared/voiceInputPowerIpc';
 import {
   type ApplicationMenuCommand,
   isApplicationMenuCommand,
@@ -335,6 +336,8 @@ const fanOutVoiceInputGlobalShortcutTrigger = createIpcFanOut('voice-input:globa
 const fanOutVoiceInputGlobalOverlayCommand = createIpcFanOut('voice-input:global-overlay-command');
 const fanOutVoiceInputDictionaryLearningEvidence = createIpcFanOut('voice-input:dictionary-learning-evidence');
 const fanOutVoiceInputDataChanged = createIpcFanOut('voice-input:data-changed');
+// 挂起/锁屏 → renderer 释放 fast activation 的保活麦克风(见 shared/voiceInputPowerIpc)。
+const fanOutVoiceInputPowerStateChange = createIpcFanOut(VOICE_INPUT_POWER_STATE_CHANNEL);
 // 应用级快捷键 override 变化广播 (设置页改绑 / reset 后 main 推全量 overrides,
 // renderer 侧 appShortcutStore 订阅热更新)。
 const fanOutAppShortcutsChanged = createIpcFanOut('app-shortcuts:changed');
@@ -996,6 +999,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
     adviseDictionaryLearning: (payload: unknown): Promise<unknown> =>
       ipcRenderer.invoke('voice-input:dictionary-learning:advise', payload),
     onDictionaryLearningEvidence: fanOutVoiceInputDictionaryLearningEvidence,
+    onPowerStateChange: fanOutVoiceInputPowerStateChange,
     notifyGlobalOverlayReady: (): void =>
       ipcRenderer.send('voice-input:global-overlay-ready'),
     pasteIntoFocusedTarget: (text: string, rawTranscriptText?: string): Promise<VoiceInputGlobalResult> =>
