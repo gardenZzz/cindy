@@ -28,36 +28,26 @@ const PLUGIN_KEY = new PluginKey<DecorationSet>('composerListIndentDecoration');
 
 /** 行内一个非文本 inline 节点(mention chip 等)的占位符,与 applyListContinuation 一致。 */
 const ATOM_PLACEHOLDER = '\uFFFC';
-
-/** 浏览器默认 tab stop 是 8 个空格,并与 CSS 的 tab-size 保持一致。 */
-const TAB_SIZE_CH = 8;
+const CJK_PUNCTUATION_RE = /[\u3000-\u303f\uff00-\uffef]/;
 
 /**
  * 将列表前缀换算成当前字体下的近似宽度。
  *
  * ChatInput 已启用 tabular-nums,所以数字直接用 1ch;句点、空格、方括号等
- * 窄字符按 0.4ch 估算;中文顿号按全角 1em。制表符按当前列位置推进到下一个
- * 8 空格 tab stop。这里只生成数字和 CSS 单位,不会透传用户文本。
+ * 窄字符按 0.4ch 估算;中文顿号按全角 1em。这里只生成数字和 CSS 单位,
+ * 不会透传用户文本。含 Tab 的行由调用方跳过,因为比例字体下无法用 ch
+ * 准确复现浏览器的 tab advance。
  */
 export function listPrefixIndentStyle(prefix: string): string {
   let ch = 0;
   let em = 0;
-  let columns = 0;
   for (const char of prefix) {
     if (char >= '0' && char <= '9') {
       ch += 1;
-      columns += 1;
     } else if (char === '、' || char === '\u3000') {
       em += 1;
-      columns += 2;
-    } else if (char === '\t') {
-      const remainder = columns % TAB_SIZE_CH;
-      const advance = remainder === 0 ? TAB_SIZE_CH : TAB_SIZE_CH - remainder;
-      ch += advance;
-      columns += advance;
     } else {
       ch += 0.4;
-      columns += 0.4;
     }
   }
   const chValue = Number(ch.toFixed(2));
@@ -91,21 +81,19 @@ export function buildListIndentDecorations(doc: PMNode): DecorationSet {
     let lineStartOffset = 0;
     let lineEndOffset = 0;
     let lineHasInlineAtom = false;
+    const lines: Array<{
+      text: string;
+      start: number;
+      end: number;
+      hasInlineAtom: boolean;
+    }> = [];
     const flushLine = () => {
-      const match = matchListPrefix(lineText);
-      // Inline decorations apply their attributes to every covered inline node.
-      // A mixed text/atom line would split the full-width wrapper around the atom
-      // and turn chips into blocks, so leave those lines untouched.
-      if (!match || lineHasInlineAtom) return;
-      const from = contentBase + lineStartOffset;
-      const to = contentBase + lineEndOffset;
-      const prefix = lineText.slice(0, match.prefixLength);
-      decorations.push(
-        Decoration.inline(from, to, {
-          class: 'composer-list-line-indent',
-          style: listPrefixIndentStyle(prefix),
-        }),
-      );
+      lines.push({
+        text: lineText,
+        start: lineStartOffset,
+        end: lineEndOffset,
+        hasInlineAtom: lineHasInlineAtom,
+      });
     };
     block.nodesBetween(0, block.content.size, (node, pos) => {
       if (node.type.name === 'hardBreak') {
@@ -128,6 +116,56 @@ export function buildListIndentDecorations(doc: PMNode): DecorationSet {
     });
     lineEndOffset = block.content.size;
     flushLine(); // 段落最后一行
+
+    const addLineDecoration = (line: (typeof lines)[number]) => {
+      const match = matchListPrefix(line.text);
+      // Inline decorations apply their attributes to every covered inline node.
+      // A mixed text/atom line would split the full-width wrapper around the atom
+      // and turn chips into blocks, so leave those lines untouched.
+      // Tab-indented and CJK-punctuated lines are also skipped in the inline
+      // fallback: their rendered width cannot be represented safely by a split
+      // inline wrapper.
+      if (
+        !match ||
+        line.hasInlineAtom ||
+        line.text.slice(0, match.prefixLength).includes('\t') ||
+        CJK_PUNCTUATION_RE.test(line.text)
+      ) {
+        return;
+      }
+      const from = contentBase + line.start;
+      const to = contentBase + line.end;
+      const prefix = line.text.slice(0, match.prefixLength);
+      decorations.push(
+        Decoration.inline(from, to, {
+          class: 'composer-list-line-indent',
+          style: listPrefixIndentStyle(prefix),
+        }),
+      );
+    };
+
+    if (lines.length === 1) {
+      const [line] = lines;
+      const match = line && matchListPrefix(line.text);
+      const prefix = match ? line.text.slice(0, match.prefixLength) : '';
+      // A node decoration stays on the paragraph even when CjkPunctDecoration
+      // adds nested inline spans, so punctuation cannot split the list wrapper.
+      if (
+        line &&
+        match &&
+        !line.hasInlineAtom &&
+        !prefix.includes('\t')
+      ) {
+        decorations.push(
+          Decoration.node(blockPos, blockPos + block.nodeSize, {
+            class: 'composer-list-block-indent',
+            style: listPrefixIndentStyle(prefix),
+          }),
+        );
+      }
+    } else {
+      lines.forEach(addLineDecoration);
+    }
 
     return false; // textblock 内部已手动扫过,不再下钻
   });
