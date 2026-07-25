@@ -46,6 +46,35 @@ const check = (id, ok, detail) => {
   console.log(`${ok ? 'PASS' : 'FAIL'} ${id}${detail ? '  ' + detail : ''}`);
 };
 
+// 收尾落盘抽成函数 + 顶层异常兜底(Copilot 审查):任一 page.evaluate 里的 selector
+// 缺失都会抛异常,若直接崩掉就既没有结构化 FAIL、也不落 evidence,排查无从下手。
+// 这里把「记一条 harness 失败 + 照常落盘 + exit 2」做成兜底,覆盖全部取元素点位。
+let evidenceWritten = false;
+function writeEvidence() {
+  if (evidenceWritten) return;
+  evidenceWritten = true;
+  const evidenceDir = join(demoDir, 'evidence');
+  if (!existsSync(evidenceDir)) mkdirSync(evidenceDir, { recursive: true });
+  const out = {
+    gate: 'interaction',
+    pass: failures === 0,
+    total: results.length,
+    passed: results.filter((r) => r.pass).length,
+    failures,
+    generatedAt: new Date().toISOString(),
+    results,
+  };
+  writeFileSync(join(evidenceDir, 'interaction-gate.json'), JSON.stringify(out, null, 1) + '\n');
+  console.log(`\n交互门: ${out.passed}/${out.total} pass,evidence → evidence/interaction-gate.json`);
+}
+function bail(err) {
+  check('harness', false, `门执行中断:${err && err.message ? err.message : String(err)}(DOM 结构变了?selector 未命中?)`);
+  writeEvidence();
+  process.exit(2);
+}
+process.on('uncaughtException', bail);
+process.on('unhandledRejection', bail);
+
 const browser = await chromium.launch();
 const page = await (await browser.newContext({ viewport: { width: 1440, height: 960 } })).newPage();
 const base = pathToFileURL(join(demoDir, 'index.html')).href;
@@ -155,9 +184,5 @@ for (const [w, want] of [[390, 335], [374, 334], [335, 295]]) {
 
 await browser.close();
 
-const evidenceDir = join(demoDir, 'evidence');
-if (!existsSync(evidenceDir)) mkdirSync(evidenceDir, { recursive: true });
-const out = { gate: 'interaction', pass: failures === 0, total: results.length, passed: results.filter((r) => r.pass).length, failures, generatedAt: new Date().toISOString(), results };
-writeFileSync(join(evidenceDir, 'interaction-gate.json'), JSON.stringify(out, null, 1) + '\n');
-console.log(`\n交互门: ${out.passed}/${out.total} pass,evidence → evidence/interaction-gate.json`);
+writeEvidence();
 process.exit(failures === 0 ? 0 : 2);

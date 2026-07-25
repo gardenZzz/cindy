@@ -171,9 +171,13 @@ if (/\? 'auto' : 'none'/.test(mGateTag[0]))
   throw new Error("mobile 气泡包装层 pointerEvents 出现 'auto'——会挡住下方登录组命中(Greptile P1 回归)");
 if (!/style=\{\[StyleSheet\.absoluteFill, \{ opacity: panelEntrance\.opacity \}\]\}/.test(mGateTag[0]))
   throw new Error('mobile 气泡入场门 opacity=panelEntrance.opacity 未命中');
-// Android 读屏隔离(PR #464 codex):协议弹窗打开时与登录组同步隐藏
-if (!/importantForAccessibility=\{consentDialogOpen \? 'no-hide-descendants' : 'auto'\}/.test(mGateTag[0]))
-  throw new Error('mobile 气泡 Android 无障碍隐藏(consentDialogOpen)未命中');
+// 读屏隔离(PR #464 codex):iOS + Android 双端属性,条件覆盖「弹窗打开」与「入场未完成」
+if (!/accessibilityElementsHidden=\{deletionBubbleA11yHidden\}/.test(mGateTag[0]))
+  throw new Error('mobile 气泡 iOS 读屏隐藏(accessibilityElementsHidden)未命中');
+if (!/importantForAccessibility=\{\s*deletionBubbleA11yHidden \? 'no-hide-descendants' : 'auto'\s*\}/.test(mGateTag[0]))
+  throw new Error('mobile 气泡 Android 读屏隐藏(importantForAccessibility)未命中');
+if (!/const deletionBubbleA11yHidden = consentDialogOpen \|\| handoffPhase !== 'done';/.test(mLoginSrc))
+  throw new Error('mobile 气泡读屏隐藏条件(弹窗打开 || 入场未完成)未命中');
 
 // loginPalettes 双色板
 const mPalettesObj = extractConstObject(mTokensSrc, 'loginPalettes');
@@ -256,7 +260,7 @@ const truth = {
       dismissHitSlop: leaf('hitSlop {top:12,bottom:12,left:20,right:20} → 热区 47≥44', M.loginTsx, 'login.tsx hitSlop={LOGIN_DELETION_BUBBLE.linkHitSlop}'),
       dismissGate: leaf('仅 completed 态渲染 dismiss Pressable(onDismiss 仅 completed 传入)', M.loginTsx, 'login.tsx:1315-1327 {onDismiss ? <Pressable/> : null}'),
       entranceGate: leaf("Animated.View 包装:opacity=panelEntrance.opacity(与登录组同一 Animated 值);pointerEvents 仅 handoffPhase==='done' 放行且取 box-none(全屏包装层不作触摸目标,避免挡住下方登录组命中;入场完成前 none = 不可见不可点)(PR #464 review)", M.loginTsx, 'login.tsx 气泡渲染点 Animated.View pointerEvents/style'),
-      a11yModalGate: leaf("协议弹窗打开时气泡与登录组同步 importantForAccessibility='no-hide-descendants'——accessibilityViewIsModal 仅 iOS 生效,Android TalkBack 需显式隐藏(PR #464 codex)", M.loginTsx, 'login.tsx 气泡渲染点 Animated.View importantForAccessibility'),
+      a11yModalGate: leaf("气泡对读屏隐藏 = 协议弹窗打开 || 入场未完成;iOS accessibilityElementsHidden + Android importantForAccessibility 双端都给(opacity/pointerEvents 不影响读屏,不隐藏则会念出不可见的注销状态)(PR #464 codex)", M.loginTsx, 'login.tsx 气泡渲染点 Animated.View importantForAccessibility'),
     },
   },
   desktop: {

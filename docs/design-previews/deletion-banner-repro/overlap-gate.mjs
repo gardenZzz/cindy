@@ -47,6 +47,43 @@ const STATES = ['deletion-pending', 'deletion-processing', 'deletion-completed']
 const results = [];
 let failures = 0;
 
+// 收尾落盘抽成函数 + 顶层异常兜底(Copilot 审查):任一 page.evaluate 里的 selector
+// (#frameBug / .db-banner / .lp-panel 及意图帧等价物)缺失都会抛异常,直接崩掉就
+// 既没有结构化 FAIL、也不落 evidence。这里统一「记 harness 失败 + 照常落盘 + exit 2」。
+let evidenceWritten = false;
+function writeEvidence() {
+  if (evidenceWritten) return;
+  evidenceWritten = true;
+  const evidenceDir = join(demoDir, 'evidence');
+  if (!existsSync(evidenceDir)) mkdirSync(evidenceDir, { recursive: true });
+  const out = {
+    gate: 'overlap',
+    pass: failures === 0,
+    total: results.length,
+    passed: results.filter((r) => r.pass).length,
+    failures,
+    generatedAt: new Date().toISOString(),
+    results,
+  };
+  writeFileSync(join(evidenceDir, 'overlap-gate.json'), JSON.stringify(out, null, 1) + '\n');
+  console.log(`\n重叠门: ${out.passed}/${out.total} pass,evidence → evidence/overlap-gate.json`);
+}
+function bail(err) {
+  failures++;
+  results.push({
+    case: 'harness',
+    state: '-',
+    pass: false,
+    checks: { harness_ok: false },
+    metrics: { error: err && err.message ? err.message : String(err) },
+  });
+  console.log(`FAIL harness 门执行中断:${err && err.message ? err.message : String(err)}(DOM 结构变了?selector 未命中?)`);
+  writeEvidence();
+  process.exit(2);
+}
+process.on('uncaughtException', bail);
+process.on('unhandledRejection', bail);
+
 const browser = await chromium.launch();
 const page = await (await browser.newContext({ viewport: { width: 1440, height: 960 } })).newPage();
 const base = pathToFileURL(join(demoDir, 'index.html')).href;
@@ -109,17 +146,5 @@ for (const tc of CASES) {
 }
 await browser.close();
 
-const evidenceDir = join(demoDir, 'evidence');
-if (!existsSync(evidenceDir)) mkdirSync(evidenceDir, { recursive: true });
-const out = {
-  gate: 'overlap',
-  pass: failures === 0,
-  total: results.length,
-  passed: results.filter((r) => r.pass).length,
-  failures,
-  generatedAt: new Date().toISOString(),
-  results,
-};
-writeFileSync(join(evidenceDir, 'overlap-gate.json'), JSON.stringify(out, null, 1) + '\n');
-console.log(`\n重叠门: ${out.passed}/${out.total} pass,evidence → evidence/overlap-gate.json`);
+writeEvidence();
 process.exit(failures === 0 ? 0 : 2);
