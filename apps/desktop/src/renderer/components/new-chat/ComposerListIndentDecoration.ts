@@ -14,7 +14,7 @@
  * - decoration 只是渲染层,doc JSON / 草稿存储 / 发送内容里没有任何痕迹;
  * - doc 没变直接复用 DecorationSet,变了全量重扫(chat input 文本量小,
  *   全量成本可忽略,不值得做增量映射);
- * - IME 组合期不重算,避免 DOM 抖动打断输入法候选框;
+ * - 只在 doc 发生变化时重算,view.update 不参与 decoration 计算;
  * - 这是纯文本编辑器的视觉缩进,不改变 doc JSON / 发送文本。
  */
 import { Extension } from '@tiptap/core';
@@ -29,23 +29,35 @@ const PLUGIN_KEY = new PluginKey<DecorationSet>('composerListIndentDecoration');
 /** 行内一个非文本 inline 节点(mention chip 等)的占位符,与 applyListContinuation 一致。 */
 const ATOM_PLACEHOLDER = '\uFFFC';
 
+/** 浏览器默认 tab stop 是 8 个空格,并与 CSS 的 tab-size 保持一致。 */
+const TAB_SIZE_CH = 8;
+
 /**
  * 将列表前缀换算成当前字体下的近似宽度。
  *
  * ChatInput 已启用 tabular-nums,所以数字直接用 1ch;句点、空格、方括号等
- * 窄字符按 0.4ch 估算;中文顿号按全角 1em。正负值成对写入,供 padding-left
- * 与 text-indent 组成悬挂缩进。这里只生成数字和 CSS 单位,不会透传用户文本。
+ * 窄字符按 0.4ch 估算;中文顿号按全角 1em。制表符按当前列位置推进到下一个
+ * 8 空格 tab stop。这里只生成数字和 CSS 单位,不会透传用户文本。
  */
 export function listPrefixIndentStyle(prefix: string): string {
   let ch = 0;
   let em = 0;
+  let columns = 0;
   for (const char of prefix) {
     if (char >= '0' && char <= '9') {
       ch += 1;
+      columns += 1;
     } else if (char === '、' || char === '\u3000') {
       em += 1;
+      columns += 2;
+    } else if (char === '\t') {
+      const remainder = columns % TAB_SIZE_CH;
+      const advance = remainder === 0 ? TAB_SIZE_CH : TAB_SIZE_CH - remainder;
+      ch += advance;
+      columns += advance;
     } else {
       ch += 0.4;
+      columns += 0.4;
     }
   }
   const chValue = Number(ch.toFixed(2));
@@ -57,14 +69,6 @@ export function listPrefixIndentStyle(prefix: string): string {
   return [
     `--composer-list-hang:${positive}`,
     `--composer-list-hang-negative:${negative}`,
-    'display:inline-block',
-    'box-sizing:border-box',
-    'width:100%',
-    'padding-left:calc(1em + var(--composer-list-hang))',
-    'text-indent:var(--composer-list-hang-negative)',
-    'vertical-align:top',
-    'overflow-wrap:anywhere',
-    'word-break:break-all',
   ]
     .map((declaration) => `${declaration};`)
     .join('');
@@ -86,9 +90,13 @@ export function buildListIndentDecorations(doc: PMNode): DecorationSet {
     let lineText = '';
     let lineStartOffset = 0;
     let lineEndOffset = 0;
+    let lineHasInlineAtom = false;
     const flushLine = () => {
       const match = matchListPrefix(lineText);
-      if (!match) return;
+      // Inline decorations apply their attributes to every covered inline node.
+      // A mixed text/atom line would split the full-width wrapper around the atom
+      // and turn chips into blocks, so leave those lines untouched.
+      if (!match || lineHasInlineAtom) return;
       const from = contentBase + lineStartOffset;
       const to = contentBase + lineEndOffset;
       const prefix = lineText.slice(0, match.prefixLength);
@@ -107,12 +115,14 @@ export function buildListIndentDecorations(doc: PMNode): DecorationSet {
         lineText = '';
         lineStartOffset = pos + node.nodeSize;
         lineEndOffset = lineStartOffset;
+        lineHasInlineAtom = false;
       } else if (node.isText) {
         lineText += node.text ?? '';
         lineEndOffset = pos + node.nodeSize;
       } else {
         lineText += ATOM_PLACEHOLDER;
         lineEndOffset = pos + node.nodeSize;
+        lineHasInlineAtom = true;
       }
       return false;
     });

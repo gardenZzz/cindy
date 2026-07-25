@@ -2,7 +2,7 @@
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
-import { Editor } from '@tiptap/core';
+import { Editor, Node as TiptapNode } from '@tiptap/core';
 import Document from '@tiptap/extension-document';
 import Paragraph from '@tiptap/extension-paragraph';
 import Text from '@tiptap/extension-text';
@@ -22,6 +22,22 @@ import {
 
 let editor: Editor | null = null;
 
+const TestAtom = TiptapNode.create({
+  name: 'testAtom',
+  inline: true,
+  group: 'inline',
+  atom: true,
+  selectable: true,
+
+  parseHTML() {
+    return [{ tag: 'span[data-test-atom]' }];
+  },
+
+  renderHTML() {
+    return ['span', { 'data-test-atom': '' }, 'chip'];
+  },
+});
+
 function makeEditor(lines: string[]): Editor {
   const content: Array<Record<string, unknown>> = [];
   lines.forEach((line, i) => {
@@ -30,7 +46,7 @@ function makeEditor(lines: string[]): Editor {
   });
   editor = new Editor({
     element: document.createElement('div'),
-    extensions: [Document, Paragraph, Text, HardBreak, ComposerListIndentDecoration],
+    extensions: [Document, Paragraph, Text, HardBreak, TestAtom, ComposerListIndentDecoration],
     content: { type: 'doc', content: [{ type: 'paragraph', content }] },
   });
   return editor;
@@ -49,12 +65,21 @@ afterEach(() => {
 
 describe('buildListIndentDecorations', () => {
   it('builds paired hanging-indent variables without embedding user text', () => {
-    expect(listPrefixIndentStyle('2. ')).toBe(
-      '--composer-list-hang:1.8ch;--composer-list-hang-negative:-1.8ch;display:inline-block;box-sizing:border-box;width:100%;padding-left:calc(1em + var(--composer-list-hang));text-indent:var(--composer-list-hang-negative);vertical-align:top;overflow-wrap:anywhere;word-break:break-all;',
-    );
-    expect(listPrefixIndentStyle('10、')).toBe(
-      '--composer-list-hang:calc(2ch + 1em);--composer-list-hang-negative:calc(-2ch - 1em);display:inline-block;box-sizing:border-box;width:100%;padding-left:calc(1em + var(--composer-list-hang));text-indent:var(--composer-list-hang-negative);vertical-align:top;overflow-wrap:anywhere;word-break:break-all;',
-    );
+    const latinStyle = listPrefixIndentStyle('2. ');
+    expect(latinStyle).toContain('--composer-list-hang:1.8ch;');
+    expect(latinStyle).toContain('--composer-list-hang-negative:-1.8ch;');
+    expect(latinStyle).not.toContain('2. ');
+
+    const cjkStyle = listPrefixIndentStyle('10、');
+    expect(cjkStyle).toContain('--composer-list-hang:calc(2ch + 1em);');
+    expect(cjkStyle).toContain('--composer-list-hang-negative:calc(-2ch - 1em);');
+    expect(cjkStyle).not.toContain('10、');
+  });
+
+  it('measures tabs using the configured tab stop instead of punctuation width', () => {
+    const style = listPrefixIndentStyle('\t1. ');
+    expect(style).toContain('--composer-list-hang:9.8ch;');
+    expect(style).toContain('--composer-list-hang-negative:-9.8ch;');
   });
 
   it('decorates the full content of a single-line item', () => {
@@ -84,6 +109,32 @@ describe('buildListIndentDecorations', () => {
   it('does not decorate plain text lines', () => {
     const ed = makeEditor(['hello world', '3.14159']);
     expect(buildListIndentDecorations(ed.state.doc).find()).toHaveLength(0);
+  });
+
+  it('leaves lines containing inline atoms untouched so chips keep their inline geometry', () => {
+    editor = new Editor({
+      element: document.createElement('div'),
+      extensions: [Document, Paragraph, Text, HardBreak, TestAtom, ComposerListIndentDecoration],
+      content: {
+        type: 'doc',
+        content: [
+          {
+            type: 'paragraph',
+            content: [
+              { type: 'text', text: '- before ' },
+              { type: 'testAtom' },
+              { type: 'text', text: ' after' },
+            ],
+          },
+        ],
+      },
+    });
+    expect(buildListIndentDecorations(editor.state.doc).find()).toHaveLength(0);
+    expect(
+      editor.view.dom
+        .querySelector('[data-test-atom]')
+        ?.classList.contains('composer-list-line-indent'),
+    ).toBe(false);
   });
 });
 
@@ -125,12 +176,13 @@ describe('wiring contract', () => {
 
   it('globals.css defines the indent class', () => {
     const css = readFileSync(resolve(__dirname, '..', 'styles', 'globals.css'), 'utf8');
-    expect(css).toContain('.ProseMirror .composer-list-line-indent');
+    expect(css).toContain('.ProseMirror span.composer-list-line-indent');
     expect(css).toContain('display: inline-block;');
     expect(css).toContain('width: 100%;');
     expect(css).toContain('padding-left: calc(1em + var(--composer-list-hang, 1.25em));');
     expect(css).toContain('text-indent: var(--composer-list-hang-negative, -1.25em);');
     expect(css).toContain('overflow-wrap: anywhere;');
-    expect(css).toContain('word-break: break-all;');
+    expect(css).toContain('tab-size: 8;');
+    expect(css).not.toContain('word-break: break-all;');
   });
 });
