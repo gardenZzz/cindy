@@ -23,13 +23,39 @@ import { Decoration, DecorationSet } from '@tiptap/pm/view';
 import type { EditorState, Transaction } from '@tiptap/pm/state';
 import type { Node as PMNode } from '@tiptap/pm/model';
 import { matchListPrefix } from '@/lib/composerListContinuation';
+import {
+  findSlashCommandMatches,
+  getSlashCommandRoster,
+  getSlashCommandRosterUpdate,
+  type SlashCommandMatch,
+} from './SlashCommandDecoration';
 
 const PLUGIN_KEY = new PluginKey<DecorationSet>('composerListIndentDecoration');
 
 /** 行内一个非文本 inline 节点(mention chip 等)的占位符,与 applyListContinuation 一致。 */
 const ATOM_PLACEHOLDER = '\uFFFC';
 const CJK_PUNCTUATION_RE = /[\u3000-\u303f\uff00-\uffef]/;
-const SLASH_COMMAND_RUN_RE = /(?:^|\s)\/\S+/;
+const LONG_ALPHANUMERIC_RUN_RE = /[A-Za-z0-9]{12,}/;
+
+function addLongRunDecoration(
+  decorations: Decoration[],
+  from: number,
+  to: number,
+  prefixLength: number,
+  prefix: string,
+): void {
+  const prefixTo = from + prefixLength;
+  decorations.push(
+    Decoration.inline(from, prefixTo, {
+      class: 'composer-list-long-run-marker',
+      style: listPrefixIndentStyle(prefix),
+    }),
+    Decoration.inline(prefixTo, to, {
+      class: 'composer-list-long-run-body composer-list-long-run-indent',
+      style: listPrefixIndentStyle(prefix),
+    }),
+  );
+}
 
 /**
  * 将列表前缀换算成当前字体下的近似宽度。
@@ -69,7 +95,10 @@ export function listPrefixIndentStyle(prefix: string): string {
  * 扫描 doc,给所有"列表行"的整行内容生成 inline decoration。
  * 返回的 from/to 是 doc-level position。导出以便单测直接断言范围。
  */
-export function buildListIndentDecorations(doc: PMNode): DecorationSet {
+export function buildListIndentDecorations(
+  doc: PMNode,
+  slashCommandMatches: ReadonlyArray<Pick<SlashCommandMatch, 'from' | 'to'>> = [],
+): DecorationSet {
   const decorations: Decoration[] = [];
 
   doc.descendants((block, blockPos) => {
@@ -128,10 +157,14 @@ export function buildListIndentDecorations(doc: PMNode): DecorationSet {
       const from = contentBase + line.start;
       const to = contentBase + line.end;
       const prefix = line.text.slice(0, match.prefixLength);
+      const body = line.text.slice(match.prefixLength);
+      const overlapsSlashCommandPill = slashCommandMatches.some(
+        (slashMatch) => slashMatch.from < to && slashMatch.to > from,
+      );
       const hasOverlappingInlineDecoration =
         line.hasInlineAtom ||
-        CJK_PUNCTUATION_RE.test(line.text) ||
-        SLASH_COMMAND_RUN_RE.test(line.text.slice(match.prefixLength));
+        CJK_PUNCTUATION_RE.test(body) ||
+        overlapsSlashCommandPill;
       if (hasOverlappingInlineDecoration) {
         // Keep list-mode feedback without wrapping an inline decoration range.
         // Prefix-only styling cannot be split by CJK punctuation, slash-command
@@ -141,6 +174,10 @@ export function buildListIndentDecorations(doc: PMNode): DecorationSet {
             class: 'composer-list-prefix-indent',
           }),
         );
+        return;
+      }
+      if (LONG_ALPHANUMERIC_RUN_RE.test(body)) {
+        addLongRunDecoration(decorations, from, to, match.prefixLength, prefix);
         return;
       }
       decorations.push(
@@ -157,12 +194,32 @@ export function buildListIndentDecorations(doc: PMNode): DecorationSet {
       const prefix = match ? line.text.slice(0, match.prefixLength) : '';
       // A node decoration stays on the paragraph even when CjkPunctDecoration
       // adds nested inline spans, so punctuation cannot split the list wrapper.
-      if (line && match && !prefix.includes('\t') && !line.hasInlineAtom) {
+      if (
+        line &&
+        match &&
+        !prefix.includes('\t') &&
+        !line.hasInlineAtom &&
+        !LONG_ALPHANUMERIC_RUN_RE.test(line.text.slice(match.prefixLength))
+      ) {
         decorations.push(
           Decoration.node(blockPos, blockPos + block.nodeSize, {
             class: 'composer-list-block-indent',
             style: listPrefixIndentStyle(prefix),
           }),
+        );
+      } else if (
+        line &&
+        match &&
+        !prefix.includes('\t') &&
+        !line.hasInlineAtom &&
+        LONG_ALPHANUMERIC_RUN_RE.test(line.text.slice(match.prefixLength))
+      ) {
+        addLongRunDecoration(
+          decorations,
+          contentBase + line.start,
+          contentBase + line.end,
+          match.prefixLength,
+          prefix,
         );
       } else if (line && match && !prefix.includes('\t')) {
         decorations.push(
@@ -194,11 +251,24 @@ export const ComposerListIndentDecoration = Extension.create({
         key: PLUGIN_KEY,
         state: {
           init(_config, state: EditorState) {
-            return buildListIndentDecorations(state.doc);
+            const roster = getSlashCommandRoster(state);
+            return buildListIndentDecorations(
+              state.doc,
+              findSlashCommandMatches(state.doc, roster),
+            );
           },
-          apply(tr: Transaction, old: DecorationSet) {
-            if (!tr.docChanged) return old;
-            return buildListIndentDecorations(tr.doc);
+          apply(
+            tr: Transaction,
+            old: DecorationSet,
+            oldState: EditorState,
+          ) {
+            const rosterUpdate = getSlashCommandRosterUpdate(tr);
+            if (!tr.docChanged && rosterUpdate === undefined) return old;
+            const roster = rosterUpdate ?? getSlashCommandRoster(oldState);
+            return buildListIndentDecorations(
+              tr.doc,
+              findSlashCommandMatches(tr.doc, roster),
+            );
           },
         },
         props: {
