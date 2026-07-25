@@ -44,6 +44,8 @@ import { validateAgainstSchema } from './shared/json-schema-lite.mjs';
 import {
   ELLIPSIS_LOCALES,
   FULL_WIDTH_PUNCT,
+  countHalfWidthPunct,
+  countOccurrences,
   HALFWIDTH_PUNCT_LOCALES,
   WORD_BOUNDARY,
   findCaseMismatch,
@@ -186,7 +188,13 @@ function truncate(text, max) {
   return flat.length > max ? `${flat.slice(0, max)}…` : flat;
 }
 
-/** 一条违规。fingerprint 用于 baseline 比对,必须稳定。 */
+/**
+ * 一条违规。fingerprint 用于 baseline 比对,必须稳定。
+ *
+ * detail 里带**命中次数**:否则同一个 key 里 1 处「会话」与 3 处「会话」产出相同指纹,
+ * 一处被冻进 baseline 后再往同一条文案加一处,新违规会被静默掩盖、CI 照过——
+ * 那就破了 baseline「只减不增」的契约。带上次数,增加一处就是一条新指纹。
+ */
 function makeViolation({ locale, key, rule, detail, severity, hint }) {
   return {
     locale,
@@ -234,7 +242,8 @@ for (const term of glossary.terms) {
 
       for (const [key, value] of entries) {
         if (isExempt(key)) continue;
-        if (!occursIn(stripNonProse(value), bad)) continue;
+        const badCount = countOccurrences(stripNonProse(value), bad);
+        if (badCount === 0) continue;
         if (sourceRe) {
           // 英文源同样要先剥离非文案片段:whenEn 若只出现在 URL / 文件名 / $t() 里
           // (例如英文源含 agent-config.json),会被误判为「英文命中」,把禁用规则
@@ -258,7 +267,7 @@ for (const term of glossary.terms) {
             locale,
             key,
             rule: 'forbidden-term',
-            detail: `${term.id}:${bad}`,
+            detail: `${term.id}:${bad}\u00d7${badCount}`,
             severity,
             hint:
               `「${bad}」是 ${term.en} 条目下的禁用译法` +
@@ -286,14 +295,16 @@ for (const term of glossary.terms) {
     if (!standard || standard !== term.en) continue;
     for (const [key, value] of entries) {
       if (isExempt(key)) continue;
-      const hit = findCaseMismatch(stripNonProse(value), standard);
+      const prose = stripNonProse(value);
+      const hit = findCaseMismatch(prose, standard);
       if (!hit) continue;
+      const hitCount = countOccurrences(prose, standard);
       violations.push(
         makeViolation({
           locale,
           key,
           rule: 'term-case',
-          detail: `${term.id}:${hit}`,
+          detail: `${term.id}:${hit}\u00d7${hitCount}`,
           severity,
           // 这条给出确定目标是可以的:大小写形态与语境无关,worker 在任何句子里都该写
           // Worker,答案唯一。禁用译法则不同——同一个中文词对应多个英文概念,目标不唯一,
@@ -324,7 +335,7 @@ for (const locale of locales) {
           locale,
           key,
           rule: 'punct-halfwidth',
-          detail: mark,
+          detail: `${mark}\u00d7${countHalfWidthPunct(prose)}`,
           severity: 'error',
           hint: `中文字符后应使用全角「${FULL_WIDTH_PUNCT[mark] ?? mark}」,当前是半角「${mark}」`,
         }),
@@ -337,7 +348,7 @@ for (const locale of locales) {
           locale,
           key,
           rule: 'punct-ellipsis',
-          detail: '...',
+          detail: `...×${(prose.match(/\.\.\./g) ?? []).length}`,
           severity: 'error',
           hint: '省略号应使用「…」而非三个半角点',
         }),
