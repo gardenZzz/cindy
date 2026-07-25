@@ -156,6 +156,16 @@ function observedAt(value: unknown): string | null {
   return value;
 }
 
+function compareObservedAt(left: string, right: string): number {
+  const [leftWhole, leftFraction = ''] = left.slice(0, -1).split('.');
+  const [rightWhole, rightFraction = ''] = right.slice(0, -1).split('.');
+  if (leftWhole !== rightWhole) return leftWhole < rightWhole ? -1 : 1;
+  const normalizedLeft = leftFraction.padEnd(9, '0');
+  const normalizedRight = rightFraction.padEnd(9, '0');
+  if (normalizedLeft === normalizedRight) return 0;
+  return normalizedLeft < normalizedRight ? -1 : 1;
+}
+
 export function projectModelAccessBalance(value: unknown): ModelAccessBalance {
   if (!isRecord(value) || value.scale !== 9) invalidResponse();
   const planCredits = ledgerDecimal(value.planCredits);
@@ -230,7 +240,7 @@ function projectPromotionalGrant(value: unknown): ModelAccessPromotionalGrantUsa
       ? null
       : (boundedString(value.displayName, MAX_NAME_LENGTH) ?? undefined);
   const originalAmount = ledgerDecimal(value.originalAmount);
-  const usedAmount = value.usedAmount === null ? null : ledgerDecimal(value.usedAmount);
+  const usedAmount = ledgerDecimal(value.usedAmount);
   const remainingAmount = ledgerDecimal(value.remainingAmount);
   const expiresAt = observedAt(value.expiresAt);
   const state =
@@ -242,23 +252,20 @@ function projectPromotionalGrant(value: unknown): ModelAccessPromotionalGrantUsa
     !grantId ||
     displayName === undefined ||
     !originalAmount ||
+    !usedAmount ||
     !remainingAmount ||
     originalAmount.scaled <= 0n ||
+    usedAmount.scaled < 0n ||
     remainingAmount.scaled < 0n ||
     !expiresAt ||
     !state ||
     (state === 'active' &&
       (remainingAmount.scaled === 0n ||
-        !usedAmount ||
-        usedAmount.scaled < 0n ||
         usedAmount.scaled + remainingAmount.scaled !== originalAmount.scaled)) ||
     (state === 'depleted' &&
-      (remainingAmount.scaled !== 0n ||
-      (!usedAmount ||
-        usedAmount.scaled < 0n ||
-        usedAmount.scaled !== originalAmount.scaled))) ||
+      (remainingAmount.scaled !== 0n || usedAmount.scaled !== originalAmount.scaled)) ||
     ((state === 'expired' || state === 'voided') &&
-      (value.usedAmount !== null || remainingAmount.scaled !== 0n))
+      (remainingAmount.scaled !== 0n || usedAmount.scaled > originalAmount.scaled))
   ) {
     invalidResponse();
   }
@@ -266,7 +273,7 @@ function projectPromotionalGrant(value: unknown): ModelAccessPromotionalGrantUsa
     grantId,
     displayName,
     originalAmount: originalAmount.source,
-    usedAmount: usedAmount?.source ?? null,
+    usedAmount: usedAmount.source,
     remainingAmount: remainingAmount.source,
     expiresAt,
     state,
@@ -280,7 +287,7 @@ export function projectModelAccessCreditUsage(value: unknown): ModelAccessCredit
     !Array.isArray(value.promotionalGrants) ||
     value.promotionalGrants.length > MAX_PROMOTIONAL_GRANTS ||
     typeof value.promotionalGrantsComplete !== 'boolean' ||
-    value.promotionalGrantConsistency !== 'LAST_SETTLED'
+    value.promotionalGrantConsistency !== 'OBSERVED'
   ) {
     invalidResponse();
   }
@@ -301,22 +308,29 @@ export function projectModelAccessCreditUsage(value: unknown): ModelAccessCredit
 
   const grantIds = new Set<string>();
   let currentOriginalTotal = 0n;
-  const observedAtMs = Date.parse(snapshotTime);
+  let currentUsedTotal = 0n;
+  let currentRemainingTotal = 0n;
   const promotionalGrants = value.promotionalGrants.map((grant) => {
     const projected = projectPromotionalGrant(grant);
     if (grantIds.has(projected.grantId)) invalidResponse();
     grantIds.add(projected.grantId);
     if (
       (projected.state === 'active' || projected.state === 'depleted') &&
-      Date.parse(projected.expiresAt) > observedAtMs
+      compareObservedAt(projected.expiresAt, snapshotTime) > 0
     ) {
       currentOriginalTotal += ledgerDecimal(projected.originalAmount)!.scaled;
+      currentUsedTotal += ledgerDecimal(projected.usedAmount)!.scaled;
+      currentRemainingTotal += ledgerDecimal(projected.remainingAmount)!.scaled;
     }
     return projected;
   });
   if (
     (value.promotionalGrantsComplete &&
-      (promotional.total === null || promotional.total !== currentOriginalTotal)) ||
+      (promotional.total === null ||
+        promotional.used === null ||
+        promotional.total !== currentOriginalTotal ||
+        promotional.used !== currentUsedTotal ||
+        promotional.remaining !== currentRemainingTotal)) ||
     (!value.promotionalGrantsComplete && (promotional.used !== null || promotional.total !== null))
   ) {
     invalidResponse();
@@ -329,7 +343,7 @@ export function projectModelAccessCreditUsage(value: unknown): ModelAccessCredit
     promotional: promotional.value,
     promotionalGrants,
     promotionalGrantsComplete: value.promotionalGrantsComplete,
-    promotionalGrantConsistency: 'LAST_SETTLED',
+    promotionalGrantConsistency: 'OBSERVED',
     ledgerUpdatedAt,
     scale: 9,
     observedAt: snapshotTime,
