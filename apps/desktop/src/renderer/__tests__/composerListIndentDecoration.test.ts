@@ -10,11 +10,12 @@ import HardBreak from '@tiptap/extension-hard-break';
 import {
   buildListIndentDecorations,
   ComposerListIndentDecoration,
+  listPrefixIndentStyle,
 } from '@/components/new-chat/ComposerListIndentDecoration';
 
 /**
  * composer 列表行缩进 decoration:
- * - buildListIndentDecorations 的范围计算(hardBreak 分行、多行、前缀即缩进);
+ * - buildListIndentDecorations 的范围计算(hardBreak 分行、多行、整行缩进);
  * - 真实编辑器集成:decoration 渲染进 DOM,打完前缀立即出现、删掉即消失;
  * - ChatInput 注册 + globals.css 样式存在的接线契约。
  */
@@ -47,12 +48,21 @@ afterEach(() => {
 });
 
 describe('buildListIndentDecorations', () => {
-  it('decorates the list prefix of a single-line item', () => {
+  it('builds paired hanging-indent variables without embedding user text', () => {
+    expect(listPrefixIndentStyle('2. ')).toBe(
+      '--composer-list-hang:1.8ch;--composer-list-hang-negative:-1.8ch;display:inline-block;box-sizing:border-box;width:100%;padding-left:calc(1em + var(--composer-list-hang));text-indent:var(--composer-list-hang-negative);vertical-align:top;overflow-wrap:anywhere;word-break:break-all;',
+    );
+    expect(listPrefixIndentStyle('10、')).toBe(
+      '--composer-list-hang:calc(2ch + 1em);--composer-list-hang-negative:calc(-2ch - 1em);display:inline-block;box-sizing:border-box;width:100%;padding-left:calc(1em + var(--composer-list-hang));text-indent:var(--composer-list-hang-negative);vertical-align:top;overflow-wrap:anywhere;word-break:break-all;',
+    );
+  });
+
+  it('decorates the full content of a single-line item', () => {
     const ed = makeEditor(['1. test']);
     const found = buildListIndentDecorations(ed.state.doc).find();
     expect(found).toHaveLength(1);
     expect(found[0].from).toBe(1);
-    expect(found[0].to).toBe(4); // "1. " 三个字符
+    expect(found[0].to).toBe(8); // 整行 "1. test"
   });
 
   it('decorates each list line independently across hardBreaks', () => {
@@ -61,9 +71,9 @@ describe('buildListIndentDecorations', () => {
     expect(found).toHaveLength(2);
     // "intro"(5) + br(1) → "- item" 行起点 offset 6,contentBase 1
     expect(found[0].from).toBe(7);
-    expect(found[0].to).toBe(9); // "- "
+    expect(found[0].to).toBe(13); // 整行 "- item"
     expect(found[1].from).toBe(14);
-    expect(found[1].to).toBe(17); // "2. "
+    expect(found[1].to).toBe(18); // 整行 "2. x"
   });
 
   it('decorates a prefix-only line (即时反馈:刚打完 `1. ` 就缩进)', () => {
@@ -80,7 +90,12 @@ describe('buildListIndentDecorations', () => {
 describe('ComposerListIndentDecoration in a real editor', () => {
   it('renders the indent span into the DOM for list lines', () => {
     const ed = makeEditor(['1. hello']);
-    expect(indentSpans(ed)).toEqual(['1. ']);
+    expect(indentSpans(ed)).toEqual(['1. hello']);
+    expect(
+      ed.view.dom
+        .querySelector<HTMLElement>('span.composer-list-line-indent')
+        ?.style.getPropertyValue('--composer-list-hang'),
+    ).toBe('1.8ch');
   });
 
   it('appears the moment the prefix becomes complete, and disappears when broken', () => {
@@ -111,6 +126,11 @@ describe('wiring contract', () => {
   it('globals.css defines the indent class', () => {
     const css = readFileSync(resolve(__dirname, '..', 'styles', 'globals.css'), 'utf8');
     expect(css).toContain('.ProseMirror .composer-list-line-indent');
-    expect(css).toContain('padding-left: 1em;');
+    expect(css).toContain('display: inline-block;');
+    expect(css).toContain('width: 100%;');
+    expect(css).toContain('padding-left: calc(1em + var(--composer-list-hang, 1.25em));');
+    expect(css).toContain('text-indent: var(--composer-list-hang-negative, -1.25em);');
+    expect(css).toContain('overflow-wrap: anywhere;');
+    expect(css).toContain('word-break: break-all;');
   });
 });
