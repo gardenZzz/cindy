@@ -249,6 +249,28 @@ export class GhostSetupCoordinator {
         this.deps.bridge.update(snapshot);
       };
 
+      const publishSatisfied = (nextAssessment: GhostSetupAssessment): void => {
+        assessment = nextAssessment;
+        const nextRevision = Math.max(snapshot.revision + 1, assessment.revision);
+        // A ready assessment has no actionable plan, but Renderer still
+        // requires the terminal snapshot to retain the interaction's steps.
+        // Preserve the last authoritative presentation and strip every
+        // action/error while projecting the completed state.
+        snapshot = {
+          ...snapshot,
+          revision: nextRevision,
+          steps: snapshot.steps.map((step) => ({
+            id: step.id,
+            groupId: step.groupId,
+            groupMode: step.groupMode,
+            title: step.title,
+            description: step.description,
+            phase: 'satisfied',
+          })),
+        };
+        this.deps.bridge.update(snapshot);
+      };
+
       const verify = (requiredPhase?: GhostSetupInteractionStep['phase']): Promise<void> => {
         if (settled) return Promise.resolve();
         if (verifying) return verifying;
@@ -275,7 +297,7 @@ export class GhostSetupCoordinator {
           }
           const next = current.assessment;
           if (next.state === 'ready') {
-            publish(next, 'satisfied');
+            publishSatisfied(next);
             settle({ ok: true, assessment: next }, 'ready');
             return;
           }

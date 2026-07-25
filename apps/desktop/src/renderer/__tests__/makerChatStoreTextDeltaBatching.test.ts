@@ -7,6 +7,7 @@
 
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { AgentInputProjection, AgentInputQueuedMessage } from '../../shared/agentInputQueue';
+import { GHOST_SETUP_MAX_INTERACTION_STEPS } from '../../shared/ghost';
 import type { Message } from '@/lib/ccAgent.types';
 import type { AttachedFile, MentionedResource } from '@/lib/fileTypes';
 
@@ -827,23 +828,25 @@ describe('makerChatStore text delta batching', () => {
     expect(makerChatStore.getSnapshot(SESSION_ID).pendingPluginSetup).toBeNull();
   });
 
-  it('accepts all 64 manifest-valid setup steps and rejects a 65th', () => {
+  it('accepts the full setup interaction capacity and rejects one extra step', () => {
     const step = pluginSetupRequest(1).steps[0];
     emitInteractionRequest({
       ...pluginSetupRequest(1),
-      steps: Array.from({ length: 64 }, (_, index) => ({
+      steps: Array.from({ length: GHOST_SETUP_MAX_INTERACTION_STEPS }, (_, index) => ({
         ...step,
         id: `setup-${index}`,
         action: { ...step.action, id: `oauth:${index}` },
       })),
     });
-    expect(makerChatStore.getSnapshot(SESSION_ID).pendingPluginSetup?.steps).toHaveLength(64);
+    expect(makerChatStore.getSnapshot(SESSION_ID).pendingPluginSetup?.steps).toHaveLength(
+      GHOST_SETUP_MAX_INTERACTION_STEPS,
+    );
 
     makerChatStore.purgeSession(SESSION_ID);
     emitInteractionRequest({
       ...pluginSetupRequest(1),
       requestId: 'plugin-setup-oversized',
-      steps: Array.from({ length: 65 }, (_, index) => ({
+      steps: Array.from({ length: GHOST_SETUP_MAX_INTERACTION_STEPS + 1 }, (_, index) => ({
         ...step,
         id: `setup-${index}`,
         action: { ...step.action, id: `oauth:${index}` },
