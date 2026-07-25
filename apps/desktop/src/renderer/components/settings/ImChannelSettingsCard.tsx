@@ -77,7 +77,9 @@ export function ImChannelSettingsCard({
         'bg-[var(--settings-theme-card-bg)]',
       )}
     >
-      <div className="flex items-center">
+      {/* hover 高亮挂在整行容器上: headerAction 在按钮外, 挂按钮会让行尾
+          (开关区)缺一截高亮 */}
+      <div className="flex items-center transition-colors hover:bg-[var(--surface-hover-soft)]">
         <button
           type="button"
           aria-expanded={expanded}
@@ -85,7 +87,6 @@ export function ImChannelSettingsCard({
           onClick={onToggle}
           className={cn(
             'flex min-h-[76px] min-w-0 flex-1 select-none items-center gap-4 px-4 py-3 text-left',
-            'transition-colors hover:bg-[var(--surface-hover-soft)]',
             'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-[var(--focus-ring)]',
           )}
         >
