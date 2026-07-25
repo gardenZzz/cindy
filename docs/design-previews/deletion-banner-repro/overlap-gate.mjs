@@ -14,18 +14,27 @@ const demoDir = process.argv.includes('--demo')
   ? resolve(process.argv[process.argv.indexOf('--demo') + 1])
   : dirname(fileURLToPath(import.meta.url));
 
-// playwright 解析:demo dir → 宿主仓 → 邻仓(Project MivoCanvas 已装)
+// Playwright 解析(可移植,不含任何本机绝对路径):
+//  1) 正常 Node resolution(createRequire,沿 demo 目录向上找 node_modules)
+//  2) 仓库根 node_modules(demo 目录向上三级 ../../..)
+//  3) QA_HIFI_MODULE_ROOT 环境变量显式指定(兜底;skill 标准入口)
 const require_ = createRequire(join(demoDir, 'noop.js'));
 const candidates = [
   () => require_('playwright'),
-  () => require_(join(demoDir, '..', '..', 'node_modules', 'playwright')),
-  () => require_('/Users/praise/AI-Agent/Claude/projects/Project MivoCanvas/node_modules/playwright'),
+  () => require_(join(demoDir, '..', '..', '..', 'node_modules', 'playwright')),
 ];
+if (process.env.QA_HIFI_MODULE_ROOT) {
+  candidates.push(() => require_(join(process.env.QA_HIFI_MODULE_ROOT, 'node_modules', 'playwright')));
+  candidates.push(() => require_(join(process.env.QA_HIFI_MODULE_ROOT, 'playwright')));
+}
 let chromium;
 for (const load of candidates) {
   try { ({ chromium } = load()); break; } catch {}
 }
-if (!chromium) { console.error('playwright 未解析到'); process.exit(2); }
+if (!chromium) {
+  console.error('playwright 未解析到(尝试过: node resolution / 仓库根 node_modules / QA_HIFI_MODULE_ROOT)');
+  process.exit(2);
+}
 
 const CASES = [
   { id: 'desk-cn-light-zh', prefs: { plat: 'desk', region: 'cn', os: 'mac', mode: 'light', lang: 'zh-CN' } },
