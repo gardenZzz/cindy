@@ -128,9 +128,11 @@ function typeOf(value) {
 }
 
 function matchesType(value, expected) {
+  // integer / number 单独判:typeOf 把整数报成 'integer',直接比对会让 `type: "number"`
+  // 拒掉整数值。
   if (expected === 'integer') return Number.isInteger(value);
   if (expected === 'number') return typeof value === 'number';
-  return typeOf(value) === expected || (expected === 'number' && typeOf(value) === 'integer');
+  return typeOf(value) === expected;
 }
 
 /**

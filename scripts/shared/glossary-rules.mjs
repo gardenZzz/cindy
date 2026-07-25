@@ -27,11 +27,13 @@ const CJK_CHAR = '\\u4e00-\\u9fff\\u3040-\\u30ff\\uac00-\\ud7af';
  *
  * 两级截断:
  *  - 全角句读:一律截断——URL 里不会出现全角标点;
- *  - 半角 , ; : ! ?:**仅当其后紧跟 CJK 字符时**截断。不能无条件截,否则会切坏合法的
+ *  - 半角 , ; : ! ?:**仅当其后(允许一个空格)是 CJK 字符时**截断。允许空格是因为中英混排
+ *    常写成 `https://x.test, 返回…`;只认紧邻的话逗号会被当成 URL 的一部分吃掉,
+ *    后面的标点违规随之漏检。不能无条件截,否则会切坏合法的
  *    query string(`?a=1&ids=1,2`)与端口号(`:8080`);而 `https://x.test,返回…`
  *    这种半角逗号后直接接中文的写法,逗号显然是正文标点而非 URL 的一部分。
  */
-const TOKEN_TAIL = `(?:(?![${CJK_PUNCT}])(?![,;:!?](?=[${CJK_CHAR}]))\\S)+`;
+const TOKEN_TAIL = `(?:(?![${CJK_PUNCT}])(?![,;:!?](?=\\s*[${CJK_CHAR}]))\\S)+`;
 
 const URL_TOKEN = new RegExp(`\\b[a-z][\\w-]*://${TOKEN_TAIL}`, 'gi');
 
@@ -248,8 +250,8 @@ export function normalizeForPunctuation(text) {
     // lookahead 里必须带 CJK,不能只写 [,;:!?]:token 匹配是贪婪的,只要 lookahead 能满足
     // 就会回溯出更短的匹配——`https://a.test/x?ids=1,2` 会被切在 query string 内部的逗号处,
     // 于是那个逗号被误判成正文标点。带上 CJK 后与 TOKEN_TAIL 自身的截断条件一致,不会回溯。
-    .replace(new RegExp(`${URL_TOKEN.source}(?=[,;:!?][${CJK_CHAR}])`, 'gi'), PROSE_PLACEHOLDER)
-    .replace(new RegExp(`${EMAIL_TOKEN.source}(?=[,;:!?][${CJK_CHAR}])`, 'g'), PROSE_PLACEHOLDER)
+    .replace(new RegExp(`${URL_TOKEN.source}(?=[,;:!?]\\s*[${CJK_CHAR}])`, 'gi'), PROSE_PLACEHOLDER)
+    .replace(new RegExp(`${EMAIL_TOKEN.source}(?=[,;:!?]\\s*[${CJK_CHAR}])`, 'g'), PROSE_PLACEHOLDER)
     .replace(URL_TOKEN, ' ')
     .replace(EMAIL_TOKEN, ' ')
     .replace(FILENAME_TOKEN, ' ');
