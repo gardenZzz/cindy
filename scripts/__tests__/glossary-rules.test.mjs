@@ -721,3 +721,43 @@ test('findHalfWidthPunct: 闭合的半角引号也算左边界,但要求右侧�
   // 全角括号那一支不要求右侧是中文（已对 26 处实例逐条核对）
   assert.equal(findHalfWidthPunct('(直接替换,不留原文),或用卡片'), ',');
 });
+
+test('findCaseMismatch: 标准词自带尾部 s 时不能把它当复数削掉', () => {
+  // 匹配正则带 `s?`,无条件 replace(/s$/,'') 会把 Credits / Full access 固有的 s 削掉,
+  // 拼写完全正确的文案反被判违规。目前保留英文的术语恰好都不以 s 结尾,所以还没爆——
+  // 但只要有人加一条以 s 结尾的术语,正确文案就会被门禁全面拒绝。
+  assert.equal(findCaseMismatch('Full access', 'Full access'), null);
+  assert.equal(findCaseMismatch('Credits', 'Credits'), null);
+  assert.equal(countCaseMismatches('Full access', 'Full access'), 0);
+  // 仍要能抓出真正的大小写错误
+  assert.equal(findCaseMismatch('full access', 'Full access'), 'full access');
+  assert.equal(findCaseMismatch('credits', 'Credits'), 'credits');
+  // 复数形式仍算正确
+  assert.equal(findCaseMismatch('两个 Workers', 'Worker'), null);
+});
+
+test('stripNonProse: 扩展名不设长度上限', () => {
+  // 支持列表里有 .gitattributes(13) / .browserslistrc(14) / .prettierignore(14),
+  // 任何具体上限都会随列表变化失准
+  for (const [text, gone] of [
+    ['见 worker.browserslistrc 配置', 'worker'],
+    ['见 plugin.prettierignore 配置', 'plugin'],
+    ['见 agent.gitattributes 配置', 'agent'],
+  ]) {
+    assert.ok(!stripNonProse(text).includes(gone), text);
+  }
+  assert.ok(stripNonProse('已用 1.5 GB').includes('1.5'));
+});
+
+test('normalizeForPunctuation: 文件名后的正文标点与 URL 后的省略号都要保留', () => {
+  // 文件名换成空格会丢掉左边界,`编辑 config.json,然后重试` 的逗号漏检
+  assert.equal(findHalfWidthPunct(normalizeForPunctuation('编辑 config.json,然后重试')), ',');
+  assert.equal(findHalfWidthPunct(normalizeForPunctuation('编辑 config.json, 然后重试')), ',');
+  // 路径里的冒号仍不算正文标点
+  assert.equal(findHalfWidthPunct(normalizeForPunctuation('详见 config.json:12 行')), null);
+  // token 不能吃掉正文省略号
+  assert.equal(hasAsciiEllipsis(normalizeForPunctuation('Open https://x.test...')), true);
+  assert.equal(hasAsciiEllipsis(normalizeForPunctuation('联系 a@x.com...然后重试')), true);
+  // URL 内部的单点不受影响
+  assert.equal(hasAsciiEllipsis(normalizeForPunctuation('见 https://a.test/a.b.c 页面')), false);
+});
