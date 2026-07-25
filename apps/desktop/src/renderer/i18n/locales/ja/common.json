@@ -7108,6 +7108,8 @@
     },
     "balance": {
       "title": "利用可能残高",
+      "creditParityCny": "1クレジット = 1元。クレジットは Cindy AI の利用量の決済に使われ、支払いは第三者の決済事業者が処理します。",
+      "creditParityUsd": "1クレジット = 1米ドル。クレジットは Cindy AI の利用量の決済に使われ、支払いは第三者の決済事業者が処理します。",
       "plan": "プランクレジット",
       "purchased": "購入済みクレジット",
       "promotional": "特典クレジット",
@@ -7197,7 +7199,6 @@
       "alipay": "Alipay",
       "stripe": "カード"
     },
-    "securityNotice": "支払いは選択した事業者が安全に処理し、Cindyは支払い認証情報を保存しません",
     "currentSubscription": {
       "title": "現在のサブスクリプション",
       "purchaseBlocked": "未終了のサブスクリプションがあります。既存のサブスクリプションを処理してから新しいプランを購入してください。"

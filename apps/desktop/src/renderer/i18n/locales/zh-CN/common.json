@@ -7108,6 +7108,8 @@
     },
     "balance": {
       "title": "可用额度",
+      "creditParityCny": "1 点 = 1 元，用于 Cindy AI 用量结算；支付由第三方渠道处理。",
+      "creditParityUsd": "1 点 = 1 美元，用于 Cindy AI 用量结算；支付由第三方渠道处理。",
       "plan": "订阅额度",
       "purchased": "已购额度",
       "promotional": "赠送额度",
@@ -7197,7 +7199,6 @@
       "alipay": "支付宝",
       "stripe": "银行卡"
     },
-    "securityNotice": "支付由所选渠道安全处理，Cindy 不保存你的支付凭证",
     "currentSubscription": {
       "title": "当前订阅",
       "purchaseBlocked": "当前已有未结束的订阅，请先处理现有订阅后再购买新套餐。"
