@@ -3846,6 +3846,7 @@
         "cacheRead": "缓存读取",
         "cacheCreate": "缓存写入",
         "free": "限时免费",
+        "discount": "立省 {{percent}}%",
         "perMillion": "模型标准价格",
         "fixedFx": "按固定汇率 1 USD = 6.7 CNY 约算",
         "subscriptionEstimate": "价值估算，不代表实际账单"
@@ -3876,7 +3877,8 @@
       "meta": {
         "context": "{{value}} 上下文",
         "price": "{{input}}/{{output}} / 百万",
-        "fastBadge": "快速"
+        "fastBadge": "快速",
+        "budgetDiscount": "特别折扣"
       },
       "source": {
         "railLabel": "来源",
