@@ -40,6 +40,7 @@ import { fileURLToPath } from 'node:url';
 import { renderGlossaryDoc } from './shared/glossary-doc.mjs';
 import {
   ELLIPSIS_LOCALES,
+  FULL_WIDTH_PUNCT,
   HALFWIDTH_PUNCT_LOCALES,
   findCaseMismatch,
   findHalfWidthPunct,
@@ -225,7 +226,7 @@ for (const locale of locales) {
           rule: 'punct-halfwidth',
           detail: mark,
           severity: 'error',
-          hint: `中文字符后应使用全角「${mark === ',' ? '，' : '：'}」,当前是半角「${mark}」`,
+          hint: `中文字符后应使用全角「${FULL_WIDTH_PUNCT[mark] ?? mark}」,当前是半角「${mark}」`,
         }),
       );
     }

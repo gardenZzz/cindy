@@ -257,7 +257,7 @@
       "cancelA11y": "自動化の編集をキャンセル"
     },
     "delete": {
-      "counting": "この自動化が生成した会話を集計中...",
+      "counting": "この自動化が生成した会話を集計中…",
       "confirmDeleteBoth": "タスクと会話を削除",
       "confirmArchive": "タスクを削除して会話をアーカイブ",
       "confirmTaskOnly": "タスクのみ削除",

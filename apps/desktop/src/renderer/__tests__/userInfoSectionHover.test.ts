@@ -124,7 +124,7 @@ describe('UserInfoSection — inner main button no longer owns hover background'
     expect(source).toContain(
       "aria-label={t('sidebar.user.settingsLink', { name: displayName })}",
     );
-    expect(locale.sidebar.user.settingsLink).toBe('设置, 当前用户: {{name}}');
+    expect(locale.sidebar.user.settingsLink).toBe('设置，当前用户：{{name}}');
   });
 });
 

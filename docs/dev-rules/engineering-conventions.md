@@ -128,6 +128,10 @@ UI 文案的语气与措辞另见 [`DESIGN.md`](../design-rules/DESIGN.md) 的 V
   不能靠 guard 绿灯就认为改完了。反过来这也是一层兜底——Session→对话 那轮正是
   `mobileCindyVoiceSession.test.ts` 暴露了漏网的「语音识别会话」（ASR WebSocket
   连接，不是产品对话）。
+- **标点可能不在 locale 里**：部分错误消息由代码拼接（如 `cloudVoiceHttpErrorMessage()`
+  给 `composer.voice.refineFailed` 补半角冒号），guard 只扫 locale JSON，改不到也管不到。
+  批量改标点后若测试断言与实际值方向相反，先查该文案的冒号究竟来自 locale 还是代码，
+  别顺手把断言改成"看起来一致"的那个。
 - **同形异义靠人判断，不靠词表**：中文同一个词常对应多个英文概念，机械替换必错。
   已登记的几组：ssh-agent ≠ 产品 Agent；Computer Use 的「自动操作」≠ scheduler 的
   「自动化」；SSO 的「身份提供方」≠「模型供应商」；登录态 / WebSocket 的 session

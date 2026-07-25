@@ -88,10 +88,19 @@ export function makeExemptChecker(list) {
 export const HALFWIDTH_PUNCT_LOCALES = new Set(['zh-CN']);
 export const ELLIPSIS_LOCALES = new Set(['zh-CN', 'ja', 'ko']);
 
-const HALF_WIDTH_AFTER_HAN = /[一-鿿][,:]/;
+const HALF_WIDTH_AFTER_HAN = /[一-鿿][,:;!?]/;
 const ASCII_ELLIPSIS = /\.\.\./;
 
-/** 汉字后紧跟半角逗号/冒号时返回该标点,否则 null。 */
+/** 半角标点 → 中文全角对应物。 */
+export const FULL_WIDTH_PUNCT = Object.freeze({
+  ',': '，',
+  ':': '：',
+  ';': '；',
+  '!': '！',
+  '?': '？',
+});
+
+/** 汉字后紧跟半角标点时返回该标点,否则 null。 */
 export function findHalfWidthPunct(text) {
   const m = text.match(HALF_WIDTH_AFTER_HAN);
   return m ? m[0].slice(-1) : null;

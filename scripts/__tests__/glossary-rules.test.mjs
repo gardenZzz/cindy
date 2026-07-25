@@ -13,6 +13,7 @@ import { fileURLToPath } from 'node:url';
 import {
   ELLIPSIS_LOCALES,
   HALFWIDTH_PUNCT_LOCALES,
+  FULL_WIDTH_PUNCT,
   findCaseMismatch,
   findHalfWidthPunct,
   hasAsciiEllipsis,
@@ -130,6 +131,24 @@ test('findHalfWidthPunct: 只在汉字后触发', () => {
   // 英文/数字后的半角标点是正常排版,不能报。
   assert.equal(findHalfWidthPunct('Error: not found'), null);
   assert.equal(findHalfWidthPunct('共 1,000 项'), null);
+});
+
+test('findHalfWidthPunct: 覆盖分号与问号叹号', () => {
+  // 首轮只查了逗号冒号,清理时才发现分号 49 处、问号叹号 25 处是同类问题。
+  assert.equal(findHalfWidthPunct('加载失败;请重试'), ';');
+  assert.equal(findHalfWidthPunct('确定要删除吗?'), '?');
+  assert.equal(findHalfWidthPunct('操作成功!'), '!');
+  assert.equal(findHalfWidthPunct('加载失败；请重试'), null);
+  assert.equal(findHalfWidthPunct('确定要删除吗？'), null);
+});
+
+test('FULL_WIDTH_PUNCT: 覆盖全部受检半角标点', () => {
+  // 映射表缺项会让 hint 退化成「应使用全角「;」」这种自相矛盾的提示。
+  for (const mark of [',', ':', ';', '!', '?']) {
+    assert.ok(FULL_WIDTH_PUNCT[mark], `缺少 ${mark} 的全角映射`);
+    assert.equal(findHalfWidthPunct(`中文${mark}`), mark);
+    assert.equal(findHalfWidthPunct(`中文${FULL_WIDTH_PUNCT[mark]}`), null);
+  }
 });
 
 test('标点规则的 locale 适用范围有数据依据', () => {
