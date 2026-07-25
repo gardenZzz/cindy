@@ -7119,6 +7119,8 @@
     },
     "balance": {
       "title": "Available balance",
+      "creditParityCny": "1 credit = 1 CNY. Credits pay for Cindy AI usage; payments are processed by third-party providers.",
+      "creditParityUsd": "1 credit = 1 USD. Credits pay for Cindy AI usage; payments are processed by third-party providers.",
       "plan": "Plan credits",
       "purchased": "Purchased credits",
       "promotional": "Promotional credits",
@@ -7208,7 +7210,6 @@
       "alipay": "Alipay",
       "stripe": "Card"
     },
-    "securityNotice": "Payments are securely handled by the selected provider; Cindy does not store payment credentials",
     "currentSubscription": {
       "title": "Current subscription",
       "purchaseBlocked": "You already have an unfinished subscription. Manage it before purchasing another plan."

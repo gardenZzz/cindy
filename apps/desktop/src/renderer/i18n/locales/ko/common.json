@@ -7108,6 +7108,8 @@
     },
     "balance": {
       "title": "사용 가능 잔액",
+      "creditParityCny": "1크레딧 = 1위안. 크레딧은 Cindy AI 사용량 결제에 사용되며, 결제는 제3자 결제 채널에서 처리됩니다.",
+      "creditParityUsd": "1크레딧 = 1달러. 크레딧은 Cindy AI 사용량 결제에 사용되며, 결제는 제3자 결제 채널에서 처리됩니다.",
       "plan": "요금제 크레딧",
       "purchased": "구매한 크레딧",
       "promotional": "프로모션 크레딧",
@@ -7197,7 +7199,6 @@
       "alipay": "Alipay",
       "stripe": "카드"
     },
-    "securityNotice": "결제는 선택한 결제사에서 안전하게 처리하며 Cindy는 결제 인증 정보를 저장하지 않습니다",
     "currentSubscription": {
       "title": "현재 구독",
       "purchaseBlocked": "종료되지 않은 구독이 있습니다. 기존 구독을 처리한 후 새 요금제를 구매하세요."

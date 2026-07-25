@@ -7,7 +7,6 @@ import {
   CreditCard,
   PackageOpen,
   RefreshCcw,
-  ShieldCheck,
   X,
 } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
@@ -498,7 +497,10 @@ export function BillingSettingsSection({ accountId }: { accountId: string | null
     const entry = offers.find(({ offer }) => offer.code === offerCode);
     if (!entry || !isCatalogOfferPurchasable(entry)) return;
     setSelectedOfferCode(offerCode);
-    setSelectedPurchaseOptionId(null);
+    // 只有一种支付方式时默认选中,免去一次多余点击。
+    setSelectedPurchaseOptionId(
+      entry.purchaseOptions.length === 1 ? entry.purchaseOptions[0].id : null,
+    );
     setCustomAmount('');
   };
 
@@ -655,6 +657,14 @@ export function BillingSettingsSection({ accountId }: { accountId: string | null
             </BillingGroup>
           )}
         </div>
+
+        <p className="mt-8 text-12 leading-5 text-[var(--text-tertiary)]">
+          {t(
+            BILLING_CURRENCY === 'usd'
+              ? 'billing.balance.creditParityUsd'
+              : 'billing.balance.creditParityCny',
+          )}
+        </p>
       </div>
 
       <BillingOfferDialog
@@ -1449,11 +1459,7 @@ function BillingOfferDialog({
             )}
           </div>
 
-          <div className="flex min-h-16 items-center justify-between gap-4 border-t border-[var(--border-default)] px-6 py-3">
-            <div className="flex min-w-0 max-w-[380px] items-start gap-2 text-11 leading-4 text-[var(--text-tertiary)]">
-              <ShieldCheck size={13} className="shrink-0" />
-              <span>{t('billing.securityNotice')}</span>
-            </div>
+          <div className="flex min-h-16 items-center justify-end gap-4 border-t border-[var(--border-default)] px-6 py-3">
             <button
               type="button"
               onClick={onSubmit}
@@ -1537,11 +1543,11 @@ function PaymentOptionRow({
       ) : (
         <Icon size={16} className="shrink-0 text-[var(--text-secondary)]" />
       )}
-      <div className="min-w-0 flex-1">
+      <div className="flex min-w-0 flex-1 items-baseline gap-2">
         <p className="truncate text-13 font-medium text-[var(--text-primary)]">
           {providerLabel(option.provider, t)}
         </p>
-        <p className="mt-0.5 text-11 text-[var(--text-tertiary)]">
+        <p className="truncate text-11 text-[var(--text-tertiary)]">
           {option.paymentAction === 'QR_CODE'
             ? t('billing.paymentActions.QR_CODE')
             : t('billing.paymentActions.REDIRECT')}
