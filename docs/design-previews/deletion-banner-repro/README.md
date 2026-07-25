@@ -6,7 +6,7 @@
 
 - 提取基线 = **本 PR 的 base commit `75baac1ee`**(origin/main 分叉点;该 commit 的 main 源码即修复前状态)。
 - `extract.mjs` 的源码读取**全部走 `git show 75baac1ee:<repo-relative-path>`**(execFileSync,cwd=仓根),**不读工作区文件**——工作区已是修复后代码,读了就不是「修复前」。
-- 每个 truth 叶子的 `provenance.hash` 按 pinned 字节计算;`provenance.source` 指向 `_pinned/`(提取时由 `git show` 落盘的源文件全集,先清空再写,与提取严格一致)——skill 校验器按磁盘文件复核 hash,落盘让「修复前证据」自包含、在任何 checkout 上可验。
+- 每个 truth 叶子的 `provenance.hash` 按 pinned 字节计算;`provenance.source` 指向 `_pinned/`(提取时由 `git show` 落盘的源文件全集,先清空再写,与提取严格一致)。**`_pinned/` 已 gitignore 不入仓**——extract 每次运行自动再生(确定性字节),仓库里不放产品源文件副本(reviewer 不见、grep 不命中);skill 校验器按磁盘文件复核 hash,本地 extract 跑过即可验。
 - 为什么钉 SHA 而非工作区:本 demo 断言的是**修复前**的结构事实(如 `makeStyles.deletionStatus` 无底色、横幅在 `{stateContent}` 之前的渲染序),修复后这些结构已不存在;钉 SHA 后 drift-check 恒定有意义(语义 = 提取器或 pinned 基线被改动),读工作区则必然失效。
 
 ## 如何重跑
@@ -27,5 +27,5 @@ QA_HIFI_MODULE_ROOT=<装了 playwright 的目录> node docs/design-previews/dele
 
 - `spec.json` / `extract.mjs` / `truth.json` / `index.html` / `report.json` — qa-hifi-demo 标准五件
 - `overlap-gate.mjs` — 自定义重叠门脚本
-- `_pinned/` — `git show 75baac1ee` 落盘的 provenance 源文件(提取时重新生成,提交入库)
+- `_pinned/` — `git show 75baac1ee` 落盘的 provenance 源文件(**gitignored,extract 每次运行自动再生,不入仓**)
 - `evidence/` — overlap-gate.json + 目检截图
