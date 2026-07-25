@@ -216,6 +216,15 @@ describe('ghost · 清单校验', () => {
     expect(
       bothOff.ok && (bothOff as { ok: true; manifest: GhostManifest }).manifest.panel?.systemButtons,
     ).toEqual({ maximize: false, detach: false });
+    const minimizeOff = withPanel({ systemButtons: { minimize: false } });
+    expect(
+      minimizeOff.ok &&
+        (minimizeOff as { ok: true; manifest: GhostManifest }).manifest.panel?.systemButtons,
+    ).toEqual({ minimize: false });
+    const allOff = withPanel({ systemButtons: { maximize: false, detach: false, minimize: false } });
+    expect(
+      allOff.ok && (allOff as { ok: true; manifest: GhostManifest }).manifest.panel?.systemButtons,
+    ).toEqual({ maximize: false, detach: false, minimize: false });
     expect(withPanel({ systemButtons: {} }).ok).toBe(true);
     expect(withPanel({ systemButtons: { maximize: true, detach: true } }).ok).toBe(true);
     // 非对象 / 未知键 / 非布尔值:收词明确拒绝(规则 9)
@@ -223,6 +232,8 @@ describe('ghost · 清单校验', () => {
     expect(withPanel({ systemButtons: { refresh: false } }).ok).toBe(false);
     expect(withPanel({ systemButtons: { maximize: 'no' } }).ok).toBe(false);
     expect(withPanel({ systemButtons: { detach: 0 } }).ok).toBe(false);
+    expect(withPanel({ systemButtons: { minimize: 0 } }).ok).toBe(false);
+    expect(withPanel({ position: 'tab', systemButtons: { minimize: false } }).ok).toBe(false);
     // 页签形态没有标准头:声明即拒(与 minWidth/defaultFraction 同款语义)
     expect(withPanel({ position: 'tab', systemButtons: { maximize: false } }).ok).toBe(false);
     // 缺省(不声明)不产出字段

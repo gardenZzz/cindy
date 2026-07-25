@@ -320,12 +320,12 @@ export interface GhostPanelDecl {
   defaultFraction?: number;
   /**
    * 标准头系统按钮开关(2026-07-25):缺省全开,声明 false 逐个关闭。
-   * 当前一批:maximize =「撑满内容区」、detach =「在独立窗口中打开」。
-   * 标准头本体(标题条)恒由主机绘制、不可关——可配置的只是系统按钮;
-   * 'tab' 形态没有标准头,声明本字段拒装。未知键按规则 9 收词明确拒绝,
-   * 新按钮上线时在这里扩键。
+   * 当前一批:maximize =「撑满内容区」、detach =「在独立窗口中打开」、
+   * minimize =「最小化为浮动气泡」。标准头本体(标题条)恒由主机绘制、
+   * 不可关——可配置的只是系统按钮;'tab' 形态没有标准头,声明本字段拒装。
+   * 未知键按规则 9 收词明确拒绝,新按钮上线时在这里扩键。
    */
-  systemButtons?: { maximize?: boolean; detach?: boolean };
+  systemButtons?: { maximize?: boolean; detach?: boolean; minimize?: boolean };
 }
 
 /**
@@ -2182,7 +2182,7 @@ export function validateGhostManifest(raw: unknown): ManifestValidation {
         return { ok: false, reason: 'panel.systemButtons 必须是对象(如 { "maximize": false })' };
       }
       // 收词明确拒绝未知键(规则 9):新系统按钮上线时在白名单里扩键。
-      const knownButtons = ['maximize', 'detach'];
+      const knownButtons = ['maximize', 'detach', 'minimize'];
       for (const key of Object.keys(sb)) {
         if (!knownButtons.includes(key)) {
           return { ok: false, reason: `panel.systemButtons 只认 ${knownButtons.join(' / ')},未知键:${key}` };
@@ -2193,9 +2193,11 @@ export function validateGhostManifest(raw: unknown): ManifestValidation {
       }
       const maximize = (sb as Record<string, unknown>).maximize;
       const detach = (sb as Record<string, unknown>).detach;
+      const minimize = (sb as Record<string, unknown>).minimize;
       systemButtons = {
         ...(typeof maximize === 'boolean' ? { maximize } : {}),
         ...(typeof detach === 'boolean' ? { detach } : {}),
+        ...(typeof minimize === 'boolean' ? { minimize } : {}),
       };
     }
     let position: GhostPanelPosition | undefined;

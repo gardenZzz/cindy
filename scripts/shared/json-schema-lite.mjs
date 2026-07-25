@@ -10,7 +10,13 @@
  * 那正是本模块要解决的问题本身。宁可让加新关键字的人被迫来这里补实现。
  */
 
-/** 本模块实现的关键字。不在此列的一律报错,详见文件头。 */
+/**
+ * 本模块实现的关键字。不在此列的一律报错,详见文件头。
+ *
+ * 其中 $schema / $id / title / description 是纯注解,不产生约束;definitions 只被
+ * $ref 解引用时用到。它们列在这里是为了让 assertSupported 放行,校验逻辑本身
+ * 不需要看它们。
+ */
 const SUPPORTED = new Set([
   '$schema',
   '$id',
@@ -29,9 +35,6 @@ const SUPPORTED = new Set([
   'oneOf',
   'definitions',
 ]);
-
-/** 纯注解性关键字,不参与校验。 */
-const ANNOTATIONS = new Set(['$schema', '$id', 'title', 'description', 'definitions']);
 
 /** 递归检查 schema 自身只用了已实现的关键字。 */
 function assertSupported(node, path = '#') {
