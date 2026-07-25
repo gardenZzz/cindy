@@ -370,6 +370,29 @@ html:lang(ko) {
   vertical-align: top;
   overflow-wrap: anywhere;
 }
+/* 只对没有自然断点的长数字/字母串启用强制断字。普通英文句子仍由
+   overflow-wrap:anywhere 保持自然单词边界，避免全局 break-all 造成逐字竖排。 */
+.ProseMirror .composer-list-long-run-indent {
+  word-break: break-all;
+}
+.ProseMirror .composer-list-long-run-marker {
+  display: inline-block;
+  box-sizing: border-box;
+  width: calc(1em + var(--composer-list-hang, 1.25em));
+  padding-left: 1em;
+  overflow: visible;
+  white-space: nowrap;
+  vertical-align: top;
+}
+.ProseMirror .composer-list-long-run-body {
+  display: inline-block;
+  box-sizing: border-box;
+  width: calc(100% - 1em - var(--composer-list-hang, 1.25em));
+  max-width: calc(100% - 1em - var(--composer-list-hang, 1.25em));
+  overflow-wrap: anywhere;
+  word-break: break-all;
+  vertical-align: top;
+}
 .ProseMirror .voice-input-draft-replaced {
   display: none;
 }

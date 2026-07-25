@@ -94,6 +94,27 @@ describe('buildListIndentDecorations', () => {
     expect(found[0].to).toBe(9);
   });
 
+  it('marks long digit and letter runs for scoped emergency breaking', () => {
+    const ed = makeEditor([
+      '2. 221241412423532235235325235212414',
+      '3. abbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb',
+    ]);
+    expect(ed.view.dom.querySelector('p.composer-list-block-indent')).toBeNull();
+    expect(
+      Array.from(ed.view.dom.querySelectorAll('span.composer-list-long-run-marker')).map(
+        (node) => node.textContent,
+      ),
+    ).toEqual(['2. ', '3. ']);
+    expect(
+      Array.from(ed.view.dom.querySelectorAll('span.composer-list-long-run-body')).map(
+        (node) => node.textContent,
+      ),
+    ).toEqual([
+      '221241412423532235235325235212414',
+      'abbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb',
+    ]);
+  });
+
   it('decorates each list line independently across hardBreaks', () => {
     const ed = makeEditor(['intro', '- item', '2. x']);
     const found = buildListIndentDecorations(ed.state.doc).find();
@@ -194,6 +215,16 @@ describe('ComposerListIndentDecoration in a real editor', () => {
     expect(indentSpans(ed)).toEqual(['2. plain']);
   });
 
+  it('keeps hanging indent when CJK punctuation belongs only to the list marker', () => {
+    const ed = makeEditor(['intro', '1、中文正文会在输入框边界自然换行']);
+    expect(
+      Array.from(ed.view.dom.querySelectorAll('span.composer-list-prefix-indent')).map(
+        (node) => node.textContent,
+      ),
+    ).toEqual([]);
+    expect(indentSpans(ed)).toEqual(['1、中文正文会在输入框边界自然换行']);
+  });
+
   it('keeps slash-command pills inline by falling back to prefix-only decoration', () => {
     editor = new Editor({
       element: document.createElement('div'),
@@ -225,6 +256,40 @@ describe('ComposerListIndentDecoration in a real editor', () => {
     ).toBe('- ');
     expect(editor.view.dom.querySelector('span.slash-cmd-pill')?.textContent).toBe('/foo');
     expect(indentSpans(editor)).toEqual(['2. plain']);
+  });
+
+  it('keeps hanging indent for slash paths and unknown commands without pills', () => {
+    editor = new Editor({
+      element: document.createElement('div'),
+      extensions: [
+        Document,
+        Paragraph,
+        Text,
+        HardBreak,
+        SlashCommandDecoration,
+        ComposerListIndentDecoration,
+      ],
+      content: {
+        type: 'doc',
+        content: [
+          {
+            type: 'paragraph',
+            content: [
+              { type: 'text', text: '- inspect /usr/local/bin before continuing' },
+              { type: 'hardBreak' },
+              { type: 'text', text: '2. try /unknown later' },
+            ],
+          },
+        ],
+      },
+    });
+    setSlashCommandRoster(editor, [{ name: 'foo', description: 'test command' }]);
+    expect(editor.view.dom.querySelectorAll('span.composer-list-prefix-indent')).toHaveLength(0);
+    expect(editor.view.dom.querySelectorAll('span.slash-cmd-pill')).toHaveLength(0);
+    expect(indentSpans(editor)).toEqual([
+      '- inspect /usr/local/bin before continuing',
+      '2. try /unknown later',
+    ]);
   });
 
   it('appears the moment the prefix becomes complete, and disappears when broken', () => {
@@ -262,6 +327,14 @@ describe('wiring contract', () => {
     expect(css).toContain('padding-left: calc(1em + var(--composer-list-hang, 1.25em));');
     expect(css).toContain('text-indent: var(--composer-list-hang-negative, -1.25em);');
     expect(css).toContain('overflow-wrap: anywhere;');
-    expect(css).not.toContain('word-break: break-all;');
+    expect(css).toContain('.ProseMirror .composer-list-long-run-indent');
+    expect(css).toContain('word-break: break-all;');
+    expect(css).toContain('.ProseMirror .composer-list-long-run-marker');
+    expect(css).toContain('.ProseMirror .composer-list-long-run-body');
+    expect(css).toContain('white-space: nowrap;');
+    const regularIndentRule = css.match(
+      /\.ProseMirror span\.composer-list-line-indent \{([\s\S]*?)\n\}/,
+    )?.[1];
+    expect(regularIndentRule).not.toContain('word-break: break-all;');
   });
 });
