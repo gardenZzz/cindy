@@ -531,10 +531,10 @@ describe('new session model', () => {
       title: '还不能创建',
       subtitle: '请输入电脑端项目路径。',
       details: [
-        '电脑: Carol Mac',
-        '位置: 未选择项目路径',
-        '运行: Claude · claude-sonnet-4-6 · medium',
-        '首条: 未填写',
+        '电脑：Carol Mac',
+        '位置：未选择项目路径',
+        '运行：Claude · claude-sonnet-4-6 · medium',
+        '首条：未填写',
       ],
     });
 
@@ -546,12 +546,12 @@ describe('new session model', () => {
       model: 'claude-sonnet-4-6',
     }, 'Carol Mac')).toMatchObject({
       title: '准备创建并发送',
-      subtitle: '确认后会在被控电脑创建会话，并把首条消息加入队列。',
+      subtitle: '确认后会在被控电脑创建对话，并把首条消息加入队列。',
       details: [
-        '电脑: Carol Mac',
-        '位置: 对话工作区',
-        '运行: Claude · claude-sonnet-4-6 · medium',
-        '首条: 请帮我总结这个项目，并给出下一步建议。',
+        '电脑：Carol Mac',
+        '位置：对话工作区',
+        '运行：Claude · claude-sonnet-4-6 · medium',
+        '首条：请帮我总结这个项目，并给出下一步建议。',
       ],
     });
 
@@ -562,11 +562,11 @@ describe('new session model', () => {
     }, 'Carol Mac', { attachmentCount: 2 })).toMatchObject({
       title: '准备创建并发送',
       details: [
-        '电脑: Carol Mac',
-        '位置: /repo/xdt-maker',
-        '运行: Claude · claude-sonnet-4-6 · medium',
-        '首条: 仅发送附件',
-        '附件: 2 个',
+        '电脑：Carol Mac',
+        '位置：/repo/xdt-maker',
+        '运行：Claude · claude-sonnet-4-6 · medium',
+        '首条：仅发送附件',
+        '附件：2 个',
       ],
     });
   });

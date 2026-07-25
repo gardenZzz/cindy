@@ -289,7 +289,7 @@ describe('mobileVoiceInput', () => {
 
     await expect(putMobileVoiceUpload('https://oss.example/voice-put', new Blob(['x']), 'audio/mp4', {
       fetch: fetchPut,
-    })).rejects.toThrow('语音上传失败: HTTP 403 Forbidden');
+    })).rejects.toThrow('语音上传失败：HTTP 403 Forbidden');
   });
 
   it('streams mobile refinement previews from managed refine SSE chunks', async () => {
@@ -455,6 +455,8 @@ describe('mobileVoiceInput', () => {
       system: 'Return JSON.',
       user: { dictationText: 'raw' },
       schemaName: 'dictation_refinement',
+    // 冒号来自 cloudVoiceHttpErrorMessage() 的代码拼接（半角），不在 locale 里，
+    // 因此不随 zh-CN 全角标点规则变化。
     })).rejects.toThrow('语音润色失败: HTTP 500 Server Error · managed refiner unavailable');
   });
 });

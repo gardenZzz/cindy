@@ -92,7 +92,7 @@ describe('shared session composer action model', () => {
       visible: false,
     });
     expect(empty.guidanceText).toBe('输入文字开始，使用 / 调命令，使用 @ 引用项目资源。');
-    expect(empty.input.placeholder).toBe('继续聊一聊...');
+    expect(empty.input.placeholder).toBe('继续聊一聊…');
     expect(empty.statusText).toBe('就绪');
 
     const attachmentOnly = buildSessionComposerLayout({
