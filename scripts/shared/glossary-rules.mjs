@@ -95,6 +95,21 @@ export const ELLIPSIS_LOCALES = new Set(['zh-CN', 'ja', 'ko']);
 const HALF_WIDTH_AFTER_HAN = /[一-鿿][,:;!?]/;
 const ASCII_ELLIPSIS = /\.\.\./;
 
+/**
+ * 插值占位符在标点检查里的替身。
+ *
+ * stripNonProse 把 {{total}} 换成空格,于是「已缓存 {{total}},上限」在剥离后成了
+ * 「已缓存  ,上限」——半角逗号前面是空格而非汉字,HALF_WIDTH_AFTER_HAN 匹配不上,
+ * 违规被静默放过(实测 settings.about.storage.reportCache 就是这样漏掉的)。
+ *
+ * 对读者而言 {{total}} 渲染出来就是正文的一部分,它后面跟半角逗号同样是排版错误,
+ * 所以标点检查要把插值当成汉字。用一个落在 一-鿿 区间内的字符做替身即可。
+ *
+ * URL / 邮箱 / 文件名**不能**这样替换:`config.json:` 里的冒号是路径分隔符不是标点,
+ * 换成汉字替身会把它们全判成违规。那几类仍替换为空格。
+ */
+const PROSE_PLACEHOLDER = '中';
+
 /** 半角标点 → 中文全角对应物。 */
 export const FULL_WIDTH_PUNCT = Object.freeze({
   ',': '，',
@@ -103,6 +118,26 @@ export const FULL_WIDTH_PUNCT = Object.freeze({
   '!': '！',
   '?': '？',
 });
+
+/**
+ * 标点检查专用的预处理:与 stripNonProse 剥离同样的片段,但把插值类占位符换成
+ * 汉字替身而非空格,理由见 PROSE_PLACEHOLDER。
+ *
+ * 传入**原始文案**,不要传 stripNonProse 的结果——那样插值信息已经丢了。
+ */
+export function normalizeForPunctuation(text) {
+  return text
+    // 两个插值之间的标点是**格式分隔符**,不是正文标点:`{{minutes}}:{{seconds}}` 是时间、
+    // `{{label}}: {{path}}` 是「标签: 路径」。它该用半角还是全角取决于运行期填进去的值,
+    // 静态扫描判不了,所以整类排除——先把这类标点换成空格,再做插值替换。
+    .replace(/\}\}\s*[,:;!?]\s*\{\{/g, '}} {{')
+    .replace(/\{\{[^}]*\}\}/g, PROSE_PLACEHOLDER)
+    .replace(/<\/?\d+>/g, PROSE_PLACEHOLDER)
+    .replace(/\$t\([^)]*\)/g, PROSE_PLACEHOLDER)
+    .replace(/\b[a-z][\w-]*:\/\/\S+/gi, ' ')
+    .replace(/\S+@\S+\.\S+/g, ' ')
+    .replace(/\b[\w-]+\.(json|ts|tsx|js|mjs|md|yml|yaml|sql|lock|toml)\b/gi, ' ');
+}
 
 /** 汉字后紧跟半角标点时返回该标点,否则 null。 */
 export function findHalfWidthPunct(text) {

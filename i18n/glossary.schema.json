@@ -27,7 +27,9 @@
     },
     "terms": {
       "type": "array",
-      "items": { "$ref": "#/definitions/term" }
+      "description": "术语条目。minItems 为 1 是防塌陷保险：terms 被误清空时，所有「遍历 terms」的完整性单测都会变成空循环而全绿，baseline 也是空的，于是整套禁用词与大小写检查静默消失、CI 一路通过。这类失效必须在加载阶段就炸掉。",
+      "items": { "$ref": "#/definitions/term" },
+      "minItems": 1
     }
   },
   "definitions": {

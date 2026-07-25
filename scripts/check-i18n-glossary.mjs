@@ -49,6 +49,7 @@ import {
   findCaseMismatch,
   findHalfWidthPunct,
   hasAsciiEllipsis,
+  normalizeForPunctuation,
   makeExemptChecker,
   occursIn,
   stripNonProse,
@@ -264,7 +265,9 @@ for (const locale of locales) {
   if (!checkHalfWidth && !checkEllipsis) continue;
 
   for (const [key, value] of corpus.get(locale)) {
-    const prose = stripNonProse(value);
+    // 标点检查走 normalizeForPunctuation 而非 stripNonProse:后者把 {{插值}} 换成空格,
+    // 「{{total}},上限」剥离后逗号前是空格,违规会被静默放过。
+    const prose = normalizeForPunctuation(value);
 
     const mark = checkHalfWidth ? findHalfWidthPunct(prose) : null;
     if (mark) {

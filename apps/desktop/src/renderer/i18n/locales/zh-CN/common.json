@@ -675,7 +675,7 @@
         "scanFailed": "扫描失败",
         "reportZeroRef": "无引用文件 {{count}} 个({{size}})",
         "reportProtected": "另有 {{count}} 个文件在草稿或排队消息中，已保护不动",
-        "reportCache": "缓存超限，可瘦身 {{size}}(当前 {{total}},上限 {{limit}};清掉的内容下次使用会自动重新下载)",
+        "reportCache": "缓存超限，可瘦身 {{size}}（当前 {{total}}，上限 {{limit}}；清掉的内容下次使用会自动重新下载）",
         "reportDeadDirs": "废弃目录 {{size}}(超过 30 天无改动的旧版本残留)",
         "reportTmpFiles": "写入残留临时文件 {{count}} 个",
         "nothingToClean": "没有可清理的内容",
@@ -684,7 +684,7 @@
         "confirmCleanupNoSize": "清理",
         "cleanupDoneToast": "已释放 {{size}}",
         "cleanupFailed": "清理失败",
-        "cleanupResult": "清理完成，已释放 {{size}};{{skipped}} 项因状态变化被安全跳过",
+        "cleanupResult": "清理完成，已释放 {{size}}；{{skipped}} 项因状态变化被安全跳过",
         "reconcileLabel": "存储体检",
         "reconcileDescription": "核对媒体账本与磁盘文件是否一致。只检查、只报告，不删除任何内容。",
         "reconcileButton": "体检",
@@ -2974,7 +2974,7 @@
     "xai": {
       "requestsLine": "限流(请求):剩余 {{remaining}}/{{limit}}",
       "tokensLine": "限流(token):剩余 {{remaining}}/{{limit}}",
-      "noQuotaDetail": "xAI 未提供订阅点数明细，此处仅显示价值估算"
+      "noQuotaDetail": "xAI 未提供订阅配额明细，此处仅显示价值估算"
     },
     "dailyLimitLabel": "今日 {{spend}}/{{limit}}",
     "monthlyLimitLabel": "本周期 {{spend}}/{{limit}}",
@@ -3282,7 +3282,7 @@
       "sessionRunningWriteBlocked": "Agent 正在运行，git 写操作暂不可用。",
       "renamePartialNotice": "v1 重命名文件仅支持整文件暂存/取消暂存/还原。",
       "typechangePartialNotice": "此类文件仅支持整文件暂存/取消暂存/还原。",
-      "aheadBehindTooltip": "{{upstream}}: 领先 {{ahead}}, 落后 {{behind}}",
+      "aheadBehindTooltip": "{{upstream}}：领先 {{ahead}}，落后 {{behind}}",
       "writeDisabledNotice": "当前为只读状态：{{reasons}}。仍可查看 git 改动。",
       "writeDisabledReasons": {
         "detached": "detached HEAD",
@@ -3377,7 +3377,7 @@
         "unstageAll": "全部取消暂存",
         "discardAll": "还原全部",
         "disabledWriteGateWithReasons": "当前暂不能操作：{{reasons}}。状态恢复后可继续。",
-        "partialFailure": "部分完成：成功 {{succeeded}}, 失败 {{failed}}"
+        "partialFailure": "部分完成：成功 {{succeeded}}，失败 {{failed}}"
       },
       "discard": {
         "confirm": {
@@ -3460,7 +3460,7 @@
         "old": "旧图",
         "new": "新图",
         "loading": "正在读取图片预览",
-        "tooLarge": "图片 {{size}} 超过 {{maxSize}},未加载预览。",
+        "tooLarge": "图片 {{size}} 超过 {{maxSize}}，未加载预览。",
         "loadFailed": "图片预览读取失败",
         "missing": "图片不存在",
         "alt": "{{label}}: {{path}}"
@@ -3469,7 +3469,7 @@
         "loading": "正在加载预览…",
         "fallbackTitle": "富文本预览不可用。",
         "loadFailed": "无法加载预览",
-        "tooLarge": "Markdown 文件 {{size}} 超过 {{maxSize}},已回退为普通 diff。",
+        "tooLarge": "Markdown 文件 {{size}} 超过 {{maxSize}}，已回退为普通 diff。",
         "reason": {
           "not-markdown": "该文件不是 Markdown 文件。",
           "deleted": "删除文件没有变更后内容。",
@@ -3907,8 +3907,8 @@
       "stopConfirmDesc": "Worker 对话将被销毁，如果正在执行任务则会立即停止，本次执行结果会丢失。确认要结束吗？",
       "stopConfirmConfirm": "结束协同",
       "stopConfirmCancel": "取消",
-      "archiveWorkerConfirmTitle": "归档 Worker {{role}} #{{label}}?",
-      "archiveWorkerConfirmTitleName": "归档 Worker {{name}}?",
+      "archiveWorkerConfirmTitle": "归档 Worker {{role}} #{{label}}？",
+      "archiveWorkerConfirmTitleName": "归档 Worker {{name}}？",
       "archiveWorkerConfirmDesc": "这会停掉它的 SDK 对话，并从 sidebar 隐藏；历史数据会以 archived 状态保留。当前 UI 不支持恢复，误归档后需要重新创建 Worker 派任务。",
       "archiveWorkerConfirmConfirm": "归档 Worker",
       "archiveWorkerConfirmCancel": "取消",
@@ -6238,7 +6238,7 @@
       },
       "uninstall": "卸载",
       "uninstallDialog": {
-        "title": "卸载 {{name}}?",
+        "title": "卸载 {{name}}？",
         "description": "将删除本地文件夹\n{{path}}\n此操作不可撤销。",
         "confirm": "确认卸载",
         "cancel": "取消"
@@ -6373,7 +6373,7 @@
       "subtitleWorking": "{{base}} · 正在发布中",
       "confirmFirstTitle": "确认发布到市场？",
       "confirmFirstDesc": "名称「{{name}}」将被占用，且无法修改。请再确认一次。",
-      "confirmVersionTitle": "确认发布 v{{version}}?",
+      "confirmVersionTitle": "确认发布 v{{version}}？",
       "confirmVersionDesc": "发布后所有可见范围内的用户都能拉取到新版本。",
       "confirmPublish": "发布",
       "confirmReconsider": "再想想",
@@ -6593,7 +6593,7 @@
     "marketConfirm": {
       "publishDesc": "上架后，具备访问权限的用户可以在市场中看到并 Clone 这个 Skill。",
       "delistDesc": "下架后变为私有(仅自己可见)，不再出现在公开市场；云端发布物仍保留，可再次上架。",
-      "deleteTitle": "删除 {{name}}?",
+      "deleteTitle": "删除 {{name}}？",
       "deleteDesc": "删除后，{{name}} 会从市场和团队访问中消失，操作不可撤销；已安装的用户不受影响，也不会删除你本机的 Skill 文件。",
       "deleteConfirm": "确认删除"
     },
@@ -7053,16 +7053,16 @@
       "purchased": "已购点数",
       "promotional": "赠送点数",
       "notProvisioned": "当前账户尚未开通点数。",
-      "notSupported": "当前账户暂不支持点数查询。",
-      "unavailable": "暂时无法获取点数，请刷新后重试。"
+      "notSupported": "当前账户暂不支持余额查询。",
+      "unavailable": "暂时无法获取余额，请刷新后重试。"
     },
     "usage": {
-      "observedAt": "点数更新于 {{date}}",
+      "observedAt": "余额更新于 {{date}}",
       "used": "已用",
       "total": "总额",
       "remaining": "剩余",
       "progressLabel": "{{label}}使用进度",
-      "historyUnavailable": "历史记录不完整，暂时仅显示剩余点数。",
+      "historyUnavailable": "历史记录不完整，暂时仅显示剩余余额。",
       "percentUsed": "已使用 {{percent}}%",
       "detailsUnavailable": "用量明细暂时不可用，当前仅显示各类余额。",
       "promotionalDetails": {

@@ -358,10 +358,13 @@
       },
       "forbidden": {
         "zh-CN": [
-          "额度"
+          {
+            "text": "额度",
+            "whenEn": "Credits"
+          }
         ]
       },
-      "note": "计费点数用「点数」。清理前中文「额度」同时对应 Balance / Credits / Quota 三个英文概念，是计费面板里最容易误导用户的一处：同一个 billing 页面里「点数」和「额度」并存，而「额度」在别处又指配额。裁决把三者拆开——Credits =「点数」、Quota =「配额」、Balance =「余额」，「额度」整体退出。第三方原生 credits 与 reset credits 属不同概念，走 alsoAllowed。"
+      "note": "计费点数用「点数」。清理前中文「额度」同时对应 Balance / Credits / Quota 三个英文概念，是计费面板里最容易误导用户的一处：同一个 billing 页面里「点数」和「额度」并存，而「额度」在别处又指配额。裁决把三者拆开——Credits =「点数」、Quota =「配额」、Balance =「余额」，「额度」整体退出。「额度」的禁用按英文源拆成三条条件禁用,分别挂在 credits / quota / balance 下。不能无条件禁:同一个「额度」在不同 key 里分别对应 Credits / Quota / Balance,目标译法不唯一,无条件禁只会让自动替换随机挑一个——xAI 的 subscription quota 就是这样被改成「订阅点数」的。第三方原生 credits 与 reset credits 属不同概念，走 alsoAllowed。"
     },
     {
       "id": "quota",
@@ -376,6 +379,12 @@
       "forbidden": {
         "ja": [
           "残量"
+        ],
+        "zh-CN": [
+          {
+            "text": "额度",
+            "whenEn": "Quota"
+          }
         ]
       },
       "note": "周期内的使用上限用「配额」（现状已有 3 处这么写）。与 credits 条目一起裁决：「额度」原先同时表示 Balance / Credits / Quota，三个概念在计费与限额提示里互相污染。「额度」的 forbidden 统一登记在 credits 条目下，不在这里重复——一个词只归属一个术语，否则同一处违规会被两个术语各报一次。（2026-07 修正：ko 原声明 쿼터 在全仓零出现，属凭空造词；ja 原声明 クォータ 仅 desktop 用、mobile 用 残量。定为 ja クォータ / ko 할당량——残量 语义偏 Balance 会与 残高 混淆，而 ko 的 사용량 正是 Usage 的标准词，让 Quota 占用它会重演 zh「额度」三义合一的错误。）",
@@ -394,7 +403,14 @@
         "ko": "잔액"
       },
       "checkCase": false,
-      "forbidden": {},
+      "forbidden": {
+        "zh-CN": [
+          {
+            "text": "额度",
+            "whenEn": "Balance"
+          }
+        ]
+      },
       "note": "账户余额用「余额」。原先被并入「额度」（可用额度 / 额度更新于 / 剩余额度），与 Credits、Quota 混同。Balance 是「账上还剩多少」，Credits 是「可购买消耗的计数单位」，Quota 是「周期内上限」——三者是不同层面的量，中文必须分开。"
     },
     {
@@ -430,7 +446,11 @@
           "오토메이션"
         ]
       },
-      "note": "模块名 / 能力名用「自动化」（现状 88 处主流）；指单条实例时用「自动任务」，这是刻意保留的场景差异——一刀切会写出「查看你的自动化」这类别扭中文。特别注意 Automation 在本产品里指两个不同概念：scheduler 的定时任务，以及 settings.computerUse 的操控电脑能力；后者用「自动操作电脑 / 浏览器」，改成「自动化电脑」反而不通。因此不设 forbidden。（2026-07 修正：ja 原声明 オートメーション 仅 37/121，主流是 自動化；ko 的 자동화 75/121 本就正确。）"
+      "note": "模块名 / 能力名用「自动化」（现状 88 处主流）；指单条实例时用「自动任务」，这是刻意保留的场景差异——一刀切会写出「查看你的自动化」这类别扭中文。特别注意 Automation 在本产品里指两个不同概念：scheduler 的定时任务，以及 settings.computerUse 的操控电脑能力；后者用「自动操作电脑 / 浏览器」，改成「自动化电脑」反而不通。因此不设 forbidden。（2026-07 修正：ja 原声明 オートメーション 仅 37/121，主流是 自動化；ko 的 자동화 75/121 本就正确。）豁免通讯录授权提示的两个 key:那里指的是 macOS 系统设置里的面板名,日文官方标签是「オートメーション」而非产品术语「自動化」——照产品术语改会让用户按提示在系统设置里找不到对应项,授权恢复路径直接断掉。zh-CN 的「自动化」与 ko 的「자동화」恰好就是各自的 macOS 官方标签,不受影响。",
+      "exempt": [
+        "desktop:settings.contacts.import.permissionDenied",
+        "desktop:settings.contacts.ipcError.PERMISSION_DENIED"
+      ]
     },
     {
       "id": "usage",
