@@ -598,8 +598,13 @@ test('normalizeForPunctuation: URL / 邮箱后紧跟半角标点 + 中文时留�
 test('countOccurrences: 次数进 fingerprint 才能挡住「已冻结 key 里新增一处」', () => {
   assert.equal(countOccurrences('这个对话和那个会话', '会话'), 1);
   assert.equal(countOccurrences('会话结束后新建会话', '会话'), 2);
-  // ASCII 词按词边界,允许复数 s;ssh-agent 不算产品 Agent
-  assert.equal(countOccurrences('创建 Worker 后 worker 会启动', 'Worker'), 2);
+  // ASCII 词按词边界,允许复数 s;ssh-agent 不算产品 Agent。
+  // 默认大小写敏感(同 occursIn),小写 worker 不计入;要数全部形态得显式放开。
+  assert.equal(countOccurrences('创建 Worker 后 worker 会启动', 'Worker'), 1);
+  assert.equal(
+    countOccurrences('创建 Worker 后 worker 会启动', 'Worker', { caseInsensitive: true }),
+    2,
+  );
   assert.equal(countOccurrences('用 ssh-agent 转发', 'Agent'), 0);
   assert.equal(countHalfWidthPunct('先这样,再那样,最后收尾'), 2);
 });
@@ -633,4 +638,32 @@ test('ELLIPSIS_LOCALES 必须含 en', () => {
   // 漏掉 en 等于让门禁替既有违规背书(实测当时 en 侧有 54 处)。
   assert.ok(ELLIPSIS_LOCALES.has('en'));
   for (const l of ['zh-CN', 'ja', 'ko']) assert.ok(ELLIPSIS_LOCALES.has(l), l);
+});
+
+test('countOccurrences: 默认大小写敏感,与 occursIn 同口径', () => {
+  // 术语表里 project 只禁大写 Project、plugin 把两种大小写各列一条,说明设计意图是
+  // 逐形态声明。计数若用 /i,「只禁 Project」会被悄悄扩成连小写 project 也禁。
+  const text = '打开 project 目录后再看 Project 设置';
+  assert.equal(countOccurrences(text, 'Project'), 1);
+  assert.equal(occursIn(text, 'Project'), true);
+  // 大小写检查那条规则要数出所有形态,显式放开
+  assert.equal(countOccurrences(text, 'Project', { caseInsensitive: true }), 2);
+});
+
+test('findHalfWidthPunct: 半角标点后有空格再接中文同样算违规', () => {
+  // 中英混排常在半角标点后留一个空格,`Keychain, 重启` 与 `Keychain,重启` 是同一问题
+  assert.equal(findHalfWidthPunct('Keychain, 重启后自动恢复'), ',');
+  assert.equal(findHalfWidthPunct('Keychain,重启后自动恢复'), ',');
+  // 空白不影响排除纯 ASCII 的本意
+  assert.equal(findHalfWidthPunct('a=1, b=2 的形式'), null);
+  assert.equal(findHalfWidthPunct('GPT-4, Claude 两者'), null);
+});
+
+test('glossary.json: punctuationExempt 格式合法且不滥用', () => {
+  const list = glossary.punctuationExempt ?? [];
+  for (const entry of list) {
+    assert.match(entry, /^(desktop|mobile\/[a-zA-Z]+):.+$/, `豁免项格式非法:${entry}`);
+  }
+  // 标点豁免的正当用途极窄(机器可读的结构化文本),数量失控就说明规则本身该改而不是加豁免
+  assert.ok(list.length <= 5, `标点豁免已达 ${list.length} 条,请复核规则本身是否需要调整`);
 });
