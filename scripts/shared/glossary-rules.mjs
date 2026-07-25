@@ -232,7 +232,9 @@ export const ELLIPSIS_LOCALES = new Set(['en', 'zh-CN', 'ja', 'ko']);
  *     闭合的半角引号后面那个逗号一样是正文标点。但引号这一支**要求右侧是 CJK**
  *     ——半角引号常用来包英文,`英文 "note", then continue` 里的逗号是英文标点,
  *     不该判违规。全角括号 / 书名号那一支不需要这个条件(已对 26 处实例逐条核对过)。
- *  2. 拉丁字母或数字 + 半角标点 + **后面是 CJK**。`Keychain,重启` 这类漏了整整一类:
+ *  2. 拉丁字母 / 数字 / 连字符 / 下划线 + 半角标点 + **后面是 CJK**。
+ *     `Keychain,重启` 这类漏了整整一类;连字符与下划线也要算,否则代码风格的 token
+ *     结尾会漏——`该 id 使用了官方保留前缀 cindy-,仅随…` 里逗号前是连字符。
  *     中文句子里夹的英文产品名、技术词后面同样该用全角。这一支必须要求右边是 CJK,
  *     否则 `a=1,b=2`、`GPT-4,Claude` 这种纯 ASCII 片段会被误判。
  *
@@ -241,7 +243,7 @@ export const ELLIPSIS_LOCALES = new Set(['en', 'zh-CN', 'ja', 'ko']);
  *     ——`a=1, b=2` 后面仍不是 CJK。
  */
 const HALF_WIDTH_AFTER_HAN = new RegExp(
-  `[一-鿿）)」』】》〉”’][,:;!?]|["'\`][,:;!?](?=\\s*[${CJK_CHAR}])|[A-Za-z0-9][,:;!?](?=\\s*[${CJK_CHAR}])`,
+  `[一-鿿）)」』】》〉”’][,:;!?]|["'\`][,:;!?](?=\\s*[${CJK_CHAR}])|[A-Za-z0-9_-][,:;!?](?=\\s*[${CJK_CHAR}])`,
 );
 const ASCII_ELLIPSIS = /\.\.\./;
 
