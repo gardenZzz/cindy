@@ -1,6 +1,13 @@
 #!/usr/bin/env node
 // extract.mjs — 账号注销横幅被登录面板覆盖 bug 复现 demo 的真值提取器。
-// 机械提取,不手抄;stdout 输出 truth JSON。提取面:
+// 机械提取,不手抄;stdout 输出 truth JSON。
+//
+// ⚠️ 本 demo 是「修复前证据」:truth 一律钉在 PINNED_SHA(本 PR 的 base commit)上,
+// 源码读取全部走 `git show <PINNED_SHA>:<repo-relative-path>`(execFileSync,cwd=仓根),
+// 不读工作区文件——工作区已是修复后代码,读了就不是「修复前」。
+// drift-check 语义随之变为「提取器/ pinned 基线是否被改动」,恒定可复核。
+//
+// 提取面:
 //  - desk:loginDesignTokens.ts(组/面板/社交行/consent 行/Global 徽标几何)、
 //    loginScale.ts(PANEL_FIXED_SCALE)、themes/colors.ts(面板/横幅/文字/consent/
 //    apple/徽标 token 双模式)、LoginPage.tsx(横幅 className 结构事实 + 渲染位置 +
@@ -21,31 +28,54 @@
 // 横幅 tailwind 类 → px 的解析在提取器内完成(spacing 1 单位 = 4px 为框架事实),
 // locator 记录源 class 串,可复核。
 
+import { execFileSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
-import { readFileSync } from 'node:fs';
-import { dirname, resolve } from 'node:path';
+import { mkdirSync, rmSync, writeFileSync } from 'node:fs';
+import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
+/** 修复前基线 = 本 PR 的 base commit(origin/main 分叉点;该 commit 的 main 源码即修复前状态)。
+ *  钉死不随分支漂移:本 demo 复现的 bug 存在于且仅钉在这个基线上。 */
+const PINNED_SHA = '75baac1ee';
+
 const demoDir = dirname(fileURLToPath(import.meta.url));
-const repoRoot = resolve(demoDir, '..', '..');
-const R = (p) => resolve(repoRoot, p);
-const rel = (p) => `../../${p}`;
+const repoRoot = resolve(demoDir, '..', '..', '..');
+const pinnedDir = join(demoDir, '_pinned');
 
 const hashes = new Map();
-function fileHash(absPath) {
-  if (!hashes.has(absPath)) {
-    hashes.set(absPath, createHash('sha256').update(readFileSync(absPath)).digest('hex'));
+function fileHash(repoRelPath) {
+  if (!hashes.has(repoRelPath)) {
+    hashes.set(repoRelPath, createHash('sha256').update(readSrc(repoRelPath)).digest('hex'));
   }
-  return hashes.get(absPath);
+  return hashes.get(repoRelPath);
 }
 function leaf(value, srcRelRepo, locator) {
   return {
     value,
-    provenance: { source: rel(srcRelRepo), locator, hash: `sha256:${fileHash(R(srcRelRepo))}` },
+    provenance: {
+      source: `_pinned/${srcRelRepo}`,
+      locator: `[pinned ${PINNED_SHA}] ${locator}`,
+      hash: `sha256:${fileHash(srcRelRepo)}`,
+    },
   };
 }
+/** 从 pinned commit 读源码文本(git show;不读工作区)。 */
 function readSrc(p) {
-  return readFileSync(R(p), 'utf8');
+  return execFileSync('git', ['show', `${PINNED_SHA}:${p}`], {
+    cwd: repoRoot,
+    encoding: 'utf8',
+    maxBuffer: 32 * 1024 * 1024,
+  });
+}
+/** 把本轮读到的全部 pinned 源文件落盘到 _pinned/(先清空再写,保证目录与提取严格一致;
+ *  provenance.source 指向这里——skill 校验器按磁盘文件复核 hash,落盘让「修复前证据」自包含可验)。 */
+function dumpPinnedSources() {
+  rmSync(pinnedDir, { recursive: true, force: true });
+  for (const repoRelPath of hashes.keys()) {
+    const dest = join(pinnedDir, repoRelPath);
+    mkdirSync(dirname(dest), { recursive: true });
+    writeFileSync(dest, readSrc(repoRelPath));
+  }
 }
 /** 把 {k: v} 逐字段包成 {k: leaf(v)}(locator = prefix.k)——门 D truth 路径按字段寻址。 */
 function leafFields(obj, srcRelRepo, prefix, locators = {}) {
@@ -688,5 +718,9 @@ const truth = {
     copy: Object.fromEntries(MSG_LOCALES.map((loc) => [loc, leaf(mCopy[loc], M.loginMessages, 'accountDeletion* + title/phonePlaceholder/emailPlaceholder/continue/consentStatement/ssoEntry/social(apple|google|wechat)')])),
   },
 };
+
+// 全部 provenance 源文件已读齐(hashes 的键集合)——落盘 _pinned/ 后再输出 truth
+// (provenance.source 指向 _pinned/,校验器按磁盘复核 hash 时与 pinned 字节一致)。
+dumpPinnedSources();
 
 process.stdout.write(JSON.stringify(truth, null, 1) + '\n');
