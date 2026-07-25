@@ -6985,8 +6985,7 @@
     "sidebar": "Credits & plans",
     "settings": {
       "title": "Usage and billing",
-      "subtitle": "Review your current subscription or purchase server-provided plans and credits.",
-      "loading": "Loading subscription status…",
+      "subtitle": "Review your available credits and current plan, or buy more credits as needed.",
       "subscriptionCard": {
         "title": "Current plan",
         "empty": "No active subscription",
@@ -6994,13 +6993,17 @@
         "unnamedPlan": "Subscription plan",
         "unavailable": "Subscription status is temporarily unavailable. Refresh to try again.",
         "action": "View plans",
-        "changeAction": "Change plan"
+        "changeAction": "Change plan",
+        "priceInterval": "{{price}} / {{interval}}",
+        "includedCredits": "Includes {{amount}} credits per {{interval}}",
+        "renewsAt": "Renews {{date}}",
+        "endsAt": "Plan ends {{date}}"
       },
       "topupCard": {
         "title": "Credits",
         "description": "Purchase credits for usage-based models and features.",
         "cardTitle": "Buy credits as needed",
-        "cardDescription": "Available credit products are configured by the server.",
+        "cardDescription": "Add to your available credits as needed. The checkout page shows the final amount.",
         "action": "Buy credits"
       }
     },
@@ -7136,7 +7139,8 @@
       "title": "Unfinished payment found",
       "description": "Continue the previous payment and confirm its latest state with the server.",
       "continueTopup": "Continue {{amount}} payment",
-      "continueSubscription": "Continue subscription payment"
+      "continueSubscription": "Continue subscription payment",
+      "continueFailed": "Continue interrupted payment"
     },
     "checkout": {
       "creatingTitle": "Creating payment",

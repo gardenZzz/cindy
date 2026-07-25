@@ -22,6 +22,7 @@ import type {
   BillingCatalogOfferUnavailableReason,
   BillingCatalogProduct,
   BillingPendingPlanChange,
+  BillingPaymentOrder,
   BillingPurchaseOption,
   BillingSubscription,
 } from '../../../shared/billing';
@@ -56,6 +57,15 @@ type SupportedPurchaseOption = BillingPurchaseOption & {
 
 type PurchaseKind = BillingCatalogProduct['kind'];
 type BalanceIssue = 'NOT_PROVISIONED' | 'NOT_SUPPORTED' | 'UNAVAILABLE' | null;
+type CurrentPlanFacts = {
+  name: string;
+  status: BillingSubscription['status'];
+  price: string | null;
+  interval: BillingCatalogOffer['interval'];
+  includedCredits: string | null;
+  periodEndAt: string | null;
+  cancelAtPeriodEnd: boolean;
+};
 
 const SUPPORTED_BILLING_PROVIDERS = new Set<SupportedBillingProvider>(['alipay', 'stripe']);
 const SUPPORTED_PAYMENT_ACTIONS = new Set<BillingPurchaseOption['paymentAction']>([
@@ -124,6 +134,17 @@ function formatLedgerTimestamp(value: string): string {
     }).format(timestamp);
   } catch {
     return value;
+  }
+}
+
+function formatBillingDate(value: string | null, locale: string): string | null {
+  if (!value) return null;
+  const timestamp = Date.parse(value);
+  if (!Number.isFinite(timestamp)) return null;
+  try {
+    return new Intl.DateTimeFormat(locale, { dateStyle: 'medium' }).format(timestamp);
+  } catch {
+    return null;
   }
 }
 
@@ -198,7 +219,8 @@ export function BillingPage() {
 }
 
 export function BillingSettingsSection({ accountId }: { accountId: string | null }) {
-  const { t } = useTranslation();
+  const { t, i18n } = useTranslation();
+  const billingLocale = i18n.resolvedLanguage ?? i18n.language;
   const [catalog, setCatalog] = useState<BillingCatalog | null>(null);
   const [catalogError, setCatalogError] = useState(false);
   const [loadingCatalog, setLoadingCatalog] = useState(true);
@@ -305,6 +327,13 @@ export function BillingSettingsSection({ accountId }: { accountId: string | null
     [loadBillingState, loadSubscription],
   );
   const planChange = usePlanChange(accountId, handlePlanChangeSettled);
+  const hasRecoverableFailedIntent =
+    !checkout.state.open &&
+    checkout.state.phase === 'FAILED' &&
+    checkout.state.error &&
+    checkout.state.intent !== null &&
+    checkout.state.order === null &&
+    checkout.state.subscription === null;
 
   const offers = useMemo<CatalogOfferEntry[]>(() => {
     if (!catalog) return [];
@@ -320,12 +349,7 @@ export function BillingSettingsSection({ accountId }: { accountId: string | null
             : [],
         })),
       )
-      .filter(isCatalogOfferVisible)
-      .sort((left, right) => {
-        const productOrder = left.product.sortOrder - right.product.sortOrder;
-        if (productOrder !== 0) return productOrder;
-        return left.offer.code.localeCompare(right.offer.code);
-      });
+      .filter(isCatalogOfferVisible);
   }, [catalog]);
 
   const subscriptionOffers = useMemo(
@@ -423,6 +447,19 @@ export function BillingSettingsSection({ accountId }: { accountId: string | null
     currentSubscription?.status === 'ACTIVE' &&
     !currentSubscription.cancelAtPeriodEnd &&
     currentPlan?.offer.interval === 'MONTH';
+  const currentPlanFacts = useMemo(() => {
+    if (!currentSubscription) return null;
+    const plan = currentSubscription.effectivePlan;
+    return {
+      name: planNameOf(plan?.product.code) ?? t('billing.settings.subscriptionCard.unnamedPlan'),
+      status: currentSubscription.status,
+      price: plan ? formatMoney(plan.terms.amount, plan.terms.currency) : null,
+      interval: plan?.offer.interval ?? null,
+      includedCredits: plan?.terms.creditAmount ?? null,
+      periodEndAt: formatBillingDate(currentSubscription.currentPeriodEndAt, billingLocale),
+      cancelAtPeriodEnd: currentSubscription.cancelAtPeriodEnd,
+    };
+  }, [billingLocale, currentSubscription, planNameOf, t]);
 
   // UI candidates only. The quote is the authority on whether a target is
   // actually reachable; this filter just avoids offering obviously invalid
@@ -555,7 +592,21 @@ export function BillingSettingsSection({ accountId }: { accountId: string | null
           </button>
         </div>
 
-        <div className="mt-8 overflow-hidden rounded-xl border border-[var(--border-default)] bg-[var(--surface-elevated)]">
+        {!checkout.recovering &&
+          (checkout.recoverables.topups.length > 0 ||
+            checkout.recoverables.subscription !== null ||
+            hasRecoverableFailedIntent) && (
+            <BillingRecoveryNotice
+              topups={checkout.recoverables.topups}
+              subscription={checkout.recoverables.subscription}
+              failedIntent={hasRecoverableFailedIntent}
+              onResumeTopup={checkout.resumeTopup}
+              onResumeSubscription={checkout.resumeSubscription}
+              onResumeFailed={checkout.resumeFailed}
+            />
+          )}
+
+        <div className="mt-5 overflow-hidden rounded-xl border border-[var(--border-default)] bg-[var(--surface-elevated)]">
           <BillingUsageSummary
             usage={creditUsage}
             balance={balance}
@@ -563,89 +614,28 @@ export function BillingSettingsSection({ accountId }: { accountId: string | null
             loading={loadingBalance}
             detailsUnavailable={usageDetailsUnavailable}
           />
-          <div className="border-t border-[var(--border-default)]">
-            <BillingSummaryRow
-              label={t('billing.settings.subscriptionCard.title')}
-              title={
-                currentPlanName ??
-                (currentSubscription
-                  ? t('billing.settings.subscriptionCard.unnamedPlan')
-                  : t('billing.settings.subscriptionCard.emptyTitle'))
-              }
-              description={
-                loadingSubscription
-                  ? t('billing.settings.loading')
-                  : subscriptionError
-                    ? t('billing.settings.subscriptionCard.unavailable')
-                    : currentSubscription
-                      ? t(`billing.subscriptionStatus.${currentSubscription.status}`)
-                      : t('billing.settings.subscriptionCard.empty')
-              }
-              loading={loadingSubscription}
-              disabled={loadingSubscription || subscriptionError}
-              actionLabel={
-                planChangeable
-                  ? t('billing.settings.subscriptionCard.changeAction')
-                  : t('billing.settings.subscriptionCard.action')
-              }
-              onAction={() => {
-                if (planChangeable) openPlanChange();
-                else openPurchaseDialog('SUBSCRIPTION');
-              }}
-            />
-            {pendingPlanChange && (
-              <PendingPlanChangeBanner
-                pending={pendingPlanChange}
-                targetName={planNameOf(pendingPlanChange.targetPlan?.product.code)}
-                onResume={() => planChange.resumePending(pendingPlanChange)}
-                onUndo={() => void planChange.cancelChange(pendingPlanChange.planChangeId)}
-              />
-            )}
-          </div>
-          <div className="border-t border-[var(--border-default)]">
-            <BillingSummaryRow
-              label={t('billing.settings.topupCard.title')}
-              title={t('billing.settings.topupCard.cardTitle')}
-              description={t('billing.settings.topupCard.cardDescription')}
-              actionLabel={t('billing.settings.topupCard.action')}
-              onAction={() => openPurchaseDialog('CREDIT_TOPUP')}
-            />
-          </div>
         </div>
 
-        {!checkout.recovering &&
-          (checkout.recoverables.topups.length > 0 ||
-            checkout.recoverables.subscription !== null) && (
-            <div className="mt-5 rounded-xl border border-[var(--border-default)] px-5 py-4">
-              <p className="text-sm font-medium">{t('billing.recovery.title')}</p>
-              <p className="mt-1 text-12 text-[var(--text-secondary)]">
-                {t('billing.recovery.description')}
-              </p>
-              <div className="mt-3 flex flex-wrap gap-2">
-                {checkout.recoverables.topups.map((order) => (
-                  <button
-                    key={order.orderId}
-                    type="button"
-                    onClick={() => checkout.resumeTopup(order)}
-                    className="rounded-full border border-[var(--border-default)] px-3 py-1.5 text-12 font-medium hover:bg-[var(--surface-hover-soft)]"
-                  >
-                    {t('billing.recovery.continueTopup', {
-                      amount: formatMoney(order.amount, order.currency),
-                    })}
-                  </button>
-                ))}
-                {checkout.recoverables.subscription && (
-                  <button
-                    type="button"
-                    onClick={() => checkout.resumeSubscription(checkout.recoverables.subscription!)}
-                    className="rounded-full border border-[var(--border-default)] px-3 py-1.5 text-12 font-medium hover:bg-[var(--surface-hover-soft)]"
-                  >
-                    {t('billing.recovery.continueSubscription')}
-                  </button>
-                )}
-              </div>
-            </div>
-          )}
+        <div className="mt-4 grid grid-cols-1 gap-4 lg:grid-cols-2">
+          <SubscriptionOverviewCard
+            facts={currentPlanFacts}
+            loading={loadingSubscription}
+            error={subscriptionError}
+            planChangeable={planChangeable}
+            actionDisabled={loadingSubscription || subscriptionError}
+            pendingPlanChange={pendingPlanChange}
+            pendingTargetName={planNameOf(pendingPlanChange?.targetPlan?.product.code)}
+            onChangePlan={openPlanChange}
+            onPurchase={() => openPurchaseDialog('SUBSCRIPTION')}
+            onResumePending={() => {
+              if (pendingPlanChange) planChange.resumePending(pendingPlanChange);
+            }}
+            onCancelPending={() => {
+              if (pendingPlanChange) void planChange.cancelChange(pendingPlanChange.planChangeId);
+            }}
+          />
+          <TopupOverviewCard onPurchase={() => openPurchaseDialog('CREDIT_TOPUP')} />
+        </div>
       </div>
 
       <BillingOfferDialog
@@ -719,6 +709,205 @@ export function BillingSettingsSection({ accountId }: { accountId: string | null
   );
 }
 
+function BillingRecoveryNotice({
+  topups,
+  subscription,
+  failedIntent,
+  onResumeTopup,
+  onResumeSubscription,
+  onResumeFailed,
+}: {
+  topups: BillingPaymentOrder[];
+  subscription: BillingSubscription | null;
+  failedIntent: boolean;
+  onResumeTopup: (order: BillingPaymentOrder) => void;
+  onResumeSubscription: (subscription: BillingSubscription) => void;
+  onResumeFailed: () => void;
+}) {
+  const { t } = useTranslation();
+  return (
+    <section className="mt-5 rounded-xl border border-[var(--border-default)] bg-[var(--surface-elevated)] px-5 py-4">
+      <p className="text-sm font-medium text-[var(--text-primary)]">
+        {t('billing.recovery.title')}
+      </p>
+      <p className="mt-1 text-12 text-[var(--text-secondary)]">
+        {t('billing.recovery.description')}
+      </p>
+      <div className="mt-3 flex flex-wrap gap-2">
+        {topups.map((order) => (
+          <button
+            key={order.orderId}
+            type="button"
+            onClick={() => onResumeTopup(order)}
+            className="select-none rounded-full border border-[var(--border-default)] px-3 py-1.5 text-12 font-medium transition-colors hover:bg-[var(--surface-hover-soft)]"
+          >
+            {t('billing.recovery.continueTopup', {
+              amount: formatMoney(order.amount, order.currency),
+            })}
+          </button>
+        ))}
+        {subscription && (
+          <button
+            type="button"
+            onClick={() => onResumeSubscription(subscription)}
+            className="select-none rounded-full border border-[var(--border-default)] px-3 py-1.5 text-12 font-medium transition-colors hover:bg-[var(--surface-hover-soft)]"
+          >
+            {t('billing.recovery.continueSubscription')}
+          </button>
+        )}
+        {failedIntent && (
+          <button
+            type="button"
+            onClick={onResumeFailed}
+            className="select-none rounded-full border border-[var(--border-default)] px-3 py-1.5 text-12 font-medium transition-colors hover:bg-[var(--surface-hover-soft)]"
+          >
+            {t('billing.recovery.continueFailed')}
+          </button>
+        )}
+      </div>
+    </section>
+  );
+}
+
+function SubscriptionOverviewCard({
+  facts,
+  loading,
+  error,
+  planChangeable,
+  actionDisabled,
+  pendingPlanChange,
+  pendingTargetName,
+  onChangePlan,
+  onPurchase,
+  onResumePending,
+  onCancelPending,
+}: {
+  facts: CurrentPlanFacts | null;
+  loading: boolean;
+  error: boolean;
+  planChangeable: boolean;
+  actionDisabled: boolean;
+  pendingPlanChange: BillingPendingPlanChange | null;
+  pendingTargetName: string | null;
+  onChangePlan: () => void;
+  onPurchase: () => void;
+  onResumePending: () => void;
+  onCancelPending: () => void;
+}) {
+  const { t } = useTranslation();
+  const showPeriodDate =
+    facts?.periodEndAt &&
+    (facts.cancelAtPeriodEnd || facts.status === 'ACTIVE' || facts.status === 'TRIALING');
+
+  return (
+    <section className="flex min-h-[220px] flex-col rounded-xl border border-[var(--border-default)] bg-[var(--surface-elevated)] p-5">
+      <p className="text-11 font-medium text-[var(--text-tertiary)]">
+        {t('billing.settings.subscriptionCard.title')}
+      </p>
+      <div className="mt-3 min-h-0 flex-1">
+        {loading ? (
+          <Spinner size={15} />
+        ) : error ? (
+          <p className="text-12 leading-5 text-[var(--text-secondary)]">
+            {t('billing.settings.subscriptionCard.unavailable')}
+          </p>
+        ) : facts ? (
+          <>
+            <div className="flex flex-wrap items-center gap-2">
+              <h3 className="text-16 font-medium text-[var(--text-primary)]">{facts.name}</h3>
+              <span className="select-none rounded-full bg-[var(--surface-chip)] px-2.5 py-1 text-10 font-medium text-[var(--text-secondary)]">
+                {t(`billing.subscriptionStatus.${facts.status}`)}
+              </span>
+            </div>
+            {facts.price && facts.interval && (
+              <p className="mt-3 text-13 text-[var(--text-primary)]">
+                {t('billing.settings.subscriptionCard.priceInterval', {
+                  price: facts.price,
+                  interval: t(`billing.intervals.${facts.interval}`),
+                })}
+              </p>
+            )}
+            {facts.includedCredits && facts.interval && (
+              <p className="mt-1 text-12 text-[var(--text-secondary)]">
+                {t('billing.settings.subscriptionCard.includedCredits', {
+                  amount: facts.includedCredits,
+                  interval: t(`billing.intervals.${facts.interval}`),
+                })}
+              </p>
+            )}
+            {showPeriodDate && (
+              <p className="mt-3 text-12 text-[var(--text-secondary)]">
+                {facts.cancelAtPeriodEnd
+                  ? t('billing.settings.subscriptionCard.endsAt', {
+                      date: facts.periodEndAt,
+                    })
+                  : t('billing.settings.subscriptionCard.renewsAt', {
+                      date: facts.periodEndAt,
+                    })}
+              </p>
+            )}
+          </>
+        ) : (
+          <>
+            <h3 className="text-16 font-medium text-[var(--text-primary)]">
+              {t('billing.settings.subscriptionCard.emptyTitle')}
+            </h3>
+            <p className="mt-2 text-12 leading-5 text-[var(--text-secondary)]">
+              {t('billing.settings.subscriptionCard.empty')}
+            </p>
+          </>
+        )}
+      </div>
+      <div className="mt-5 flex flex-wrap gap-2">
+        <button
+          type="button"
+          onClick={planChangeable ? onChangePlan : onPurchase}
+          disabled={actionDisabled}
+          className="h-8 select-none rounded-full border border-[var(--border-default)] px-3.5 text-12 font-medium text-[var(--text-primary)] transition-colors hover:bg-[var(--surface-hover-soft)] disabled:cursor-not-allowed disabled:opacity-40"
+        >
+          {planChangeable
+            ? t('billing.settings.subscriptionCard.changeAction')
+            : t('billing.settings.subscriptionCard.action')}
+        </button>
+      </div>
+      {pendingPlanChange && (
+        <PendingPlanChangeBanner
+          pending={pendingPlanChange}
+          targetName={pendingTargetName}
+          onResume={onResumePending}
+          onUndo={onCancelPending}
+        />
+      )}
+    </section>
+  );
+}
+
+function TopupOverviewCard({ onPurchase }: { onPurchase: () => void }) {
+  const { t } = useTranslation();
+  return (
+    <section className="flex min-h-[220px] flex-col rounded-xl border border-[var(--border-default)] bg-[var(--surface-elevated)] p-5">
+      <p className="text-11 font-medium text-[var(--text-tertiary)]">
+        {t('billing.settings.topupCard.title')}
+      </p>
+      <div className="mt-3 flex-1">
+        <h3 className="text-16 font-medium text-[var(--text-primary)]">
+          {t('billing.settings.topupCard.cardTitle')}
+        </h3>
+        <p className="mt-2 max-w-[420px] text-12 leading-5 text-[var(--text-secondary)]">
+          {t('billing.settings.topupCard.cardDescription')}
+        </p>
+      </div>
+      <button
+        type="button"
+        onClick={onPurchase}
+        className="mt-5 h-8 w-fit select-none rounded-full border border-[var(--border-default)] px-3.5 text-12 font-medium text-[var(--text-primary)] transition-colors hover:bg-[var(--surface-hover-soft)]"
+      >
+        {t('billing.settings.topupCard.action')}
+      </button>
+    </section>
+  );
+}
+
 function PendingPlanChangeBanner({
   pending,
   targetName,
@@ -754,13 +943,13 @@ function PendingPlanChangeBanner({
             name: targetName ?? t('billing.settings.subscriptionCard.unnamedPlan'),
           });
   return (
-    <div className="flex items-center gap-4 border-t border-[var(--border-default)] bg-[var(--surface-chip)] px-5 py-3">
+    <div className="mt-5 flex flex-wrap items-center gap-3 rounded-xl border border-[var(--border-default)] bg-[var(--surface-chip)] px-4 py-3">
       <p className="min-w-0 flex-1 text-12 leading-5 text-[var(--text-secondary)]">{label}</p>
       {pending.status === 'SCHEDULED' ? (
         <button
           type="button"
           onClick={onUndo}
-          className="h-8 shrink-0 rounded-full border border-[var(--border-default)] px-3.5 text-12 font-medium text-[var(--text-primary)] transition-colors hover:bg-[var(--surface-hover-soft)]"
+          className="h-8 shrink-0 select-none rounded-full border border-[var(--border-default)] px-3.5 text-12 font-medium text-[var(--text-primary)] transition-colors hover:bg-[var(--surface-hover-soft)]"
         >
           {t('billing.planChange.undo')}
         </button>
@@ -768,7 +957,7 @@ function PendingPlanChangeBanner({
         <button
           type="button"
           onClick={onResume}
-          className="h-8 shrink-0 rounded-full border border-[var(--border-default)] px-3.5 text-12 font-medium text-[var(--text-primary)] transition-colors hover:bg-[var(--surface-hover-soft)]"
+          className="h-8 shrink-0 select-none rounded-full border border-[var(--border-default)] px-3.5 text-12 font-medium text-[var(--text-primary)] transition-colors hover:bg-[var(--surface-hover-soft)]"
         >
           {t('billing.planChange.resume')}
         </button>
@@ -822,14 +1011,9 @@ function BillingUsageSummary({
         : t('billing.balance.unavailable');
 
   return (
-    <section
-      className="px-5 py-5"
-      aria-labelledby="billing-balance-title"
-      aria-live="polite"
-      aria-busy={loading}
-    >
+    <section aria-labelledby="billing-balance-title" aria-live="polite" aria-busy={loading}>
       {loading ? (
-        <div className="flex h-[118px] items-center px-5">
+        <div className="flex h-[118px] items-center px-5 py-5">
           <Spinner size={15} />
         </div>
       ) : usage ? (
@@ -1080,44 +1264,6 @@ function GrantAmount({
       <p className="mt-0.5 truncate text-11 font-medium tabular-nums text-[var(--text-primary)]">
         {amount === null ? '—' : formatMoney(amount, currency)}
       </p>
-    </div>
-  );
-}
-
-function BillingSummaryRow({
-  label,
-  title,
-  description,
-  loading = false,
-  disabled = false,
-  actionLabel,
-  onAction,
-}: {
-  label: string;
-  title: string;
-  description: string;
-  loading?: boolean;
-  disabled?: boolean;
-  actionLabel: string;
-  onAction: () => void;
-}) {
-  return (
-    <div className="flex min-h-[112px] items-center gap-6 px-5 py-4">
-      <div className="min-w-0 flex-1">
-        <p className="text-11 font-medium text-[var(--text-tertiary)]">{label}</p>
-        <p className="mt-1 text-sm font-medium text-[var(--text-primary)]">{title}</p>
-        <div className="mt-1 min-h-5 text-12 leading-5 text-[var(--text-secondary)]">
-          {loading ? <Spinner size={13} /> : description}
-        </div>
-      </div>
-      <button
-        type="button"
-        onClick={onAction}
-        disabled={disabled}
-        className="h-8 shrink-0 rounded-full border border-[var(--border-default)] px-4 text-12 font-medium text-[var(--text-primary)] transition-colors hover:bg-[var(--surface-hover-soft)] disabled:cursor-not-allowed disabled:opacity-40"
-      >
-        {actionLabel}
-      </button>
     </div>
   );
 }
