@@ -319,6 +319,23 @@ interface ModelSelectorProps {
   /** 可选的列表首行兜底值，例如“不指定（使用原逻辑）”。 */
   fallbackOption?: { active: boolean; label: string; onSelect: () => void };
   /**
+   * 点击**当前已选中**的行时照常回调 onModelChange / onProviderChange（默认 false = 收起了事）。
+   * 供「当前值是解析出的继承值、点一下才落成显式值」的调用方（IM 工作目录偏好）使用；
+   * 会话场景不要开——那里 modelId 本就是已持久化的值，重选自己是纯无操作。
+   */
+  reselectEmitsChange?: boolean;
+  /**
+   * modelId 非空但不在可见清单时的 trigger 文案（默认落「选择模型」占位符）。
+   * 供展示已持久化偏好的调用方给出诊断性文案，避免把「存过但当前不可用」显示成「没选过」。
+   */
+  unknownModelLabel?: (modelId: string) => string;
+  /**
+   * 可及名上下文前缀(如「模型 · chat」)。多实例同屏(IM 目录偏好逐行一个)时前置到
+   * trigger 的 aria-label,行与行才能被读屏区分 —— 与 VendorSegmentedSwitcher.ariaLabel
+   * 同一动机;单实例的 composer 不传,行为不变。
+   */
+  ariaContext?: string;
+  /**
    * session-agent-switch:会话内显式两步切换引擎(先选 Agent,再选模型)。
    * 传入后列表顶部渲染 Claude / Codex 分段;切到非当前引擎的 tab 进入「浏览目标
    * 引擎模型」态(带提示行),此时点模型行调 onSwitch(而非 onModelChange),由调用方
@@ -370,8 +387,15 @@ interface ModelSelectorContentProps {
   followSession?: { active: boolean; label: string; onFollow: () => void };
   /** 是否显示模型的 effort / Fast 编辑入口。 */
   configurationEnabled?: boolean;
+  /** 语义同 ModelSelectorProps.reselectEmitsChange(点当前行照常回调)。 */
+  reselectEmitsChange?: boolean;
   /** Morph 原位展开时，要求真实 pointer move 后才展示行级配置，避免静止光标误触。 */
   pointerRevealRequiresIntent?: boolean;
+  /**
+   * field 形态:面板宽度绑定 trigger(DESIGN.md §4「Panel width must bind to the
+   * trigger width」),主菜单列由固定 320 改为撑满外层 PopoverContent。
+   */
+  fluidWidth?: boolean;
   /** 语义同 ModelSelectorProps.agentSwitch(显式两步引擎切换)。 */
   agentSwitch?: {
     currentVendor: 'cc' | 'codex';
@@ -414,7 +438,9 @@ function ModelSelectorContentView({
   onNavigateToProviders,
   followSession,
   configurationEnabled = true,
+  reselectEmitsChange = false,
   pointerRevealRequiresIntent = false,
+  fluidWidth = false,
   agentSwitch,
   pricing,
 }: ModelSelectorContentProps & { pricing: ModelPricingCatalog | null }) {
@@ -826,6 +852,14 @@ function ModelSelectorContentView({
       return;
     }
     if (isSelectedRow(providerId, id)) {
+      // 默认:重选当前行 = 无操作,直接收起(会话场景点自己没有意义)。
+      // reselectEmitsChange:调用方的「当前值」可能是**解析出来的继承值**而非已持久化的
+      // 显式值(IM 工作目录偏好),这时点当前行的语义是「把继承值钉成显式值」,必须照常回调,
+      // 否则用户点了没反应、之后上游默认一变这条偏好就被静默改掉。
+      if (reselectEmitsChange) {
+        if (sections && providerId) onProviderChange?.(providerId, id);
+        else onModelChange(id);
+      }
       onDismiss?.();
       return;
     }
@@ -1333,9 +1367,15 @@ function ModelSelectorContentView({
 
   const hasAnyModel = sections ? sections.length > 0 : (flatModels?.length ?? 0) > 0;
 
-  // ── 主菜单:固定 320 宽,选项浮层 portal 到 body,hover 时主菜单完全不重排 ─────
+  // ── 主菜单:固定 320 宽(field 形态改绑 trigger 宽度,见 fluidWidth),选项浮层
+  //    portal 到 body,hover 时主菜单完全不重排 ─────
   const pane = (
-    <div className="flex w-[320px] shrink-0 flex-col gap-1.5 p-2">
+    <div
+      className={cn(
+        'flex shrink-0 flex-col gap-1.5 p-2',
+        fluidWidth ? 'w-full min-w-0' : 'w-[320px]',
+      )}
+    >
       {/* session-agent-switch:显式两步引擎切换——先在分段里选 Agent,再选模型。
           复用新建会话的 VendorSegmentedSwitcher 视觉(dense),宽度撑满列表列。 */}
       {agentSwitch && (
@@ -1475,6 +1515,9 @@ export function ModelSelector({
   popoverSide = 'top',
   configurationEnabled = true,
   fallbackOption,
+  reselectEmitsChange = false,
+  unknownModelLabel,
+  ariaContext,
   currentProviderId,
   sourceDisconnected = false,
   onProviderChange,
@@ -1537,9 +1580,18 @@ export function ModelSelector({
   );
 
   const currentModel = visibleModels.find((m) => m.id === modelId);
+  // 已保存的模型不在可见清单里(被隐藏 / 供应商断开 / 目录下架)时,默认落到「选择模型」
+  // 占位符 —— 对会话是对的(没选过),但对「展示一条已持久化偏好」的调用方是信息丢失:
+  // 用户既看不到自己存的是什么,也看不到实际会跑什么。unknownModelLabel 让这类调用方
+  // 给出诊断性文案(通常是裸 id),行为与本组件接管前一致。
+  // unknown label 空串/全空白按缺省处理(否则 ?? 不回落,trigger 渲染成空白)。
+  const unknownLabel =
+    modelId && unknownModelLabel ? unknownModelLabel(modelId).trim() : '';
   const displayLabel = fallbackOption?.active
     ? fallbackOption.label
-    : (currentModel?.displayName ?? t('newChat.modelSelector.trigger.placeholder'));
+    : (currentModel?.displayName ??
+      (unknownLabel !== '' ? unknownLabel : null) ??
+      t('newChat.modelSelector.trigger.placeholder'));
   const efforts = currentModel?.efforts ?? [];
 
   const currentAgentKind: AgentKind | null = useMemo(() => {
@@ -1641,7 +1693,7 @@ export function ModelSelector({
   // 断开态仅在「非 noSource」时生效:全部来源都断开时 noSource CTA 优先(下拉已无可选行,
   // 跳设置才是正确恢复路径);还有别的已连接来源时,下拉换源就是恢复路径,trigger 保持可点。
   const showSourceDisconnected = !noSource && sourceDisconnected && !!currentProviderId;
-  const ariaLabel = noSource
+  const baseAriaLabel = noSource
     ? t('newChat.modelSelector.source.connect')
     : showSourceDisconnected
       ? `${t('newChat.modelSelector.source.disconnected')}: ${displayLabel}`
@@ -1651,6 +1703,8 @@ export function ModelSelector({
             effort: effortLabel,
           })
         : t('newChat.modelSelector.trigger.aria', { model: displayLabel });
+  // 多实例同屏(IM 目录偏好)时前置「字段名 · 行别名」,读屏才能区分行与行。
+  const ariaLabel = ariaContext ? `${ariaContext}:${baseAriaLabel}` : baseAriaLabel;
   const isBudget = modelId.startsWith('codex/');
   const isFieldTrigger = triggerVariant === 'field';
   const isCreateAgentVariant = visualVariant === 'create-agent';
@@ -1680,7 +1734,8 @@ export function ModelSelector({
         'flex min-w-0 max-w-full items-center gap-1 transition-colors',
         isFieldTrigger
           ? cn(
-              'w-full rounded-lg border border-[var(--border-default)] bg-[var(--settings-input-bg)] px-3',
+              // pill 而非 8px:DESIGN.md §4 Select & Dropdown 规定单行 select trigger 同单行输入,胶囊形。
+              'w-full rounded-full border border-[var(--border-default)] bg-[var(--settings-input-bg)] px-3',
               dense ? 'h-9' : 'h-10',
               'hover:bg-[var(--surface-hover-soft)]',
             )
@@ -1895,7 +1950,9 @@ export function ModelSelector({
       onProviderChange={onProviderChange}
       onNavigateToProviders={onNavigateToProviders}
       configurationEnabled={configurationEnabled}
+      reselectEmitsChange={reselectEmitsChange}
       pointerRevealRequiresIntent={morphEnabled}
+      fluidWidth={isFieldTrigger}
       agentSwitch={contentAgentSwitch}
       pricing={pricing}
       followSession={
@@ -1939,7 +1996,11 @@ export function ModelSelector({
         sideOffset={4}
         collisionPadding={8}
         className={cn(
-          'w-auto overflow-hidden rounded-[12px] p-0',
+          // field 形态面板宽度绑定 trigger(DESIGN.md §4 Select & Dropdown 宽度铁则,
+          // 与隔壁权限字段同规则),且压掉共享 PopoverContent 的 shadow-md(§4 面板无
+          // 阴影);toolbar 等非 field 的 Radix 分支维持既有视觉不动。
+          isFieldTrigger ? 'w-[var(--radix-popover-trigger-width)] shadow-none' : 'w-auto',
+          'overflow-hidden rounded-[12px] p-0',
           'bg-[var(--model-dropdown-bg)]',
           'border border-[var(--model-dropdown-border)]',
         )}
