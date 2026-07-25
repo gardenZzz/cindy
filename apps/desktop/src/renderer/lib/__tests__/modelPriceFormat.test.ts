@@ -3,6 +3,7 @@ import { describe, expect, it } from 'vitest';
 import type { ModelPriceQuote } from '../../../shared/regionalMoney';
 import {
   formatModelPricePair,
+  modelPriceDiscountLabelValues,
   modelPriceDetailRows,
   modelPricePresentation,
 } from '../modelPriceFormat';
@@ -49,17 +50,30 @@ describe('modelPriceFormat', () => {
     ]);
   });
 
-  it('uses the effective price when it is a uniform scaling of the standard price', () => {
-    const standard = quote({ inputPerMtok: 12, outputPerMtok: 36 });
-    expect(modelPricePresentation(standard, { input: 6, output: 18 })).toEqual({
+  it('uses the effective price while retaining the original for a 50% discount', () => {
+    const original = quote({ inputPerMtok: 12, outputPerMtok: 36 });
+    expect(modelPricePresentation(original, { input: 6, output: 18 })).toEqual({
       kind: 'priced',
       current: quote({ inputPerMtok: 6, outputPerMtok: 18 }),
+      original,
+      discount: 0.5,
+    });
+    expect(modelPriceDiscountLabelValues(0.5)).toEqual({
+      percent: '50',
+      rate: '5',
+    });
+    expect(modelPriceDiscountLabelValues(0.2)).toEqual({
+      percent: '20',
+      rate: '8',
     });
     expect(
-      modelPriceDetailRows(quote({ inputPerMtok: 6, outputPerMtok: 18, cacheReadPerMtok: 0.3 })),
+      modelPriceDetailRows(
+        quote({ inputPerMtok: 6, outputPerMtok: 18, cacheReadPerMtok: 0.3 }),
+        original,
+      ),
     ).toEqual([
-      { kind: 'input', value: '¥6' },
-      { kind: 'output', value: '¥18' },
+      { kind: 'input', value: '¥6', originalValue: '¥12' },
+      { kind: 'output', value: '¥18', originalValue: '¥36' },
       { kind: 'cacheRead', value: '¥0.3' },
     ]);
   });
@@ -88,14 +102,19 @@ describe('modelPriceFormat', () => {
         cacheReadPerMtok: 1.2,
         cacheCreatePerMtok: 7.5,
       }),
+      original: standard,
+      discount: 0.5,
     });
+    // 缓存价也参与折算,所以明细四行都能给出划线原价。
     expect(
-      presentation?.kind === 'priced' ? modelPriceDetailRows(presentation.current) : [],
+      presentation?.kind === 'priced'
+        ? modelPriceDetailRows(presentation.current, presentation.original)
+        : [],
     ).toEqual([
-      { kind: 'input', value: '¥6' },
-      { kind: 'output', value: '¥18' },
-      { kind: 'cacheRead', value: '¥1.2' },
-      { kind: 'cacheCreate', value: '¥7.5' },
+      { kind: 'input', value: '¥6', originalValue: '¥12' },
+      { kind: 'output', value: '¥18', originalValue: '¥36' },
+      { kind: 'cacheRead', value: '¥1.2', originalValue: '¥2.4' },
+      { kind: 'cacheCreate', value: '¥7.5', originalValue: '¥15' },
     ]);
   });
 
@@ -131,15 +150,17 @@ describe('modelPriceFormat', () => {
     expect(modelPricePresentation(undefined, { input: 0, output: 0 })).toBeNull();
   });
 
-  it('shows double-zero effective prices as zero when the quote is nonzero', () => {
-    const standard = quote({ inputPerMtok: 12, outputPerMtok: 36 });
-    expect(modelPricePresentation(standard, { input: 0, output: 0 })).toEqual({
+  it('keeps double-zero effective prices as a 100% discount when the quote is nonzero', () => {
+    const original = quote({ inputPerMtok: 12, outputPerMtok: 36 });
+    expect(modelPricePresentation(original, { input: 0, output: 0 })).toEqual({
       kind: 'priced',
       current: quote({ inputPerMtok: 0, outputPerMtok: 0 }),
+      original,
+      discount: 1,
     });
   });
 
-  it('preserves the standard price when the effective price matches it', () => {
+  it('preserves the standard price when there is no discount', () => {
     const standard = quote({ inputPerMtok: 12, outputPerMtok: 36 });
     expect(modelPricePresentation(standard, { input: 12, output: 36 })).toEqual({
       kind: 'priced',

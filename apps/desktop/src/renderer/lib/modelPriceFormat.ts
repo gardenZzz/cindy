@@ -22,6 +22,8 @@ export type ModelPricePresentation =
   | {
       kind: 'priced';
       current: ModelPriceQuote;
+      original?: ModelPriceQuote;
+      discount?: number;
     };
 
 function compactNumber(value: number): string {
@@ -41,19 +43,30 @@ export function formatModelPricePair(quote: ModelPriceQuote): string {
   return `${quote.approximate ? '≈' : ''}${input} / ${output}`;
 }
 
+export function modelPriceDiscountLabelValues(discount: number): {
+  percent: string;
+  rate: string;
+} {
+  return {
+    percent: compactNumber(discount * 100),
+    rate: compactNumber((1 - discount) * 10),
+  };
+}
+
 function isNonNegativeFinite(value: unknown): value is number {
   return typeof value === 'number' && Number.isFinite(value) && value >= 0;
 }
 
 /**
- * effectiveCost 能否直接当展示价:要求已展示的 input / output / 缓存价格
- * 相对标准价都是同一个缩放比例。标准价中的非零缓存维度必须有实际价对应,
- * 避免在同一张明细表中混用实际价与标准价。
+ * effectiveCost 能否直接当展示价,以及折价幅度是多少:要求已展示的 input / output /
+ * 缓存价格相对标准价都是同一个缩放比例。标准价中的非零缓存维度必须有实际价对应,
+ * 避免在同一张明细表中混用实际价与标准价。比例不一致时返回 undefined —— 展示层
+ * 退回标准价,不挂折价徽标也不做原价对比。
  */
-function effectiveCostIsConsistent(
+function inferDiscount(
   quote: ModelPriceQuote,
   cost: CompleteEffectiveModelCost,
-): boolean {
+): number | undefined {
   const gaps: number[] = [];
   for (const [standard, effective] of [
     [quote.inputPerMtok, cost.input],
@@ -62,24 +75,25 @@ function effectiveCostIsConsistent(
     [quote.cacheCreatePerMtok, cost.cacheWrite],
   ] as const) {
     if (standard === undefined) continue;
-    if (!isNonNegativeFinite(standard)) return false;
+    if (!isNonNegativeFinite(standard)) return undefined;
     if (effective === undefined && standard === 0) continue;
-    if (!isNonNegativeFinite(effective)) return false;
+    if (!isNonNegativeFinite(effective)) return undefined;
     if (standard === 0) {
-      if (effective !== 0) return false;
+      if (effective !== 0) return undefined;
       continue;
     }
     const gap = 1 - effective / standard;
-    if (gap < MIN_EFFECTIVE_PRICE_GAP || gap > 1) return false;
+    if (gap < MIN_EFFECTIVE_PRICE_GAP || gap > 1) return undefined;
     gaps.push(gap);
   }
-  if (gaps.length === 0) return false;
-  return gaps.every((gap) => Math.abs(gap - gaps[0]) < 1e-9);
+  if (gaps.length === 0) return undefined;
+  return gaps.every((gap) => Math.abs(gap - gaps[0]) < 1e-9) ? gaps[0] : undefined;
 }
 
 /**
  * 构建模型选择器的展示价格。quote 继续保留用量估算所需的标准价；
- * CatalogModel.cost 承载 XD 模型的实际展示价，一致时直接覆盖 input / output。
+ * CatalogModel.cost 承载 XD 模型的折后展示价，比例一致时覆盖 input / output /
+ * 缓存价，并把标准价留在 original 供原价对比与折价徽标使用。
  */
 export function modelPricePresentation(
   quote: ModelPriceQuote | null | undefined,
@@ -108,9 +122,8 @@ export function modelPricePresentation(
 
   const cacheRead = effectiveCost?.cacheRead;
   const cacheWrite = effectiveCost?.cacheWrite;
-  if (!effectiveCostIsConsistent(quote, { input, output, cacheRead, cacheWrite })) {
-    return { kind: 'priced', current: quote };
-  }
+  const discount = inferDiscount(quote, { input, output, cacheRead, cacheWrite });
+  if (discount === undefined) return { kind: 'priced', current: quote };
   return {
     kind: 'priced',
     current: {
@@ -124,21 +137,37 @@ export function modelPricePresentation(
         ? { cacheCreatePerMtok: cacheWrite ?? quote.cacheCreatePerMtok }
         : {}),
     },
+    original: quote,
+    discount,
   };
 }
 
-export function modelPriceDetailRows(quote: ModelPriceQuote): Array<{
+export function modelPriceDetailRows(
+  quote: ModelPriceQuote,
+  originalQuote?: ModelPriceQuote,
+): Array<{
   kind: 'input' | 'output' | 'cacheRead' | 'cacheCreate';
   value: string;
+  originalValue?: string;
 }> {
+  // 折后价与标准价相同的维度(例如两边都是 0)不划线,避免出现「¥0 划掉 ¥0」。
+  const originalOf = (value: string, original: number | undefined) => {
+    if (!originalQuote || original === undefined) return {};
+    const originalValue = formatModelPriceAmount(original, originalQuote.currency);
+    return originalValue === value ? {} : { originalValue };
+  };
+  const inputValue = formatModelPriceAmount(quote.inputPerMtok, quote.currency);
+  const outputValue = formatModelPriceAmount(quote.outputPerMtok, quote.currency);
   return [
     {
       kind: 'input' as const,
-      value: formatModelPriceAmount(quote.inputPerMtok, quote.currency),
+      value: inputValue,
+      ...originalOf(inputValue, originalQuote?.inputPerMtok),
     },
     {
       kind: 'output' as const,
-      value: formatModelPriceAmount(quote.outputPerMtok, quote.currency),
+      value: outputValue,
+      ...originalOf(outputValue, originalQuote?.outputPerMtok),
     },
     ...(quote.cacheReadPerMtok === undefined
       ? []
@@ -146,6 +175,10 @@ export function modelPriceDetailRows(quote: ModelPriceQuote): Array<{
           {
             kind: 'cacheRead' as const,
             value: formatModelPriceAmount(quote.cacheReadPerMtok, quote.currency),
+            ...originalOf(
+              formatModelPriceAmount(quote.cacheReadPerMtok, quote.currency),
+              originalQuote?.cacheReadPerMtok,
+            ),
           },
         ]),
     ...(quote.cacheCreatePerMtok === undefined
@@ -154,6 +187,10 @@ export function modelPriceDetailRows(quote: ModelPriceQuote): Array<{
           {
             kind: 'cacheCreate' as const,
             value: formatModelPriceAmount(quote.cacheCreatePerMtok, quote.currency),
+            ...originalOf(
+              formatModelPriceAmount(quote.cacheCreatePerMtok, quote.currency),
+              originalQuote?.cacheCreatePerMtok,
+            ),
           },
         ]),
   ];
