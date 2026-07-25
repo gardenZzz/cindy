@@ -44,6 +44,7 @@ import { validateAgainstSchema } from './shared/json-schema-lite.mjs';
 import {
   ELLIPSIS_LOCALES,
   FULL_WIDTH_PUNCT,
+  countCaseMismatches,
   countHalfWidthPunct,
   countOccurrences,
   HALFWIDTH_PUNCT_LOCALES,
@@ -298,8 +299,10 @@ for (const term of glossary.terms) {
       const prose = stripNonProse(value);
       const hit = findCaseMismatch(prose, standard);
       if (!hit) continue;
-      // 大小写检查要数出所有形态(Worker / worker / WORKER),故显式放开大小写
-      const hitCount = countOccurrences(prose, standard, { caseInsensitive: true });
+      // 指纹里要数的是「错了几处」而不是「这个词出现了几次」:数总次数的话
+      // `worker … Worker` 与 `worker … worker` 同指纹,前者冻结后把正确的那处也改错
+      // 就被静默掩盖了。
+      const hitCount = countCaseMismatches(prose, standard);
       violations.push(
         makeViolation({
           locale,

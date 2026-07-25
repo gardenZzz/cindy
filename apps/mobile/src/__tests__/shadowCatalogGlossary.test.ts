@@ -44,7 +44,12 @@ interface GlossaryTerm {
 
 const glossary = JSON.parse(
   readFileSync(resolve(REPO_ROOT, 'i18n/glossary.json'), 'utf8'),
-) as { locales: string[]; sourceLocale: string; terms: GlossaryTerm[] };
+) as {
+  locales: string[];
+  sourceLocale: string;
+  punctuationExempt?: string[];
+  terms: GlossaryTerm[];
+};
 
 /**
  * 把影子 catalog 摊平成 (source, locale, key, value)。
@@ -91,6 +96,9 @@ function collectEntries(): { locale: string; key: string; value: string }[] {
 }
 
 const entries = collectEntries();
+
+/** 标点豁免:与根门禁同源,只作用于半角标点检查(不含省略号)。 */
+const isHalfWidthExempt = makeExemptChecker(glossary.punctuationExempt);
 
 /** key → 英文源文案。条件禁用要按 key 查英文源,放进三重循环里线性扫会随 catalog 增长恶化。 */
 const sourceByKey = new Map(
@@ -176,7 +184,9 @@ describe('影子 catalog 术语一致性', () => {
     const violations: string[] = [];
     for (const { locale, key, value } of entries) {
       const prose = normalizeForPunctuation(value);
-      if (HALFWIDTH_PUNCT_LOCALES.has(locale)) {
+      // 与根门禁一致:punctuationExempt 只豁免半角标点、不豁免省略号。
+      // 两边不一致的话,加一条豁免会让根门禁放行、而本测试误报阻断 CI。
+      if (HALFWIDTH_PUNCT_LOCALES.has(locale) && !isHalfWidthExempt(key)) {
         const mark = findHalfWidthPunct(prose);
         if (mark) violations.push(`${locale} ${key}: 中文后半角「${mark}」— ${value.slice(0, 40)}`);
       }

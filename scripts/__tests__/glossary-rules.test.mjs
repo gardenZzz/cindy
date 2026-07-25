@@ -23,6 +23,7 @@ import {
   normalizeForPunctuation,
   countOccurrences,
   countHalfWidthPunct,
+  countCaseMismatches,
 } from '../shared/glossary-rules.mjs';
 import { validateAgainstSchema } from '../shared/json-schema-lite.mjs';
 import { renderGlossaryDoc } from '../shared/glossary-doc.mjs';
@@ -666,4 +667,25 @@ test('glossary.json: punctuationExempt 格式合法且不滥用', () => {
   }
   // 标点豁免的正当用途极窄(机器可读的结构化文本),数量失控就说明规则本身该改而不是加豁免
   assert.ok(list.length <= 5, `标点豁免已达 ${list.length} 条,请复核规则本身是否需要调整`);
+});
+
+test('countCaseMismatches: 只数错的那几处,不是术语出现的总次数', () => {
+  // 数总次数的话 `worker … Worker` 与 `worker … worker` 同指纹,前者冻进 baseline 后
+  // 把原本正确的那处也改错,新增违规会被静默掩盖
+  assert.equal(countCaseMismatches('用 worker 再看 Worker', 'Worker'), 1);
+  assert.equal(countCaseMismatches('用 worker 再看 worker', 'Worker'), 2);
+  assert.equal(countCaseMismatches('用 Worker 再看 Worker', 'Worker'), 0);
+});
+
+test('stripNonProse: 较长扩展名的文件名同样要剥离', () => {
+  // 仓库实际支持 .markdown / .properties / .webmanifest（见 maker-shared/filePreview.ts）,
+  // 卡在 6 位会让 worker.markdown 留在正文里被误报成产品 Worker
+  for (const [text, gone] of [
+    ['请编辑 worker.markdown 后重试', 'worker'],
+    ['打开 plugin.properties', 'plugin'],
+    ['见 agent.webmanifest', 'agent'],
+  ]) {
+    assert.ok(!stripNonProse(text).includes(gone), text);
+  }
+  assert.ok(stripNonProse('已用 1.5 GB').includes('1.5'));
 });

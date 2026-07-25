@@ -652,7 +652,7 @@
       "analyticsDisabledToast": "已关闭使用统计",
       "analyticsSaveFailed": "保存使用统计设置失败",
       "debugLogLabel": "Debug 日志",
-      "debugLogDescription": "开启后输出全量调试日志：main/maker logger 抬到 debug 级，新建的 Claude Code 对话额外输出 API 请求 URL/状态/耗时、Node 层 DNS/TCP/TLS 握手时序，以及 SDK 内部信息。日志量较大，定位问题后请关闭。dev 模式下始终开启。",
+      "debugLogDescription": "开启后输出全量调试日志：main/maker logger 抬到 debug 级，新建的 Claude Code 会话额外输出 API 请求 URL/状态/耗时、Node 层 DNS/TCP/TLS 握手时序，以及 SDK 内部信息。日志量较大，定位问题后请关闭。dev 模式下始终开启。",
       "social": {
         "title": "和 Cindy 联系",
         "discordLabel": "Discord",
@@ -4596,7 +4596,7 @@
       "context": {
         "title": "上下文用量",
         "loading": "正在加载…",
-        "noLiveSession": "暂无可用的上下文数据。Claude Code 对话启动后再试一次。",
+        "noLiveSession": "暂无可用的上下文数据。Claude Code 会话启动后再试一次。",
         "unsupportedAgent": "{{agent}} 暂不支持上下文用量展示。",
         "percentFull": "已使用 {{pct}}%",
         "tokensSummary": "{{used}} / {{total}} ({{pct}}%)",
@@ -4740,7 +4740,7 @@
         "noLiveQuery": "对话未激活——请先发送任意一条消息（哪怕一句\"ok\"）让 SDK 起来再 rewind",
         "noPriorAssistantCommit": "请在 AI 回复之后的提问上 rewind",
         "commitGeneric": "rewind 失败，请重试",
-        "remoteNotSupported": "远端 Claude Code 对话暂不支持 rewind"
+        "remoteNotSupported": "远端 Claude Code 会话暂不支持 rewind"
       },
       "dialog": {
         "title": "回退到这条消息？",
@@ -4779,7 +4779,7 @@
     "remoteError": {
       "REMOTE_DAEMON_CLOSED": "远端连接已中断（daemon 可能正在升级或重启）。本轮已结束 — 请重新发送。",
       "REMOTE_LOCAL_ATTACHMENT_UNSUPPORTED": "远端对话无法访问本地文件/图片附件。请直接粘贴内容。",
-      "REMOTE_COMPAT_MODE_UNSUPPORTED": "远端 Claude Code 对话无法通过本地兼容 Proxy 路由(内部错误，请反馈)。",
+      "REMOTE_COMPAT_MODE_UNSUPPORTED": "远端 Claude Code 会话无法通过本地兼容 Proxy 路由(内部错误，请反馈)。",
       "REMOTE_GATEWAY_ENDPOINT_UNAVAILABLE": "Cindy AI 凭据尚未就绪(登录后由服务端自动下发)。请稍候重试；若持续出现，请到 设置 → 模型供应商 检查 Cindy AI 连接状态。",
       "DEVICE_LINK_CONTROL_DISABLED": "已关闭对该设备的控制，消息未发送。",
       "DEVICE_LINK_MEDIA_TRANSFER_FAILED": "附件传输失败，消息未发送。请重试。"
