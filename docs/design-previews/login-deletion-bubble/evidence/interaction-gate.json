@@ -1,0 +1,235 @@
+{
+ "gate": "interaction",
+ "pass": true,
+ "total": 45,
+ "passed": 45,
+ "failures": 0,
+ "generatedAt": "2026-07-25T19:28:30.917Z",
+ "results": [
+  {
+   "id": "overlay:desk",
+   "pass": true,
+   "detail": "elementFromPoint(气泡中心)命中气泡"
+  },
+  {
+   "id": "dismiss:desk",
+   "pass": true,
+   "detail": "点击「我知道了」气泡消失"
+  },
+  {
+   "id": "no-push:desk",
+   "pass": true,
+   "detail": "气泡消失后面板示意 rect 逐 px 不变(不占布局流)"
+  },
+  {
+   "id": "overlay:phone",
+   "pass": true,
+   "detail": "elementFromPoint(气泡中心)命中气泡"
+  },
+  {
+   "id": "dismiss:phone",
+   "pass": true,
+   "detail": "点击「我知道了」气泡消失"
+  },
+  {
+   "id": "no-push:phone",
+   "pass": true,
+   "detail": "气泡消失后面板示意 rect 逐 px 不变(不占布局流)"
+  },
+  {
+   "id": "overlay:pad-landscape",
+   "pass": true,
+   "detail": "elementFromPoint(气泡中心)命中气泡"
+  },
+  {
+   "id": "dismiss:pad-landscape",
+   "pass": true,
+   "detail": "点击「我知道了」气泡消失"
+  },
+  {
+   "id": "no-push:pad-landscape",
+   "pass": true,
+   "detail": "气泡消失后面板示意 rect 逐 px 不变(不占布局流)"
+  },
+  {
+   "id": "overlay:pad-portrait",
+   "pass": true,
+   "detail": "elementFromPoint(气泡中心)命中气泡"
+  },
+  {
+   "id": "dismiss:pad-portrait",
+   "pass": true,
+   "detail": "点击「我知道了」气泡消失"
+  },
+  {
+   "id": "no-push:pad-portrait",
+   "pass": true,
+   "detail": "气泡消失后面板示意 rect 逐 px 不变(不占布局流)"
+  },
+  {
+   "id": "gap-link:desk:completed",
+   "pass": true,
+   "detail": "正文↔我知道了=22.0(期望 22)"
+  },
+  {
+   "id": "gap-bottom:desk:completed",
+   "pass": true,
+   "detail": "我知道了↔气泡底=21.0(拍板恒定 20)"
+  },
+  {
+   "id": "copy-center:desk:completed",
+   "pass": true,
+   "detail": "text-align=center"
+  },
+  {
+   "id": "hit-area:desk:completed",
+   "pass": true,
+   "detail": "命中区 104×45(≥44)"
+  },
+  {
+   "id": "gap-link:desk:stress",
+   "pass": true,
+   "detail": "正文↔我知道了=22.0(期望 22)"
+  },
+  {
+   "id": "gap-bottom:desk:stress",
+   "pass": true,
+   "detail": "我知道了↔气泡底=21.0(拍板恒定 20)"
+  },
+  {
+   "id": "copy-center:desk:stress",
+   "pass": true,
+   "detail": "text-align=center"
+  },
+  {
+   "id": "hit-area:desk:stress",
+   "pass": true,
+   "detail": "命中区 104×45(≥44)"
+  },
+  {
+   "id": "stress-grows:desk",
+   "pass": true,
+   "detail": "压力态撑高 184 > completed 138"
+  },
+  {
+   "id": "gap-link:phone:completed",
+   "pass": true,
+   "detail": "正文↔我知道了=22.0(期望 22)"
+  },
+  {
+   "id": "gap-bottom:phone:completed",
+   "pass": true,
+   "detail": "我知道了↔气泡底=21.0(拍板恒定 20)"
+  },
+  {
+   "id": "copy-center:phone:completed",
+   "pass": true,
+   "detail": "text-align=center"
+  },
+  {
+   "id": "hit-area:phone:completed",
+   "pass": true,
+   "detail": "命中区 120×47(≥44)"
+  },
+  {
+   "id": "gap-link:phone:stress",
+   "pass": true,
+   "detail": "正文↔我知道了=22.0(期望 22)"
+  },
+  {
+   "id": "gap-bottom:phone:stress",
+   "pass": true,
+   "detail": "我知道了↔气泡底=21.0(拍板恒定 20)"
+  },
+  {
+   "id": "copy-center:phone:stress",
+   "pass": true,
+   "detail": "text-align=center"
+  },
+  {
+   "id": "hit-area:phone:stress",
+   "pass": true,
+   "detail": "命中区 120×47(≥44)"
+  },
+  {
+   "id": "stress-grows:phone",
+   "pass": true,
+   "detail": "压力态撑高 276 > completed 138"
+  },
+  {
+   "id": "desk-clamp:800",
+   "pass": true,
+   "detail": "宽=670.0(期望 670=min(670,800-48))"
+  },
+  {
+   "id": "desk-top:800",
+   "pass": true,
+   "detail": "top=72.0(恒定 72)"
+  },
+  {
+   "id": "desk-center:800",
+   "pass": true,
+   "detail": "left=65.0(水平居中)"
+  },
+  {
+   "id": "desk-clamp:717",
+   "pass": true,
+   "detail": "宽=669.0(期望 669=min(670,717-48))"
+  },
+  {
+   "id": "desk-top:717",
+   "pass": true,
+   "detail": "top=72.0(恒定 72)"
+  },
+  {
+   "id": "desk-center:717",
+   "pass": true,
+   "detail": "left=24.0(水平居中)"
+  },
+  {
+   "id": "desk-clamp:600",
+   "pass": true,
+   "detail": "宽=552.0(期望 552=min(670,600-48))"
+  },
+  {
+   "id": "desk-top:600",
+   "pass": true,
+   "detail": "top=72.0(恒定 72)"
+  },
+  {
+   "id": "desk-center:600",
+   "pass": true,
+   "detail": "left=24.0(水平居中)"
+  },
+  {
+   "id": "phone-clamp:390",
+   "pass": true,
+   "detail": "宽=335.0(期望 335=min(335,390-40))"
+  },
+  {
+   "id": "phone-center:390",
+   "pass": true,
+   "detail": "left=27.5(水平居中)"
+  },
+  {
+   "id": "phone-clamp:374",
+   "pass": true,
+   "detail": "宽=334.0(期望 334=min(335,374-40))"
+  },
+  {
+   "id": "phone-center:374",
+   "pass": true,
+   "detail": "left=20.0(水平居中)"
+  },
+  {
+   "id": "phone-clamp:335",
+   "pass": true,
+   "detail": "宽=295.0(期望 295=min(335,335-40))"
+  },
+  {
+   "id": "phone-center:335",
+   "pass": true,
+   "detail": "left=20.0(水平居中)"
+  }
+ ]
+}
