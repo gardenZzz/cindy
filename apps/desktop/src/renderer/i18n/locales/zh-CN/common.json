@@ -1895,6 +1895,9 @@
       },
       "hook": {
         "description": "把 Slack 和 Telegram 接入同一个 Cindy：消息都会派发到这台设备，共享项目清单与 session 执行链；账号绑定和运行偏好按渠道隔离。",
+        "slackDescription": "绑定 Slack workspace，在 Slack 里 @Cindy 派发任务。",
+        "slackDisabledHint": "打开开关即发起 Slack 授权，绑定完成后即可在 Slack 里派活。",
+        "slackBoundHint": "已完成绑定。关闭开关将解除绑定，重新打开需再次授权。",
         "toggleAria": "切换 Slack 连接的启用状态",
         "installApp": "安装 Slack App",
         "status": {
@@ -1905,7 +1908,8 @@
           "error": "连接失败"
         },
         "form": {
-          "workspaces": "工作目录映射(别名 → 本地绝对路径)",
+          "workspacesCardTitle": "工作目录映射",
+          "workspacesCardDescription": "别名 → 本地绝对路径；目录清单所有渠道共用，运行偏好按渠道独立。",
           "workspacesBoundCount_one": "已绑定 {{count}} 个本地工作目录",
           "workspacesBoundCount_other": "已绑定 {{count}} 个本地工作目录",
           "aliasPlaceholder": "别名, 如 my-server",
@@ -1946,7 +1950,6 @@
           "waitingHint": "等待安装完成…装好后会自动完成绑定, 无需再次授权。"
         },
         "multi": {
-          "title": "Slack workspaces",
           "statusWorkspaces_one": "{{count}} 个 workspace",
           "statusWorkspaces_other": "{{count}} 个 workspace",
           "statusPendingSuffix_one": "({{count}} 个待处理)",
@@ -1966,6 +1969,8 @@
           "alreadyBound": "授权的是已绑定的 {{team}}。要添加其它 workspace, 请在 Slack 授权页右上角先切换到目标 workspace 再点允许。"
         },
         "telegram": {
+          "description": "关联 Telegram 账号，通过官方 bot 给 Cindy 派发任务。",
+          "disabledHint": "打开开关后，按提示在 Telegram 里完成账号关联。",
           "toggleAria": "切换 Telegram 连接",
           "connect": "关联 Telegram",
           "openTelegram": "打开 Telegram",
@@ -2025,8 +2030,7 @@
         "toast": {
           "saveFailed": "保存目录偏好失败"
         },
-        "teamChipAria": "选择偏好所属的 Slack workspace",
-        "providerAria": "选择偏好所属的 IM 渠道"
+        "teamChipAria": "选择偏好所属的 Slack workspace"
       }
     },
     "devices": {

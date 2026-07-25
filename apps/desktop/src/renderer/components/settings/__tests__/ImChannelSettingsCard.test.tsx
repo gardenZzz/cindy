@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 
 import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { useState } from 'react';
 
 import { ImChannelSettingsCard } from '../ImChannelSettingsCard';
@@ -15,6 +15,28 @@ function Harness() {
       description="Personal channel"
       status={<span>Connected</span>}
       routeSummary="Claude Code · Opus"
+      expanded={expanded}
+      onToggle={() => setExpanded((value) => !value)}
+    >
+      <button type="button">Edit Channel</button>
+    </ImChannelSettingsCard>
+  );
+}
+
+function HeaderActionHarness({ onAction }: { onAction: () => void }) {
+  const [expanded, setExpanded] = useState(false);
+  return (
+    <ImChannelSettingsCard
+      id="channel-action-test"
+      title="Slack"
+      description="Cindy channel"
+      status={<span>Connected</span>}
+      routeSummary={null}
+      headerAction={
+        <button type="button" onClick={onAction}>
+          Enable
+        </button>
+      }
       expanded={expanded}
       onToggle={() => setExpanded((value) => !value)}
     >
@@ -41,5 +63,18 @@ describe('ImChannelSettingsCard', () => {
       expect(trigger.getAttribute('aria-expanded')).toBe('true');
       expect(screen.getByRole('button', { name: 'Edit Channel' })).toBeTruthy();
     });
+  });
+
+  it('does not toggle expansion when the header action is clicked', () => {
+    const onAction = vi.fn();
+    render(<HeaderActionHarness onAction={onAction} />);
+
+    fireEvent.click(screen.getByRole('button', { name: 'Enable' }));
+
+    expect(onAction).toHaveBeenCalledOnce();
+    expect(screen.getByRole('button', { name: /Slack/ }).getAttribute('aria-expanded')).toBe(
+      'false',
+    );
+    expect(screen.queryByRole('button', { name: 'Edit Channel' })).toBeNull();
   });
 });

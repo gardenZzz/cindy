@@ -1895,6 +1895,9 @@
       },
       "hook": {
         "description": "Slack과 Telegram을 하나의 Cindy에 연결합니다. 메시지는 이 기기로 전달되며 프로젝트 목록과 세션 실행기를 공유합니다. 계정 연동과 설정은 공급자별로 분리됩니다.",
+        "slackDescription": "Slack 워크스페이스를 연결하고 Slack에서 Cindy에게 작업을 맡기세요.",
+        "slackDisabledHint": "스위치를 켜면 Slack 인증이 시작됩니다. 연결이 완료되면 Slack에서 작업을 맡길 수 있습니다.",
+        "slackBoundHint": "연결이 완료되었습니다. 스위치를 끄면 연결이 해제되며 다시 켜려면 재인증이 필요합니다.",
         "toggleAria": "Slack 연결 활성 상태 전환",
         "installApp": "Slack 앱 설치",
         "status": {
@@ -1905,7 +1908,8 @@
           "error": "연결 실패"
         },
         "form": {
-          "workspaces": "작업 디렉터리 매핑(별칭 → 로컬 절대 경로)",
+          "workspacesCardTitle": "작업 디렉터리 매핑",
+          "workspacesCardDescription": "별칭 → 로컬 절대 경로. 디렉터리 목록은 모든 채널이 공유하며 실행 설정은 채널별로 독립적입니다.",
           "workspacesBoundCount_one": "로컬 작업 디렉터리 {{count}}개 바인딩됨",
           "workspacesBoundCount_other": "로컬 작업 디렉터리 {{count}}개 바인딩됨",
           "aliasPlaceholder": "별칭, 예: my-server",
@@ -1946,7 +1950,6 @@
           "waitingHint": "설치 완료를 기다리는 중… 설치되면 바인딩이 자동으로 완료되며 재인증은 필요 없습니다."
         },
         "multi": {
-          "title": "Slack 워크스페이스",
           "statusWorkspaces_one": "워크스페이스 {{count}}개",
           "statusWorkspaces_other": "워크스페이스 {{count}}개",
           "statusPendingSuffix_one": "({{count}}개 처리 대기)",
@@ -1966,6 +1969,8 @@
           "alreadyBound": "이미 연동된 {{team}}이(가) 인증되었습니다. 다른 워크스페이스를 추가하려면 Slack 인증 페이지 오른쪽 위에서 워크스페이스를 전환한 후 허용하세요."
         },
         "telegram": {
+          "description": "Telegram 계정을 연결하고 공식 bot을 통해 Cindy에게 작업을 맡기세요.",
+          "disabledHint": "스위치를 켠 뒤 Telegram의 안내에 따라 계정 연결을 완료하세요.",
           "toggleAria": "Telegram 연결 전환",
           "connect": "Telegram 연결",
           "openTelegram": "Telegram 열기",
@@ -2025,8 +2030,7 @@
         "toast": {
           "saveFailed": "디렉터리 설정을 저장하지 못했습니다"
         },
-        "teamChipAria": "환경설정이 속한 Slack 워크스페이스 선택",
-        "providerAria": "환경설정이 속한 IM 공급자 선택"
+        "teamChipAria": "환경설정이 속한 Slack 워크스페이스 선택"
       }
     },
     "devices": {

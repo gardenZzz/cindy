@@ -1895,6 +1895,9 @@
       },
       "hook": {
         "description": "Slack と Telegram を同じ Cindy に接続します。メッセージはこのデバイスに送られ、プロジェクト一覧とセッション実行基盤を共有します。アカウント連携と設定はプロバイダーごとに分離されます。",
+        "slackDescription": "Slack ワークスペースを連携し、Slack から Cindy にタスクを依頼できます。",
+        "slackDisabledHint": "スイッチをオンにすると Slack 認証が始まります。連携が完了すると Slack からタスクを依頼できます。",
+        "slackBoundHint": "連携が完了しました。スイッチをオフにすると連携が解除され、再びオンにするには再認証が必要です。",
         "toggleAria": "Slack 接続の有効状態を切り替え",
         "installApp": "Slack アプリをインストール",
         "status": {
@@ -1905,7 +1908,8 @@
           "error": "接続失敗"
         },
         "form": {
-          "workspaces": "作業ディレクトリのマッピング(エイリアス → ローカル絶対パス)",
+          "workspacesCardTitle": "作業ディレクトリのマッピング",
+          "workspacesCardDescription": "エイリアス → ローカル絶対パス。ディレクトリ一覧は全チャンネル共通で、実行設定はチャンネルごとに独立します。",
           "workspacesBoundCount_one": "ローカル作業ディレクトリを {{count}} 個バインド済み",
           "workspacesBoundCount_other": "ローカル作業ディレクトリを {{count}} 個バインド済み",
           "aliasPlaceholder": "エイリアス(例: my-server)",
@@ -1946,7 +1950,6 @@
           "waitingHint": "インストールの完了を待っています…完了するとバインドは自動的に行われ、再認証は不要です。"
         },
         "multi": {
-          "title": "Slack ワークスペース",
           "statusWorkspaces_one": "{{count}} 個のワークスペース",
           "statusWorkspaces_other": "{{count}} 個のワークスペース",
           "statusPendingSuffix_one": "({{count}} 件対応待ち)",
@@ -1966,6 +1969,8 @@
           "alreadyBound": "認可されたのはすでに連携済みの {{team}} です。別のワークスペースを追加するには、Slack の認可ページ右上でワークスペースを切り替えてから許可してください。"
         },
         "telegram": {
+          "description": "Telegram アカウントを連携し、公式 bot 経由で Cindy にタスクを依頼できます。",
+          "disabledHint": "スイッチをオンにして、Telegram 内の案内に従ってアカウント連携を完了してください。",
           "toggleAria": "Telegram 接続を切り替える",
           "connect": "Telegram と連携",
           "openTelegram": "Telegram を開く",
@@ -2025,8 +2030,7 @@
         "toast": {
           "saveFailed": "ディレクトリ設定の保存に失敗しました"
         },
-        "teamChipAria": "設定の対象となる Slack ワークスペースを選択",
-        "providerAria": "設定の対象となる IM プロバイダーを選択"
+        "teamChipAria": "設定の対象となる Slack ワークスペースを選択"
       }
     },
     "devices": {

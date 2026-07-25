@@ -1896,6 +1896,9 @@
       },
       "hook": {
         "description": "Connect Slack and Telegram to the same Cindy. Messages are dispatched to this device and share its project list and session runner; each provider keeps its own account and preferences.",
+        "slackDescription": "Bind Slack workspaces and hand tasks to Cindy from Slack.",
+        "slackDisabledHint": "Turn on the switch to start Slack authorization; once bound you can dispatch tasks from Slack.",
+        "slackBoundHint": "Binding complete. Turning the switch off unbinds this device; turning it back on requires authorizing again.",
         "toggleAria": "Toggle the Slack connection",
         "installApp": "Install Slack App",
         "status": {
@@ -1906,7 +1909,8 @@
           "error": "Connection failed"
         },
         "form": {
-          "workspaces": "Working directory mapping (alias → local absolute path)",
+          "workspacesCardTitle": "Workdir mappings",
+          "workspacesCardDescription": "Alias → local absolute path; the directory list is shared across channels while run preferences stay per channel.",
           "workspacesBoundCount_one": "{{count}} local working directory bound",
           "workspacesBoundCount_other": "{{count}} local working directories bound",
           "aliasPlaceholder": "Alias, e.g. my-server",
@@ -1947,7 +1951,6 @@
           "waitingHint": "Waiting for the installation to finish… Binding completes automatically once installed, no re-authorization needed."
         },
         "multi": {
-          "title": "Slack workspaces",
           "statusWorkspaces_one": "{{count}} workspace",
           "statusWorkspaces_other": "{{count}} workspaces",
           "statusPendingSuffix_one": " ({{count}} pending)",
@@ -1967,6 +1970,8 @@
           "alreadyBound": "You authorized {{team}}, which is already linked. To add another workspace, switch workspaces in the top-right corner of the Slack authorization page before allowing."
         },
         "telegram": {
+          "description": "Link your Telegram account and dispatch tasks to Cindy via the official bot.",
+          "disabledHint": "Turn on the switch, then follow the prompts in Telegram to link your account.",
           "toggleAria": "Toggle the Telegram connection",
           "connect": "Link Telegram",
           "openTelegram": "Open Telegram",
@@ -2026,8 +2031,7 @@
         "toast": {
           "saveFailed": "Failed to save directory preferences"
         },
-        "teamChipAria": "Choose which Slack workspace these preferences belong to",
-        "providerAria": "Choose which IM provider these preferences belong to"
+        "teamChipAria": "Choose which Slack workspace these preferences belong to"
       }
     },
     "devices": {
