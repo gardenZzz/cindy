@@ -158,9 +158,19 @@ const mResolveCallM = /resolveDeletionBubbleFrame\(stage, insets\.top\)/.exec(mL
 if (!mResolveCallM) throw new Error('mobile resolveDeletionBubbleFrame(stage, insets.top) 调用未命中');
 const mHitSlopM = /hitSlop=\{LOGIN_DELETION_BUBBLE\.linkHitSlop\}/.exec(mLoginSrc);
 if (!mHitSlopM) throw new Error('mobile dismiss hitSlop 未命中');
-// 入场门(PR #464 review):Animated.View opacity=panelEntrance.opacity + pointerEvents 仅 done
-const mEntranceGateM = /<Animated.View\s+pointerEvents=\{handoffPhase === 'done' \? 'auto' : 'none'\}\s+style=\{\[StyleSheet\.absoluteFill, \{ opacity: panelEntrance\.opacity \}\]\}/.exec(mLoginSrc);
-if (!mEntranceGateM) throw new Error('mobile 气泡入场门(Animated.View opacity/pointerEvents gate)未命中');
+// 入场门(PR #464 review):Animated.View opacity=panelEntrance.opacity + pointerEvents 仅 done。
+// 按 opening tag 整段取(容纳后续追加的属性/注释,如 Android 无障碍隐藏),再逐项断言,
+// 避免属性顺序或新增属性把单条长正则打断。
+const mGateTag = /<Animated\.View\b[\s\S]*?>\s*<AccountDeletionStatusPanel/.exec(mLoginSrc);
+if (!mGateTag) throw new Error('mobile 气泡浮层包装层(Animated.View + AccountDeletionStatusPanel)未命中');
+const mEntranceGateM = [mGateTag[0]];
+if (!/pointerEvents=\{handoffPhase === 'done' \? 'auto' : 'none'\}/.test(mGateTag[0]))
+  throw new Error('mobile 气泡入场门 pointerEvents(仅 done 放行)未命中');
+if (!/style=\{\[StyleSheet\.absoluteFill, \{ opacity: panelEntrance\.opacity \}\]\}/.test(mGateTag[0]))
+  throw new Error('mobile 气泡入场门 opacity=panelEntrance.opacity 未命中');
+// Android 读屏隔离(PR #464 codex):协议弹窗打开时与登录组同步隐藏
+if (!/importantForAccessibility=\{consentDialogOpen \? 'no-hide-descendants' : 'auto'\}/.test(mGateTag[0]))
+  throw new Error('mobile 气泡 Android 无障碍隐藏(consentDialogOpen)未命中');
 
 // loginPalettes 双色板
 const mPalettesObj = extractConstObject(mTokensSrc, 'loginPalettes');
@@ -243,6 +253,7 @@ const truth = {
       dismissHitSlop: leaf('hitSlop {top:12,bottom:12,left:20,right:20} → 热区 47≥44', M.loginTsx, 'login.tsx hitSlop={LOGIN_DELETION_BUBBLE.linkHitSlop}'),
       dismissGate: leaf('仅 completed 态渲染 dismiss Pressable(onDismiss 仅 completed 传入)', M.loginTsx, 'login.tsx:1315-1327 {onDismiss ? <Pressable/> : null}'),
       entranceGate: leaf("Animated.View 包装:opacity=panelEntrance.opacity(与登录组同一 Animated 值);pointerEvents 仅 handoffPhase==='done' 放行——入场完成前不可见不可点(PR #464 review)", M.loginTsx, 'login.tsx 气泡渲染点 Animated.View pointerEvents/style'),
+      a11yModalGate: leaf("协议弹窗打开时气泡与登录组同步 importantForAccessibility='no-hide-descendants'——accessibilityViewIsModal 仅 iOS 生效,Android TalkBack 需显式隐藏(PR #464 codex)", M.loginTsx, 'login.tsx 气泡渲染点 Animated.View importantForAccessibility'),
     },
   },
   desktop: {
