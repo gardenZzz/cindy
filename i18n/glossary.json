@@ -309,8 +309,10 @@
           "제공업체"
         ]
       },
-      "note": "中文用「供应商」（现状 36:18 领先简称）。全称「模型供应商」在需要消歧的位置仍可用。「提供商」「提供方」是同义漂移，禁用——设置页标题写「模型供应商」、它自己的表单写「提供商」是既有 bug。豁免 ssoVerificationSubtitle：那里的「身份提供方」是 SSO / SAML 领域 Identity Provider 的标准中文术语，与模型供应商是两个概念。该文案在 desktop locale 与 mobile 影子 catalog 各有一份副本，两处都要豁免。（2026-07 修正：ko 原声明 제공업체 仅 6 处，实测 제공자 32 处为主流，改随主流。）ja 的「提供元」是多义词——同时表示 \"source\"（来源），因此按 whenEn=Provider 条件禁用；无条件禁会把「共有元の提供元を信頼できるか」这类 source 语境一并换掉。",
+      "note": "中文用「供应商」（现状 36:18 领先简称）。全称「模型供应商」在需要消歧的位置仍可用。「提供商」「提供方」是同义漂移，禁用——设置页标题写「模型供应商」、它自己的表单写「提供商」是既有 bug。豁免 ssoVerificationSubtitle：那里的「身份提供方」是 SSO / SAML 领域 Identity Provider 的标准中文术语，与模型供应商是两个概念。该文案在 desktop locale 与 mobile 影子 catalog 各有一份副本，两处都要豁免。（2026-07 修正：ko 原声明 제공업체 仅 6 处，实测 제공자 32 处为主流，改随主流。）ja 的「提供元」是多义词——同时表示 \"source\"（来源），因此按 whenEn=Provider 条件禁用；无条件禁会把「共有元の提供元を信頼できるか」这类 source 语境一并换掉。豁免 creditParity 两条:那里的 third-party providers 指支付渠道/收单机构,不是模型供应商——ja 用「事業者」、zh-CN 用「第三方渠道」都对,套上「プロバイダー」反而会让用户以为是模型服务商在收钱。",
       "exempt": [
+        "desktop:billing.balance.creditParityCny",
+        "desktop:billing.balance.creditParityUsd",
         "desktop:login.ssoVerificationSubtitle",
         "mobile/loginMessages:ssoVerificationSubtitle"
       ]
@@ -479,7 +481,11 @@
           "사용 현황"
         ]
       },
-      "note": "中文用「用量」（现状 37:6 压倒性）。「使用情况」「使用表现」是同义漂移，禁用。注意 usage 在英文里也有「用法」义（如 CLI usage），那属于另一个概念，不在本条约束范围。"
+      "note": "中文用「用量」（现状 37:6 压倒性）。「使用情况」「使用表现」是同义漂移，禁用。注意 usage 在英文里也有「用法」义（如 CLI usage），那属于另一个概念，不在本条约束范围。豁免遥测说明两处:那里的 usage 指「启动与留存情况」这类使用行为,不是计费口径的用量指标。硬套成「用量」会写出「启动与留存用量」这种不通的话——zh-CN 用的是「留存情况」+「使用环境」,ja/ko 的「継続利用状況」「지속 사용 현황」同理。",
+      "exempt": [
+        "desktop:settings.about.analyticsDescription",
+        "mobile/settings:legal.analyticsHint"
+      ]
     },
     {
       "id": "collapse",

@@ -1054,6 +1054,9 @@ export function TodaySpendChip({
     sessionId,
     shouldReadLocalCodexAccountUsage ? 'codex' : undefined,
     isChatgptBridge ? 'openai-web' : 'app-server',
+    // app-server 形态下据当前模型匹配限额桶(账号可能同时有主配额桶与模型专属
+    // 促销桶, 见 useAccountUsage.matchCodexBucketForModel)。
+    modelId,
   );
   // xAI 限流快照同为本机 main 抓的 —— 远程会话(SSH / device-link)同样抑制,回落价值估算。
   const xaiRateLimit = useXaiRateLimit(usesXaiQuotaForm && !isAnyRemoteSession);
