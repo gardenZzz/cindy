@@ -80,7 +80,7 @@ describeOnLinuxFileSystem('install path helpers', () => {
       path.join('/userdata', 'claude-code', '2.1.219', 'claude'),
     );
     expect(legacyManagedBinaryPath('/userdata', 'codex')).toBe(
-      path.join('/userdata', 'codex', '0.144.6', 'codex'),
+      path.join('/userdata', 'codex', '0.145.0', 'codex'),
     );
   });
 
