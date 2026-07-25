@@ -273,18 +273,25 @@ describe('mobile account deletion', () => {
     expect(panel).not.toContain('Animated');
   });
 
-  it('hides the bubble from Android screen readers while the consent dialog is modal (PR #464 codex)', () => {
+  it('hides the bubble from screen readers while modal or before the handoff reveals login (PR #464 codex)', () => {
     const login = source('app/(auth)/login.tsx');
     const gate = login.slice(
       login.indexOf('{accountDeletionStatus && deletionBubbleFrame ? ('),
       login.indexOf('{/* 服务条款和隐私协议确认弹窗'),
     );
-    // 气泡是协议弹窗的兄弟浮层:accessibilityViewIsModal 只在 iOS 生效,Android 必须
-    // 与登录组同步 no-hide-descendants,否则 TalkBack 仍能读到注销文案、completed 态
-    // 还能激活「我知道了」。两处用同一个条件表达式,避免只改一处漂移。
-    const androidHide =
-      "importantForAccessibility={consentDialogOpen ? 'no-hide-descendants' : 'auto'}";
-    expect(gate).toContain(androidHide);
-    expect(login.match(new RegExp(androidHide.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'g'))).toHaveLength(2);
+    // 两种时刻都不该被念出:① 协议弹窗打开(气泡是弹窗兄弟浮层,accessibilityViewIsModal
+    // 仅 iOS 生效);② 入场未完成(opacity/pointerEvents 只管渲染与命中,读屏照念)。
+    // iOS 与 Android 属性都要给,条件收敛到一个常量避免两处漂移。
+    expect(login).toContain(
+      "const deletionBubbleA11yHidden = consentDialogOpen || handoffPhase !== 'done';",
+    );
+    expect(gate).toContain('accessibilityElementsHidden={deletionBubbleA11yHidden}');
+    expect(gate).toContain(
+      "deletionBubbleA11yHidden ? 'no-hide-descendants' : 'auto'",
+    );
+    // 登录组那层仍按弹窗条件隐藏(它本身在入场动画容器内,不需要入场条件)。
+    expect(login).toContain(
+      "importantForAccessibility={consentDialogOpen ? 'no-hide-descendants' : 'auto'}",
+    );
   });
 });

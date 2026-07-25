@@ -226,9 +226,9 @@ export interface LoginSkinColors {
   secondaryButtonText: string;
   /** 弹窗次级钮 pressed 叠层(亮浅底黑10% / 暗 Dark_button_Normal 黑20%;wave5 §11.1) */
   overlaySecondaryPressed: string;
-  /** 注销提示气泡底(亮 #FFFFFF / 暗 #1F1F1E;figma 678:1075——色值走桌面 agent 输入框底 chat-input-bg / 最深深色底 token 实值,不抄 figma 裸 hex;浮层盖立绘必须不透明) */
+  /** 注销提示气泡底(figma 678:1075):固定亮 #FFFFFF / 暗 #1F1F1E,与桌面 --login-deletion-bubble-bg 逐值一致(取 agent 输入框底与最深深色底的值);浮层压立绘,必须不透明 */
   deletionBubbleBg: string;
-  /** 注销提示气泡 1px 描边(亮 #D7D7D4 / 暗 #3C3C3A;figma 678:1075,桌面 chat-input-border 实值) */
+  /** 注销提示气泡 1px 描边(figma 678:1075):固定亮 #D7D7D4 / 暗 #3C3C3A,与桌面 --login-deletion-bubble-border 逐值一致 */
   deletionBubbleBorder: string;
 }
 

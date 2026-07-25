@@ -1140,6 +1140,11 @@ export default function LoginScreen() {
   const deletionBubbleFrame = accountDeletionStatus
     ? resolveDeletionBubbleFrame(stage, insets.top)
     : null;
+  // 气泡对读屏隐藏的条件:① 协议弹窗打开(气泡是弹窗兄弟浮层,不隐藏则 TalkBack 可
+  // 穿透读到文案、completed 态还能激活「我知道了」);② 入场未完成(opacity/pointerEvents
+  // 只管渲染与命中,读屏仍会念出不可见的注销状态)。iOS 走 accessibilityElementsHidden、
+  // Android 走 importantForAccessibility,两端都要给(PR #464 codex)。
+  const deletionBubbleA11yHidden = consentDialogOpen || handoffPhase !== 'done';
 
   return (
     <MobileLoginHandoffStage
@@ -1195,10 +1200,12 @@ export default function LoginScreen() {
         // Animated 值(splash=0 → handoff 渐显 → done=1,同一 usePanelEntrance 输出,
         // 不新造状态机);pointerEvents 仅 done 放行——入场完成前气泡不可见也不可点。
         <Animated.View
-          // Android 读屏:协议弹窗打开时一并隐藏气泡(与上方登录组同口径)——气泡是
-          // 弹窗的兄弟浮层,accessibilityViewIsModal 仅 iOS 生效,不加这行 TalkBack
-          // 仍能读到注销文案、completed 态还能激活「我知道了」(codex 审查 P1)。
-          importantForAccessibility={consentDialogOpen ? 'no-hide-descendants' : 'auto'}
+          // 读屏隔离(见 deletionBubbleA11yHidden 注):iOS + Android 双端属性都给,
+          // 覆盖「协议弹窗打开」与「入场未完成」两种不该被念出的时刻。
+          accessibilityElementsHidden={deletionBubbleA11yHidden}
+          importantForAccessibility={
+            deletionBubbleA11yHidden ? 'no-hide-descendants' : 'auto'
+          }
           // box-none 而非 auto:包装层铺满全屏(absoluteFill),RN 下全屏 View 即使透明
           // 也会吃掉命中区、挡住下方登录组的输入框/按钮/社交入口(web 的穿透直觉不适用)。
           // box-none = 自身不作触摸目标、子节点(气泡)照常可点(Greptile 审查 P1)。

@@ -1057,7 +1057,7 @@ function SocialProviderIcon({ provider }: { provider: SocialProvider }) {
  * 「我知道了」= 下划线文字链(login-link-text 既有形态),视觉不变但点击热区
  * 经 ±11px padding/负 margin 扩到 ≥44×44。状态:pending/processing 无按钮、
  * completed 带「我知道了」;颜色全走 token(气泡底 login-deletion-bubble-bg,
- * 描边 chat-input-border)。
+ * 描边 login-deletion-bubble-border,均为固定亮/暗值、不随扩展主题)。
  */
 function AccountDeletionStatusPanel({
   status,
