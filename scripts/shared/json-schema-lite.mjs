@@ -36,17 +36,65 @@ const SUPPORTED = new Set([
   'definitions',
 ]);
 
-/** 递归检查 schema 自身只用了已实现的关键字。 */
+/**
+ * 每个关键字的值必须是什么形状。
+ *
+ * 只查「关键字名认不认得」是不够的:形状写错时,校验器会以自己那套(而非 JSON Schema 的)
+ * 方式去解释它,约束就变成了别的意思——这恰恰违背本模块「不静默忽略」的安全前提。
+ * 典型的是 `type: ["string", "null"]`(draft-07 合法),本实现只支持字符串形态,
+ * 拿数组去比对会永远不等,于是那条 type 约束在「看似生效」的外表下彻底失效。
+ */
+const KEYWORD_SHAPE = {
+  type: 'string',
+  pattern: 'string',
+  $ref: 'string',
+  $schema: 'string',
+  $id: 'string',
+  title: 'string',
+  description: 'string',
+  minItems: 'number',
+  minLength: 'number',
+  required: 'array',
+  enum: 'array',
+  oneOf: 'array',
+  properties: 'object',
+  definitions: 'object',
+  items: 'object',
+  // additionalProperties 可以是 boolean 或 schema 对象,单独判
+};
+
+function shapeOf(value) {
+  if (Array.isArray(value)) return 'array';
+  if (value === null) return 'null';
+  return typeof value;
+}
+
+/** 递归检查 schema 自身只用了已实现的关键字,且每个关键字的值形状也在支持范围内。 */
 function assertSupported(node, path = '#') {
   if (node === true || node === false) return;
   if (typeof node !== 'object' || node === null) {
     throw new Error(`schema ${path} 不是对象`);
   }
-  for (const key of Object.keys(node)) {
+  for (const [key, value] of Object.entries(node)) {
     if (!SUPPORTED.has(key)) {
       throw new Error(
         `schema ${path} 使用了未实现的关键字 "${key}"——请在 scripts/shared/json-schema-lite.mjs 里补上实现,` +
           '不要让它被静默忽略',
+      );
+    }
+    if (key === 'additionalProperties') {
+      if (typeof value !== 'boolean' && shapeOf(value) !== 'object') {
+        throw new Error(
+          `schema ${path}/additionalProperties 只支持 boolean 或 schema 对象,实际是 ${shapeOf(value)}`,
+        );
+      }
+      continue;
+    }
+    const expected = KEYWORD_SHAPE[key];
+    if (expected && shapeOf(value) !== expected) {
+      throw new Error(
+        `schema ${path} 的 "${key}" 应是 ${expected},实际是 ${shapeOf(value)}——` +
+          '本模块只实现了 JSON Schema 的一个子集,形状不符时约束会被错误解释而非报错',
       );
     }
   }

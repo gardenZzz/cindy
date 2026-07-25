@@ -51,45 +51,6 @@ function applyCodexBudgetDiscount(quote: ModelPriceQuote): ModelPriceQuote {
   };
 }
 
-function normalizedCostDiscount(value: unknown): number | undefined {
-  return typeof value === 'number' && Number.isFinite(value) && value > 0 && value <= 1
-    ? value
-    : undefined;
-}
-
-/**
- * 把 Gateway costDiscount 落到报价上:各单价 ×(1-discount) 变为实付口径,原价挪进
- * original* 字段供划线展示。codex/ 折扣路由跳过——其 0.15 乘数由
- * applyCodexBudgetDiscount 作为客户端权威,不与服务端 costDiscount 叠加双重打折。
- */
-function applyGatewayCostDiscount(
-  quote: ModelPriceQuote,
-  discount: number | undefined,
-): ModelPriceQuote {
-  if (discount === undefined || quote.modelId.startsWith('codex/')) return quote;
-  const multiplier = 1 - discount;
-  return {
-    ...quote,
-    inputPerMtok: quote.inputPerMtok * multiplier,
-    outputPerMtok: quote.outputPerMtok * multiplier,
-    ...(quote.cacheReadPerMtok !== undefined
-      ? { cacheReadPerMtok: quote.cacheReadPerMtok * multiplier }
-      : {}),
-    ...(quote.cacheCreatePerMtok !== undefined
-      ? { cacheCreatePerMtok: quote.cacheCreatePerMtok * multiplier }
-      : {}),
-    discount,
-    originalInputPerMtok: quote.inputPerMtok,
-    originalOutputPerMtok: quote.outputPerMtok,
-    ...(quote.cacheReadPerMtok !== undefined
-      ? { originalCacheReadPerMtok: quote.cacheReadPerMtok }
-      : {}),
-    ...(quote.cacheCreatePerMtok !== undefined
-      ? { originalCacheCreatePerMtok: quote.cacheCreatePerMtok }
-      : {}),
-  };
-}
-
 export function gatewayModelPriceQuote(
   model: ModelAccessGatewayModel,
   region: CindyRegion,
@@ -100,26 +61,29 @@ export function gatewayModelPriceQuote(
   if (!modelId || inputPerMtok === undefined || outputPerMtok === undefined) {
     return undefined;
   }
-  // 0/0 判定用折扣前原价:100% 折扣(原价非零)仍是有效报价,展示为立省 100% 而非免费。
-  if (inputPerMtok === 0 && outputPerMtok === 0) return undefined;
   const cacheReadPerMtok = perMtok(model.cacheReadInputTokenCost);
   const cacheCreatePerMtok = perMtok(model.cacheCreationInputTokenCost);
-  return applyCodexBudgetDiscount(
-    applyGatewayCostDiscount(
-      {
-        providerId: 'xd',
-        modelId,
-        currency: gatewayCurrencyForRegion(region),
-        source: 'gateway',
-        approximate: false,
-        inputPerMtok,
-        outputPerMtok,
-        ...(cacheReadPerMtok !== undefined ? { cacheReadPerMtok } : {}),
-        ...(cacheCreatePerMtok !== undefined ? { cacheCreatePerMtok } : {}),
-      },
-      normalizedCostDiscount(model.costDiscount),
-    ),
-  );
+  if (
+    inputPerMtok === 0 &&
+    outputPerMtok === 0 &&
+    (cacheReadPerMtok === undefined || cacheReadPerMtok === 0) &&
+    (cacheCreatePerMtok === undefined || cacheCreatePerMtok === 0)
+  ) {
+    return undefined;
+  }
+  // quote 保留未折扣的标准价:UI 通过对比 quote(原价) vs CatalogModel.cost(折后价)
+  // 推断折扣 badge;costDiscount 仅在 effectiveGatewayModelCost 侧应用到 cost。
+  return applyCodexBudgetDiscount({
+    providerId: 'xd',
+    modelId,
+    currency: gatewayCurrencyForRegion(region),
+    source: 'gateway',
+    approximate: false,
+    inputPerMtok,
+    outputPerMtok,
+    ...(cacheReadPerMtok !== undefined ? { cacheReadPerMtok } : {}),
+    ...(cacheCreatePerMtok !== undefined ? { cacheCreatePerMtok } : {}),
+  });
 }
 
 export function gatewayPricingCatalog(
@@ -213,7 +177,9 @@ export function getModelPriceQuote(
   );
 }
 
-export function subscriptionDirectPriceQuote(modelId: string): ModelPriceQuote | undefined {
+export function subscriptionDirectPriceQuote(
+  modelId: string,
+): ModelPriceQuote | undefined {
   if (modelId.startsWith(CHATGPT_MODEL_PREFIX)) {
     return providerReferencePriceQuote('openai', modelId);
   }
@@ -236,25 +202,15 @@ export function regionalizeModelPriceQuote(
     outputPerMtok: quote.outputPerMtok * USD_TO_CNY_FIXED_RATE,
     ...(quote.cacheReadPerMtok !== undefined
       ? {
-          cacheReadPerMtok: quote.cacheReadPerMtok * USD_TO_CNY_FIXED_RATE,
+          cacheReadPerMtok:
+            quote.cacheReadPerMtok * USD_TO_CNY_FIXED_RATE,
         }
       : {}),
     ...(quote.cacheCreatePerMtok !== undefined
       ? {
-          cacheCreatePerMtok: quote.cacheCreatePerMtok * USD_TO_CNY_FIXED_RATE,
+          cacheCreatePerMtok:
+            quote.cacheCreatePerMtok * USD_TO_CNY_FIXED_RATE,
         }
-      : {}),
-    ...(quote.originalInputPerMtok !== undefined
-      ? { originalInputPerMtok: quote.originalInputPerMtok * USD_TO_CNY_FIXED_RATE }
-      : {}),
-    ...(quote.originalOutputPerMtok !== undefined
-      ? { originalOutputPerMtok: quote.originalOutputPerMtok * USD_TO_CNY_FIXED_RATE }
-      : {}),
-    ...(quote.originalCacheReadPerMtok !== undefined
-      ? { originalCacheReadPerMtok: quote.originalCacheReadPerMtok * USD_TO_CNY_FIXED_RATE }
-      : {}),
-    ...(quote.originalCacheCreatePerMtok !== undefined
-      ? { originalCacheCreatePerMtok: quote.originalCacheCreatePerMtok * USD_TO_CNY_FIXED_RATE }
       : {}),
   };
 }

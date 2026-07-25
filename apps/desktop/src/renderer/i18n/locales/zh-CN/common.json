@@ -2278,6 +2278,10 @@
         "install": "安装",
         "details": "详情",
         "update": "从市场更新",
+        "updateAvailable": "可更新",
+        "updateAction": "更新",
+        "updateAria": "更新 {{name}}",
+        "updateTo": "更新到 v{{version}}",
         "installed": "已安装",
         "conflict": "插件标识冲突",
         "unavailable": "插件市场暂时不可用；已安装插件仍可正常管理和使用。",
@@ -2426,6 +2430,8 @@
         "noChange": "权限无变化。",
         "pick": "可请求你选择一个文件夹交给它",
         "pickDetail": "它发起请求时，Cindy 会弹出系统的选择文件夹窗口；选哪个、给不给，都由你亲手决定，取消则它什么都拿不到。",
+        "workspace": "可请求为项目文件夹在侧边栏创建对话入口",
+        "workspaceDetail": "它发起请求时，由你亲手选择文件夹，或在确认卡上看到完整路径后再决定；它正在处理你发起的调用时，当前对话工作目录内的子文件夹可直接使用，不再单独确认。文件夹已有对话时直接复用，不重复创建。创建的只是空对话，不会自动开始任何任务。",
         "sessionContext": "可获知当前对话正在使用的项目文件夹位置",
         "sessionContextDetail": "只在它为当前对话干活时告知位置信息(对话编号与项目文件夹路径)，不包含文件内容，也不因此获得文件访问权。",
         "preview": "可在右侧栏浏览器中打开以下网站的预览页面",
@@ -2521,7 +2527,8 @@
         "slotNetwork": "网络访问",
         "slotNotify": "系统提示",
         "slotFs": "写文件",
-        "slotSkill": "Agent 技能"
+        "slotSkill": "Agent 技能",
+        "slotWorkspace": "工作区对话"
       },
       "commandPaletteTag": "插件指令",
       "updateConfirm": {
@@ -2533,6 +2540,10 @@
       "pick": {
         "dialogTitle": "选择文件夹",
         "dialogMessage": "插件「{{name}}」请求你选择一个文件夹"
+      },
+      "workspace": {
+        "dialogTitle": "选择项目文件夹",
+        "dialogMessage": "插件「{{name}}」请求你选择一个项目文件夹，用于在侧边栏创建对话"
       }
     },
     "mcp": {
@@ -3231,7 +3242,15 @@
         "unresponsiveDesc": "页面长时间未响应，可重新加载或稍候等待",
         "navigationLoopTitle": "已停止重复跳转",
         "navigationLoopDesc": "页面在短时间内反复跳转，已暂停导航。请重新加载页面后重试",
+        "resourceKilledTitle": "页面占用内存过高",
+        "resourceKilledDesc": "该页面占用内存过高，已被终止以保护应用运行。可重新加载",
+        "forceKill": "强制终止",
         "reload": "重新加载"
+      },
+      "resourceAlert": {
+        "cpuHint": "此页面占用大量系统资源",
+        "terminate": "终止页面",
+        "dismiss": "关闭"
       }
     },
     "terminal": {
@@ -6159,6 +6178,7 @@
       "descriptionDir": "以下目录/文件在当前对话的工作目录之外。允许后，其中的文件会交给该插件上传(它只拿到一次性票据，拿不到路径)。",
       "descriptionSaveDir": "以下目录在当前对话的工作目录之外。允许后，该插件可以把下载的文件存入其中(不会覆盖已有文件)。",
       "descriptionFsWrite": "该插件请求在当前对话的工作目录写入以下文件。允许后，本对话内它写同一目录不再询问。",
+      "descriptionWorkspace": "该文件夹在当前对话的工作目录之外。允许后，Cindy 会以它为工作目录在侧边栏创建一个空对话(已有对话时直接复用)，不会读取其中的文件。",
       "dirMeta": "{{count}} 个文件 · {{size}}",
       "directory": "目录",
       "allowDirs": "同时允许这些文件所在目录(本对话内同目录媒体文件不再询问)",

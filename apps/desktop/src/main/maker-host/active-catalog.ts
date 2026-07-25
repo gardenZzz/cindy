@@ -58,7 +58,7 @@ export interface XdGatewayAgentOverride {
   defaultEnabled?: boolean;
 }
 
-/** 服务端下发的 XD 网关聊天模型条目(shared/modelAccess ModelAccessGatewayModel 同形)。 */
+/** 服务端下发的 XD 网关聊天模型条目(shared/modelAccess ModelAccessGatewayModel 的子集)。 */
 export interface XdGatewayModelInfo {
   id: string;
   /** AIGateway 折扣比例(0..1),折后价 = 原价 × (1 - costDiscount)。 */
@@ -66,7 +66,7 @@ export interface XdGatewayModelInfo {
   /** AIGateway 标准 token 单价(per token)。 */
   inputCostPerToken?: number;
   outputCostPerToken?: number;
-  /** AIGateway 缓存 token 单价(per token);参与「免费」判定,防止只免标准价的模型误标免费。 */
+  /** AIGateway 缓存 token 单价(per token);参与「免费」判定与价格展示。 */
   cacheReadInputTokenCost?: number;
   cacheCreationInputTokenCost?: number;
   /** 进哪些 runtime tab;缺省 = 仅 claude-code 兜底。 */

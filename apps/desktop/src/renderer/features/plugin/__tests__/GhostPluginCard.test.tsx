@@ -1,5 +1,5 @@
 /**
- * Regression coverage for installed Plugin card actions.
+ * Regression coverage for Plugin card actions and compact marketplace metadata.
  * [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
  * @vitest-environment jsdom
  */
@@ -20,8 +20,9 @@ vi.mock('@/components/ui/tooltip', () => ({
   ),
 }));
 
-import { GhostPluginCard, InstalledGhostShortcut } from '../GhostPluginPage';
+import { GhostPluginCard, InstalledGhostShortcut, MarketPluginCard } from '../GhostPluginPage';
 import type { GhostPluginListItem } from '../lib/ghostPluginViewModel';
+import type { PluginMarketItem } from '../../../../shared/pluginMarket';
 
 const installedPlugin: GhostPluginListItem = {
   id: 'filo-google',
@@ -30,6 +31,23 @@ const installedPlugin: GhostPluginListItem = {
   version: '1.0.0',
   enabled: true,
   canUse: true,
+};
+
+const marketPlugin: PluginMarketItem = {
+  pluginId: 'release-google-calendar',
+  ghostId: 'google-calendar',
+  name: 'Google Calendar',
+  description: 'Connect Google Calendar',
+  author: 'Cindy',
+  scope: 'public',
+  organizationId: null,
+  defaultInstall: false,
+  releaseId: 'release-1',
+  version: '1.3.11',
+  publishedAt: '2026-07-25T00:00:00.000Z',
+  icon: null,
+  installState: 'not-installed',
+  enabled: null,
 };
 
 describe('GhostPluginCard', () => {
@@ -56,6 +74,56 @@ describe('GhostPluginCard', () => {
 
     expect(onSelect).toHaveBeenCalledTimes(1);
     expect(onAction).not.toHaveBeenCalled();
+  });
+
+  it('surfaces the market update state with a badge and a direct update action', () => {
+    const onAction = vi.fn();
+    const onUpdate = vi.fn();
+    render(
+      <GhostPluginCard
+        item={installedPlugin}
+        onSelect={vi.fn()}
+        onAction={onAction}
+        onUpdate={onUpdate}
+        updateVersion="1.1.1"
+      />,
+    );
+
+    expect(screen.getByText('settings.ghosts.market.updateAvailable')).toBeTruthy();
+    // Metadata keeps only the installed version; the pending version stays out of
+    // the crowded metadata row (surfaced by the badge and the detail header instead).
+    expect(screen.getByText('v1.0.0')).toBeTruthy();
+    expect(screen.queryByText('v1.1.1')).toBeNull();
+
+    const updateButton = screen.getByRole('button', {
+      name: 'settings.ghosts.market.updateAria',
+    });
+    fireEvent.click(updateButton);
+    expect(onUpdate).toHaveBeenCalledTimes(1);
+    expect(onAction).not.toHaveBeenCalled();
+    // The direct Use entry is replaced by Update while a new release is pending.
+    expect(screen.queryByRole('button', { name: 'settings.ghosts.page.useAria' })).toBeNull();
+  });
+
+  it('keeps the update action interactive while Use is locked, and blocks it when busy', () => {
+    const onUpdate = vi.fn();
+    render(
+      <GhostPluginCard
+        item={{ ...installedPlugin, enabled: false, canUse: false }}
+        onSelect={vi.fn()}
+        onAction={vi.fn()}
+        onUpdate={onUpdate}
+        updateVersion="1.1.1"
+        updateBusy
+      />,
+    );
+
+    const updateButton = screen.getByRole('button', {
+      name: 'settings.ghosts.market.updateAria',
+    }) as HTMLButtonElement;
+    expect(updateButton.disabled).toBe(true);
+    fireEvent.click(updateButton);
+    expect(onUpdate).not.toHaveBeenCalled();
   });
 
   it('disables Use when an installed plugin has no command', () => {
@@ -115,5 +183,26 @@ describe('GhostPluginCard', () => {
     const fallbackIcon = container.querySelector('.lucide-workflow');
     expect(fallbackIcon).toBeTruthy();
     expect(fallbackIcon?.parentElement?.className).toContain('var(--surface-elevated)');
+  });
+
+  it('keeps fixed market metadata on one line while truncating long identities', () => {
+    render(
+      <MarketPluginCard
+        item={marketPlugin}
+        busy={false}
+        onSelect={vi.fn()}
+        onIconLoadError={vi.fn()}
+      />,
+    );
+
+    const origin = screen.getByText('settings.ghosts.page.origin.public');
+    const metadata = origin.parentElement;
+    expect(metadata?.className).toContain('whitespace-nowrap');
+    expect(metadata?.className).toContain('overflow-hidden');
+    expect(origin.className).toContain('shrink-0');
+    expect(screen.getByText('v1.3.11').className).toContain('shrink-0');
+    expect(screen.getByText('google-calendar').className).toContain('truncate');
+    expect(screen.getByText('google-calendar').className).toContain('min-w-0');
+    expect(screen.getByText('Cindy').className).toContain('truncate');
   });
 });
