@@ -7136,7 +7136,16 @@
         "priceInterval": "{{price}} / {{interval}}",
         "includedCredits": "每{{interval}}包含 {{amount}} 点数",
         "renewsAt": "下次续费 {{date}}",
-        "endsAt": "套餐将于 {{date}} 结束"
+        "endsAt": "套餐将于 {{date}} 结束",
+        "cancelAction": "取消订阅",
+        "cancelConfirmTitle": "取消当前订阅？",
+        "cancelConfirmDescription": "本次操作不会退款，也不会立即调整额度。当前套餐权益可继续使用至 {{date}}，之后不再续费。",
+        "cancelConfirmDescriptionWithoutDate": "本次操作不会退款，也不会立即调整额度。当前套餐权益可继续使用至本计费周期结束，之后不再续费。",
+        "cancelConfirmAction": "确认取消",
+        "cancelSuccess": "已取消自动续费，当前套餐可使用至 {{date}}。",
+        "cancelSuccessWithoutDate": "已取消自动续费，当前套餐将在本计费周期结束后到期。",
+        "cancelNotSupported": "当前订阅暂不支持取消。",
+        "cancelFailed": "取消订阅失败，请稍后重试。"
       },
       "topupCard": {
         "action": "购买点数"

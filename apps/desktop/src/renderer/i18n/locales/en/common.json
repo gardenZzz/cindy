@@ -7147,7 +7147,16 @@
         "priceInterval": "{{price}} / {{interval}}",
         "includedCredits": "Includes {{amount}} credits per {{interval}}",
         "renewsAt": "Renews {{date}}",
-        "endsAt": "Plan ends {{date}}"
+        "endsAt": "Plan ends {{date}}",
+        "cancelAction": "Cancel subscription",
+        "cancelConfirmTitle": "Cancel your current subscription?",
+        "cancelConfirmDescription": "This action does not issue a refund or immediately change your credits. Your current plan stays available through {{date}}, then it will not renew.",
+        "cancelConfirmDescriptionWithoutDate": "This action does not issue a refund or immediately change your credits. Your current plan stays available through the end of this billing period, then it will not renew.",
+        "cancelConfirmAction": "Confirm cancellation",
+        "cancelSuccess": "Auto-renewal is canceled. Your current plan remains available through {{date}}.",
+        "cancelSuccessWithoutDate": "Auto-renewal is canceled. Your current plan will end after this billing period.",
+        "cancelNotSupported": "This subscription cannot be canceled yet.",
+        "cancelFailed": "Could not cancel the subscription. Try again later."
       },
       "topupCard": {
         "action": "Buy credits"
