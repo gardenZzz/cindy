@@ -253,6 +253,22 @@ export function BillingSettingsSection({ accountId }: { accountId: string | null
   const checkout = useBillingCheckout(accountId);
   const previousCheckoutPhaseRef = useRef(checkout.state.phase);
   const cancelSubscriptionLockRef = useRef(false);
+  // 取消订阅的 DELETE 不带 subscriptionId,服务端按「请求时已认证的账号」执行。
+  // ConfirmDialogProvider 挂在 AuthProvider 之外(见 App.tsx),弹窗会活过本 section
+  // 因 dataOwnerId 变化而发生的卸载,所以必须记住确认时的账号与挂载态。
+  const accountIdRef = useRef(accountId);
+  const sectionMountedRef = useRef(true);
+
+  useEffect(() => {
+    accountIdRef.current = accountId;
+  }, [accountId]);
+
+  useEffect(() => {
+    sectionMountedRef.current = true;
+    return () => {
+      sectionMountedRef.current = false;
+    };
+  }, []);
 
   const resetSelection = useCallback(() => {
     setSelectedOfferCode(null);
@@ -506,6 +522,7 @@ export function BillingSettingsSection({ accountId }: { accountId: string | null
     }
     cancelSubscriptionLockRef.current = true;
     try {
+      const confirmingAccountId = accountIdRef.current;
       const periodEndAt = currentPlanFacts?.periodEndAt ?? null;
       const confirmed = await confirm({
         title: t('billing.settings.subscriptionCard.cancelConfirmTitle'),
@@ -518,6 +535,9 @@ export function BillingSettingsSection({ accountId }: { accountId: string | null
         cancelText: t('commonUi.confirmDialog.cancel'),
       });
       if (!confirmed) return;
+      // 确认期间账号被换掉(或本 section 已卸载)就放弃:再发请求会取消到另一个账号
+      // 的订阅,而取消不可撤销。
+      if (!sectionMountedRef.current || accountIdRef.current !== confirmingAccountId) return;
 
       setCancelingSubscription(true);
       try {
