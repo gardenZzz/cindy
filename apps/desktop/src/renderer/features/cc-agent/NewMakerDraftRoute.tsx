@@ -66,6 +66,7 @@ import { useAttachments } from '@/hooks/useAttachments';
 import {
   useNewMakerDraft,
   switchVendor,
+  getDraft,
   patchDraft,
   patchCollab,
   patchCurrentVendorPrefs,
@@ -1107,9 +1108,19 @@ export function NewMakerDraftRoute() {
     patchDraft({ workingDir: dir, remoteHostId: null });
   }, []);
 
+  // ─── 新草稿入场:引用目录清零 ──────────────────────────────────────────
+  // 引用目录是"这次给 agent 额外看哪"的单次授权,不是"我常用哪个"的偏好记忆:
+  // 上一个未发送草稿留下的目录若静默带进新草稿,用户会无感知地扩大 agent 可见
+  // 范围(2026-07-25 用户定稿)。每次进入草稿页一律从空开始;store 侧 sanitize
+  // 也不跨重启还原,双保险。workingDir / 文本 / 模型等便利性记忆不受影响。
+  // StrictMode 双 mount 安全:清空幂等;guard 避免空转 emit。
+  useEffect(() => {
+    if (getDraft().extraDirs.length > 0) patchDraft({ extraDirs: [] });
+  }, []);
+
   // ─── 用户增删 extraDirs → 写回 draft ────────────────────────────────────
-  // 草稿期 (还没建 session) 没有 IPC 可调; localStorage 持久化 + 走 createSession
-  // 时一次性透传到 DB / agent 即可。
+  // 草稿期 (还没建 session) 没有 IPC 可调; 内存态 + 走 createSession
+  // 时一次性透传到 DB / agent 即可(sanitize 不跨重启还原,见 store 注释)。
   const handleExtraDirsChange = useCallback((next: string[]) => {
     patchDraft({ extraDirs: next });
   }, []);
@@ -1581,8 +1592,7 @@ export function NewMakerDraftRoute() {
             // 自动分配 <userData>/dialogues/<date>/<sid>/ 作为运行目录,不进入项目段。
             workspaceKind: workingDir ? 'project' : 'dialogue',
             remoteHostId: workingDir ? (effectiveRemoteHostId ?? undefined) : undefined,
-            // Codex 不支持 extraDirs (capability=false), agent 收到也忽略;
-            // 但 draft.extraDirs 是 vendor 无关字段, 这里照传, DB 存了也无害。
+            // extraDirs 是 vendor 无关字段；Claude 与 Codex 都按只读引用目录透传。
             extraDirs: effectiveExtraDirs,
             providerId,
           });

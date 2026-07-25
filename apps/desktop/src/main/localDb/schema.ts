@@ -179,8 +179,8 @@ export const sessions = sqliteTable(
     codexHistoryHasProductPrompt: integer('codex_history_has_product_prompt', { mode: 'boolean' }),
     /**
      * Session 附加只读引用目录列表(JSON 字符串数组,绝对路径)。
-     * agent (目前仅 Claude Code) 在每 turn 拼 query options.additionalDirectories 时透传。
-     * Codex session 此列恒为 '[]' (capability 不支持, UI 不暴露入口)。
+     * agent 在每 turn 透传：Claude Code 使用 options.additionalDirectories，
+     * Codex 使用 runtimeWorkspaceRoots + 只读 permission profile。
      * 反序列化由 mapper 兜底 (失败 fallback []), 不抛错。
      */
     extraDirs: text('extra_dirs').notNull().default('[]'),

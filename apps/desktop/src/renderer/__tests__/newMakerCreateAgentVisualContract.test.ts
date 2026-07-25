@@ -255,6 +255,22 @@ describe('NewMakerDraftRoute CREATE AGENT visual contract', () => {
     expect(chatInputSource).toContain(
       "className={isCreateAgentVariant && !useNarrowToolbar ? 'ml-[7px]' : undefined}",
     );
+    expect(chatInputSource).toContain(
+      '(extraDirs !== undefined && onExtraDirsChange)',
+    );
+    expect(chatInputSource).not.toContain(
+      "vendorKey === 'cc' && extraDirs !== undefined && onExtraDirsChange",
+    );
+    expect(extraDirsButtonSource).toContain(
+      'const hasReferenceDirs = onChange !== undefined',
+    );
+    expect(extraDirsButtonSource).not.toContain("const isCc = agentKind === 'cc'");
+    // ×N 角标在 create-agent(新建草稿)也要外显(2026-07-25 用户定稿):引用目录
+    // 扩大 agent 可见范围,收起态不允许静默。不得回退到 icon-only 紧凑态。
+    expect(extraDirsButtonSource).toContain('count > 0 && hasReferenceDirs');
+    expect(extraDirsButtonSource).not.toContain(
+      'count > 0 && hasReferenceDirs && !isCreateAgentVariant',
+    );
   });
 
   it('keeps the worktree checkmark readable in both themes', () => {

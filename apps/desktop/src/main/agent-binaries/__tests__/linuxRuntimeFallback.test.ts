@@ -41,8 +41,8 @@ describe('runtimeVersionMatchesPin', () => {
   it('requires Cindy-managed Claude and Codex binaries to match their pins exactly', () => {
     expect(runtimeVersionMatchesPin('claude-code', '2.1.219 (Claude Code)')).toBe(true);
     expect(runtimeVersionMatchesPin('claude-code', '2.1.218 (Claude Code)')).toBe(false);
-    expect(runtimeVersionMatchesPin('codex', 'codex-cli 0.144.6')).toBe(true);
-    expect(runtimeVersionMatchesPin('codex', 'codex-cli 0.144.5')).toBe(false);
+    expect(runtimeVersionMatchesPin('codex', 'codex-cli 0.145.0')).toBe(true);
+    expect(runtimeVersionMatchesPin('codex', 'codex-cli 0.144.6')).toBe(false);
   });
 
   it('rejects empty or unparsable version output', () => {

@@ -554,7 +554,7 @@ export class Session {
   }
 
   /**
-   * 运行时覆盖 extraDirs (附加只读引用目录)。Claude 即时生效, Codex capability=false。
+   * 运行时覆盖 extraDirs (附加只读引用目录)。Claude 与 Codex 都在下一 turn 生效。
    * 不写 DB —— 持久化由调用方 (main IPC 协调 local-db:sessions:update) 负责,
    * 跟 setModel/setEffort 双 IPC 协调先例一致。
    */
