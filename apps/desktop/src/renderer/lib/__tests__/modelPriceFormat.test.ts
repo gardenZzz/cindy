@@ -3,7 +3,6 @@ import { describe, expect, it } from 'vitest';
 import type { ModelPriceQuote } from '../../../shared/regionalMoney';
 import {
   formatModelPricePair,
-  modelPriceDiscountLabelValues,
   modelPriceDetailRows,
   modelPricePresentation,
 } from '../modelPriceFormat';
@@ -50,32 +49,79 @@ describe('modelPriceFormat', () => {
     ]);
   });
 
-  it('uses the effective price while retaining the original for a 50% discount', () => {
-    const original = quote({ inputPerMtok: 12, outputPerMtok: 36 });
-    expect(modelPricePresentation(original, { input: 6, output: 18 })).toEqual({
+  it('uses the effective price when it is a uniform scaling of the standard price', () => {
+    const standard = quote({ inputPerMtok: 12, outputPerMtok: 36 });
+    expect(modelPricePresentation(standard, { input: 6, output: 18 })).toEqual({
       kind: 'priced',
       current: quote({ inputPerMtok: 6, outputPerMtok: 18 }),
-      original,
-      discount: 0.5,
-    });
-    expect(modelPriceDiscountLabelValues(0.5)).toEqual({
-      percent: '50',
-      rate: '5',
-    });
-    expect(modelPriceDiscountLabelValues(0.2)).toEqual({
-      percent: '20',
-      rate: '8',
     });
     expect(
-      modelPriceDetailRows(
-        quote({ inputPerMtok: 6, outputPerMtok: 18, cacheReadPerMtok: 0.3 }),
-        original,
-      ),
+      modelPriceDetailRows(quote({ inputPerMtok: 6, outputPerMtok: 18, cacheReadPerMtok: 0.3 })),
     ).toEqual([
-      { kind: 'input', value: '¥6', originalValue: '¥12' },
-      { kind: 'output', value: '¥18', originalValue: '¥36' },
+      { kind: 'input', value: '¥6' },
+      { kind: 'output', value: '¥18' },
       { kind: 'cacheRead', value: '¥0.3' },
     ]);
+  });
+
+  it('uses the effective Gateway price across Qwen cache dimensions', () => {
+    const standard = quote({
+      modelId: 'qwen/qwen3.7-max',
+      inputPerMtok: 12,
+      outputPerMtok: 36,
+      cacheReadPerMtok: 2.4,
+      cacheCreatePerMtok: 15,
+    });
+    const presentation = modelPricePresentation(standard, {
+      input: 6,
+      output: 18,
+      cacheRead: 1.2,
+      cacheWrite: 7.5,
+    });
+
+    expect(presentation).toEqual({
+      kind: 'priced',
+      current: quote({
+        modelId: 'qwen/qwen3.7-max',
+        inputPerMtok: 6,
+        outputPerMtok: 18,
+        cacheReadPerMtok: 1.2,
+        cacheCreatePerMtok: 7.5,
+      }),
+    });
+    expect(
+      presentation?.kind === 'priced' ? modelPriceDetailRows(presentation.current) : [],
+    ).toEqual([
+      { kind: 'input', value: '¥6' },
+      { kind: 'output', value: '¥18' },
+      { kind: 'cacheRead', value: '¥1.2' },
+      { kind: 'cacheCreate', value: '¥7.5' },
+    ]);
+  });
+
+  it('falls back to the standard price when a cache dimension cannot confirm the effective price', () => {
+    const standard = quote({
+      inputPerMtok: 12,
+      outputPerMtok: 36,
+      cacheReadPerMtok: 2.4,
+      cacheCreatePerMtok: 15,
+    });
+
+    expect(
+      modelPricePresentation(standard, {
+        input: 6,
+        output: 18,
+        cacheRead: 1.2,
+      }),
+    ).toEqual({ kind: 'priced', current: standard });
+    expect(
+      modelPricePresentation(standard, {
+        input: 6,
+        output: 18,
+        cacheRead: 2.4,
+        cacheWrite: 7.5,
+      }),
+    ).toEqual({ kind: 'priced', current: standard });
   });
 
   it('marks only an explicit double-zero model price with a confirmed missing quote as free', () => {
@@ -85,17 +131,15 @@ describe('modelPriceFormat', () => {
     expect(modelPricePresentation(undefined, { input: 0, output: 0 })).toBeNull();
   });
 
-  it('keeps double-zero effective prices as a 100% discount when the quote is nonzero', () => {
-    const original = quote({ inputPerMtok: 12, outputPerMtok: 36 });
-    expect(modelPricePresentation(original, { input: 0, output: 0 })).toEqual({
+  it('shows double-zero effective prices as zero when the quote is nonzero', () => {
+    const standard = quote({ inputPerMtok: 12, outputPerMtok: 36 });
+    expect(modelPricePresentation(standard, { input: 0, output: 0 })).toEqual({
       kind: 'priced',
       current: quote({ inputPerMtok: 0, outputPerMtok: 0 }),
-      original,
-      discount: 1,
     });
   });
 
-  it('preserves the standard price when there is no discount', () => {
+  it('preserves the standard price when the effective price matches it', () => {
     const standard = quote({ inputPerMtok: 12, outputPerMtok: 36 });
     expect(modelPricePresentation(standard, { input: 12, output: 36 })).toEqual({
       kind: 'priced',
@@ -103,7 +147,7 @@ describe('modelPriceFormat', () => {
     });
   });
 
-  it('ignores sub-threshold floating-point discount noise', () => {
+  it('ignores sub-threshold floating-point price noise', () => {
     const standard = quote({ inputPerMtok: 12, outputPerMtok: 36 });
     expect(
       modelPricePresentation(standard, {

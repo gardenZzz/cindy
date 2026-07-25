@@ -619,40 +619,34 @@ describe('MobileDownloadDialog', () => {
     );
   });
 
-  it('keeps the brand edge inside its registered exception', () => {
-    // §15.7 / §14.4 登记的窄范围例外只覆盖「品牌资产 + 纯 transform 的常驻旋转」。
-    // 例外之外的两项(卡片阴影、指针 3D 倾斜)必须保持关闭。
+  it('keeps the QR card flat with no brand edge', () => {
+    // 二维码卡回到 DESIGN.md 的中性处理:没有品牌描边、没有阴影、没有指针 3D 倾斜,
+    // 也没有常驻动画(§14.4 红线);唯一动效是 linked ↔ onboarding 的尺寸补间。
     expect(source).not.toMatch(/perspective\(|scale3d\(|onPointerMove|requestAnimationFrame/);
     expect(source).not.toMatch(/mobile-download-qr-shadow/);
     expect(globalStyles).not.toMatch(/--mobile-download-qr-shadow/);
     expect(themeColors).not.toMatch(/mobile-download-qr-shadow/);
-    // 红蓝只能来自官方 icon 资产,不自写品牌渐变/色值。
+    // 不自写品牌渐变/色值。
     expect(source).not.toMatch(/linear-gradient|conic-gradient|#[0-9a-fA-F]{3,8}\b/);
 
-    const cardRule = globalStyles.slice(
-      globalStyles.indexOf('.mobile-download-qr-card {'),
-      globalStyles.indexOf('.mobile-download-qr-edge {'),
+    // 折射边整层撤除:组件、keyframes、周期 token 都不该再留残骸。
+    expect(source).not.toMatch(/mobile-download-qr-edge/);
+    expect(globalStyles).not.toMatch(
+      /mobile-download-qr-edge|mobile-download-edge-turn|--mobile-download-edge-cycle/,
     );
-    expect(cardRule).not.toMatch(/box-shadow|animation:|transform:/);
+    // 官方 icon 只剩弹窗头部这一处(import + 一次使用)。
+    expect(source.match(/cindyIconUrl/g)).toHaveLength(2);
+
+    const cardStart = globalStyles.indexOf('.mobile-download-qr-card {');
+    const cardRule = globalStyles.slice(cardStart, globalStyles.indexOf('}', cardStart) + 1);
+    expect(cardRule).not.toMatch(/box-shadow|animation:|transform:|border/);
     expect(cardRule).toMatch(
       /transition:\s*\n\s*width var\(--motion-base\) var\(--motion-ease-move\),/,
     );
     expect(cardRule).toMatch(/height var\(--motion-base\) var\(--motion-ease-move\);/);
-
-    // 常驻动画只能碰 transform(合成器层),且必须登记进 reduced-motion 白名单。
-    const edgeStart = globalStyles.indexOf('.mobile-download-qr-edge {');
-    const edgeRule = globalStyles.slice(
-      edgeStart,
-      globalStyles.indexOf('@media (prefers-reduced-motion: reduce)', edgeStart),
-    );
-    expect(edgeRule).toContain(
-      'animation: mobile-download-edge-turn var(--mobile-download-edge-cycle) linear infinite',
-    );
-    expect(edgeRule).not.toMatch(/filter:|backdrop-filter:|mask-image:|width:|height:/);
-    expect(globalStyles).toMatch(/\.mobile-download-qr-edge\s*\{\s*animation: none;\s*transform:/);
   });
 
-  it('renders the brand edge behind the QR surface', () => {
+  it('renders the QR as the only image inside the card', async () => {
     render(
       <MobileDownloadDialog
         open
@@ -664,9 +658,11 @@ describe('MobileDownloadDialog', () => {
       />,
     );
 
+    await screen.findByAltText('sidebar.mobileDownload.qrAlt');
     const card = screen.getByTestId('mobile-download-qr-card');
-    const edge = card.querySelector('.mobile-download-qr-edge');
-    expect(edge).toBeTruthy();
-    expect(edge?.getAttribute('aria-hidden')).toBe('true');
+    expect(card.querySelector('.mobile-download-qr-edge')).toBeNull();
+    const images = card.querySelectorAll('img');
+    expect(images).toHaveLength(1);
+    expect(images[0]?.getAttribute('alt')).toBe('sidebar.mobileDownload.qrAlt');
   });
 });

@@ -3847,7 +3847,6 @@
         "cacheRead": "Cache read",
         "cacheCreate": "Cache write",
         "free": "Limited-time free",
-        "discount": "Save {{percent}}%",
         "perMillion": "Standard model pricing",
         "fixedFx": "Estimated at the fixed rate of 1 USD = 6.7 CNY",
         "subscriptionEstimate": "Value estimate, not an actual bill"
@@ -3860,7 +3859,7 @@
       "category": {
         "anthropic": "Anthropic",
         "gpt": "OpenAI",
-        "budget": "85% off",
+        "budget": "GPT Discount",
         "grok": "xAI",
         "google": "Google",
         "china": "Domestic",
@@ -3878,8 +3877,7 @@
       "meta": {
         "context": "{{value}} context",
         "price": "{{input}}/{{output}} per 1M",
-        "fastBadge": "Fast",
-        "budgetDiscount": "85% off"
+        "fastBadge": "Fast"
       },
       "source": {
         "railLabel": "Source",
@@ -5859,7 +5857,7 @@
         "category": {
           "anthropic": "Anthropic",
           "gpt": "GPT",
-          "gpt-budget": "GPT (85% off)",
+          "gpt-budget": "GPT Discount",
           "google": "Google",
           "china": "China"
         },
@@ -7322,6 +7320,7 @@
     "planChange": {
       "targetTitle": "Change subscription plan",
       "upgradeBadge": "Upgrade",
+      "sameLevelBadge": "Same tier",
       "downgradeBadge": "Downgrade",
       "emptyTitle": "No plans available to switch to",
       "emptyDescription": "The server has not configured another plan for your current payment method.",
@@ -7343,7 +7342,9 @@
       "expiredBody": "The quote expired. Start the plan change again to get a new quote.",
       "failedTitle": "Plan change failed",
       "failedBody": "The plan change did not complete. Your current plan is unchanged.",
-      "requestFailed": "The request failed. Please try again.",
+      "requestFailed": "The plan change request couldn’t be completed. Refresh your subscription status and try again.",
+      "quoteRejected": "This plan isn’t available for your current subscription. Choose another plan.",
+      "chooseAnotherPlan": "Choose Another Plan",
       "resyncHint": "The confirmation result could not be verified. Syncing the latest status from the server…",
       "upgradeDueNow": "Pay {{amount}} now for the remainder of this period",
       "upgradeNoAmount": "The upgrade takes effect immediately after confirmation.",
