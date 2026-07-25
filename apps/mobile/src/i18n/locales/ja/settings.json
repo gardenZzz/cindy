@@ -84,8 +84,10 @@
   "legal": {
     "sectionTitle": "法的情報",
     "privacyPolicy": "プライバシーポリシー",
+    "userAgreement": "利用規約",
     "view": "表示",
     "openPrivacyPolicy": "プライバシーポリシーを開く",
+    "openUserAgreement": "利用規約を開く",
     "appFilingNumber": "アプリ届出番号"
   },
   "account": {

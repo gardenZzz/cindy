@@ -84,8 +84,10 @@
   "legal": {
     "sectionTitle": "备案信息",
     "privacyPolicy": "隐私政策",
+    "userAgreement": "用户协议",
     "view": "查看",
     "openPrivacyPolicy": "打开隐私政策",
+    "openUserAgreement": "打开用户协议",
     "appFilingNumber": "App 备案号"
   },
   "account": {

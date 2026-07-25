@@ -84,8 +84,10 @@
   "legal": {
     "sectionTitle": "법적 정보",
     "privacyPolicy": "개인정보 처리방침",
+    "userAgreement": "이용약관",
     "view": "보기",
     "openPrivacyPolicy": "개인정보 처리방침 열기",
+    "openUserAgreement": "이용약관 열기",
     "appFilingNumber": "앱 등록 번호"
   },
   "account": {
