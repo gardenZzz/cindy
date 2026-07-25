@@ -615,6 +615,14 @@ registerColor('login-error-fg', {
   light: '#D91F37',
   dark: '#D91F37',
 }, 'Login — 错误文本/error 描边(语义豁免,跨模式不变 #D91F37)');
+// 注销提示气泡底(figma 678:1075「注销状态」组件集;用户拍板 2026-07-25):值是 var 引用——
+// light 消费 --chat-input-bg(agent 输入框底,实值 #FFFFFF)、dark 消费 --surface(main 最深
+// 深色背景,实值 #1F1F1E,用户点名"找最深的");非默认扩展主题自动跟随这两个语义槽,
+// 无需逐主题 override(规则 16:alias 形态,同 panel-bg 先例)。
+registerColor('login-deletion-bubble-bg', {
+  light: 'var(--chat-input-bg)',
+  dark: 'var(--surface)',
+}, 'Login — 注销提示气泡底(figma 678:1075;light alias --chat-input-bg #FFFFFF / dark alias --surface #1F1F1E,var 引用随扩展主题自动跟随)');
 // Splash 统一面板进度条(亮色 track #D9D9D9/fill #252222;暗色推导 track #434343/fill #D4D4D4,待 Figma 精确)。
 registerColor('login-splash-progress-track', {
   light: '#D9D9D9',
