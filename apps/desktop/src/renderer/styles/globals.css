@@ -347,10 +347,18 @@ html:lang(ko) {
   border-left-color: var(--caret-accent) !important;
 }
 /* composer 列表行缩进(ComposerListIndentDecoration):行首列表前缀被识别后,
-   整行内容右移一格,作为"已进入列表状态"的视觉反馈(对齐 Claude 原生 App)。
-   纯文本编辑器行是 inline 内容,折行后的后续视觉行不缩进(已知 trade-off)。 */
+   整条列表行变成独立的 inline-block 换行容器。padding-left 留出"基础缩进
+   + 前缀宽度",首行再用负 text-indent 把列表标记悬挂回基础缩进位置;
+   自动换行后的续行不吃负缩进,因此会与首行正文对齐。 */
 .ProseMirror .composer-list-line-indent {
-  padding-left: 1em;
+  display: inline-block;
+  box-sizing: border-box;
+  width: 100%;
+  padding-left: calc(1em + var(--composer-list-hang, 1.25em));
+  text-indent: var(--composer-list-hang-negative, -1.25em);
+  vertical-align: top;
+  overflow-wrap: anywhere;
+  word-break: break-all;
 }
 .ProseMirror .voice-input-draft-replaced {
   display: none;
