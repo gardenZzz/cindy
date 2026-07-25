@@ -1211,6 +1211,7 @@ export function MainLayout() {
                   onCloseSidebar={isMac ? undefined : handleToggleRightSidebar}
                   onMaximize={handleMaximizeRightSidebar}
                   isMaximized={isRightSidebarMaximized}
+                  reserveLeftChromeActions={isRightSidebarMaximized && isSidebarCollapsed}
                   sessionId={rightSidebarSessionId}
                   workdir={rightSidebarWorkdirInfo.workdir}
                   remoteHostId={rightSidebarWorkdirInfo.remoteHostId}
