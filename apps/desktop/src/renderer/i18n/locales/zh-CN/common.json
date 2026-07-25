@@ -3909,7 +3909,7 @@
       "stopConfirmCancel": "取消",
       "archiveWorkerConfirmTitle": "归档 Worker {{role}} #{{label}}？",
       "archiveWorkerConfirmTitleName": "归档 Worker {{name}}？",
-      "archiveWorkerConfirmDesc": "这会停掉它的 SDK 对话，并从 sidebar 隐藏；历史数据会以 archived 状态保留。当前 UI 不支持恢复，误归档后需要重新创建 Worker 派任务。",
+      "archiveWorkerConfirmDesc": "这会停掉它的 SDK 会话，并从 sidebar 隐藏；历史数据会以 archived 状态保留。当前 UI 不支持恢复，误归档后需要重新创建 Worker 派任务。",
       "archiveWorkerConfirmConfirm": "归档 Worker",
       "archiveWorkerConfirmCancel": "取消",
       "errors": {
