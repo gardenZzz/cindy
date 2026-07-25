@@ -1076,6 +1076,38 @@
         "supportsFastMode": false,
         "defaultEnabled": false
       },
+      "bytedance-seed/seed-2.1-pro": {
+        "agents": [
+          "claude-code",
+          "codex"
+        ],
+        "name": "Seed 2.1 Pro",
+        "group": "china",
+        "contextWindow": 256000,
+        "efforts": [
+          "low",
+          "medium",
+          "high"
+        ],
+        "defaultEffort": "high",
+        "supportsFastMode": true
+      },
+      "qwen/qwen3.8-max-preview": {
+        "agents": [
+          "claude-code",
+          "codex"
+        ],
+        "name": "Qwen 3.8 Max Preview",
+        "group": "china",
+        "contextWindow": 983616,
+        "efforts": [
+          "low",
+          "medium",
+          "high"
+        ],
+        "defaultEffort": "high",
+        "supportsFastMode": true
+      },
       "qwen/qwen3.7-max": {
         "agents": [
           "claude-code"
