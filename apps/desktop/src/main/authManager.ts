@@ -80,18 +80,23 @@ import {
   getActiveAppSession,
   type AppSessionMode,
 } from './appSessionState.js';
-import { claimLegacyOwnerNamespace } from './ownerNamespaceMigration.js';
+import {
+  claimLegacyOwnerNamespace,
+  recordLegacyGhostMigrationResult,
+} from './ownerNamespaceMigration.js';
 
 const log = createLogger('authManager');
 
 async function claimLegacyNamespaceForVerifiedUser(userId: string): Promise<void> {
   try {
-    await claimLegacyOwnerNamespace({
+    const result = await claimLegacyOwnerNamespace({
       mode: 'cloud',
       dataOwnerId: userId,
       user: { id: userId },
     });
+    recordLegacyGhostMigrationResult(userId, result);
   } catch (error) {
+    recordLegacyGhostMigrationResult(userId, { status: 'partial', moved: 0, conflicts: 0 });
     log.warn('legacy owner namespace claim failed; continuing with scoped storage', {
       userId,
       error: error instanceof Error ? error.message : String(error),
