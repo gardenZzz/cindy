@@ -3087,11 +3087,15 @@
   "panelChrome": {
     "maximizeAria": "Maximize panel",
     "restoreAria": "Restore panel size",
-    "detachAria": "Open in a new window"
+    "detachAria": "Open in a new window",
+    "minimizeAria": "Minimize to floating bubble"
   },
   "ghostPanelWindow": {
     "mergeBack": "Merge back into main window",
     "unavailable": "This plugin panel is currently unavailable"
+  },
+  "ghostPanelBubble": {
+    "restoreAria": "Restore {{name}} panel"
   },
   "rightSidebar": {
     "ariaLabel": "Right sidebar",

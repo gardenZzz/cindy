@@ -3086,11 +3086,15 @@
   "panelChrome": {
     "maximizeAria": "パネルを最大化",
     "restoreAria": "パネルのサイズを元に戻す",
-    "detachAria": "新しいウィンドウで開く"
+    "detachAria": "新しいウィンドウで開く",
+    "minimizeAria": "フローティングバブルに最小化"
   },
   "ghostPanelWindow": {
     "mergeBack": "メインウィンドウに戻す",
     "unavailable": "このプラグインパネルは現在利用できません"
+  },
+  "ghostPanelBubble": {
+    "restoreAria": "{{name}} パネルを元に戻す"
   },
   "rightSidebar": {
     "ariaLabel": "右サイドバー",

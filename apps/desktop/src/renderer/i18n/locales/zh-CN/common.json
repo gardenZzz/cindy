@@ -3086,11 +3086,15 @@
   "panelChrome": {
     "maximizeAria": "撑满内容区",
     "restoreAria": "还原面板大小",
-    "detachAria": "在独立窗口中打开"
+    "detachAria": "在独立窗口中打开",
+    "minimizeAria": "最小化为浮动气泡"
   },
   "ghostPanelWindow": {
     "mergeBack": "合并回主窗口",
     "unavailable": "该插件面板当前不可用"
+  },
+  "ghostPanelBubble": {
+    "restoreAria": "恢复 {{name}} 面板"
   },
   "rightSidebar": {
     "ariaLabel": "右侧边栏",

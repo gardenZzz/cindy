@@ -3086,11 +3086,15 @@
   "panelChrome": {
     "maximizeAria": "패널 최대화",
     "restoreAria": "패널 크기 복원",
-    "detachAria": "새 창에서 열기"
+    "detachAria": "새 창에서 열기",
+    "minimizeAria": "플로팅 버블로 최소화"
   },
   "ghostPanelWindow": {
     "mergeBack": "메인 창으로 되돌리기",
     "unavailable": "이 플러그인 패널은 현재 사용할 수 없습니다"
+  },
+  "ghostPanelBubble": {
+    "restoreAria": "{{name}} 패널 복원"
   },
   "rightSidebar": {
     "ariaLabel": "오른쪽 사이드바",
