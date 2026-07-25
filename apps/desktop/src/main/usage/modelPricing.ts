@@ -268,6 +268,13 @@ export async function getModelPricing(): Promise<ModelPricingCatalog | null> {
 }
 
 /**
+ * 记账热路径等待 inflight 同步的上限:/models 请求本身不设超时,黑洞网络下
+ * 不能让记账写入无限期挂起(app 等待期间退出会丢整轮账)。超时后直接用当前
+ * 已落地的投影计价,quote 缺失时调用方走 SDK 兜底,不丢账。
+ */
+const PRICING_SYNC_WAIT_MS = 3_000;
+
+/**
  * 计费热路径等待模型同步已经落下的本地投影，不再自己联网。providerId 是必需的，
  * 同模型从 XD/OpenAI/订阅来源进入时不会串价。
  */
@@ -275,7 +282,19 @@ export async function getModelPricingForModel(
   providerId: string | null | undefined,
   modelId: string,
 ): Promise<ModelPricingCatalog | null> {
-  if (modelSyncInflight) await modelSyncInflight;
+  if (modelSyncInflight) {
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    try {
+      await Promise.race([
+        modelSyncInflight.catch(() => undefined),
+        new Promise<void>((resolve) => {
+          timer = setTimeout(resolve, PRICING_SYNC_WAIT_MS);
+        }),
+      ]);
+    } finally {
+      if (timer) clearTimeout(timer);
+    }
+  }
   const pricing = await getModelPricing();
   void getModelPriceQuote(pricing, providerId, modelId);
   return pricing;

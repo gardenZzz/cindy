@@ -142,6 +142,12 @@ export function sessionToCamel(row: SessionRowWithCount): Session {
         ? addRegionalMoney([legacyMoney, currentMoney])
         : currentMoney
       : (currentMoney ?? legacyMoney ?? zeroRegionalMoney(CURRENT_CINDY_REGION));
+  // 旧字段兼容投影,与 totalMoney 同一 combine 语义:结构化累计仍是 USD 时并入,
+  // 否则(CNY 无法表达进 USD 字段)保持冻结历史值。只消费 totalCostUsd 的读方
+  // (device-link v1 / 手机端)在全量 reseed 后才不会丢本构建新增的 USD 花费。
+  const legacyUsdProjection =
+    row.totalCostUsd +
+    (row.totalCostCurrency === 'USD' ? row.totalCostAmount : 0);
   return {
     id: row.id,
     userId: '', // 本地 db 已按 user 隔离，无需冗余存储
@@ -155,7 +161,7 @@ export function sessionToCamel(row: SessionRowWithCount): Session {
     status: row.status as SessionStatus,
     sdkSessionId: row.sdkSessionId,
     totalTokenUsage: row.totalTokenUsage,
-    totalCostUsd: row.totalCostUsd,
+    totalCostUsd: legacyUsdProjection,
     totalMoney,
     contextTokens: row.contextTokens,
     contextWindow: row.contextWindow,
