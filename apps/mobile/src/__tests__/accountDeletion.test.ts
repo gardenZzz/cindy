@@ -256,8 +256,11 @@ describe('mobile account deletion', () => {
     );
     expect(gate).toContain('<Animated.View');
     expect(gate).toContain(
-      "pointerEvents={handoffPhase === 'done' ? 'auto' : 'none'}",
+      "pointerEvents={handoffPhase === 'done' ? 'box-none' : 'none'}",
     );
+    // 全屏包装层禁止 'auto':RN 下 absoluteFill 的 View 即使透明也会吃掉命中区,
+    // 挡住下方登录组的输入框/按钮/社交入口(Greptile 审查 P1)。
+    expect(gate).not.toContain("? 'auto' : 'none'}");
     expect(gate).toContain('{ opacity: panelEntrance.opacity }');
     expect(gate).toContain('StyleSheet.absoluteFill');
     // 入场完成后(done)才允许交互;disabled/条件渲染等替代形态未引入。

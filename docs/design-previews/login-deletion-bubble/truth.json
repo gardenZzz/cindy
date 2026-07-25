@@ -10,7 +10,7 @@
     },
     "safeTop": {
       "provenance": {
-        "hash": "sha256:93df7ee1c49ac7cd5bfab97efb42b8bc487ea7cbdd38381b5722c839467ed90a",
+        "hash": "sha256:3eb5eb060f51cadfed62161cb5a320c6d06a9cca23be01ef1c48eb641c135031",
         "locator": "demo chrome:safe-area 顶仿真常量(产品运行时 = insets.top)",
         "source": "../../../apps/mobile/app/(auth)/login.tsx"
       },
@@ -1186,7 +1186,7 @@
     "mobile": {
       "a11yModalGate": {
         "provenance": {
-          "hash": "sha256:93df7ee1c49ac7cd5bfab97efb42b8bc487ea7cbdd38381b5722c839467ed90a",
+          "hash": "sha256:3eb5eb060f51cadfed62161cb5a320c6d06a9cca23be01ef1c48eb641c135031",
           "locator": "login.tsx 气泡渲染点 Animated.View importantForAccessibility",
           "source": "../../../apps/mobile/app/(auth)/login.tsx"
         },
@@ -1194,7 +1194,7 @@
       },
       "dismissGate": {
         "provenance": {
-          "hash": "sha256:93df7ee1c49ac7cd5bfab97efb42b8bc487ea7cbdd38381b5722c839467ed90a",
+          "hash": "sha256:3eb5eb060f51cadfed62161cb5a320c6d06a9cca23be01ef1c48eb641c135031",
           "locator": "login.tsx:1315-1327 {onDismiss ? <Pressable/> : null}",
           "source": "../../../apps/mobile/app/(auth)/login.tsx"
         },
@@ -1202,7 +1202,7 @@
       },
       "dismissHitSlop": {
         "provenance": {
-          "hash": "sha256:93df7ee1c49ac7cd5bfab97efb42b8bc487ea7cbdd38381b5722c839467ed90a",
+          "hash": "sha256:3eb5eb060f51cadfed62161cb5a320c6d06a9cca23be01ef1c48eb641c135031",
           "locator": "login.tsx hitSlop={LOGIN_DELETION_BUBBLE.linkHitSlop}",
           "source": "../../../apps/mobile/app/(auth)/login.tsx"
         },
@@ -1210,15 +1210,15 @@
       },
       "entranceGate": {
         "provenance": {
-          "hash": "sha256:93df7ee1c49ac7cd5bfab97efb42b8bc487ea7cbdd38381b5722c839467ed90a",
+          "hash": "sha256:3eb5eb060f51cadfed62161cb5a320c6d06a9cca23be01ef1c48eb641c135031",
           "locator": "login.tsx 气泡渲染点 Animated.View pointerEvents/style",
           "source": "../../../apps/mobile/app/(auth)/login.tsx"
         },
-        "value": "Animated.View 包装:opacity=panelEntrance.opacity(与登录组同一 Animated 值);pointerEvents 仅 handoffPhase==='done' 放行——入场完成前不可见不可点(PR #464 review)"
+        "value": "Animated.View 包装:opacity=panelEntrance.opacity(与登录组同一 Animated 值);pointerEvents 仅 handoffPhase==='done' 放行且取 box-none(全屏包装层不作触摸目标,避免挡住下方登录组命中;入场完成前 none = 不可见不可点)(PR #464 review)"
       },
       "renderPosition": {
         "provenance": {
-          "hash": "sha256:93df7ee1c49ac7cd5bfab97efb42b8bc487ea7cbdd38381b5722c839467ed90a",
+          "hash": "sha256:3eb5eb060f51cadfed62161cb5a320c6d06a9cca23be01ef1c48eb641c135031",
           "locator": "login.tsx:1140-1197 deletionBubbleFrame + AccountDeletionStatusPanel frame prop",
           "source": "../../../apps/mobile/app/(auth)/login.tsx"
         },
@@ -1226,7 +1226,7 @@
       },
       "styleFacts": {
         "provenance": {
-          "hash": "sha256:93df7ee1c49ac7cd5bfab97efb42b8bc487ea7cbdd38381b5722c839467ed90a",
+          "hash": "sha256:3eb5eb060f51cadfed62161cb5a320c6d06a9cca23be01ef1c48eb641c135031",
           "locator": "login.tsx:1439-1449 makeStyles.deletionBubble",
           "source": "../../../apps/mobile/app/(auth)/login.tsx"
         },
