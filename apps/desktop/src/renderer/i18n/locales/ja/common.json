@@ -6974,8 +6974,7 @@
     "sidebar": "クレジットとプラン",
     "settings": {
       "title": "使用状況と請求",
-      "subtitle": "現在のサブスクリプションを確認し、サーバーから提供されるプランやクレジットを購入できます。",
-      "loading": "サブスクリプションの状態を取得中…",
+      "subtitle": "利用可能なクレジットと現在のプランを確認し、必要に応じてクレジットを購入できます。",
       "subscriptionCard": {
         "title": "現在のプラン",
         "empty": "有効なサブスクリプションはありません",
@@ -6983,13 +6982,17 @@
         "unnamedPlan": "サブスクリプションプラン",
         "unavailable": "サブスクリプションの状態を取得できません。更新してもう一度お試しください。",
         "action": "プランを見る",
-        "changeAction": "プラン変更"
+        "changeAction": "プランを変更",
+        "priceInterval": "{{price}} / {{interval}}",
+        "includedCredits": "毎{{interval}} {{amount}} クレジットを付与",
+        "renewsAt": "次回更新日: {{date}}",
+        "endsAt": "{{date}} にプラン終了"
       },
       "topupCard": {
         "title": "クレジット",
         "description": "従量制のモデルや機能で使うクレジットを購入します。",
         "cardTitle": "必要に応じてクレジットを購入",
-        "cardDescription": "購入可能なクレジット商品はサーバーで設定されます。",
+        "cardDescription": "必要に応じて利用可能なクレジットを追加できます。最終金額は決済ページに表示されます。",
         "action": "クレジットを購入"
       }
     },
@@ -7125,7 +7128,8 @@
       "title": "未完了の支払いがあります",
       "description": "前回の支払いを続け、最新状態をサーバーで確認できます。",
       "continueTopup": "{{amount}}の支払いを続ける",
-      "continueSubscription": "サブスクリプションの支払いを続ける"
+      "continueSubscription": "サブスクリプションの支払いを続ける",
+      "continueFailed": "中断した支払いを続ける"
     },
     "checkout": {
       "creatingTitle": "支払いを作成中",

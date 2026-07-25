@@ -173,7 +173,7 @@ describe('billing checkout phase projection', () => {
     expect(readBillingCheckoutIntent(ACCOUNT_ID)).toBeNull();
   });
 
-  it('replays an unresolved persisted purchase with the original request and key', async () => {
+  it('replays an unresolved persisted purchase in the background without opening it', async () => {
     const pending = {
       subscriptionId: 'subscription_pending',
       status: 'INCOMPLETE' as const,
@@ -216,8 +216,9 @@ describe('billing checkout phase projection', () => {
       },
       'desktop:subscription:stale-intent',
     );
-    expect(result.current.state.open).toBe(true);
+    expect(result.current.state.open).toBe(false);
     expect(result.current.state.phase).toBe('AWAITING_PAYMENT');
+    expect(result.current.recoverables.subscription).toEqual(pending);
     expect(readBillingCheckoutIntent(ACCOUNT_ID)).toEqual({
       version: 1,
       kind: 'SUBSCRIPTION',
@@ -230,6 +231,57 @@ describe('billing checkout phase projection', () => {
       purchaseAttemptId: 'purchase_pending',
       createdAt: '2026-01-01T00:00:00.000Z',
     });
+
+    act(() => result.current.resumeSubscription(result.current.recoverables.subscription!));
+    expect(result.current.state.open).toBe(true);
+    expect(result.current.state.subscription).toEqual(pending);
+  });
+
+  it('keeps polling a restored paid top-up in the background until fulfillment succeeds', async () => {
+    const paidOrder = {
+      orderId: 'order_paid',
+      productCode: 'credit_topup',
+      offerCode: 'credit_topup_20',
+      amount: '20',
+      currency: 'cny',
+      status: 'SUCCEEDED' as const,
+      fulfillmentStatus: 'PENDING' as const,
+      paymentAction: null,
+      createdAt: '2026-01-01T00:00:00.000Z',
+      updatedAt: '2026-01-01T00:01:00.000Z',
+    };
+    writeBillingCheckoutIntent(ACCOUNT_ID, {
+      version: 1,
+      kind: 'TOPUP',
+      idempotencyKey: 'desktop:topup:paid-intent',
+      request: {
+        offerCode: 'credit_topup_20',
+        purchaseOptionId: 'listing_alipay',
+      },
+      orderId: paidOrder.orderId,
+      createdAt: '2026-01-01T00:00:00.000Z',
+    });
+    api.listOrders.mockResolvedValue({ orders: [paidOrder], nextCursor: null });
+    api.getOrder.mockResolvedValue({
+      ...paidOrder,
+      fulfillmentStatus: 'SUCCEEDED',
+    });
+
+    const { result } = renderHook(() => useBillingCheckout(ACCOUNT_ID));
+    await waitFor(() => expect(result.current.recovering).toBe(false));
+    expect(result.current.state).toMatchObject({
+      open: false,
+      phase: 'FULFILLING',
+      order: paidOrder,
+    });
+
+    act(() => window.dispatchEvent(new Event('focus')));
+
+    await waitFor(() => expect(result.current.state.phase).toBe('COMPLETED'));
+    expect(api.getOrder).toHaveBeenCalledWith(paidOrder.orderId);
+    expect(result.current.state.open).toBe(false);
+    expect(result.current.recoverables.topups).toEqual([]);
+    expect(readBillingCheckoutIntent(ACCOUNT_ID)).toBeNull();
   });
 
   it('does not replace a persisted subscription intent with another current subscription', async () => {
@@ -265,6 +317,7 @@ describe('billing checkout phase projection', () => {
 
     expect(api.refreshSubscriptionPurchase).toHaveBeenCalledWith('purchase_expected');
     expect(result.current.state).toMatchObject({
+      open: false,
       phase: 'FAILED',
       intent,
       subscription: null,
@@ -306,11 +359,118 @@ describe('billing checkout phase projection', () => {
 
     expect(api.refreshSubscriptionPurchase).toHaveBeenCalledWith('purchase_expected');
     expect(result.current.state).toMatchObject({
+      open: false,
       phase: 'COMPLETED',
       subscription: completed,
       error: false,
     });
     expect(readBillingCheckoutIntent(ACCOUNT_ID)).toBeNull();
+  });
+
+  it('clears an expired persisted top-up without opening a dialog', async () => {
+    const intent = {
+      version: 1 as const,
+      kind: 'TOPUP' as const,
+      idempotencyKey: 'desktop:topup:expired-intent',
+      request: {
+        offerCode: 'credit_topup_20',
+        purchaseOptionId: 'listing_alipay',
+      },
+      orderId: 'order_expired',
+      createdAt: '2026-01-01T00:00:00.000Z',
+    };
+    const expiredOrder = {
+      orderId: 'order_expired',
+      productCode: 'credit_topup',
+      offerCode: 'credit_topup_20',
+      amount: '20',
+      currency: 'cny',
+      status: 'EXPIRED' as const,
+      paymentAction: null,
+      createdAt: '2026-01-01T00:00:00.000Z',
+      updatedAt: '2026-01-01T00:01:00.000Z',
+    };
+    writeBillingCheckoutIntent(ACCOUNT_ID, intent);
+    api.listOrders.mockResolvedValue({ orders: [expiredOrder], nextCursor: null });
+
+    const { result } = renderHook(() => useBillingCheckout(ACCOUNT_ID));
+    await waitFor(() => expect(result.current.recovering).toBe(false));
+
+    expect(result.current.state).toMatchObject({
+      open: false,
+      phase: 'EXPIRED',
+      order: expiredOrder,
+    });
+    expect(result.current.recoverables.topups).toEqual([]);
+    expect(readBillingCheckoutIntent(ACCOUNT_ID)).toBeNull();
+  });
+
+  it('clears an expired persisted subscription purchase without opening a dialog', async () => {
+    const intent = {
+      version: 1 as const,
+      kind: 'SUBSCRIPTION' as const,
+      idempotencyKey: 'desktop:subscription:expired-intent',
+      request: {
+        offerCode: 'plus_month',
+        purchaseOptionId: 'listing_alipay',
+      },
+      subscriptionId: 'subscription_expired',
+      purchaseAttemptId: 'purchase_expired',
+      createdAt: '2026-01-01T00:00:00.000Z',
+    };
+    const expiredSubscription = {
+      subscriptionId: 'subscription_expired',
+      status: 'INCOMPLETE_EXPIRED' as const,
+      currentPeriodStartAt: null,
+      currentPeriodEndAt: null,
+      entitlementValidUntil: null,
+      cancelAtPeriodEnd: false,
+      effectivePlan: null,
+      purchaseAttemptId: 'purchase_expired',
+      paymentAction: null,
+    };
+    writeBillingCheckoutIntent(ACCOUNT_ID, intent);
+    api.getCurrentSubscription.mockResolvedValue({ subscription: expiredSubscription });
+    api.refreshSubscriptionPurchase.mockResolvedValue(expiredSubscription);
+
+    const { result } = renderHook(() => useBillingCheckout(ACCOUNT_ID));
+    await waitFor(() => expect(result.current.recovering).toBe(false));
+
+    expect(result.current.state).toMatchObject({
+      open: false,
+      phase: 'EXPIRED',
+      subscription: expiredSubscription,
+    });
+    expect(result.current.recoverables.subscription).toBeNull();
+    expect(readBillingCheckoutIntent(ACCOUNT_ID)).toBeNull();
+  });
+
+  it('lists a pending top-up as recoverable without opening it, then opens on resume', async () => {
+    const pendingOrder = {
+      orderId: 'order_pending',
+      productCode: 'credit_topup',
+      offerCode: 'credit_topup_20',
+      amount: '20',
+      currency: 'cny',
+      status: 'PENDING' as const,
+      paymentAction: null,
+      createdAt: '2026-01-01T00:00:00.000Z',
+      updatedAt: '2026-01-01T00:01:00.000Z',
+    };
+    api.listOrders.mockResolvedValue({ orders: [pendingOrder], nextCursor: null });
+
+    const { result } = renderHook(() => useBillingCheckout(ACCOUNT_ID));
+    await waitFor(() => expect(result.current.recovering).toBe(false));
+
+    expect(result.current.state.open).toBe(false);
+    expect(result.current.recoverables.topups).toEqual([pendingOrder]);
+
+    act(() => result.current.resumeTopup(result.current.recoverables.topups[0]));
+    expect(result.current.state).toMatchObject({
+      open: true,
+      phase: 'AWAITING_PAYMENT',
+      order: pendingOrder,
+    });
   });
 
   it('keeps an unresolved persisted purchase retryable when recovery fails', async () => {
@@ -333,15 +493,21 @@ describe('billing checkout phase projection', () => {
     await waitFor(() => expect(result.current.recovering).toBe(false));
 
     expect(result.current.state).toMatchObject({
-      open: true,
+      open: false,
       kind: 'TOPUP',
       phase: 'FAILED',
       intent,
       error: true,
     });
     expect(readBillingCheckoutIntent(ACCOUNT_ID)).toEqual(intent);
-    act(() => result.current.close());
-    expect(result.current.state.open).toBe(false);
+
+    act(() => result.current.resumeFailed());
+    expect(result.current.state).toMatchObject({
+      open: true,
+      phase: 'FAILED',
+      intent,
+      error: true,
+    });
     expect(readBillingCheckoutIntent(ACCOUNT_ID)).toEqual(intent);
   });
 
@@ -454,6 +620,35 @@ describe('billing checkout phase projection', () => {
 
     await act(async () => resolveRefresh?.(pendingOrder));
     expect(api.refreshTopup).toHaveBeenCalledWith('order_fixture');
+  });
+
+  it('keeps a visible checkout open when refresh reports it expired', async () => {
+    const pendingOrder = {
+      orderId: 'order_fixture',
+      productCode: 'credit_topup',
+      offerCode: 'credit_topup_20',
+      amount: '20',
+      currency: 'cny',
+      status: 'PENDING' as const,
+      paymentAction: null,
+      createdAt: '2026-01-01T00:00:00.000Z',
+      updatedAt: '2026-01-01T00:01:00.000Z',
+    };
+    api.refreshTopup.mockResolvedValue({
+      ...pendingOrder,
+      status: 'EXPIRED',
+    });
+
+    const { result } = renderHook(() => useBillingCheckout(ACCOUNT_ID));
+    await waitFor(() => expect(result.current.recovering).toBe(false));
+    act(() => result.current.resumeTopup(pendingOrder));
+
+    await act(() => result.current.refreshActive());
+
+    expect(result.current.state).toMatchObject({
+      open: true,
+      phase: 'EXPIRED',
+    });
   });
 
   it('keeps a pending checkout recoverable after its dialog is closed', async () => {

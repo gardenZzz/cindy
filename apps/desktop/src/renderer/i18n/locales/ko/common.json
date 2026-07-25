@@ -6974,8 +6974,7 @@
     "sidebar": "크레딧 및 요금제",
     "settings": {
       "title": "사용량 및 결제",
-      "subtitle": "현재 구독을 확인하거나 서버에서 제공하는 구독 상품과 크레딧을 구매할 수 있습니다.",
-      "loading": "구독 상태를 불러오는 중…",
+      "subtitle": "사용 가능한 크레딧과 현재 요금제를 확인하거나 필요할 때 크레딧을 구매할 수 있습니다.",
       "subscriptionCard": {
         "title": "현재 요금제",
         "empty": "활성 구독이 없습니다",
@@ -6983,13 +6982,17 @@
         "unnamedPlan": "구독 요금제",
         "unavailable": "구독 상태를 불러올 수 없습니다. 새로고침 후 다시 시도하세요.",
         "action": "요금제 보기",
-        "changeAction": "플랜 변경"
+        "changeAction": "요금제 변경",
+        "priceInterval": "{{price}} / {{interval}}",
+        "includedCredits": "매{{interval}} {{amount}} 크레딧 포함",
+        "renewsAt": "다음 갱신일 {{date}}",
+        "endsAt": "{{date}}에 요금제 종료"
       },
       "topupCard": {
         "title": "크레딧",
         "description": "사용량 기반 모델과 기능을 위한 크레딧을 구매합니다.",
         "cardTitle": "필요할 때 크레딧 구매",
-        "cardDescription": "구매 가능한 크레딧 상품은 서버에서 설정됩니다.",
+        "cardDescription": "필요할 때 사용 가능한 크레딧을 추가할 수 있습니다. 최종 금액은 결제 페이지에서 확인하세요.",
         "action": "크레딧 구매"
       }
     },
@@ -7125,7 +7128,8 @@
       "title": "완료되지 않은 결제가 있습니다",
       "description": "이전 결제를 계속하고 서버에서 최신 상태를 확인할 수 있습니다.",
       "continueTopup": "{{amount}} 결제 계속",
-      "continueSubscription": "구독 결제 계속"
+      "continueSubscription": "구독 결제 계속",
+      "continueFailed": "중단된 결제 계속"
     },
     "checkout": {
       "creatingTitle": "결제 생성 중",

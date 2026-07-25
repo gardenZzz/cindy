@@ -2,6 +2,12 @@
 
 import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
+import type { BillingPaymentOrder, BillingSubscription } from '../../../../shared/billing';
+
+const i18n = {
+  language: 'en',
+  resolvedLanguage: 'en' as string | undefined,
+};
 
 const checkout = {
   state: {
@@ -13,7 +19,10 @@ const checkout = {
     subscription: null,
     error: false,
   },
-  recoverables: { topups: [], subscription: null },
+  recoverables: {
+    topups: [] as BillingPaymentOrder[],
+    subscription: null as BillingSubscription | null,
+  },
   recovering: false,
   startTopup: vi.fn(),
   startSubscription: vi.fn(),
@@ -23,10 +32,12 @@ const checkout = {
   close: vi.fn(),
   resumeTopup: vi.fn(),
   resumeSubscription: vi.fn(),
+  resumeFailed: vi.fn(),
 };
 
 vi.mock('react-i18next', () => ({
   useTranslation: () => ({
+    i18n,
     t: (key: string, params?: Record<string, string>) => {
       const providerLabels: Record<string, string> = {
         'billing.providers.alipay': 'alipay',
@@ -55,6 +66,8 @@ import { BillingPage } from '../BillingPage';
 
 describe('BillingPage remote catalog rendering', () => {
   beforeEach(() => {
+    i18n.language = 'en';
+    i18n.resolvedLanguage = 'en';
     Object.assign(checkout.state, {
       open: false,
       kind: null,
@@ -67,6 +80,11 @@ describe('BillingPage remote catalog rendering', () => {
     checkout.startTopup.mockClear();
     checkout.startSubscription.mockClear();
     checkout.close.mockClear();
+    checkout.resumeTopup.mockClear();
+    checkout.resumeSubscription.mockClear();
+    checkout.resumeFailed.mockClear();
+    checkout.recoverables.topups = [];
+    checkout.recoverables.subscription = null;
     checkout.recovering = false;
     Object.defineProperty(window, 'electronAPI', {
       configurable: true,
@@ -333,6 +351,213 @@ describe('BillingPage remote catalog rendering', () => {
     expect(screen.getByText('billing.usage.detailsUnavailable')).toBeTruthy();
   });
 
+  it('shows current plan price, included credits, status, and renewal date', async () => {
+    i18n.resolvedLanguage = 'ja';
+    window.electronAPI.billing.getCurrentSubscription = vi.fn(async () => ({
+      subscription: {
+        subscriptionId: 'subscription_fixture',
+        status: 'ACTIVE' as const,
+        currentPeriodStartAt: '2026-07-01T00:00:00.000Z',
+        currentPeriodEndAt: '2026-08-01T00:00:00.000Z',
+        entitlementValidUntil: '2026-08-02T00:00:00.000Z',
+        cancelAtPeriodEnd: false,
+        effectivePlan: {
+          version: 1 as const,
+          product: { code: 'plus', kind: 'SUBSCRIPTION' as const, level: 1 },
+          offer: { code: 'plus_month', interval: 'MONTH' as const },
+          terms: { amount: '9', currency: 'usd', creditAmount: '100', rolloverCap: '0' },
+          capturedAt: '2026-07-01T00:00:00.000Z',
+        },
+        purchaseAttemptId: null,
+        paymentAction: null,
+      },
+    }));
+
+    render(<BillingPage />);
+
+    expect(await screen.findByText('Configured subscription')).toBeTruthy();
+    expect(screen.getByText('billing.subscriptionStatus.ACTIVE')).toBeTruthy();
+    expect(
+      screen.getByText((text) =>
+        text.startsWith('billing.settings.subscriptionCard.priceInterval'),
+      ),
+    ).toBeTruthy();
+    expect(
+      screen.getByText((text) =>
+        text.startsWith('billing.settings.subscriptionCard.includedCredits'),
+      ),
+    ).toBeTruthy();
+    expect(
+      screen.getByText('billing.settings.subscriptionCard.renewsAt:{"date":"2026/08/01"}'),
+    ).toBeTruthy();
+    expect(screen.getByText('billing.settings.subscriptionCard.changeAction')).toBeTruthy();
+  });
+
+  it('preserves the server order for offers within the same product', async () => {
+    window.electronAPI.billing.getCatalog = vi.fn(async () => ({
+      products: [
+        {
+          code: 'ordered_topup',
+          name: 'Ordered top-up',
+          kind: 'CREDIT_TOPUP' as const,
+          level: null,
+          sortOrder: 1,
+          offers: [
+            {
+              code: 'z_twenty',
+              interval: null,
+              currency: 'cny',
+              amount: '20',
+              minAmount: null,
+              maxAmount: null,
+              creditAmount: '20',
+              rolloverCap: null,
+              purchaseOptions: [
+                {
+                  id: 'listing_twenty',
+                  provider: 'alipay',
+                  capability: 'ONE_TIME_PAYMENT' as const,
+                  paymentAction: 'QR_CODE' as const,
+                },
+              ],
+            },
+            {
+              code: 'a_hundred',
+              interval: null,
+              currency: 'cny',
+              amount: '100',
+              minAmount: null,
+              maxAmount: null,
+              creditAmount: '100',
+              rolloverCap: null,
+              purchaseOptions: [
+                {
+                  id: 'listing_hundred',
+                  provider: 'alipay',
+                  capability: 'ONE_TIME_PAYMENT' as const,
+                  paymentAction: 'QR_CODE' as const,
+                },
+              ],
+            },
+          ],
+        },
+      ],
+    }));
+
+    render(<BillingPage />);
+    fireEvent.click(await screen.findByText('billing.settings.topupCard.action'));
+
+    const offerNames = await screen.findAllByText('Ordered top-up');
+    const offerButtons = offerNames.map((name) => name.closest('button')!);
+    const twenty = new Intl.NumberFormat(undefined, {
+      style: 'currency',
+      currency: 'CNY',
+    }).format(20);
+    const hundred = new Intl.NumberFormat(undefined, {
+      style: 'currency',
+      currency: 'CNY',
+    }).format(100);
+    expect(offerButtons[0].textContent).toContain(twenty);
+    expect(offerButtons[1].textContent).toContain(hundred);
+  });
+
+  it('shows an end date for period-end cancellation and omits invalid dates', async () => {
+    const subscription = {
+      subscriptionId: 'subscription_fixture',
+      status: 'ACTIVE' as const,
+      currentPeriodStartAt: null,
+      currentPeriodEndAt: '2026-08-01T00:00:00.000Z',
+      entitlementValidUntil: null,
+      cancelAtPeriodEnd: true,
+      effectivePlan: null,
+      purchaseAttemptId: null,
+      paymentAction: null,
+    };
+    window.electronAPI.billing.getCurrentSubscription = vi
+      .fn()
+      .mockResolvedValueOnce({ subscription })
+      .mockResolvedValueOnce({
+        subscription: { ...subscription, currentPeriodEndAt: 'not-a-date' },
+      });
+
+    render(<BillingPage />);
+    expect(
+      await screen.findByText((text) =>
+        text.startsWith('billing.settings.subscriptionCard.endsAt'),
+      ),
+    ).toBeTruthy();
+
+    fireEvent.click(screen.getByText('billing.actions.refreshCatalog'));
+    await waitFor(() =>
+      expect(
+        screen.queryByText((text) => text.startsWith('billing.settings.subscriptionCard.endsAt')),
+      ).toBeNull(),
+    );
+    expect(
+      screen.queryByText((text) => text.startsWith('billing.settings.subscriptionCard.renewsAt')),
+    ).toBeNull();
+  });
+
+  it('places recoverable checkout actions before the balance overview', async () => {
+    const order = {
+      orderId: 'order_pending',
+      productCode: 'credit_topup',
+      offerCode: 'credit_topup_custom',
+      amount: '10',
+      currency: 'cny',
+      status: 'PENDING' as const,
+      fulfillmentStatus: 'NOT_STARTED' as const,
+      paymentAction: null,
+      createdAt: '2026-07-24T00:00:00.000Z',
+      updatedAt: '2026-07-24T00:00:00.000Z',
+    };
+    checkout.recoverables.topups = [order];
+
+    render(<BillingPage />);
+
+    const recovery = screen.getByText('billing.recovery.title');
+    const balanceTitle = await screen.findByText('billing.balance.title');
+    expect(recovery.compareDocumentPosition(balanceTitle) & Node.DOCUMENT_POSITION_FOLLOWING).toBe(
+      Node.DOCUMENT_POSITION_FOLLOWING,
+    );
+    fireEvent.click(screen.getByText((text) => text.startsWith('billing.recovery.continueTopup')));
+    expect(checkout.resumeTopup).toHaveBeenCalledWith(order);
+  });
+
+  it('offers a user-initiated retry entry after background recovery fails', async () => {
+    Object.assign(checkout.state, {
+      open: false,
+      kind: 'TOPUP',
+      phase: 'FAILED',
+      intent: {
+        version: 1,
+        kind: 'TOPUP',
+        idempotencyKey: 'desktop:topup:uncertain',
+        request: {
+          offerCode: 'credit_topup_custom',
+          amount: '10',
+          purchaseOptionId: 'listing_alipay',
+        },
+        orderId: null,
+        createdAt: '2026-07-24T00:00:00.000Z',
+      },
+      order: null,
+      subscription: null,
+      error: true,
+    });
+
+    render(<BillingPage />);
+
+    const resume = screen.getByText('billing.recovery.continueFailed');
+    const balanceTitle = await screen.findByText('billing.balance.title');
+    expect(resume.compareDocumentPosition(balanceTitle) & Node.DOCUMENT_POSITION_FOLLOWING).toBe(
+      Node.DOCUMENT_POSITION_FOLLOWING,
+    );
+    fireEvent.click(resume);
+    expect(checkout.resumeFailed).toHaveBeenCalledTimes(1);
+    expect(checkout.retry).not.toHaveBeenCalled();
+  });
+
   it('shows usage progress and each promotional grant with its own state and expiry', async () => {
     window.electronAPI.billing.getCreditUsage = vi.fn(async () => ({
       available: '66',
@@ -537,22 +762,18 @@ describe('BillingPage remote catalog rendering', () => {
     }));
 
     render(<BillingPage />);
-    const viewPlans = screen
-      .getByText('billing.settings.subscriptionCard.action')
-      .closest('button')!;
-    await waitFor(() => expect(viewPlans).toHaveProperty('disabled', false));
-    fireEvent.click(viewPlans);
+    fireEvent.click(await screen.findByText('billing.settings.subscriptionCard.action'));
     fireEvent.click((await screen.findByText('Configured subscription')).closest('button')!);
     fireEvent.click((await screen.findByText('stripe')).closest('button')!);
 
-    expect(screen.getByText('billing.actions.pay').closest('button')).toHaveProperty(
-      'disabled',
-      true,
-    );
+    const pay = screen.getByText('billing.actions.pay').closest('button')!;
+    expect(pay).toHaveProperty('disabled', true);
     expect(screen.getByText('billing.currentSubscription.purchaseBlocked')).toBeTruthy();
+    fireEvent.click(pay);
+    expect(checkout.startSubscription).not.toHaveBeenCalled();
   });
 
-  it('fails closed for subscription purchases when subscription status is unavailable', async () => {
+  it('keeps subscription purchases disabled when subscription status is unavailable', async () => {
     window.electronAPI.billing.getCurrentSubscription = vi.fn(async () => {
       throw new Error('subscription status unavailable');
     });
@@ -887,6 +1108,9 @@ describe('BillingPage plan change', () => {
 
   beforeEach(() => {
     localStorage.clear();
+    checkout.recoverables.topups = [];
+    checkout.recoverables.subscription = null;
+    checkout.recovering = false;
     Object.assign(checkout.state, {
       open: false,
       kind: null,
