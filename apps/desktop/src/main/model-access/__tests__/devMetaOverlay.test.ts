@@ -159,8 +159,16 @@ describe('overlayCindyModelMeta', () => {
   it('efforts 显式空数组(不可调)被尊重透传', () => {
     const [m] = overlayCindyModelMeta(
       [SERVER_MODEL],
-      envelope({ 'gpt-5.5': { agents: ['claude-code'], name: 'X', efforts: [] } }),
+      envelope({
+        'gpt-5.5': {
+          agents: ['claude-code'],
+          name: 'X',
+          efforts: [],
+          defaultEffort: null,
+        },
+      }),
     );
     expect(m.efforts).toEqual([]);
+    expect(m.defaultEffort).toBeNull();
   });
 });

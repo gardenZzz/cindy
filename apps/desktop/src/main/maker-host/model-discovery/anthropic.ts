@@ -543,14 +543,7 @@ export async function loadAnthropicModelsFromDiskCache(): Promise<void> {
         Array.isArray((m as CatalogModel).efforts),
     );
     if (valid.length === 0) return;
-    // Cache versions before explicitWindows did not distinguish an HTTP-declared
-    // window from the mapper's old fallback. Recompute only non-explicit windows
-    // so catalog corrections take effect immediately after an app upgrade.
-    const normalized = valid.map((model) => ({
-      ...model,
-      contextWindow: contextWindowFor(model.id, explicitWindows.get(model.id)),
-    }));
-    const validIds = new Set(normalized.map((model) => model.id));
+    const validIds = new Set(valid.map((model) => model.id));
     const restoreIds = (value: unknown): Set<string> => {
       const restored = new Set<string>();
       if (Array.isArray(value)) {
@@ -568,6 +561,20 @@ export async function loadAnthropicModelsFromDiskCache(): Promise<void> {
     const restoredExplicitFastModeIds = restoreIds(
       (raw as { explicitFastModeModelIds?: unknown }).explicitFastModeModelIds,
     );
+    // Cache versions before per-field provenance did not distinguish
+    // mapper fallbacks from API/SDK-declared capabilities. Refresh every
+    // non-explicit effort baseline and context window from the current
+    // catalog so app upgrades cannot preserve stale model metadata.
+    const normalized = valid.map((model) => {
+      const effortBaseline = restoredExplicitEffortIds.has(model.id)
+        ? null
+        : fallbackEffortBaseline(model.id);
+      return {
+        ...model,
+        contextWindow: contextWindowFor(model.id, explicitWindows.get(model.id)),
+        ...(effortBaseline ?? {}),
+      };
+    });
     await applyModels(
       normalized,
       false,
