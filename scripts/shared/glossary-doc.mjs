@@ -58,6 +58,16 @@ export function renderGlossaryDoc(glossary) {
       '是用户能直接看见的质量问题。',
   );
   lines.push('');
+  lines.push('> **这是一份参考，不是替换表。**');
+  lines.push('>');
+  lines.push('> 表里的「译法」是默认情况下的选择，不是「见到 A 就换成 B」的映射。同一个中文词往往');
+  lines.push('> 对应多个英文概念——「额度」同时是 Balance / Quota / Credits 的正确译法，「代理」同时是');
+  lines.push('> Agent / Subagent / Proxy 的译法——具体这一条文案该怎么译，取决于它的英文源和这个 key');
+  lines.push('> 的实际用途。');
+  lines.push('>');
+  lines.push('> 所以：**禁止拿本表做脚本批量替换**。门禁只报告「这里用了禁用译法」并给出英文源，');
+  lines.push('> 不给替换目标；改哪一条、改成什么，逐条读语境决定。');
+  lines.push('');
   lines.push('- 数据正本：`i18n/glossary.json`（本文件由它生成）');
   lines.push('- 自动门禁：`pnpm check:i18n-glossary`（随 CI 阻断）');
   lines.push('- 存量豁免：`i18n/glossary-baseline.json`（只减不增）');

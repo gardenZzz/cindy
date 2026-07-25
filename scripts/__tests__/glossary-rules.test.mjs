@@ -502,3 +502,32 @@ test('findHalfWidthPunct: 右括号等闭合符号也算中文正文的左边界
   // (HALFWIDTH_PUNCT_LOCALES),而 zh-CN 文案里的英文括注同样该跟中文标点
   assert.equal(findHalfWidthPunct('see (note), then continue'), ',');
 });
+
+// ---------------------------------------------------------------------------
+// 术语表的定位:参考,不是替换表
+// ---------------------------------------------------------------------------
+
+test('禁用译法的提示不给替换目标,只给英文源', () => {
+  // 「应为 X」读起来就是一条替换指令,会诱导机械替换——#389 由此产生约 35 处误译。
+  // 禁用译法的正确目标取决于英文源(同一个「额度」在 Balance / Quota / Credits 下答案
+  // 不同),工具给不出,也不该假装给得出。这条断言防止提示被改回「应为」句式。
+  const src = fs.readFileSync(path.join(ROOT, 'scripts', 'check-i18n-glossary.mjs'), 'utf8');
+  const forbiddenBlock = src
+    .slice(src.indexOf("rule: 'forbidden-term'"), src.indexOf("rule: 'term-case'"))
+    // 剔除注释行:注释里会引用旧的「应为」句式来解释为什么不再用它
+    .split('\n')
+    .filter((line) => !line.trim().startsWith('//'))
+    .join('\n');
+  assert.ok(forbiddenBlock.includes('hint:'), '未定位到 forbidden-term 的提示构造');
+  assert.ok(
+    !forbiddenBlock.includes('应为'),
+    'forbidden-term 的提示不应给出替换目标——术语表是参考不是替换表',
+  );
+  assert.ok(forbiddenBlock.includes('英文源'), 'forbidden-term 的提示应附上英文源供判断语境');
+});
+
+test('GLOSSARY.md 必须声明「参考，不是替换表」', () => {
+  const doc = fs.readFileSync(path.join(ROOT, 'i18n', 'GLOSSARY.md'), 'utf8');
+  assert.ok(doc.includes('不是替换表'), 'GLOSSARY.md 缺少定位声明');
+  assert.ok(doc.includes('禁止拿本表做脚本批量替换'), 'GLOSSARY.md 缺少批量替换禁令');
+});

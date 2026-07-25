@@ -180,6 +180,12 @@ for (const [locale, entries] of corpus) {
 // 规则
 // ---------------------------------------------------------------------------
 
+/** 截断长文案,提示里只需要够判断语境的片段。 */
+function truncate(text, max) {
+  const flat = text.replace(/\s+/g, ' ').trim();
+  return flat.length > max ? `${flat.slice(0, max)}…` : flat;
+}
+
 /** 一条违规。fingerprint 用于 baseline 比对,必须稳定。 */
 function makeViolation({ locale, key, rule, detail, severity, hint }) {
   return {
@@ -236,7 +242,17 @@ for (const term of glossary.terms) {
           const source = corpus.get(glossary.sourceLocale)?.get(key);
           if (!source || !sourceRe.test(stripNonProse(source))) continue;
         }
-        const expected = term.translations?.[locale] ?? term.en;
+        // 提示里刻意**不给替换目标**。
+        //
+        // 术语表是参考,不是替换表。以前这里输出「应为 X」,读起来就是一条替换指令,
+        // 于是很自然地被拿去做机械替换——#389 那轮由此产生约 35 处用户可见误译。
+        // 首选译法在 GLOSSARY.md 里查得到,但它只是「默认情况下」的选择;这一条具体的
+        // 文案该怎么译,取决于英文源和这个 key 的实际用途(同一个「额度」在 Balance /
+        // Quota / Credits 三种语境下答案不同)。
+        //
+        // 所以这里给的是**判断所需的材料**:英文源原文 + 术语条目位置,让人或 AI 自己读
+        // 语境定夺。工具负责发现问题,不负责替产品做翻译。
+        const source = corpus.get(glossary.sourceLocale)?.get(key);
         violations.push(
           makeViolation({
             locale,
@@ -245,8 +261,10 @@ for (const term of glossary.terms) {
             detail: `${term.id}:${bad}`,
             severity,
             hint:
-              `「${bad}」是 ${term.en} 的禁用译法,应为「${expected}」` +
-              (whenEn ? `(仅当英文源含 ${whenEn} 时)` : ''),
+              `「${bad}」是 ${term.en} 条目下的禁用译法` +
+              (whenEn ? `(该 key 的英文源含 ${whenEn})` : '') +
+              (source ? `\n      英文源: ${truncate(source, 100)}` : '') +
+              `\n      读英文源与该 key 的用途后再定译法;首选译法见 i18n/GLOSSARY.md 的 ${term.en} 条目`,
           }),
         );
       }
@@ -277,6 +295,9 @@ for (const term of glossary.terms) {
           rule: 'term-case',
           detail: `${term.id}:${hit}`,
           severity,
+          // 这条给出确定目标是可以的:大小写形态与语境无关,worker 在任何句子里都该写
+          // Worker,答案唯一。禁用译法则不同——同一个中文词对应多个英文概念,目标不唯一,
+          // 所以那边只报事实、不给目标(见规则 1)。标点同理,答案也唯一。
           hint: `「${hit}」大小写不统一,应为「${standard}」`,
         }),
       );
