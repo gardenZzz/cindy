@@ -12,6 +12,7 @@ import {
   ComposerListIndentDecoration,
   listPrefixIndentStyle,
 } from '@/components/new-chat/ComposerListIndentDecoration';
+import { CjkPunctDecoration } from '@/components/new-chat/CjkPunctDecoration';
 
 /**
  * composer 列表行缩进 decoration:
@@ -76,18 +77,17 @@ describe('buildListIndentDecorations', () => {
     expect(cjkStyle).not.toContain('10、');
   });
 
-  it('measures tabs using the configured tab stop instead of punctuation width', () => {
-    const style = listPrefixIndentStyle('\t1. ');
-    expect(style).toContain('--composer-list-hang:9.8ch;');
-    expect(style).toContain('--composer-list-hang-negative:-9.8ch;');
+  it('skips tab-indented lines instead of guessing a proportional-font tab width', () => {
+    const ed = makeEditor(['\t1. item']);
+    expect(buildListIndentDecorations(ed.state.doc).find()).toHaveLength(0);
   });
 
   it('decorates the full content of a single-line item', () => {
     const ed = makeEditor(['1. test']);
     const found = buildListIndentDecorations(ed.state.doc).find();
     expect(found).toHaveLength(1);
-    expect(found[0].from).toBe(1);
-    expect(found[0].to).toBe(8); // 整行 "1. test"
+    expect(found[0].from).toBe(0);
+    expect(found[0].to).toBe(9);
   });
 
   it('decorates each list line independently across hardBreaks', () => {
@@ -141,12 +141,40 @@ describe('buildListIndentDecorations', () => {
 describe('ComposerListIndentDecoration in a real editor', () => {
   it('renders the indent span into the DOM for list lines', () => {
     const ed = makeEditor(['1. hello']);
-    expect(indentSpans(ed)).toEqual(['1. hello']);
+    expect(ed.view.dom.querySelector('p.composer-list-block-indent')?.textContent).toBe(
+      '1. hello',
+    );
     expect(
       ed.view.dom
-        .querySelector<HTMLElement>('span.composer-list-line-indent')
+        .querySelector<HTMLElement>('p.composer-list-block-indent')
         ?.style.getPropertyValue('--composer-list-hang'),
     ).toBe('1.8ch');
+  });
+
+  it('keeps CJK punctuation inside a paragraph-level list wrapper', () => {
+    editor = new Editor({
+      element: document.createElement('div'),
+      extensions: [
+        Document,
+        Paragraph,
+        Text,
+        HardBreak,
+        CjkPunctDecoration,
+        ComposerListIndentDecoration,
+      ],
+      content: {
+        type: 'doc',
+        content: [
+          {
+            type: 'paragraph',
+            content: [{ type: 'text', text: '1. 中文，内容。继续' }],
+          },
+        ],
+      },
+    });
+    expect(editor.view.dom.querySelectorAll('p.composer-list-block-indent')).toHaveLength(1);
+    expect(editor.view.dom.querySelectorAll('span.composer-list-line-indent')).toHaveLength(0);
+    expect(editor.view.dom.querySelectorAll('span[style*="font-family"]')).not.toHaveLength(0);
   });
 
   it('appears the moment the prefix becomes complete, and disappears when broken', () => {
@@ -154,13 +182,13 @@ describe('ComposerListIndentDecoration in a real editor', () => {
     expect(indentSpans(ed)).toHaveLength(0);
     // 打出空格,前缀完整 → 缩进立即出现
     ed.commands.insertContentAt(ed.state.doc.content.size - 1, ' ');
-    expect(indentSpans(ed)).toEqual(['1. ']);
+    expect(ed.view.dom.querySelector('.composer-list-block-indent')?.textContent).toBe('1. ');
     // 删掉空格 → 缩进消失
     ed.commands.deleteRange({
       from: ed.state.doc.content.size - 2,
       to: ed.state.doc.content.size - 1,
     });
-    expect(indentSpans(ed)).toHaveLength(0);
+    expect(ed.view.dom.querySelector('.composer-list-block-indent')).toBeNull();
   });
 });
 
@@ -176,13 +204,13 @@ describe('wiring contract', () => {
 
   it('globals.css defines the indent class', () => {
     const css = readFileSync(resolve(__dirname, '..', 'styles', 'globals.css'), 'utf8');
+    expect(css).toContain('.ProseMirror .composer-list-block-indent');
     expect(css).toContain('.ProseMirror span.composer-list-line-indent');
     expect(css).toContain('display: inline-block;');
     expect(css).toContain('width: 100%;');
     expect(css).toContain('padding-left: calc(1em + var(--composer-list-hang, 1.25em));');
     expect(css).toContain('text-indent: var(--composer-list-hang-negative, -1.25em);');
     expect(css).toContain('overflow-wrap: anywhere;');
-    expect(css).toContain('tab-size: 8;');
     expect(css).not.toContain('word-break: break-all;');
   });
 });
