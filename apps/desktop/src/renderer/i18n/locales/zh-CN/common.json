@@ -1843,8 +1843,8 @@
         "productTooltip": "沿用 Cindy 产品默认值"
       },
       "toast": {
-        "enabled": "{{name}} 已启用 — 下次对话生效",
-        "disabled": "{{name}} 已禁用 — 下次对话生效",
+        "enabled": "{{name}} 已启用 — 下次 Agent 会话生效",
+        "disabled": "{{name}} 已禁用 — 下次 Agent 会话生效",
         "toggleFailed": "切换工具失败",
         "cannotModifyEssential": "{{name}} 是基础设施工具，不可关闭。"
       },
@@ -1992,7 +1992,7 @@
           "cancelPending": "取消",
           "dismiss": "关闭",
           "addWorkspace": "添加 Slack workspace",
-          "alreadyBound": "授权的是已绑定的 {{team}}。要添加其它 workspace, 请在 Slack 授权页右上角先切换到目标 workspace 再点允许。"
+          "alreadyBound": "授权的是已绑定的 {{team}}。要添加其它 workspace，请在 Slack 授权页右上角先切换到目标 workspace 再点允许。"
         },
         "telegram": {
           "description": "关联 Telegram 账号，通过官方 bot 给 Cindy 派发任务。",

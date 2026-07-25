@@ -298,7 +298,8 @@ for (const term of glossary.terms) {
       const prose = stripNonProse(value);
       const hit = findCaseMismatch(prose, standard);
       if (!hit) continue;
-      const hitCount = countOccurrences(prose, standard);
+      // 大小写检查要数出所有形态(Worker / worker / WORKER),故显式放开大小写
+      const hitCount = countOccurrences(prose, standard, { caseInsensitive: true });
       violations.push(
         makeViolation({
           locale,
@@ -318,12 +319,22 @@ for (const term of glossary.terms) {
 
 // --- 规则 3:标点风格 ---
 // 各 locale 的适用范围与数据依据见 shared/glossary-rules.mjs 的常量注释。
+// 标点规则的豁免。
+//
+// 术语规则的 exempt 挂在术语条目上,标点规则不属于任何术语,需要独立清单。
+// 唯一的正当用途:整条文案不是给人读的中文正文,而是机器可读的结构化文本
+// ——例如 GitHub issue 正文模板里的 `locale: {{locale}}` 元数据行,那里的冒号是
+// key-value 分隔符,必须半角。这类形态与「无效 JSON: {{snippet}}」外形完全相同,
+// 静态扫描区分不了,只能按 key 声明。
+const isPunctuationExempt = makeExemptChecker(glossary.punctuationExempt);
+
 for (const locale of locales) {
   const checkHalfWidth = HALFWIDTH_PUNCT_LOCALES.has(locale);
   const checkEllipsis = ELLIPSIS_LOCALES.has(locale);
   if (!checkHalfWidth && !checkEllipsis) continue;
 
   for (const [key, value] of corpus.get(locale)) {
+    if (isPunctuationExempt(key)) continue;
     // 标点检查走 normalizeForPunctuation 而非 stripNonProse:后者把 {{插值}} 换成空格,
     // 「{{total}},上限」剥离后逗号前是空格,违规会被静默放过。
     const prose = normalizeForPunctuation(value);

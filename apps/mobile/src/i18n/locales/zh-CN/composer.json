@@ -80,7 +80,7 @@
     "refineResponseTooLarge": "语音润色返回内容超过上限 {{max}} 字符。",
     "refineStreamFailed": "语音润色流式返回失败。",
     "refineNoContent": "语音润色没有返回有效内容。",
-    "refineInvalidJson": "语音润色返回了无效 JSON: {{snippet}}",
+    "refineInvalidJson": "语音润色返回了无效 JSON：{{snippet}}",
     "invalidSession": "语音服务返回了无效会话。",
     "managedRefineUnsupported": "当前 {{appName}} 语音服务暂不支持托管润色。",
     "sessionNotConnected": "语音识别会话尚未连接。",
