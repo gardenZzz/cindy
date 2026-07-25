@@ -7089,7 +7089,6 @@
     "sidebar": "点数与订阅",
     "settings": {
       "title": "使用情况和计费",
-      "subtitle": "查看可用额度与当前套餐，或按需购买点数。",
       "subscriptionCard": {
         "title": "当前套餐",
         "empty": "当前没有生效中的订阅",
@@ -7104,15 +7103,13 @@
         "endsAt": "套餐将于 {{date}} 结束"
       },
       "topupCard": {
-        "title": "点数",
-        "description": "购买点数，为按量使用的模型和功能充值。",
-        "cardTitle": "按需购买点数",
-        "cardDescription": "按需补充可用额度，购买金额以结算页为准。",
         "action": "购买点数"
       }
     },
     "balance": {
       "title": "可用额度",
+      "creditParityCny": "1 点 = 1 元，用于 Cindy AI 用量结算；支付由第三方渠道处理。",
+      "creditParityUsd": "1 点 = 1 美元，用于 Cindy AI 用量结算；支付由第三方渠道处理。",
       "plan": "订阅额度",
       "purchased": "已购额度",
       "promotional": "赠送额度",
@@ -7121,17 +7118,15 @@
       "unavailable": "暂时无法获取额度，请刷新后重试。"
     },
     "usage": {
+      "title": "额度使用",
       "observedAt": "额度更新于 {{date}}",
-      "used": "已用",
-      "total": "总额",
+      "poolDetail": "已用 {{used}} · 总额 {{total}}",
       "remaining": "剩余",
       "progressLabel": "{{label}}使用进度",
       "historyUnavailable": "历史记录不完整，暂时仅显示剩余额度。",
-      "percentUsed": "已使用 {{percent}}%",
       "detailsUnavailable": "用量明细暂时不可用，当前仅显示各类余额。",
       "promotionalDetails": {
         "title": "赠送额度明细",
-        "description": "当前赠送与总余额基于同一次额度快照，已用额度仅统计实际模型消费。",
         "count": "{{count}} 笔",
         "empty": "当前没有赠送额度记录。",
         "incomplete": "赠送记录较多，当前仅显示最近的 {{count}} 笔。",
@@ -7150,31 +7145,15 @@
     },
     "dialogs": {
       "subscription": {
-        "title": "选择订阅套餐",
-        "description": "展示服务端当前公开的订阅套餐；暂不可购买的套餐会标注状态。"
+        "title": "选择订阅套餐"
       },
       "topup": {
-        "title": "购买点数",
-        "description": "展示服务端当前公开的点数商品；暂不可购买的商品会标注状态。"
+        "title": "购买点数"
       }
     },
-    "eyebrow": "账户与用量",
-    "title": "选择适合你的方案",
-    "subtitle": "套餐和支付方式均由服务端实时下发。先选择方案，再查看该方案当前支持的支付方式。",
     "steps": {
-      "offer": {
-        "title": "选择套餐",
-        "description": "展示服务端当前公开的充值和订阅方案。"
-      },
       "channel": {
-        "title": "选择支付方式",
-        "description": "不同套餐支持的支付方式可能不同。",
-        "selectOfferFirst": "选择套餐后，这里会显示该套餐支持的支付方式"
-      },
-      "confirm": {
-        "title": "确认并支付",
-        "description": "核对方案与支付方式后创建支付。",
-        "selectChannelFirst": "选择支付方式后即可确认订单"
+        "title": "选择支付方式"
       }
     },
     "actions": {
@@ -7194,10 +7173,6 @@
         "OFFER_COMING_SOON": "敬请期待",
         "NO_AVAILABLE_PAYMENT_CHANNEL": "暂无可用支付方式"
       }
-    },
-    "offerKinds": {
-      "topup": "点数充值",
-      "subscription": "订阅套餐"
     },
     "amount": {
       "custom": "自定义金额",
@@ -7223,7 +7198,6 @@
       "alipay": "支付宝",
       "stripe": "银行卡"
     },
-    "securityNotice": "支付由所选渠道安全处理，Cindy 不保存你的支付凭证",
     "currentSubscription": {
       "title": "当前订阅",
       "purchaseBlocked": "当前已有未结束的订阅，请先处理现有订阅后再购买新套餐。"
@@ -7270,8 +7244,6 @@
     },
     "planChange": {
       "targetTitle": "更改订阅套餐",
-      "targetDescription": "套餐变更沿用当前支付方式，最终价格与生效时间以下一步确认为准。",
-      "targetDescriptionWithCurrent": "当前套餐：{{plan}}。变更沿用当前支付方式，最终价格与生效时间以下一步确认为准。",
       "upgradeBadge": "升级",
       "downgradeBadge": "降级",
       "emptyTitle": "暂无可切换的套餐",
