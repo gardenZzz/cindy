@@ -33,7 +33,7 @@
   "definitions": {
     "term": {
       "type": "object",
-      "required": ["id", "status", "en", "translations", "note"],
+      "required": ["id", "status", "en", "note"],
       "additionalProperties": false,
       "properties": {
         "id": {
@@ -51,7 +51,7 @@
         },
         "translations": {
           "type": "object",
-          "description": "各语言的首选译法（默认场景用它）。保留英文原词的术语直接把 en 原样写进来（如 Agent 的 zh-CN 就是 \"Agent\"），不要用空字符串——那个约定从未被任何条目使用，却让 guard、文档生成、单测三处各自对 \"\" 有不同解读。",
+          "description": "各语言的首选译法（默认场景用它）。保留英文原词的术语直接把 en 原样写进来（如 Agent 的 zh-CN 就是 \"Agent\"），不要用空字符串——那个约定从未被任何条目使用，却让 guard、文档生成、单测三处各自对 \"\" 有不同解读。刻意不放进 required：status=proposed 的术语正是「已知不一致但还没拍板译法」，要求它先填译法等于否定 proposed 这个状态本身。「decided 必须给全所有非源语言译法」这条真正的不变量由单测按 status 精确约束。",
           "additionalProperties": { "type": "string", "minLength": 1 }
         },
         "alsoAllowed": {
