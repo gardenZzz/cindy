@@ -25,6 +25,7 @@ import {
   InstalledGhostQueue,
   InstalledGhostShortcut,
   MarketPluginCard,
+  LegacyGhostRecoveryNotice,
 } from '../GhostPluginPage';
 import type { GhostPluginListItem } from '../lib/ghostPluginViewModel';
 import type { PluginMarketItem } from '../../../../shared/pluginMarket';
@@ -254,5 +255,62 @@ describe('GhostPluginCard', () => {
     expect(screen.getByText('google-calendar').className).toContain('truncate');
     expect(screen.getByText('google-calendar').className).toContain('min-w-0');
     expect(screen.getByText('Cindy').className).toContain('truncate');
+  });
+});
+
+describe('LegacyGhostRecoveryNotice', () => {
+  it('shows a retry action for deferred recovery', () => {
+    const onRetry = vi.fn();
+    render(
+      <LegacyGhostRecoveryNotice
+        status={{ state: 'deferred', legacyPluginCount: 2, canRetry: true }}
+        retrying={false}
+        onRetry={onRetry}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole('button', { name: 'settings.ghosts.legacyRecovery.retry' }));
+    expect(onRetry).toHaveBeenCalledTimes(1);
+    expect(screen.getByText('settings.ghosts.legacyRecovery.partial')).toBeTruthy();
+  });
+
+  it('renders nothing for the none state', () => {
+    const { container } = render(
+      <LegacyGhostRecoveryNotice
+        status={{ state: 'none', legacyPluginCount: 0, canRetry: false }}
+        retrying={false}
+        onRetry={vi.fn()}
+      />,
+    );
+
+    expect(container.firstChild).toBeNull();
+  });
+
+  it('does not offer retry for data claimed by another owner', () => {
+    render(
+      <LegacyGhostRecoveryNotice
+        status={{ state: 'claimed-by-other-owner', legacyPluginCount: 1, canRetry: false }}
+        retrying={false}
+        onRetry={vi.fn()}
+      />,
+    );
+
+    expect(screen.getByText('settings.ghosts.legacyRecovery.claimedByOtherOwner')).toBeTruthy();
+    expect(screen.queryByRole('button')).toBeNull();
+  });
+
+  it('does not offer retry when every legacy plugin has a destination conflict', () => {
+    render(
+      <LegacyGhostRecoveryNotice
+        status={{ state: 'partial', legacyPluginCount: 2, canRetry: false }}
+        retrying={false}
+        onRetry={vi.fn()}
+      />,
+    );
+
+    expect(
+      screen.getByText('settings.ghosts.legacyRecovery.partialBlocked'),
+    ).toBeTruthy();
+    expect(screen.queryByRole('button')).toBeNull();
   });
 });

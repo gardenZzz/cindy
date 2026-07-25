@@ -900,6 +900,10 @@ contextBridge.exposeInMainWorld('electronAPI', {
     runtimeStates: (): Promise<{ states: Record<string, string> }> =>
       ipcRenderer.invoke('ghosts:runtime-states'),
     reload: (id: string): Promise<{ state: string }> => ipcRenderer.invoke('ghosts:reload', id),
+    legacyRecoveryStatus: (): Promise<import('../shared/legacyGhostRecovery').LegacyGhostRecoveryStatus> =>
+      ipcRenderer.invoke('ghosts:legacy-recovery-status'),
+    retryLegacyRecovery: (): Promise<import('../shared/legacyGhostRecovery').LegacyGhostRecoveryStatus> =>
+      ipcRenderer.invoke('ghosts:retry-legacy-recovery'),
     // dev-only 运行时控制(packaged 版 main 侧不注册该 channel)。
     devRuntime: (action: 'status' | 'spawn' | 'stop' | 'crash', id?: string): Promise<unknown> =>
       ipcRenderer.invoke('ghosts:dev-runtime', action, id),

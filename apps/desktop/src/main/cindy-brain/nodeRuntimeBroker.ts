@@ -401,6 +401,14 @@ export class GhostNodeRuntimeBroker {
     if (ghost.manifest.node.protocol === 'mcp-stdio') await this.ensureMcpInitialized(entry);
   }
 
+  /** Recovery-only restart for a runtime that was already running on demand. */
+  async startForRecovery(ghost: InstalledGhost): Promise<void> {
+    this.stoppedGhosts.delete(ghost.manifest.id);
+    if (!ghost.enabled || !ghost.manifest.node) return;
+    const entry = await this.ensureWorker(ghost, ghost.manifest.node.entry);
+    if (ghost.manifest.node.protocol === 'mcp-stdio') await this.ensureMcpInitialized(entry);
+  }
+
   /** main.js 的 node-request 入口。 */
   async handleRequest(ghostId: string, payload: unknown): Promise<GhostPipeNodeResult> {
     const ghost = this.deps.getGhost(ghostId);

@@ -37,6 +37,7 @@ import { GhostManager, type InstallRejection, type UninstallRejection } from './
 import { GhostMutationCoordinator } from './ghostMutationCoordinator.js';
 import {
   clearBuiltinTombstone,
+  listEligibleBuiltinCommands,
   listBuiltinSeedIds,
   listEnterpriseSeedIds,
   listRestorableBuiltinGhosts,
@@ -197,7 +198,19 @@ import { getDbClient } from '../localDb/client/current.js';
 import * as localDbSchema from '../localDb/schema.js';
 import { eq } from 'drizzle-orm';
 import { requireAppCapability } from '../appCapabilities.js';
-import { hasLegacyOwnerNamespaceClaim } from '../ownerNamespaceMigration.js';
+import {
+  getLegacyGhostRecoveryStatus,
+  hasLegacyOwnerNamespaceClaim,
+  listLegacyGhostPluginSources,
+  listLegacyGhostTombstoneRoots,
+  recoverLegacyGhostPlugins,
+} from '../ownerNamespaceMigration.js';
+import {
+  LEGACY_GHOST_RECOVERY_RETRY_CHANNEL,
+  LEGACY_GHOST_RECOVERY_STATUS_CHANNEL,
+  createLegacyGhostRecoveryIpcHandlers,
+} from './legacyGhostRecoveryIpc.js';
+import type { LegacyGhostRecoveryStatus } from '../../shared/legacyGhostRecovery.js';
 
 /**
  * 意识仓库的进程级单例 + IPC 注册。
@@ -276,6 +289,219 @@ function beginGhostMutation(expectedOwner?: ActiveAppSession): () => void {
     }
   }
   return ghostMutationCoordinator.acquire();
+}
+
+function isSameAppSession(a: ActiveAppSession, b: ActiveAppSession): boolean {
+  return a.mode === b.mode && a.dataOwnerId === b.dataOwnerId && a.generation === b.generation;
+}
+
+function currentLegacyGhostMigrationSession(): {
+  mode: ActiveAppSession['mode'];
+  dataOwnerId: string | null;
+  user: { id: string } | null;
+} {
+  const session = getActiveAppSession();
+  return {
+    mode: session.mode,
+    dataOwnerId: session.dataOwnerId,
+    user: session.mode === 'cloud' && session.dataOwnerId ? { id: session.dataOwnerId } : null,
+  };
+}
+
+function getLegacyGhostRecoveryStatusForActiveSession(): LegacyGhostRecoveryStatus {
+  const ownerId = getActiveAppSession().dataOwnerId;
+  const excludedBuiltinIds =
+    ownerId === null
+      ? new Set<string>()
+      : new Set(
+          listLegacyGhostTombstoneRoots(ownerId, app.getPath('userData')).flatMap((root) =>
+            readBuiltinTombstones(root),
+          ),
+        );
+  const reservedBuiltinCommands = new Set(
+    listEligibleBuiltinCommands(
+      builtinSeedRootDirs(),
+      currentProvisionIdentity(),
+      excludedBuiltinIds,
+      log,
+    ),
+  );
+  return getLegacyGhostRecoveryStatus(
+    currentLegacyGhostMigrationSession(),
+    undefined,
+    isAppSessionBoundaryPending(),
+    { reservedCommands: reservedBuiltinCommands },
+  );
+}
+
+async function retryLegacyGhostRecoveryForActiveSession(): Promise<LegacyGhostRecoveryStatus> {
+  const expectedOwner = captureGhostMutationOwner();
+  if (expectedOwner.mode !== 'cloud' || !expectedOwner.dataOwnerId) {
+    return getLegacyGhostRecoveryStatusForActiveSession();
+  }
+  const initialStatus = getLegacyGhostRecoveryStatusForActiveSession();
+  if (!initialStatus.canRetry) return initialStatus;
+
+  const releaseMutation = beginGhostMutation(expectedOwner);
+  try {
+    const shouldAbort = (): boolean =>
+      isAppSessionBoundaryPending() || !isSameAppSession(expectedOwner, getActiveAppSession());
+    if (shouldAbort()) return getLegacyGhostRecoveryStatusForActiveSession();
+    const authorizedStatus = getLegacyGhostRecoveryStatusForActiveSession();
+    if (!authorizedStatus.canRetry) return authorizedStatus;
+
+    const existingGhosts = getGhostManager().list();
+    const existingGhostById = new Map(
+      existingGhosts.map((ghost) => [ghost.manifest.id, ghost]),
+    );
+    const existingGhostDirs = new Map(
+      existingGhosts.map((ghost) => [ghost.manifest.id, ghost.dir]),
+    );
+    type StoppedActiveGhost = {
+      ghost: InstalledGhost;
+      browserRuntimeRunning: boolean;
+      nodeRuntimeRunning: boolean;
+    };
+    const stoppedActiveGhosts = new Map<string, StoppedActiveGhost>();
+    const legacySources = listLegacyGhostPluginSources(
+      expectedOwner.dataOwnerId,
+      app.getPath('userData'),
+    );
+    const excludedBuiltinIds = new Set(
+      listLegacyGhostTombstoneRoots(
+        expectedOwner.dataOwnerId,
+        app.getPath('userData'),
+      ).flatMap((root) => readBuiltinTombstones(root)),
+    );
+    const reservedBuiltinCommands = new Set(
+      listEligibleBuiltinCommands(
+        builtinSeedRootDirs(),
+        currentProvisionIdentity(),
+        excludedBuiltinIds,
+        log,
+      ),
+    );
+    for (const source of legacySources) {
+      const activeDir = existingGhostDirs.get(source.id);
+      if (activeDir !== undefined && path.resolve(activeDir) !== path.resolve(source.dir)) continue;
+      const browserRuntimeRunning = getGhostRuntime().stateOf(source.id) === 'running';
+      const nodeRuntimeRunning = getGhostNodeRuntimeBroker().stateOf(source.id) === 'running';
+      getGhostRuntime().stop(source.id);
+      getGhostNodeRuntimeBroker().stop(source.id);
+      const activeGhost = existingGhostById.get(source.id);
+      if (activeGhost) {
+        stoppedActiveGhosts.set(source.id, {
+          ghost: activeGhost,
+          browserRuntimeRunning,
+          nodeRuntimeRunning,
+        });
+      }
+    }
+    const restoreGhostRuntimes = (
+      ghost: InstalledGhost,
+      stopped: StoppedActiveGhost,
+    ): void => {
+      spawnIfResident(ghost);
+      if (
+        stopped.browserRuntimeRunning &&
+        ghost.manifest.launch !== 'resident' &&
+        isGhostAvailableForActiveSession(ghost.manifest.id) &&
+        ghost.enabled
+      ) {
+        void getGhostRuntime()
+          .spawn(ghost)
+          .catch((error) =>
+            log.warn('recovery on-demand ghost spawn error', {
+              id: ghost.manifest.id,
+              error: error instanceof Error ? error.message : String(error),
+            }),
+          );
+      }
+      if (
+        stopped.nodeRuntimeRunning &&
+        ghost.manifest.node?.lifecycle !== 'resident' &&
+        isGhostAvailableForActiveSession(ghost.manifest.id) &&
+        ghost.enabled
+      ) {
+        void getGhostNodeRuntimeBroker()
+          .startForRecovery(ghost)
+          .catch((error) =>
+            log.warn('recovery on-demand ghost node spawn error', {
+              id: ghost.manifest.id,
+              error: error instanceof Error ? error.message : String(error),
+            }),
+          );
+      }
+    };
+    const restartStoppedActiveGhosts = (): void => {
+      for (const stopped of stoppedActiveGhosts.values()) {
+        restoreGhostRuntimes(stopped.ghost, stopped);
+      }
+    };
+    let result;
+    try {
+      result = await recoverLegacyGhostPlugins(
+        {
+          mode: 'cloud',
+          dataOwnerId: expectedOwner.dataOwnerId,
+          user: { id: expectedOwner.dataOwnerId },
+        },
+        undefined,
+        {
+          shouldAbort,
+          reservedCommands: reservedBuiltinCommands,
+          rejectReservedIds: app.isPackaged,
+        },
+      );
+    } catch (error) {
+      if (!shouldAbort()) restartStoppedActiveGhosts();
+      throw error;
+    }
+    if (shouldAbort()) return getLegacyGhostRecoveryStatusForActiveSession();
+    if (result.moved === 0 && !result.provisioningStateMoved) {
+      restartStoppedActiveGhosts();
+      return getLegacyGhostRecoveryStatusForActiveSession();
+    }
+    if (result.moved > 0 || result.provisioningStateMoved) {
+      brainRootCache = null;
+      const restoredBeforeReconcile = getGhostManager().list();
+      const movedGhostIds = new Set<string>();
+      for (const ghost of restoredBeforeReconcile) {
+        const previousDir = existingGhostDirs.get(ghost.manifest.id);
+        if (
+          previousDir !== undefined &&
+          path.resolve(previousDir) !== path.resolve(ghost.dir)
+        ) {
+          movedGhostIds.add(ghost.manifest.id);
+          getGhostRuntime().stop(ghost.manifest.id);
+          getGhostNodeRuntimeBroker().stop(ghost.manifest.id);
+        }
+      }
+      const builtinReconcileSucceeded =
+        result.deferredReason !== 'concurrent-live-instances' &&
+        await scheduleBuiltinReconcile('legacy-recovery');
+      if (shouldAbort()) return getLegacyGhostRecoveryStatusForActiveSession();
+      const ghosts = getGhostManager().list();
+      for (const ghost of ghosts) {
+        const previousDir = existingGhostDirs.get(ghost.manifest.id);
+        const relocatedExistingGhost =
+          movedGhostIds.has(ghost.manifest.id) ||
+          (previousDir !== undefined &&
+            path.resolve(previousDir) !== path.resolve(ghost.dir));
+        if (relocatedExistingGhost) ensureGhostProtocolRegistered(ghost);
+        const stopped = stoppedActiveGhosts.get(ghost.manifest.id);
+        if (relocatedExistingGhost && stopped) {
+          restoreGhostRuntimes(ghost, stopped);
+        } else if (builtinReconcileSucceeded && previousDir === undefined) {
+          spawnIfResident(ghost);
+        }
+      }
+      broadcastGhostsChanged(ghosts);
+    }
+    return getLegacyGhostRecoveryStatusForActiveSession();
+  } finally {
+    releaseMutation();
+  }
 }
 
 /** Wait until all owner-bound Ghost filesystem mutations have finished. */
@@ -365,15 +591,27 @@ function currentProvisionIdentity(): ProvisionIdentity | null {
  */
 let builtinReconcileChain: Promise<void> = Promise.resolve();
 
-function scheduleBuiltinReconcile(reason: string): void {
-  builtinReconcileChain = builtinReconcileChain
-    .then(() => reconcileBuiltinGhosts(reason))
+function scheduleBuiltinReconcile(reason: string): Promise<boolean> {
+  const scheduled = builtinReconcileChain
     .catch((err) => {
-      log.warn('builtin ghost reconcile error', {
-        reason,
+      log.warn('builtin ghost activation error; reconcile chain resumed', {
         error: err instanceof Error ? err.message : String(err),
       });
+    })
+    .then(async () => {
+      try {
+        await reconcileBuiltinGhosts(reason);
+        return true;
+      } catch (err) {
+        log.warn('builtin ghost reconcile error', {
+          reason,
+          error: err instanceof Error ? err.message : String(err),
+        });
+        return false;
+      }
     });
+  builtinReconcileChain = scheduled.then(() => undefined);
+  return scheduled;
 }
 
 /**
@@ -2347,6 +2585,15 @@ export function registerGhostIpc(): void {
   // 启动即对账一次 skill 槽链接:上次会话崩溃/异常退出留下的悬空链接、
   // 换账号后的期望态变化,都在这里自愈(后续变更由 ghosts:changed 广播驱动)。
   scheduleGhostSkillReconcile();
+  const legacyRecoveryIpc = createLegacyGhostRecoveryIpcHandlers({
+    assertTrusted: assertTrustedAppRendererEvent,
+    invalid: (message) => throwIpcError('INVALID_PARAMS', message),
+    failure: () => throwIpcError('INTERNAL', 'Legacy Plugin recovery failed.'),
+    getStatus: getLegacyGhostRecoveryStatusForActiveSession,
+    retry: retryLegacyGhostRecoveryForActiveSession,
+  });
+  ipcMain.handle(LEGACY_GHOST_RECOVERY_STATUS_CHANNEL, legacyRecoveryIpc.status);
+  ipcMain.handle(LEGACY_GHOST_RECOVERY_RETRY_CHANNEL, legacyRecoveryIpc.retry);
   setGhostSandboxDevToolsDisabled(app.isPackaged);
   setGhostAppContextProvider(currentGhostAppContext);
   // 面板唤醒电子脑(cindy-ghost://<id>/wake 供片分支):面板零桥,唤醒经它
@@ -2741,7 +2988,7 @@ export function registerGhostIpc(): void {
   };
 
   void app.whenReady().then(() => {
-    scheduleBuiltinReconcile('startup');
+    void scheduleBuiltinReconcile('startup');
     builtinReconcileChain = builtinReconcileChain.then(
       activateGhostsAndMigrateLegacyAccounts,
     );
@@ -2750,7 +2997,7 @@ export function registerGhostIpc(): void {
       // Even when provisioning itself is a no-op, the renderer and agent
       // roster must immediately reflect the new session capability set.
       broadcastGhostsChanged(manager.list());
-      scheduleBuiltinReconcile('auth-change');
+      void scheduleBuiltinReconcile('auth-change');
       builtinReconcileChain = builtinReconcileChain.then(
         activateGhostsAndMigrateLegacyAccounts,
       );
@@ -3274,7 +3521,7 @@ export function registerGhostIpc(): void {
       throwIpcError('NOT_FOUND', `意识 ${id} 不是内置种子`);
     }
     clearBuiltinTombstone(brainRootDir(), id, log);
-    scheduleBuiltinReconcile('restore');
+    void scheduleBuiltinReconcile('restore');
     await builtinReconcileChain; // 等本轮装完再返回,renderer 拿到结果时列表已就位
     return { ok: true };
   });

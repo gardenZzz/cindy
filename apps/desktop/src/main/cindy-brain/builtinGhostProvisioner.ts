@@ -133,6 +133,32 @@ export function listBuiltinSeedIds(seedRootDirs: string[]): string[] {
   return [...ids].sort();
 }
 
+/** 列出当前身份本轮会播种的 command(已墓碑的 id 由调用方排除)。 */
+export function listEligibleBuiltinCommands(
+  seedRootDirs: string[],
+  identity: ProvisionIdentity | null,
+  excludedIds: ReadonlySet<string> = new Set(),
+  log?: BuiltinProvisionerLogger,
+): string[] {
+  const commands = new Set<string>();
+  const seen = new Set<string>();
+  for (const root of seedRootDirs) {
+    const ids = listSeedIdsInRoot(root);
+    if (ids.length === 0) continue;
+    const config = readProvisioningConfig(root, log);
+    if (config === null) continue;
+    for (const id of ids) {
+      if (seen.has(id)) continue;
+      seen.add(id);
+      if (excludedIds.has(id) || !matchesAudience(config.get(id)?.audience, identity)) continue;
+      const manifest = readSeedManifest(path.join(root, id), id, log);
+      const command = manifest?.command?.toLowerCase();
+      if (command) commands.add(command);
+    }
+  }
+  return [...commands].sort();
+}
+
 /** 列出单个种子根下的意识 id(= 子目录名;点开头跳过)。种子根缺失返回空。 */
 function listSeedIdsInRoot(seedRootDir: string): string[] {
   let entries: fs.Dirent[];
