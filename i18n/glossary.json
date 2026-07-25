@@ -132,10 +132,11 @@
           "会话"
         ]
       },
-      "note": "面向用户一律叫「对话」——「会话」太生硬难懂（2026-07 裁决）。代码与内部标识仍用 Session，本条只约束 UI 文案。Chat 合并到同一个词，见 chat 条目。落地时把 440 处「会话」+ 22 处「聊天」统一改为「对话」。ja / ko 沿用既有音译，不受本条约束。豁免的 6 处是同形异义的技术 session（登录态、WebSocket 语音连接），与产品对话无关——同类的还有 Linux Computer Use 提示里的「桌面会话」——那是 OS 桌面会话（窗口读取与输入自动化的授权范围）。注意 login.errors 的「绑定会话」指账号绑定态，scheduler 的「绑定对话」才是产品对话，两者同名不同义，靠 key 精确区分。",
+      "note": "面向用户一律叫「对话」——「会话」太生硬难懂（2026-07 裁决）。代码与内部标识仍用 Session，本条只约束 UI 文案。Chat 合并到同一个词，见 chat 条目。落地时把 440 处「会话」+ 22 处「聊天」统一改为「对话」。ja / ko 沿用既有音译，不受本条约束。豁免的 6 处是同形异义的技术 session（登录态、WebSocket 语音连接），与产品对话无关——同类的还有 Linux Computer Use 提示里的「桌面会话」——那是 OS 桌面会话（窗口读取与输入自动化的授权范围）。注意 login.errors 的「绑定会话」指账号绑定态，scheduler 的「绑定对话」才是产品对话，两者同名不同义，靠 key 精确区分。还豁免 archiveWorkerConfirmDesc:归档 Worker 时 orcaTeamService.archiveWorker() 先关掉它的 SDK 运行时 session,再归档存下来的产品对话——一句话里是两个生命周期,统称「对话」会让用户以为聊天记录也被停掉了。",
       "exempt": [
         "desktop:login.errors.INVALID_BIND_TICKET",
         "desktop:login.errors.INVALID_LOGIN_TICKET",
+        "desktop:newChat.collaboration.archiveWorkerConfirmDesc",
         "desktop:settings.computerUse.directControl.permissions.linuxHint",
         "mobile/composer:voice.invalidSession",
         "mobile/composer:voice.missingConnectionProvider",
@@ -262,10 +263,14 @@
           }
         ]
       },
-      "note": "保留英文（2026-07 裁决）。现状「工单」32 /「议题」4 是既有 bug 的来源：列表按钮写「新建议题」、点进去页面标题写「新建工单」。「问题」不入 forbidden——它在「修复问题和失败」这类泛指语境下是正常中文，不是 Issue 的误译。checkCase 关闭：issue 同时是常用英语单词，prompt 模板里的 \"fix the issue\" 是正常用法，做大小写约束会制造 9 处假阳性。（2026-07 修正：ko 原声明 Issue 仅 3 处，实测 이슈 45 处才是主流，改随本语言主流；ja 的 Issue 43:2 保持不变。）ja 的「課題」同样是多义词（问题 / 课题），按 whenEn=Issue 条件禁用——插件创建 prompt 里的 \"define the problem\" 用「課題」是正确的。",
+      "note": "保留英文（2026-07 裁决）。现状「工单」32 /「议题」4 是既有 bug 的来源：列表按钮写「新建议题」、点进去页面标题写「新建工单」。「问题」不入 forbidden——它在「修复问题和失败」这类泛指语境下是正常中文，不是 Issue 的误译。checkCase 关闭：issue 同时是常用英语单词，prompt 模板里的 \"fix the issue\" 是正常用法，做大小写约束会制造 9 处假阳性。（2026-07 修正：ko 原声明 Issue 仅 3 处，实测 이슈 45 处才是主流，改随本语言主流；ja 的 Issue 43:2 保持不变。）ja 的「課題」同样是多义词（问题 / 课题），按 whenEn=Issue 条件禁用——插件创建 prompt 里的 \"define the problem\" 用「課題」是正确的。豁免两个 Jira capability:那里指的是 Jira 自己的记录类型,日文 UI 的既定叫法是「課題」,保留英文反而与用户实际看到的 Jira 界面对不上。产品自身的 Issue 不受影响。",
       "minorityByDesign": {
         "ja": "ja 侧 Issue 43/63 本就是主流，此处无偏离；保留字段以说明与 ko 的 이슈 有意分道——各语言跟随本语言主流，不强求跨语言一致。"
-      }
+      },
+      "exempt": [
+        "desktop:scheduler.editor.script.capabilityDescs.jira_comment",
+        "desktop:scheduler.editor.script.capabilityDescs.jira_read"
+      ]
     },
     {
       "id": "provider",

@@ -23,7 +23,9 @@ import {
   hasAsciiEllipsis,
   makeExemptChecker,
   occursIn,
+  normalizeForPunctuation,
   stripNonProse,
+  WORD_BOUNDARY,
 } from '../../../../scripts/shared/glossary-rules.mjs';
 
 const REPO_ROOT = resolve(__dirname, '../../../..');
@@ -100,10 +102,10 @@ describe('影子 catalog 术语一致性', () => {
           if (whenEn) {
             const source = entries.find((e) => e.key === key && e.locale === glossary.sourceLocale)?.value;
             const re = new RegExp(
-              `(?<![A-Za-z0-9_-])${whenEn.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}s?(?![A-Za-z0-9_-])`,
+              `(?<![${WORD_BOUNDARY}])${whenEn.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}s?(?![${WORD_BOUNDARY}])`,
               'i',
             );
-            if (!source || !re.test(source)) continue;
+            if (!source || !re.test(stripNonProse(source))) continue;
           }
           const expected = term.translations?.[locale] || term.en;
           violations.push(`${locale} ${key}: 「${bad}」应为「${expected}」— ${value.slice(0, 40)}`);
@@ -132,7 +134,7 @@ describe('影子 catalog 术语一致性', () => {
   it('标点风格符合各语言规则', () => {
     const violations: string[] = [];
     for (const { locale, key, value } of entries) {
-      const prose = stripNonProse(value);
+      const prose = normalizeForPunctuation(value);
       if (HALFWIDTH_PUNCT_LOCALES.has(locale)) {
         const mark = findHalfWidthPunct(prose);
         if (mark) violations.push(`${locale} ${key}: 中文后半角「${mark}」— ${value.slice(0, 40)}`);

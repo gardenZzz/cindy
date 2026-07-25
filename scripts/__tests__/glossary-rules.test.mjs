@@ -457,3 +457,23 @@ test('glossary.schema.json: terms 不能为空——空表会让整套门禁静�
     `空 terms 必须被拒绝,实际错误:${JSON.stringify(errors)}`,
   );
 });
+
+test('stripNonProse: URL 后紧跟中文时,不能把后面的正文一起吞掉', () => {
+  // \S+ 收尾会连全角标点带整句正文一起吃掉,URL 之后的禁用词就永远扫不到
+  const stripped = stripNonProse('请访问 https://x.test，返回对话列表继续操作');
+  assert.ok(stripped.includes('返回对话列表继续操作'), `URL 之后的正文被吞了:${JSON.stringify(stripped)}`);
+  assert.ok(!stripped.includes('x.test'));
+});
+
+test('glossary.json: 语言键必须都在 locales 里', () => {
+  // 拼错的语言键(forbidden.zh_CN)不会被 schema 拦下——additionalProperties 只约束值的
+  // 形状,不能拿 locales 的内容去约束键名——而扫描只按 locales 迭代,规则就静默失效了
+  const locales = new Set(glossary.locales);
+  for (const term of glossary.terms) {
+    for (const field of ['translations', 'forbidden', 'alsoAllowed', 'minorityByDesign']) {
+      for (const locale of Object.keys(term[field] ?? {})) {
+        assert.ok(locales.has(locale), `术语 ${term.id} 的 ${field}.${locale} 语言键不在 locales 里`);
+      }
+    }
+  }
+});
