@@ -31,10 +31,18 @@
     "pendingRequests": "대기 중인 요청",
     "queueSwitchTo": "{{position}} 대기 중인 요청으로 전환: {{label}}",
     "queueSwitchGeneric": "대기 중인 요청 전환",
+    "queuePositionCurrent": "현재",
+    "queuePositionNext": "다음",
+    "queuePositionNth": "{{index}}번째",
+    "composerBlockedByPending": "컴퓨터의 대기 중인 요청을 처리한 뒤 계속 입력할 수 있습니다.",
     "missingRequestId": "이 원격 상호작용에는 requestId가 없어 결정을 돌려보낼 수 없습니다.",
     "issueConfirmUnsupported": "Issue 제출 확인은 컴퓨터에서만 처리됩니다. 데스크톱 앱으로 돌아가 확인하거나 취소하세요.",
     "unsupportedType": "이 원격 상호작용 유형은 모바일에서 아직 지원되지 않습니다.",
     "unsupportedKind": "미지원",
+    "desktopOnlyKind": "컴퓨터에서 처리",
+    "pluginSetupDesktopOnly": "이 플러그인 설정은 컴퓨터에서 완료해야 합니다.",
+    "cancelRequest": "이 요청 취소",
+    "cancelRequestAccessibility": "이 원격 요청 취소",
     "awaitingAnswer": "답변 대기",
     "continueAccessibility": "원격 질문 계속",
     "continue": "계속",
@@ -79,6 +87,32 @@
     "planFeedbackRequired": "제출하기 전에 피드백을 입력하세요.",
     "planFeedbackSubmit": "플랜 피드백 제출",
     "planFeedbackAccessibility": "플랜을 변경할 피드백"
+  },
+  "kinds": {
+    "permission": {
+      "title": "컴퓨터 작업을 허용해 주세요",
+      "label": "권한"
+    },
+    "ask_user_question": {
+      "title": "에이전트가 답변을 기다립니다",
+      "label": "질문"
+    },
+    "plan_review": {
+      "title": "실행 계획 확인이 필요합니다",
+      "label": "계획"
+    },
+    "issue_confirm": {
+      "title": "이슈 내용을 확인해 주세요",
+      "label": "이슈"
+    },
+    "plugin_setup": {
+      "title": "컴퓨터에서 플러그인 설정이 필요합니다",
+      "label": "플러그인"
+    },
+    "fallback": {
+      "title": "원격 요청을 처리해야 합니다",
+      "label": "요청"
+    }
   },
   "rewind": {
     "readError": "되감기 미리보기를 읽을 수 없습니다. 다시 동기화한 후 시도하세요.",

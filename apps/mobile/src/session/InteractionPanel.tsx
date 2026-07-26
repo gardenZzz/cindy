@@ -32,7 +32,9 @@ import {
   buildPermissionReviewPresentation,
   buildPlanReviewEvidencePresentation,
   buildInteractionResolveActionPresentation,
+  buildPluginSetupCancelDecision,
   buildPlanReviewDecision,
+  buildRemotePluginSetupSummary,
   canStartInteractionResolve,
   encodeMultiSelectAnswer,
   resolveInteractionResilient,
@@ -42,6 +44,7 @@ import {
   planReviewFilePath,
   planReviewPlan,
   readRequestId,
+  remoteInteractionHandling,
   selectionFromAnswer,
   sessionScopedPermissionSuggestions,
   sortPendingInteractions,
@@ -68,6 +71,25 @@ import { iconSize, radius, spacing, typeScale } from '@/theme/tokens';
 import { contentToPreview } from '@/utils/contentPreview';
 
 const PLAN_PREVIEW_LINE_HEIGHT = 20;
+
+/**
+ * 有本地化文案的 interaction kind 白名单(与 interaction.json 的 `kinds` 键一一对应)。
+ *
+ * kind 来自远端请求、可以是任意字符串,不能直接拼进 i18next 的 key 路径:带 `.` 的值
+ * 会改变路径解析,`__proto__` 这类还会牵扯原型链(#530 review)。白名单外一律归到
+ * `fallback`。
+ */
+const LOCALIZED_INTERACTION_KINDS = new Set([
+  'permission',
+  'ask_user_question',
+  'plan_review',
+  'issue_confirm',
+  'plugin_setup',
+]);
+
+function localizedInteractionKindKey(kind: string): string {
+  return LOCALIZED_INTERACTION_KINDS.has(kind) ? kind : 'fallback';
+}
 
 export type MobilePlanViewerState = 'half' | 'expanded' | 'minimized' | 'edit';
 type RestorablePlanViewerState = Exclude<MobilePlanViewerState, 'minimized'>;
@@ -132,14 +154,37 @@ export function InteractionPanel({
   const activeRequestIdForPresentation = readRequestId(activeInteraction);
   const selectedQueueItem = queuePresentation.items.find((item) => item.requestId === activeRequestIdForPresentation)
     ?? queuePresentation.active;
+  // 共享层的 title / label 是中文直出(desktop 时代留下的),控制端要按当前 locale
+  // 翻译后再渲染,否则这些队列文案在 en / ja / ko 下仍是中文(#530 review)。
+  const localizedKindText = (itemKind: string, field: 'title' | 'label') => t(
+    `interaction.kinds.${localizedInteractionKindKey(itemKind)}.${field}`,
+  );
+  // positionLabel 同样是中文直出,且会被插进队列切换的 accessibility 文案 —— 不翻的话
+  // VoiceOver / TalkBack 在 en / ja / ko 下会念出混语(#530 review)。
+  const localizedPositionLabel = (index: number) => {
+    if (index === 0) return t('interaction.panel.queuePositionCurrent');
+    if (index === 1) return t('interaction.panel.queuePositionNext');
+    return t('interaction.panel.queuePositionNth', { index: index + 1 });
+  };
+  const localizeQueueItem = <T extends { kind: string; positionLabel: string }>(item: T, index: number): T => ({
+    ...item,
+    label: localizedKindText(item.kind, 'label'),
+    positionLabel: localizedPositionLabel(index),
+    title: localizedKindText(item.kind, 'title'),
+  });
+  const selectedQueueIndex = queuePresentation.items.findIndex((item) => item.requestId === activeRequestIdForPresentation);
   const activeQueuePresentation = {
     ...queuePresentation,
-    active: selectedQueueItem,
-    items: queuePresentation.items.map((item) => ({
-      ...item,
+    active: selectedQueueItem
+      ? localizeQueueItem(selectedQueueItem, selectedQueueIndex >= 0 ? selectedQueueIndex : 0)
+      : selectedQueueItem,
+    items: queuePresentation.items.map((item, index) => ({
+      ...localizeQueueItem(item, index),
       active: item.requestId === activeRequestIdForPresentation,
     })),
-    title: selectedQueueItem?.title ?? queuePresentation.title,
+    title: selectedQueueItem
+      ? localizedKindText(selectedQueueItem.kind, 'title')
+      : queuePresentation.title,
   };
   const touchLayout = buildInteractionTouchLayout({
     actionCount: resolveActionCount(kind),
@@ -301,10 +346,18 @@ function InteractionItem({
   const requestId = readRequestId(item);
   const kind = interactionKind(item);
 
-  const submitDecision = async (decision: Record<string, unknown>) => {
+  const submitDecision = async (
+    decision: Record<string, unknown>,
+    options: { optimisticDismiss?: boolean; resolvedRevision?: number } = {},
+  ) => {
     if (!canStartInteractionResolve({ requestId, submittingRequestId: submittingRequestIdRef.current })) return;
     const currentRequestId = requestId;
     if (!currentRequestId) return;
+    // 乐观 dismiss 只适合「决定即终局」的卡。plugin_setup 的取消由被控端按
+    // expectedRevision 裁决(旧快照会被改判成重新体检而非取消),抢先撤卡会在
+    // 取消其实没生效时留下一张被抑制、再也灌不回来的幽灵卡 —— 那类卡走非乐观
+    // 路径,等被控端 dismiss 推送为准。
+    const optimisticDismiss = options.optimisticDismiss !== false;
     submittingRequestIdRef.current = currentRequestId;
     setBusy(true);
     onError(null);
@@ -313,18 +366,32 @@ function InteractionItem({
     // 登记在途抑制,防权威快照 / push 重放在被控端确认前把同卡灌回闪回;保留
     // item 快照,真失败时原卡复原供重试。
     const itemSnapshot = item;
-    remoteSessionStore.beginOptimisticInteractionDismiss(sessionId, currentRequestId);
+    if (optimisticDismiss) remoteSessionStore.beginOptimisticInteractionDismiss(sessionId, currentRequestId);
     try {
       await resolveInteractionResilient(maker, sessionId, currentRequestId, decision);
       if (kind === 'plan_review') clearPlanReviewDraft(currentRequestId);
-      remoteSessionStore.settleOptimisticInteractionDismiss(sessionId, currentRequestId, { kind: 'confirmed' });
+      if (optimisticDismiss) {
+        remoteSessionStore.settleOptimisticInteractionDismiss(sessionId, currentRequestId, { kind: 'confirmed' });
+      } else if (options.resolvedRevision !== undefined) {
+        // 非乐观路径也必须挡「早发晚到」:提交前发出的慢快照仍带着这张卡,dismiss
+        // push 先到时它会把已取消的卡写回来(#530 review P1)。这里只把 revision
+        // 下限抬过本次决定作用的那份 —— 决定没生效时被控端会推更高 revision,
+        // 卡照样回来。
+        remoteSessionStore.markInteractionRevisionResolved(
+          sessionId,
+          currentRequestId,
+          options.resolvedRevision,
+        );
+      }
     } catch (err) {
       // resolveInteractionResilient 已带弱网重试 + pending 列表权威分辨,走到
       // 这里就是决定确未生效:复原卡片 + 报错。
-      remoteSessionStore.settleOptimisticInteractionDismiss(sessionId, currentRequestId, {
-        kind: 'restore',
-        item: itemSnapshot,
-      });
+      if (optimisticDismiss) {
+        remoteSessionStore.settleOptimisticInteractionDismiss(sessionId, currentRequestId, {
+          kind: 'restore',
+          item: itemSnapshot,
+        });
+      }
       onError(formatRemoteError(err));
     } finally {
       if (submittingRequestIdRef.current === currentRequestId) {
@@ -383,6 +450,40 @@ function InteractionItem({
         kind={kind}
         message={t('interaction.panel.issueConfirmUnsupported')}
         request={item.request}
+        touchLayout={touchLayout}
+      />
+    );
+  }
+  // plugin_setup:配置动作(OAuth / 写本地设置)只能在被控端完成,被控端的 IPC
+  // 边界也只放 cancel 过来。手机侧因此给只读摘要 + 取消出口,让用户至少能把
+  // 会话从等待里放出来,而不是对着一张没有任何按钮的卡干等。
+  if (kind === 'plugin_setup') {
+    // 取消入口以共享分类器为准:terminal 快照(被控端 settle 后短暂保留的收尾帧)
+    // 归 desktop-only,此时被控端已 complete、不再受理 resolve,给按钮只会让用户点出
+    // 一个「看起来成功」的 no-op(#530 review)。
+    const cancelDecision = remoteInteractionHandling(item) === 'cancel-only'
+      ? buildPluginSetupCancelDecision(item.request)
+      : null;
+    return (
+      <UnsupportedCard
+        busy={busy}
+        cancel={cancelDecision
+          ? {
+            accessibilityLabel: t('interaction.panel.cancelRequestAccessibility'),
+            label: t('interaction.panel.cancelRequest'),
+            onPress: () => void submitDecision(cancelDecision, {
+              optimisticDismiss: false,
+              resolvedRevision: cancelDecision.expectedRevision,
+            }),
+          }
+          : null}
+        kind={kind}
+        // 不是「暂不支持」:手机能看懂、能取消,只是配置动作必须回电脑端做完。
+        kindLabel={t('interaction.panel.desktopOnlyKind')}
+        message={t('interaction.panel.pluginSetupDesktopOnly')}
+        request={item.request}
+        requestId={requestId}
+        summaryLines={pluginSetupSummaryLines(item.request)}
         touchLayout={touchLayout}
       />
     );
@@ -1237,24 +1338,66 @@ function PlanReviewCard({
   );
 }
 
+function pluginSetupSummaryLines(request: PendingInteraction['request']): string[] {
+  const summary = buildRemotePluginSetupSummary(request);
+  return [summary.ghostName, summary.intro, ...summary.stepTitles]
+    .filter((line): line is string => typeof line === 'string' && line.length > 0);
+}
+
 function UnsupportedCard({
+  busy = false,
+  cancel = null,
   kind,
+  kindLabel,
   message,
   request,
+  requestId = null,
+  summaryLines,
   touchLayout,
 }: {
+  busy?: boolean;
+  /** 本端唯一能做的动作(目前只有 plugin_setup 的取消);null = 纯展示卡。 */
+  cancel?: { accessibilityLabel: string; label: string; onPress(): void } | null;
   kind: string;
+  /** eyebrow 覆写;缺省是「暂不支持」。 */
+  kindLabel?: string;
   message: string;
   request: PendingInteraction['request'];
+  requestId?: string | null;
+  /**
+   * 可读摘要。**未提供**时才回退成 request 预览(未知类型只能这样交底);提供了
+   * 空数组表示「这类卡本来就该只显示标题」,不能再掉回 raw JSON —— 那正是本次要
+   * 消灭的展示(#530 review)。
+   */
+  summaryLines?: string[];
   touchLayout: InteractionTouchLayout;
 }) {
   const styles = useThemedStyles(makeStyles);
   const { t } = useTranslation();
+  // 合并成一段带换行的文本再限行:每行各自 numberOfLines={6} 会把总可见行数放大成
+  // 6 × 行数,步骤多时把卡撑得很高(#530 review)。
+  const summaryText = (summaryLines ?? [contentToPreview(request)])
+    .filter((line) => line.length > 0)
+    .join('\n');
   return (
     <View style={cardStyle(styles, touchLayout)} testID="interaction.unsupported.card">
-      <Text style={styles.kind}>{t('interaction.panel.unsupportedKind')}</Text>
+      <Text style={styles.kind}>{kindLabel ?? t('interaction.panel.unsupportedKind')}</Text>
       <Text style={styles.cardTitle}>{message}</Text>
-      <Text style={styles.body} numberOfLines={6}>{contentToPreview(request)}</Text>
+      {summaryText ? <Text style={styles.body} numberOfLines={6}>{summaryText}</Text> : null}
+      {cancel ? (
+        <View style={actionsStyle(styles, touchLayout)}>
+          <ResolveButton
+            accessibilityLabel={cancel.accessibilityLabel}
+            busy={busy}
+            label={cancel.label}
+            onPress={cancel.onPress}
+            requestId={requestId}
+            touchStyle={resolveButtonLayoutStyle(touchLayout, 'secondary')}
+            testID="interaction.unsupported.cancelButton"
+            variant="secondary"
+          />
+        </View>
+      ) : null}
     </View>
   );
 }

@@ -31,10 +31,18 @@
     "pendingRequests": "Pending requests",
     "queueSwitchTo": "Switch to {{position}} pending request: {{label}}",
     "queueSwitchGeneric": "Switch pending request",
+    "queuePositionCurrent": "current",
+    "queuePositionNext": "next",
+    "queuePositionNth": "no. {{index}}",
+    "composerBlockedByPending": "Handle the pending request from your computer before typing again.",
     "missingRequestId": "This remote interaction has no requestId, so the decision can't be sent back.",
     "issueConfirmUnsupported": "Issue submission is confirmed only on your computer. Go back to the desktop app to confirm or cancel.",
     "unsupportedType": "This remote interaction type isn't supported on mobile yet.",
     "unsupportedKind": "Unsupported",
+    "desktopOnlyKind": "On Computer",
+    "pluginSetupDesktopOnly": "This plugin setup has to be completed on your computer.",
+    "cancelRequest": "Cancel This Request",
+    "cancelRequestAccessibility": "Cancel this remote request",
     "awaitingAnswer": "Awaiting answer",
     "continueAccessibility": "Continue the remote question",
     "continue": "Continue",
@@ -79,6 +87,32 @@
     "planFeedbackRequired": "Enter feedback before submitting.",
     "planFeedbackSubmit": "Submit plan feedback",
     "planFeedbackAccessibility": "Give feedback to change the plan"
+  },
+  "kinds": {
+    "permission": {
+      "title": "Permission Needed on Your Computer",
+      "label": "Permission"
+    },
+    "ask_user_question": {
+      "title": "Agent Needs an Answer",
+      "label": "Question"
+    },
+    "plan_review": {
+      "title": "Plan Needs Your Review",
+      "label": "Plan"
+    },
+    "issue_confirm": {
+      "title": "Issue Needs Confirmation",
+      "label": "Issue"
+    },
+    "plugin_setup": {
+      "title": "Plugin Setup Needed on Your Computer",
+      "label": "Plugin"
+    },
+    "fallback": {
+      "title": "Remote Request Needs Attention",
+      "label": "Request"
+    }
   },
   "rewind": {
     "readError": "Couldn't read the rewind preview. Sync again and retry.",
