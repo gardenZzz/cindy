@@ -405,6 +405,10 @@ const fanOutHookControlPrefs = createIpcFanOut('maker:hook-control:prefs-changed
 const fanOutHookControlProviderPrefs = createIpcFanOut(
   'maker:hook-control:provider-prefs-changed',
 );
+// 目录模型来源偏好全量推送(本地写入后广播, 多窗口设置页同步)。
+const fanOutHookControlWorkspaceProviderSource = createIpcFanOut(
+  'maker:hook-control:workspace-provider-source-changed',
+);
 
 // ─── Maker Core 一阶段重构（新链路）── 与 cc-agent:* / codex:* 双轨并行 ─────
 const fanOutMakerEvent = createIpcFanOut('maker:event');
@@ -3120,8 +3124,19 @@ contextBridge.exposeInMainWorld('electronAPI', {
       patch: Record<string, string | null>,
     ): Promise<{ prefs: unknown }> =>
       ipcRenderer.invoke('maker:hook-control:provider-prefs-set', { workspace, patch }),
+    // 工作目录模型来源偏好(纯本地, 不经 WS; providerId=null 清除条目)
+    getWorkspaceProviderSources: (): Promise<{ entries: unknown }> =>
+      ipcRenderer.invoke('maker:hook-control:workspace-provider-source-get'),
+    setWorkspaceProviderSource: (payload: {
+      channel: 'slack' | 'telegram';
+      teamId: string | null;
+      workspace: string;
+      providerId: string | null;
+    }): Promise<{ entries: unknown }> =>
+      ipcRenderer.invoke('maker:hook-control:workspace-provider-source-set', payload),
     onPrefsChanged: fanOutHookControlPrefs,
     onProviderPrefsChanged: fanOutHookControlProviderPrefs,
+    onWorkspaceProviderSourcesChanged: fanOutHookControlWorkspaceProviderSource,
     onStatusChanged: fanOutHookControlStatus,
   },
 
