@@ -391,6 +391,10 @@ import { hydrateSessionProvider, getSessionProvider } from '../maker-host/sessio
 import { getActiveCatalog, setDiscoveredProviderModels } from '../maker-host/active-catalog.js';
 import { testProviderConnection } from '../maker-host/provider-diagnostics.js';
 import { fetchProviderModels } from '../maker-host/provider-model-fetch.js';
+import {
+  getAnthropicModelDiscoveryFailure,
+  refreshAnthropicModelsFromHttp,
+} from '../maker-host/model-discovery/anthropic.js';
 import { setProviderUpstreamErrorBroadcaster } from '../maker-host/provider-upstream-error-observer.js';
 import {
   createClaudeAutoPermissionFallbackCoordinator,
@@ -3421,6 +3425,13 @@ export function registerMakerIpc(maker: Maker, options: RegisterMakerIpcOptions 
     listPresets: () => getActiveCatalog().presets ?? [],
     testConnection: (input) => testProviderConnection(input),
     fetchModels: (spec) => fetchProviderModels(spec),
+    // 动态清单重新发现：目前只有 anthropic 订阅是「清单唯一来源是动态发现」的供应商。
+    // 拉取内部只记账不抛，完成后现读一次失败归因回给 renderer。
+    rediscoverModels: async (providerId) => {
+      if (providerId !== 'anthropic') return null;
+      await refreshAnthropicModelsFromHttp();
+      return getAnthropicModelDiscoveryFailure();
+    },
     scanLocalCli: () => scanLocalCliAuth(createLocalCliScanDeps()),
     // 通用 OAuth（目录 auth.oauth 描述符驱动）：login 成功后 best-effort 拉动态模型发现
     // (additions-only merge 进 active-catalog) 并广播 PROVIDER_CHANGED 让 UI 刷新连接态。

@@ -3521,6 +3521,14 @@ interface ElectronAPI {
     scanLocalCli: () => Promise<{
       detections: import('../shared/localCliDetect').LocalCliDetection[];
     }>;
+    /**
+     * 重新发现动态清单（当前只有 anthropic 订阅）。发现失败不自动重试，这是用户在
+     * 失败态下主动点「重试」的入口；失败归因随结果回传，供 UI 渲染分类文案。
+     */
+    rediscoverModels: (providerId: string) => Promise<{
+      ok: boolean;
+      failure?: import('@cindy/model-providers').ProviderModelDiscoveryFailure;
+    }>;
     /** 自定义供应商变更广播订阅（返回 off）。 */
     onProvidersChanged: (cb: () => void) => () => void;
 

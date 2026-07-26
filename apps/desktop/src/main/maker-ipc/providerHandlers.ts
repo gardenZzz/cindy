@@ -18,6 +18,7 @@ import {
   isProviderRequestPath,
   type AgentKind,
   type CustomProviderConfig,
+  type ProviderModelDiscoveryFailure,
   type ProviderPreset,
   type ProviderView,
 } from '@cindy/model-providers';
@@ -61,6 +62,12 @@ export interface ProviderHandlerDeps {
   testConnection(input: ProviderTestInput): Promise<ProviderTestResult>;
   /** 获取模型列表（生产 = fetchProviderModels；单测注入 stub 不联网）。 */
   fetchModels(spec: ProviderModelsFetchSpec): Promise<ProviderModelsFetchResult>;
+  /**
+   * 重新发现某供应商的动态清单（生产 = anthropic 的 refreshAnthropicModelsFromHttp）。
+   * 返回本次结束后的失败归因，成功为 null。不认识的 providerId 直接返回 null（没有
+   * 动态发现通道 = 没什么可重试的），不抛错。
+   */
+  rediscoverModels(providerId: string): Promise<ProviderModelDiscoveryFailure | null>;
   /**
    * 通用 OAuth 登录 / 登出 / 取消（生产接 generic-oauth Runner + 目录描述符解析；
    * login 成功后由生产 deps 负责模型发现与 PROVIDER_CHANGED 广播）。
@@ -248,6 +255,16 @@ export function registerProviderHandlers(
     } catch {
       return { detections: [] as LocalCliDetection[] };
     }
+  });
+
+  // 动态清单重新发现（用户在失败态下主动点「重试」）：查询型返回,把最新失败归因回给
+  // renderer 渲染分类文案;成功则 failure 缺席。发现本身永不抛(内部只记账),这里的
+  // try/catch 只兜广播等收尾异常,不让重试按钮报未知错误。
+  registry.handle(MAKER_INVOKE.PROVIDER_MODELS_REDISCOVER, async (_event, input: unknown) => {
+    const providerId = requireProviderId(input);
+    const failure = await deps.rediscoverModels(providerId);
+    deps.broadcastChanged();
+    return failure ? { ok: false, failure } : { ok: true };
   });
 
   // 通用 OAuth 登录 / 登出 / 取消。login 是查询型返回（{ok, reason}——取消/超时是正常流程

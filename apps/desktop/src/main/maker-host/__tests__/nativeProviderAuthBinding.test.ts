@@ -4,7 +4,7 @@ import path from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
 const userDataDir = '/tmp/native-provider-auth-binding-test';
-const session = { dataOwnerId: 'owner-a' as string | null };
+const session = { dataOwnerId: 'owner-a' as string | null, boundaryPending: false };
 
 vi.mock('electron', () => ({
   app: { getPath: () => userDataDir },
@@ -16,6 +16,7 @@ vi.mock('../../appSessionState.js', () => ({
     dataOwnerId: session.dataOwnerId,
     generation: 1,
   }),
+  isAppSessionBoundaryPending: () => session.boundaryPending,
 }));
 
 import {
@@ -29,6 +30,7 @@ const bindingFile = path.join(userDataDir, 'native-provider-auth.json');
 
 afterEach(() => {
   session.dataOwnerId = 'owner-a';
+  session.boundaryPending = false;
   fs.rmSync(userDataDir, { recursive: true, force: true });
 });
 
@@ -101,6 +103,28 @@ describe('claimDetectedNativeProviderAuth', () => {
     session.dataOwnerId = 'owner-a';
     expect(claimDetectedNativeProviderAuth('openai', () => false)).toBe(false);
     expect(fs.existsSync(bindingFile)).toBe(false);
+  });
+
+  it('writes nothing while a session boundary is in flight', () => {
+    // owner 正在被换掉:此刻写入等于把上一个账号的凭证交给下一个账号。
+    session.boundaryPending = true;
+    expect(claimDetectedNativeProviderAuth('anthropic', () => true)).toBe(false);
+    expect(fs.existsSync(bindingFile)).toBe(false);
+
+    session.boundaryPending = false;
+    expect(claimDetectedNativeProviderAuth('anthropic', () => true)).toBe(true);
+  });
+
+  it('claims anthropic and xai on the same terms as openai', () => {
+    // 三家 native provider 共用一套认领口径:凭证在场 + 名额未被占 → 绑给当前 owner。
+    expect(claimDetectedNativeProviderAuth('anthropic', () => true)).toBe(true);
+    expect(claimDetectedNativeProviderAuth('xai', () => true)).toBe(true);
+    expect(isNativeProviderAuthBound('anthropic')).toBe(true);
+    expect(isNativeProviderAuthBound('xai')).toBe(true);
+
+    session.dataOwnerId = 'owner-b';
+    expect(isNativeProviderAuthBound('anthropic')).toBe(false);
+    expect(claimDetectedNativeProviderAuth('anthropic', () => true)).toBe(false);
   });
 
   it('treats corrupted falsy slot values as claimed-by-unknown and fails closed', () => {

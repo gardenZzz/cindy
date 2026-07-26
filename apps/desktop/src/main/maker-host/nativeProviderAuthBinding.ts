@@ -2,7 +2,7 @@ import { app } from 'electron';
 import fs from 'node:fs';
 import path from 'node:path';
 
-import { getActiveAppSession } from '../appSessionState.js';
+import { getActiveAppSession, isAppSessionBoundaryPending } from '../appSessionState.js';
 
 type NativeProviderId = 'anthropic' | 'openai' | 'xai';
 type BindingFile = Partial<Record<NativeProviderId, string>> & {
@@ -77,14 +77,21 @@ export function migrateLegacyNativeProviderAuthBindings(
 /**
  * Claim an auto-detected local CLI credential for the current owner.
  *
- * The Codex import channel materializes its credential lazily (the ~/.codex
- * reconcile hardlink is created after startup), so the one-shot legacy
- * migration above can consume `legacyClaimOwner` while the credential is not
- * visible yet — stranding the intended first-owner auto-connect forever, and
- * local-mode owners never run that migration at all. This repairs exactly
- * that: only when the slot has no owner, the credential exists, and no OTHER
- * account won the legacy claim. An existing binding is never overwritten, so
- * account switches stay fail-closed like migrateLegacyNativeProviderAuthBindings.
+ * Applies to every native provider, not just Codex. Two independent holes make
+ * the intended first-owner auto-connect strand forever without this repair:
+ *   - the one-shot legacy migration above can consume `legacyClaimOwner` while a
+ *     credential is not visible yet (the Codex ~/.codex reconcile hardlink is
+ *     created after startup, so its probe reads false);
+ *   - the migration only runs for cloud owners that hold the legacy namespace
+ *     claim, so local-mode owners — and cloud owners whose claim marker is
+ *     absent — never get a chance to inherit at all, no matter how visible the
+ *     credential is. Anthropic and xAI read their credential synchronously and
+ *     are therefore immune to the first hole but not to the second.
+ *
+ * This repairs exactly that: only when the slot has no owner, the credential
+ * exists, and no OTHER account won the legacy claim. An existing binding is
+ * never overwritten, so account switches stay fail-closed like
+ * migrateLegacyNativeProviderAuthBindings.
  */
 export function claimDetectedNativeProviderAuth(
   provider: NativeProviderId,
@@ -92,6 +99,11 @@ export function claimDetectedNativeProviderAuth(
 ): boolean {
   const owner = getActiveAppSession().dataOwnerId;
   if (!owner) return false;
+  // A session boundary in flight means `owner` is about to be replaced: writing
+  // now would hand the outgoing account's credential to the incoming one.
+  // Callers reached from an async settle (Codex reconcile) additionally pin an
+  // owner+generation snapshot; this guard is the floor every caller gets.
+  if (isAppSessionBoundaryPending()) return false;
   const bindings = readBindings();
   // Key-presence, not truthiness: a corrupted/empty-string slot must count as
   // "claimed by unknown" and fail closed, never as re-claimable (matches

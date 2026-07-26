@@ -12,7 +12,14 @@
  * active-catalog 统一持有；连接状态每次实时读（凭证变化要立即反映）。
  */
 
-import { buildRegistry, type Catalog, type ConnectionState, type ProviderView } from '@cindy/model-providers';
+import {
+  buildRegistry,
+  type Catalog,
+  type ConnectionState,
+  type ModelDiscoveryFailureState,
+  type ProviderModelDiscoveryFailure,
+  type ProviderView,
+} from '@cindy/model-providers';
 
 /** 内置三家供应商「是否已连接」的判定器（由 host 注入，读各自凭证存储）。 */
 export interface ProviderConnectionReaders {
@@ -36,6 +43,11 @@ export interface ProviderServiceDeps {
    * （生产 = generic-oauth 的 hasGenericOAuthLogin）。缺省 = 一律未连接。
    */
   genericOAuthConnected?: (providerId: string) => boolean;
+  /**
+   * 动态清单发现的最近一次失败（生产 = anthropic 的 getAnthropicModelDiscoveryFailure）。
+   * 只有「清单唯一来源是动态发现」的供应商需要，缺席 = 该供应商没有这种失败态。
+   */
+  modelDiscoveryFailure?: (providerId: string) => ProviderModelDiscoveryFailure | null;
 }
 
 export interface ProviderService {
@@ -74,7 +86,14 @@ export function createProviderService(deps: ProviderServiceDeps): ProviderServic
       // 替代「连接 / 断开」，没有独立鉴权握手（密钥缺失则请求失败，但 UI 连接态为已配置）。
       else if (p.source === 'user') connected[p.id] = true;
     }
-    return buildRegistry(catalog, connected);
+    const discoveryFailures: ModelDiscoveryFailureState = {};
+    if (deps.modelDiscoveryFailure) {
+      for (const p of catalog.providers) {
+        const failure = deps.modelDiscoveryFailure(p.id);
+        if (failure) discoveryFailures[p.id] = failure;
+      }
+    }
+    return buildRegistry(catalog, connected, discoveryFailures);
   }
 
   return { listProviders };

@@ -4,7 +4,8 @@
  * 2026-07-19 模型列表统一重构:anthropic 供应商的清单**唯一来源是动态发现**,
  * 产品目录静态段已退役(bundled 恒为空)。两条互补通道,汇入同一个 apply:
  *
- *   1. **HTTP `/v1/models`**(登录成功 / 启动时):订阅 OAuth Bearer +
+ *   1. **HTTP `/v1/models`**(启动时 / 登录成功 / 本机凭证被认领给当前 owner /
+ *      暂时性失败的有限次重试 / 用户在设置页手动重试):订阅 OAuth Bearer +
  *      `anthropic-beta: oauth-2025-04-20`(与 title-one-shot 同一套已验证的头)。
  *      即时出清单;响应可能不带 effort/fast 能力信息,此时按确定性默认合成
  *      (见 mapAnthropicHttpModels),等 SDK 通道精化。
@@ -44,7 +45,11 @@ import { app } from 'electron';
 import fsp from 'node:fs/promises';
 import path from 'node:path';
 
-import type { CatalogModel, Effort } from '@cindy/model-providers';
+import type {
+  CatalogModel,
+  Effort,
+  ProviderModelDiscoveryFailure,
+} from '@cindy/model-providers';
 
 import { createLogger } from '../../logger.js';
 import {
@@ -79,6 +84,22 @@ let authGeneration = 0;
 let httpRefreshInflight: Promise<void> | null = null;
 /** 在途拉取所属的世代;世代已变时新调用不复用旧 promise(换号补拉不被吞)。 */
 let httpRefreshInflightGen = -1;
+/**
+ * 最近一次发现失败的归因;成功即清空。
+ *
+ * 本供应商的清单没有静态兜底,拉不到就是零模型,所以失败必须如实记账、由 UI 讲明理由,
+ * 而不是一直说「正在发现」。是否自动重试按归因分流(见 isRetryableFailure):暂时性故障
+ * 悄悄重试几次,确定性拒绝(地域 / 凭证 / 请求被拒)一次都不重试 —— 那种情况重试只会
+ * 把真正的原因藏起来。
+ */
+let lastFailure: ProviderModelDiscoveryFailure | null = null;
+/**
+ * 暂时性失败的重试节奏(ms)。刻意保持「简单、短」:目的是扛过链路抖动 / 上游瞬时 5xx,
+ * 不是替代用户的判断 —— 一分钟内收敛不了就停手,把失败理由和重试入口交还给用户。
+ */
+const HTTP_RETRY_DELAYS_MS = [2_000, 8_000, 30_000] as const;
+let httpRetryTimer: NodeJS.Timeout | null = null;
+let httpRetryAttempt = 0;
 /** 缓存写入 / 删除严格串行,保证授权边界后的删除一定排在旧世代写入之后。 */
 let cacheMutationQueue: Promise<void> = Promise.resolve();
 let cacheTempSequence = 0;
@@ -190,9 +211,9 @@ function persistPendingShrink(): void {
  *   - 非骤减 → 直接放行并清零 streak;
  *   - 骤减 → 记签名(排序 id 集);**连续 CONFIRMED_SHRINK_STREAK 次相同**的骤减快照
  *     视为上游真实下架,放行收敛;签名变化(上游还在抖)则重新计数。
- * 记账随磁盘缓存持久化(persistPendingShrink):HTTP 刷新每进程只有启动 / 登录两个
- * 触发点,跨重启不累计的话收敛永远不会发生——重启后由 loadAnthropicModelsFromDiskCache
- * 恢复,登出 / 换号随缓存文件一起清除。
+ * 记账随磁盘缓存持久化(persistPendingShrink):HTTP 刷新的触发点稀疏(启动 / 登录 /
+ * 绑定认领 / 手动重试,失败只在暂时性归因下自动重试有限次),跨重启不累计的话收敛永远
+ * 不会发生——重启后由 loadAnthropicModelsFromDiskCache 恢复,登出 / 换号随缓存文件一起清除。
  * 只有 HTTP 通道参与收敛:它是 Anthropic 官方列模型端点,连续一致可作可用性证据;
  * SDK 捕获(本地 CLI 注册表,正是打塌事故的退化来源)永不收敛,等 HTTP 纠正。
  */
@@ -665,9 +686,157 @@ export function noteAnthropicSdkSupportedModels(raw: unknown): void {
   });
 }
 
+/** 非 2xx 响应:带上状态码与响应体片段抛出 —— 地域拒绝只能从响应体认出来。 */
+class DiscoveryHttpError extends Error {
+  constructor(
+    readonly status: number,
+    readonly body: string,
+  ) {
+    super(`HTTP ${status}`);
+    this.name = 'DiscoveryHttpError';
+  }
+}
+
+/** 响应体只留够判定与诊断的前缀,避免把上游的大 HTML 错误页整个搬进日志。 */
+const ERROR_BODY_SNIPPET_LIMIT = 2_000;
+
 /**
- * HTTP `/v1/models` 拉取(登录成功 / 启动时)。single-flight;失败只记日志、
- * 保留现值(缓存是上次成功的真数据);成功按合并纪律生效并持久化。
+ * 地域拒绝的识别标记。Anthropic 对不支持的国家 / 地区返回
+ * `unsupported_country_region_territory`,**400 与 403 都出现过**(取决于是否经中间层),
+ * 所以只看状态码不够 —— 必须认响应体。同为 403 的
+ * `{"error":{"type":"forbidden","message":"Request not allowed"}}` 是另一回事
+ * (Cloudflare 对代理 / VPN 出口的拦截),两者对用户的下一步完全不同。
+ */
+const REGION_BLOCK_MARKERS = [
+  'unsupported_country_region_territory',
+  'unsupported countries, regions, or territories',
+] as const;
+
+function looksRegionBlocked(status: number, body: string): boolean {
+  if (status !== 400 && status !== 403) return false;
+  const lower = body.toLowerCase();
+  return REGION_BLOCK_MARKERS.some((marker) => lower.includes(marker));
+}
+
+/**
+ * fetch / HTTP 错误 → 用户能理解的归因。
+ *
+ * undici 在 DNS 失败、连接被拒、TLS 失败时统一抛 `TypeError: fetch failed`,真正的
+ * errno 藏在 `cause.code` —— 链路不通时最常见的形态,必须挖出来才能区分「连不上」
+ * 和「连上了但超时」。detail 只进日志与诊断,不直接展示给用户。
+ */
+function classifyDiscoveryError(err: unknown): {
+  kind: ProviderModelDiscoveryFailure['kind'];
+  detail: string;
+} {
+  if (err instanceof DiscoveryHttpError) {
+    const detail = err.body ? `HTTP ${err.status}: ${err.body}` : `HTTP ${err.status}`;
+    if (looksRegionBlocked(err.status, err.body)) return { kind: 'regionBlocked', detail };
+    if (err.status === 401) return { kind: 'unauthorized', detail };
+    if (err.status === 403) return { kind: 'forbidden', detail };
+    // 5xx / 429 是服务端侧故障,可能几秒后就好;其它 4xx 是我们这边请求本身被拒。
+    if (err.status >= 500 || err.status === 429) return { kind: 'upstream', detail };
+    return { kind: 'rejected', detail };
+  }
+  const base = err instanceof Error ? `${err.name}: ${err.message}` : String(err);
+  if (err instanceof Error && (err.name === 'TimeoutError' || err.name === 'AbortError')) {
+    return { kind: 'timeout', detail: base };
+  }
+  const cause = err instanceof Error ? (err.cause as { code?: unknown } | undefined) : undefined;
+  const code = typeof cause?.code === 'string' ? cause.code : undefined;
+  const detail = code ? `${base} (${code})` : base;
+  if (code === 'ETIMEDOUT' || code === 'UND_ERR_CONNECT_TIMEOUT') {
+    return { kind: 'timeout', detail };
+  }
+  return { kind: 'network', detail };
+}
+
+/**
+ * 该归因值不值得自动重试。
+ *
+ * 分界是「这次失败是否可能只是暂时的」:链路不通 / 超时 / 上游 5xx 有可能几秒后自愈,
+ * 值得替用户悄悄再试几次;而地域拒绝、凭证被拒、请求被拒、空清单都是**确定性**答复
+ * —— 同一个请求再发一百次也是同一个结果,重试只会把「被拒绝」拖成「一直在发现中」,
+ * 把真正的原因藏起来。
+ */
+function isRetryableFailure(kind: ProviderModelDiscoveryFailure['kind']): boolean {
+  return kind === 'network' || kind === 'timeout' || kind === 'upstream';
+}
+
+/** 取消待执行的重试并清零退避计数(成功 / 授权边界 / 确定性失败 / 测试重置)。 */
+function cancelHttpRetry(): void {
+  if (httpRetryTimer) {
+    clearTimeout(httpRetryTimer);
+    httpRetryTimer = null;
+  }
+  httpRetryAttempt = 0;
+}
+
+/**
+ * 安排下一次重试。已有待执行的重试不重复排;退避次数用尽就停手(等下一次启动、显式
+ * 登录、绑定认领或用户手动重试)。世代变化后回调直接放弃 —— 登出 / 换号的在途结果本就
+ * 作废。timer 不持有事件循环(unref),不拖慢退出。
+ */
+function scheduleHttpRetry(generation: number): void {
+  if (httpRetryTimer) return;
+  if (generation !== authGeneration) return;
+  const delay = HTTP_RETRY_DELAYS_MS[httpRetryAttempt];
+  if (delay === undefined) return;
+  httpRetryAttempt += 1;
+  const attempt = httpRetryAttempt;
+  const timer = setTimeout(() => {
+    httpRetryTimer = null;
+    if (generation !== authGeneration || !hasClaudeAiOAuth()) return;
+    void refreshAnthropicModelsFromHttp().catch(() => undefined);
+  }, delay);
+  timer.unref?.();
+  httpRetryTimer = timer;
+  log.info(
+    `anthropic /v1/models retry scheduled in ${delay}ms (attempt ${attempt}/${HTTP_RETRY_DELAYS_MS.length})`,
+  );
+}
+
+/**
+ * 记一次发现失败并按归因决定要不要自动重试;世代已变(登出 / 换号)的结果不写回。
+ *
+ * 确定性拒绝会**主动取消**待执行的重试并清零退避:上一轮可能因为链路抖动排了重试,
+ * 这一轮上游明确答了「不允许」—— 继续按旧节奏重试既无意义,也会让失败理由在
+ * 「发现中」和「被拒绝」之间来回跳。
+ */
+function noteDiscoveryFailure(
+  generation: number,
+  kind: ProviderModelDiscoveryFailure['kind'],
+  detail?: string,
+): void {
+  if (generation !== authGeneration) return;
+  lastFailure = {
+    kind,
+    at: new Date().toISOString(),
+    ...(detail ? { detail } : {}),
+  };
+  log.warn(`anthropic model discovery failed (${kind})`, { detail });
+  if (isRetryableFailure(kind)) {
+    scheduleHttpRetry(generation);
+    return;
+  }
+  cancelHttpRetry();
+}
+
+/**
+ * 最近一次清单发现失败(供 listProviders 合成 ProviderView)。
+ *
+ * 未登录时一律返回 null:没有授权就谈不上「发现失败」,那种状态下 UI 该讲的是「去连接」,
+ * 而不是把上一个账号留下的失败理由摆给新用户看。
+ */
+export function getAnthropicModelDiscoveryFailure(): ProviderModelDiscoveryFailure | null {
+  if (!hasClaudeAiOAuth()) return null;
+  return lastFailure;
+}
+
+/**
+ * HTTP `/v1/models` 拉取(启动时 / 登录成功 / 绑定认领成功 / 用户手动重试)。
+ * single-flight;失败只记日志 + 记账失败归因、保留现值(缓存是上次成功的真数据),
+ * **不自动重试**(理由见 lastFailure 声明处);成功按合并纪律生效并持久化。
  */
 export function refreshAnthropicModelsFromHttp(): Promise<void> {
   // 只复用**同世代**的在途拉取:登出后世代已变,旧 promise 的结果注定作废,
@@ -692,7 +861,11 @@ export function refreshAnthropicModelsFromHttp(): Promise<void> {
           },
           signal: AbortSignal.timeout(HTTP_TIMEOUT_MS),
         });
-        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        if (!res.ok) {
+          // 读响应体:地域拒绝与 Cloudflare 拦截同为 403,只有正文能把两者分开。
+          const body = await res.text().catch(() => '');
+          throw new DiscoveryHttpError(res.status, body.slice(0, ERROR_BODY_SNIPPET_LIMIT));
+        }
         const body = (await res.json()) as { data?: unknown[]; has_more?: boolean; last_id?: string };
         if (Array.isArray(body.data)) entries.push(...body.data);
         url =
@@ -702,7 +875,8 @@ export function refreshAnthropicModelsFromHttp(): Promise<void> {
       }
     } catch (err) {
       // 失败不清列表:现值(含磁盘缓存)是上次成功的真数据;SDK 通道随后仍会精化。
-      log.warn('anthropic /v1/models fetch failed; keeping current list', { error: String(err) });
+      const { kind, detail } = classifyDiscoveryError(err);
+      noteDiscoveryFailure(gen, kind, detail);
       return;
     }
     // 在途期间登出 / 换号:结果作废,不写回、不重建缓存(review P1 竞态豁口)。
@@ -712,7 +886,9 @@ export function refreshAnthropicModelsFromHttp(): Promise<void> {
     }
     const mapped = mapAnthropicHttpModels(entries);
     if (mapped.length === 0) {
-      log.warn('anthropic /v1/models returned no usable models; keeping current list');
+      // 上游答了但一个可用模型都没有 —— 清单没有静态兜底,停在空清单等于供应商不可用,
+      // 同样记账为失败,不让 UI 停在「正在发现」。
+      noteDiscoveryFailure(gen, 'empty');
       return;
     }
     // 退化判定必须先于任何状态写入:被拒快照连 explicitWindows 也不许污染,
@@ -731,6 +907,10 @@ export function refreshAnthropicModelsFromHttp(): Promise<void> {
     const { models, explicitEffortIds, explicitFastModeIds } =
       mergeCapabilitiesWithPrevious(mapped);
     log.info(`anthropic models refreshed via HTTP: ${models.length}`);
+    // 拿到有效清单 = 发现已恢复,清掉失败态与待执行的重试(放在 apply 之前:apply 只负责
+    // 生效,它因世代变化被 gate 掉时新世代会带着自己的触发重来)。
+    lastFailure = null;
+    cancelHttpRetry();
     await applyModels(models, true, gen, explicitEffortIds, explicitFastModeIds);
   })().finally(() => {
     // 只清自己的登记:世代变化后可能已有新 flight 顶替,不能误清。
@@ -748,6 +928,10 @@ export function refreshAnthropicModelsFromHttp(): Promise<void> {
 export async function clearAnthropicDiscoveredModels(): Promise<void> {
   const generation = authGeneration + 1;
   authGeneration = generation;
+  // 失败态与待执行的重试都属于旧世代的账:登出 / 换号后既不能把上一个账号的失败理由
+  // 摆给新账号看,也不该让旧世代排的重试继续跑(回调自带世代校验,这里再显式取消)。
+  lastFailure = null;
+  cancelHttpRetry();
   explicitWindows.clear();
   explicitEffortModelIds.clear();
   explicitFastModeModelIds.clear();
@@ -770,6 +954,8 @@ export function resetAnthropicDiscoveryForTest(): void {
   explicitEffortModelIds.clear();
   explicitFastModeModelIds.clear();
   resetHttpShrinkStreak();
+  lastFailure = null;
+  cancelHttpRetry();
   // 不回拨世代:即便测试误留异步任务,旧任务也不会重新获得生效资格。
   authGeneration += 1;
   httpRefreshInflight = null;

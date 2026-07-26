@@ -91,6 +91,7 @@ import {
 } from '@/lib/composerDraftStore';
 import type { JSONContent } from '@tiptap/core';
 import { base64ToUint8Array } from '@/lib/fileTypeInference';
+import { calibrateDraftModel } from '@/lib/draftModelCalibration';
 import { showWorktreeError } from '@/lib/worktreeToast';
 import type { CreateWorktreeResp } from '@/lib/worktree.types';
 import * as sessionService from '@/lib/sessionService';
@@ -827,8 +828,30 @@ export function NewMakerDraftRoute() {
     if (isDeviceLinkDraft && deviceLinkInitial) {
       return { model: deviceLinkInitial.model, effort: deviceLinkInitial.effort };
     }
-    return { model: chatPrefs.model, effort: localDraftEffort };
-  }, [isDeviceLinkDraft, deviceLinkInitial, chatPrefs.model, localDraftEffort]);
+    // 种子默认模型是写死的产品默认,与本机连了哪些来源无关 —— 全新用户可能首屏就落在
+    // 一个零来源的模型上,Send 直接禁用。**只**校准用户从没显式选过的默认值,他自己
+    // 选过的一律不动(见 draftModelCalibration)。device-link 草稿以被控端镜像为准,不校准。
+    return {
+      model: calibrateDraftModel({
+        providers: localProviders,
+        agent: capabilityAgentKind,
+        model: chatPrefs.model,
+        chosenByUser: draft.modelChosenByVendor[draft.vendor] === true,
+        providersLoading: localProvidersLoading,
+      }),
+      effort: localDraftEffort,
+    };
+  }, [
+    isDeviceLinkDraft,
+    deviceLinkInitial,
+    chatPrefs.model,
+    localDraftEffort,
+    localProviders,
+    localProvidersLoading,
+    capabilityAgentKind,
+    draft.modelChosenByVendor,
+    draft.vendor,
+  ]);
 
   // 远程草稿的权限档 / 来源同样取镜像 holder;本地走 chatPrefs。
   const chatInitialPermissionMode = isDeviceLinkDraft

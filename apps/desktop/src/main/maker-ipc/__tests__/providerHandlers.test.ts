@@ -64,6 +64,7 @@ function makeDeps(over: Partial<ProviderHandlerDeps> = {}): ProviderHandlerDeps 
     listPresets: () => [],
     testConnection: vi.fn(async () => ({ ok: true, latencyMs: 1 })),
     fetchModels: vi.fn(async () => ({ ok: true, models: [{ id: 'm1', name: 'M1' }] })),
+    rediscoverModels: vi.fn(async () => null),
     oauthLogin: vi.fn(async () => ({ ok: true })),
     oauthLogout: vi.fn(async () => {}),
     oauthCancel: vi.fn(() => {}),
