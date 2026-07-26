@@ -8,4 +8,4 @@
 #
 # 这里同时列出 team 与个人:即使 team 尚未建好或未授权,自动指派仍然生效。
 # team 确认可用后可以删掉个人账号那一项。
-* @makecindy/maintainers @MagicLizi
+* @makecindy/maintainers
