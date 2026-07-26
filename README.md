@@ -14,11 +14,7 @@
 </p>
 
 <p align="center">
-  🌐 <a href="https://cindy.app">International</a> | <a href="https://cindy.cn">Mainland China</a>
-</p>
-
-<p align="center">
-  ⬇️ <a href="https://cindy.app/#download">International download</a> | <a href="https://cindy.cn/#download">Mainland China download</a>
+  🌐 <a href="https://cindy.app">cindy.app</a> &nbsp;·&nbsp; ⬇️ <a href="https://cindy.app/download/">Download</a>
 </p>
 
 
@@ -42,9 +38,8 @@ models your way: sign in to the official Cindy service (usage deducted
 transparently), authorize the **Claude Code / Codex Coding Plan** you already
 pay for and keep using it inside Cindy — no duplicate bill — connect your own
 API keys, or use local models.
-See the [international site](https://cindy.app/#pricing) or the
-[Mainland China site](https://cindy.cn/#pricing) for service details, pricing,
-and downloads.
+See [cindy.app](https://cindy.app) for service details,
+[pricing](https://cindy.app/#pricing), and [downloads](https://cindy.app/download/).
 
 ## Yours to shape
 
@@ -75,7 +70,7 @@ repository and is not part of this monorepo.
 
 | Mode | Account requirement | Availability |
 | --- | --- | --- |
-| Hosted service | Cindy cloud account | Use Cindy's full hosted service. See [international pricing](https://cindy.app/#pricing) or [Mainland China pricing](https://cindy.cn/#pricing). |
+| Hosted service | Cindy cloud account | Use Cindy's full hosted service. See [pricing](https://cindy.app/#pricing). |
 | Local mode | No Cindy sign-in required | Choose “Local mode” on the login screen to use local agents. Server-backed capabilities are unavailable in this mode. |
 
 ## Prerequisites
@@ -108,13 +103,13 @@ pnpm install
 # Mainland China Cindy account
 pnpm restart:desktop:remote --region=cn
 
-# International Cindy account
+# Global Cindy account
 pnpm restart:desktop:remote --region=global
 ```
 
 Remote development uses your own Cindy cloud account and existing login state, so
 you can continue existing sessions and work while developing the client. Use `cn`
-for Mainland China accounts and `global` for international accounts; do not rely
+for Mainland China accounts and `global` for everyone else; do not rely
 on the internal default. Full desktop, mobile, data-isolation, and validation
 workflows are in [`CONTRIBUTING.en.md`](CONTRIBUTING.en.md).
 

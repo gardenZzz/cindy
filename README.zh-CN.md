@@ -18,7 +18,7 @@
 </p>
 
 <p align="center">
-  ⬇️ <a href="https://cindy.cn/#download">中国大陆版下载</a> | <a href="https://cindy.app/#download">国际版下载</a>
+  ⬇️ <a href="https://cindy.cn/download/">中国大陆版下载</a> | <a href="https://cindy.app/download/">国际版下载</a>
 </p>
 
 
