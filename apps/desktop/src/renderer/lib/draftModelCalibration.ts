@@ -14,6 +14,7 @@
 import {
   connectedProvidersForAgent,
   type AgentKind,
+  type CatalogModel,
   type ProviderView,
 } from '@cindy/model-providers';
 
@@ -27,16 +28,17 @@ export function pickConnectedModelForAgent(
   providers: readonly ProviderView[],
   agent: AgentKind,
   preferredModelId: string,
+  excludeModel?: (model: CatalogModel) => boolean,
 ): string | null {
   const connected = connectedProvidersForAgent([...providers], agent);
   if (connected.length === 0) return null;
+  const usable = (provider: ProviderView): CatalogModel[] =>
+    (provider.models[agent] ?? []).filter((m) => !excludeModel?.(m));
   for (const provider of connected) {
-    if ((provider.models[agent] ?? []).some((m) => m.id === preferredModelId)) {
-      return preferredModelId;
-    }
+    if (usable(provider).some((m) => m.id === preferredModelId)) return preferredModelId;
   }
   for (const provider of connected) {
-    const first = (provider.models[agent] ?? [])[0];
+    const first = usable(provider)[0];
     if (first) return first.id;
   }
   return null;
@@ -51,6 +53,13 @@ export interface DraftModelCalibrationInput {
   chosenByUser: boolean;
   /** 供应商清单是否仍在加载：加载期不校准，避免首帧把默认模型闪成别的。 */
   providersLoading: boolean;
+  /**
+   * 逐模型排除（与选择器的可见性口径同源）。SSH 远程草稿要传
+   * `isSubscriptionDirectModel`：订阅直连模型（`chatgpt/` / `xai/`）的 bridge 只挂在本地
+   * compat-proxy，远程模式不经它，选中必失败——供应商级过滤盖不住这一层，因为同一个
+   * 供应商可能既有可路由的模型、又有订阅直连模型。
+   */
+  excludeModel?: (model: CatalogModel) => boolean;
 }
 
 /** 返回草稿应当展示 / 发送的模型 id（不可校准时原样返回，绝不返回空）。 */
@@ -60,7 +69,8 @@ export function calibrateDraftModel({
   model,
   chosenByUser,
   providersLoading,
+  excludeModel,
 }: DraftModelCalibrationInput): string {
   if (chosenByUser || providersLoading) return model;
-  return pickConnectedModelForAgent(providers, agent, model) ?? model;
+  return pickConnectedModelForAgent(providers, agent, model, excludeModel) ?? model;
 }

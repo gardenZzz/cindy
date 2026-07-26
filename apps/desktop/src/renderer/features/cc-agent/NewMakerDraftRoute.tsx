@@ -155,7 +155,7 @@ import {
   deriveModelsFromProviders,
   filterChatBridgedCodexProviders,
 } from '@/lib/providerModels';
-import { effectiveSourceIdForModel, getModel, providerOffersModel, sessionModelSupportsFastMode, connectedProvidersForAgent, type ProviderView } from '@cindy/model-providers';
+import { effectiveSourceIdForModel, getModel, providerOffersModel, sessionModelSupportsFastMode, connectedProvidersForAgent, type CatalogModel, type ProviderView } from '@cindy/model-providers';
 import { isSubscriptionDirectModel } from '../../../shared/subscriptionModels';
 import {
   resolveDeviceLinkDraftDefaults,
@@ -545,9 +545,12 @@ export function NewMakerDraftRoute() {
    * 结果用在 draftInitialModel 上,会拿新模型配上按旧模型算出来的 effort / fastMode,
    * 提交一份目标模型根本不支持的组合(PR #548 review)。
    *
-   * 候选来源与 ChatInput 的发送门禁同口径:SSH 远程草稿排除仅本地可桥接的 Codex 来源,
-   * 否则会把一个在远端根本路由不出去的模型选成默认。device-link 草稿以被控端镜像为准,
-   * 整段不校准。
+   * 候选与 ChatInput 的 SSH 可见性同口径 —— 那里由 `!!remoteHostId` 同时驱动两道排除,
+   * 少一道就会把远端根本路由不出去的模型选成默认:
+   *   · 供应商级 `excludeChatBridgedCodex`:Responses→Chat 桥只挂本地 codex-proxy;
+   *   · 模型级 `excludeSubscriptionDirect`:订阅直连(chatgpt/ 、xai/)的 bridge 只挂本地
+   *     compat-proxy。必须逐模型判,同一供应商可能既有可路由模型又有订阅直连模型。
+   * device-link 草稿以被控端镜像为准,整段不校准(被控端跑完整 app,两道排除都不适用)。
    */
   const calibrationProviders = useMemo(
     () =>
@@ -566,6 +569,9 @@ export function NewMakerDraftRoute() {
       model: chatPrefs.model,
       chosenByUser: draft.modelChosenByVendor[draft.vendor] === true,
       providersLoading: localProvidersLoading,
+      ...(effectiveRemoteHostId
+        ? { excludeModel: (m: CatalogModel) => isSubscriptionDirectModel(m.id) }
+        : {}),
     });
   }, [
     isDeviceLinkDraft,
@@ -575,6 +581,7 @@ export function NewMakerDraftRoute() {
     draft.modelChosenByVendor,
     draft.vendor,
     localProvidersLoading,
+    effectiveRemoteHostId,
   ]);
 
   const effectiveSourceId = useMemo<string | null>(() => {
@@ -1126,15 +1133,18 @@ export function NewMakerDraftRoute() {
       }
       // 权威库:per-(agent, 来源, 模型),与 resolveDraftFast 的读源对齐(ModelSelector 的 Edit 面板
       // 对选中模型也会写这一份;此处显式写一遍,使 onFastModeChange 走任何路径都自洽、不依赖选择器侧写)。
+      // 写入键必须与 effectiveFastMode 的读取键同源:两者都用**校准后**的模型。若这里仍写
+      // chatPrefs.model,种子默认被校准后用户切 fast 会写到一个当前根本没在用的模型上 ——
+      // 开关看着没生效,旧模型却被静默改了偏好(PR #548 review)。
       if (effectiveSourceId) {
-        setProviderModelFast(capabilityAgentKind, effectiveSourceId, chatPrefs.model, enabled);
+        setProviderModelFast(capabilityAgentKind, effectiveSourceId, calibratedDraftModel, enabled);
       }
       // per-model 旧库:保留为兜底(retire 计划单列),写入维持向后兼容。
-      setFastModeForModel(chatPrefs.model, enabled);
+      setFastModeForModel(calibratedDraftModel, enabled);
     },
     [
       isDeviceLinkDraft,
-      chatPrefs.model,
+      calibratedDraftModel,
       supportsFastMode,
       effectiveSourceId,
       capabilityAgentKind,

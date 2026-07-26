@@ -941,10 +941,15 @@ export function refreshAnthropicModelsFromHttp(options?: { fromRetry?: boolean }
       mergeCapabilitiesWithPrevious(mapped);
     log.info(`anthropic models refreshed via HTTP: ${models.length}`);
     // 拿到有效清单 = 发现已恢复,清掉失败态与待执行的重试(放在 apply 之前:apply 只负责
-    // 生效,它因世代变化被 gate 掉时新世代会带着自己的触发重来)。apply 自己会 markChanged
-    // 广播,所以这里不必再单独通知一次失败态变化。
+    // 生效,它因世代变化被 gate 掉时新世代会带着自己的触发重来)。
+    //
+    // 失败态由有变无也要通知:apply 只在**清单真的变了**时才 markChanged 广播,而「上次
+    // 失败、这次成功且清单与上次一致」正好落在它的 early return 里 —— 不在这里通知,UI 会
+    // 继续显示已经不成立的失败理由。
+    const hadFailure = lastFailure !== null;
     lastFailure = null;
     cancelHttpRetry();
+    if (hadFailure) notifyFailureChanged();
     await applyModels(models, true, gen, explicitEffortIds, explicitFastModeIds);
   })().finally(() => {
     // 只清自己的登记:世代变化后可能已有新 flight 顶替,不能误清。
