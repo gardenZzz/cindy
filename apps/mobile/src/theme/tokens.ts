@@ -226,6 +226,10 @@ export interface LoginSkinColors {
   secondaryButtonText: string;
   /** 弹窗次级钮 pressed 叠层(亮浅底黑10% / 暗 Dark_button_Normal 黑20%;wave5 §11.1) */
   overlaySecondaryPressed: string;
+  /** 注销提示气泡底(figma 678:1075):固定亮 #FFFFFF / 暗 #1F1F1E,与桌面 --login-deletion-bubble-bg 逐值一致(取 agent 输入框底与最深深色底的值);浮层压立绘,必须不透明 */
+  deletionBubbleBg: string;
+  /** 注销提示气泡 1px 描边(figma 678:1075):固定亮 #D7D7D4 / 暗 #3C3C3A,与桌面 --login-deletion-bubble-border 逐值一致 */
+  deletionBubbleBorder: string;
 }
 
 /** 登录皮肤双态色板(与桌面 --login-* dark 值同源,DESIGN.md §16.1) */
@@ -272,6 +276,8 @@ export const loginPalettes: Record<ThemeMode, LoginSkinColors> = {
     secondaryButtonBorder: '#FFFFFF',
     secondaryButtonText: '#2A2828',
     overlaySecondaryPressed: 'rgba(0, 0, 0, 0.1)',
+    deletionBubbleBg: '#FFFFFF',
+    deletionBubbleBorder: '#D7D7D4',
   },
   dark: {
     bgBase: '#1F1F1E',
@@ -315,6 +321,8 @@ export const loginPalettes: Record<ThemeMode, LoginSkinColors> = {
     secondaryButtonBorder: '#565454',
     secondaryButtonText: '#EEEEEE',
     overlaySecondaryPressed: 'rgba(0, 0, 0, 0.2)',
+    deletionBubbleBg: '#1F1F1E',
+    deletionBubbleBorder: '#3C3C3A',
   },
 };
 

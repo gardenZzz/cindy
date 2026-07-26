@@ -73,6 +73,40 @@ describe('LoginPage account deletion status', () => {
     expect(loginHook.value.getAccountDeletionStatus).toHaveBeenCalledOnce();
   });
 
+  it('renders the status as an overlay bubble outside LoginStage (float, not in layout flow)', async () => {
+    render(<LoginPage />);
+
+    const bubble = await screen.findByRole('region', {
+      name: 'accountDeletion.status.pendingTitle',
+    });
+    // 浮层定位类(figma 678:1075:窗口顶 72、z-30 盖过 stage、水平居中、宽 670 clamp)
+    expect(bubble.className).toContain('absolute');
+    expect(bubble.className).toContain('top-[72px]');
+    expect(bubble.className).toContain('z-30');
+    expect(bubble.className).toContain('left-1/2');
+    expect(bubble.className).toContain('w-[min(670px,calc(100vw-48px))]');
+    // 不再渲染进 LoginStage 文档流(修复前被 absolute 面板 100% 覆盖的 bug 根因)
+    const stage = screen.getByTestId('login-stage');
+    expect(stage.contains(bubble)).toBe(false);
+    // pending 态无「我知道了」按钮
+    expect(screen.queryByRole('button', { name: 'accountDeletion.status.dismissButton' })).toBeNull();
+  });
+
+  it('shows the processing state without a dismiss button', async () => {
+    loginHook.value.getAccountDeletionStatus.mockResolvedValue({
+      success: true,
+      value: {
+        status: 'processing',
+        requestedAt: '2026-07-22T00:00:00.000Z',
+        deleteAfter: '2026-08-21T00:00:00.000Z',
+      },
+    });
+    render(<LoginPage />);
+
+    expect(await screen.findByText('accountDeletion.status.processingTitle')).toBeTruthy();
+    expect(screen.queryByRole('button', { name: 'accountDeletion.status.dismissButton' })).toBeNull();
+  });
+
   it('lets the user dismiss a terminal completed receipt', async () => {
     loginHook.value.getAccountDeletionStatus.mockResolvedValue({
       success: true,
@@ -85,11 +119,17 @@ describe('LoginPage account deletion status', () => {
     });
     render(<LoginPage />);
 
-    fireEvent.click(
-      await screen.findByRole('button', {
-        name: 'accountDeletion.status.dismissButton',
-      }),
-    );
+    const bubble = await screen.findByRole('region', {
+      name: 'accountDeletion.status.completedTitle',
+    });
+    // completed 态才有「我知道了」下划线文字链
+    const dismiss = screen.getByRole('button', {
+      name: 'accountDeletion.status.dismissButton',
+    });
+    expect(bubble.contains(dismiss)).toBe(true);
+    expect(dismiss.className).toContain('underline');
+
+    fireEvent.click(dismiss);
     await waitFor(() => expect(loginHook.value.clearAccountDeletionReceipt).toHaveBeenCalledOnce());
     expect(screen.queryByText('accountDeletion.status.completedTitle')).toBeNull();
   });
