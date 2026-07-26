@@ -97,7 +97,11 @@ import {
 import { sessionActivityMs } from './lib/dateSessionGrouping';
 import { sortProjectsForSidebar, sortSessionsForSidebar } from './lib/sidebarProjectSorting';
 import { isOrcaWorkerSession, resolveSessionRoute } from '@/lib/orcaSessionIdentity';
-import { PinnedSection } from './sidebar/sections/PinnedSection';
+import {
+  PinnedSection,
+  type PinnedSidebarEntry,
+} from './sidebar/sections/PinnedSection';
+import { ProjectNode as ProjectNodeView } from './sidebar/sections/ProjectNode';
 import {
   DialogueSection,
   compareDialogueSessions,
@@ -151,6 +155,11 @@ import {
   normalizeManualPinnedOrder,
   mergeVisibleReorder,
 } from './hooks/helpers/sidebarFilterCore';
+import {
+  activePinnedSidebarEntryIds,
+  pinnedProjectEntryId,
+  projectKeyFromPinnedEntryId,
+} from './lib/pinnedSidebarOrder';
 import { createLogger } from '@/lib/logger';
 import { useProjectPickerOptions } from '@/hooks/useProjectPickerOptions';
 import { recentWorkdirsStore } from '@/lib/recentWorkdirsStore';
@@ -364,10 +373,14 @@ export function CCAgentSidebarUpper() {
   // (sessionsWithRemote),merge 保证其它机器的置顶不丢位、不被挪去末尾。
   const handleRailPinnedReorder = useCallback(
     (visibleNewOrder: string[]) => {
-      const fullActivePinnedIds = pinnedSessionIdsInDisplayOrder([
+      const pinnedSessionIds = pinnedSessionIdsInDisplayOrder([
         ...sessionsHook.sessions,
         ...remoteProjectSessions,
       ]);
+      const fullActivePinnedIds = activePinnedSidebarEntryIds(
+        filter.manualPinnedOrder,
+        pinnedSessionIds,
+      );
       const merged = mergeVisibleReorder(
         normalizeManualPinnedOrder(filter.manualPinnedOrder, fullActivePinnedIds),
         visibleNewOrder,
@@ -504,7 +517,6 @@ export function CCAgentSidebarUpper() {
     </Tooltip.Provider>
   );
 }
-
 /* ============================== Types ============================== */
 
 type SessionsHook = ReturnType<typeof useCCSessions>;
@@ -910,9 +922,20 @@ function ExpandedView({
   /* ---- Grouping & collapse ---- */
   const allGroups = useProjectGroups(sidebarSessions, projectAliases.aliases);
   const groups = useProjectGroups(activityFilteredSessions, projectAliases.aliases);
+  // 普通项目目录也需要保留「所有会话都已单独置顶」的项目身份，供用户继续
+  // 从 ProjectNode 菜单置顶整个项目；实际项目子行在渲染前仍会排除已置顶会话。
+  const groupsWithPinnedProjects = useProjectGroups(
+    activityFilteredSessions,
+    projectAliases.aliases,
+    true,
+  );
+  // Project pinning is independent from conversation pinning. This catalogue
+  // keeps pinned conversations inside their project solely for project identity
+  // and project-level actions; the normal project tree above remains deduped.
+  const allProjectGroups = useProjectGroups(sidebarSessions, projectAliases.aliases, true);
   const activeWorkingDirs = useMemo(
-    () => allGroups.projects.map((p) => p.projectKey),
-    [allGroups.projects],
+    () => allProjectGroups.projects.map((p) => p.projectKey),
+    [allProjectGroups.projects],
   );
   const collapse = useCollapsedProjects(activeWorkingDirs);
 
@@ -924,7 +947,7 @@ function ExpandedView({
     () => [...sessions, ...remoteProjectSessions].filter(passesOrcaAndStatus),
     [sessions, remoteProjectSessions, passesOrcaAndStatus],
   );
-  const projectUniverse = useProjectGroups(unfilteredProjectSessions, projectAliases.aliases);
+  const projectUniverse = useProjectGroups(unfilteredProjectSessions, projectAliases.aliases, true);
 
   // 内联会话搜索:输入行在 SidebarTopNav 的第 4 行,状态经 ConversationSearchProvider 共享;
   // 这里只取 search 来渲染下方的结果 overlay(query 非空时盖住置顶 + 项目 + 对话)。
@@ -951,7 +974,7 @@ function ExpandedView({
     if (isLoadingSessions) return; // 等首次加载完
     const targetDir = pendingFocus.workingDir;
     const targetKey = normalizeProjectKey(targetDir) ?? `local:${targetDir}`;
-    const exists = groups.projects.some((p) => p.projectKey === targetKey);
+    const exists = groupsWithPinnedProjects.projects.some((p) => p.projectKey === targetKey);
     if (exists) {
       collapse.expand(targetKey);
       // RAF 等 expand 触发的 re-render 完成 (project header DOM 在折叠态下已渲染,
@@ -972,7 +995,14 @@ function ExpandedView({
       toast.warning(t('ccAgent.sidebar.deepLink.projectNotFound'));
     }
     consumePendingProjectFocus();
-  }, [pendingFocus, groups.projects, collapse, isLoadingSessions, selectedMachineId, t]);
+  }, [
+    pendingFocus,
+    groupsWithPinnedProjects.projects,
+    collapse,
+    isLoadingSessions,
+    selectedMachineId,
+    t,
+  ]);
 
   /* ---- 自动展开：首条消息把 session 从未分类挪进 Project 时，
    *      若目标 Project 当前折叠，幂等展开它，避免新会话视觉上"消失"。
@@ -1015,13 +1045,10 @@ function ExpandedView({
 
   /* ---- F-PJ-10: 在 render 阶段把 filter.projects 应用到 ProjectNode 列表 ---- */
   const visibleProjects = useMemo(() => {
-    if (filter.projectsAsSet === null) return groups.projects;
+    if (filter.projectsAsSet === null) return groupsWithPinnedProjects.projects;
     const allowed = filter.projectsAsSet;
-    return groups.projects.filter((p) => allowed.has(p.projectKey));
-  }, [groups.projects, filter.projectsAsSet]);
-
-  // PinnedSection 的 projectsFilter 入参（'all' | ReadonlySet<string>）
-  const pinnedFilter = filter.projectsAsSet ?? 'all';
+    return groupsWithPinnedProjects.projects.filter((p) => allowed.has(p.projectKey));
+  }, [groupsWithPinnedProjects.projects, filter.projectsAsSet]);
 
   /* ---- M41: Vendor 过滤 — 应用到 pinned / unclassified / project sessions ---- */
   const vendorPredicate = useMemo(() => {
@@ -1030,24 +1057,82 @@ function ExpandedView({
     return (s: { agentKind?: string | null }) => (s.agentKind ?? 'cc') === v;
   }, [filter.vendor]);
 
-  const visiblePinned = useMemo(() => {
+  const pinnedProjectKeys = useMemo(() => {
+    const keys = new Set<string>();
+    for (const entryId of filter.manualPinnedOrder) {
+      const projectKey = projectKeyFromPinnedEntryId(entryId);
+      if (projectKey) keys.add(projectKey);
+    }
+    return keys;
+  }, [filter.manualPinnedOrder]);
+
+  const visiblePinnedSessions = useMemo(() => {
     // 置顶段用 allGroups.pinned(未经"最近活跃 N 天"筛选)——置顶内容不受活跃时间过滤影响,
     // 久未活跃的置顶会话也始终显示。vendor / project 过滤仍照常生效。
-    const base = vendorPredicate ? allGroups.pinned.filter(vendorPredicate) : allGroups.pinned;
-    // 应用 manualPinnedOrder：出现在 order 中的按其下标稳定排前面（保持用户拖出的次序 +
-    // pin 时由 promotePin 主动塞到首位的新置顶）；不在 order 中的（升级前残留 pinned 没被
-    // 新版 pin 路径触达）落到末尾，维持 base 自带的 status→pinnedAt desc。
-    // manualPinnedOrder 为空（用户从未拖过 + 没在新版 pin 过）→ 直接退回原 base 顺序，零开销。
+    return allGroups.pinned.filter((session) => {
+      if (vendorPredicate && !vendorPredicate(session)) return false;
+      const allowedProjects = filter.projectsAsSet;
+      if (allowedProjects === null) return true;
+      if (session.workspaceKind === 'dialogue') return false;
+      const projectKey = projectIdentityKeyForSession(session);
+      return projectKey != null && allowedProjects.has(projectKey);
+    });
+  }, [allGroups.pinned, vendorPredicate, filter.projectsAsSet]);
+
+  const visiblePinnedProjects = useMemo(() => {
+    const allowedProjects = filter.projectsAsSet;
+    return allProjectGroups.projects.flatMap((project) => {
+      if (!pinnedProjectKeys.has(project.projectKey)) return [];
+      if (allowedProjects !== null && !allowedProjects.has(project.projectKey)) return [];
+
+      const matchingSessions = vendorPredicate
+        ? project.sessions.filter(vendorPredicate)
+        : project.sessions;
+      if (vendorPredicate && matchingSessions.length === 0) return [];
+
+      return [
+        {
+          project,
+          // Individually pinned conversations stay as their own siblings in the
+          // Pinned section; the project container only shows the remainder.
+          displaySessions: matchingSessions.filter((session) => session.pinnedAt == null),
+        },
+      ];
+    });
+  }, [
+    allProjectGroups.projects,
+    pinnedProjectKeys,
+    filter.projectsAsSet,
+    vendorPredicate,
+  ]);
+
+  const visiblePinnedEntries = useMemo<PinnedSidebarEntry[]>(() => {
+    const entries: PinnedSidebarEntry[] = [
+      ...visiblePinnedSessions.map((session) => ({
+        kind: 'session' as const,
+        id: session.id,
+        session,
+      })),
+      ...visiblePinnedProjects.map(({ project, displaySessions }) => ({
+        kind: 'project' as const,
+        id: pinnedProjectEntryId(project.projectKey),
+        project,
+        displaySessions,
+      })),
+    ];
+
+    // Entries in the persisted order rank first. Legacy pinned conversations
+    // without a rank remain at the end in their existing pinnedAt order.
     const order = filter.manualPinnedOrder;
-    if (order.length === 0) return base;
+    if (order.length === 0) return entries;
     const rank = new Map<string, number>();
     order.forEach((id, idx) => rank.set(id, idx));
-    return base.slice().sort((a, b) => {
+    return entries.sort((a, b) => {
       const ra = rank.get(a.id) ?? Number.MAX_SAFE_INTEGER;
       const rb = rank.get(b.id) ?? Number.MAX_SAFE_INTEGER;
       return ra - rb;
     });
-  }, [allGroups.pinned, vendorPredicate, filter.manualPinnedOrder]);
+  }, [visiblePinnedSessions, visiblePinnedProjects, filter.manualPinnedOrder]);
 
   const visibleUnclassified = useMemo(() => {
     const sessions = vendorPredicate
@@ -1078,11 +1163,41 @@ function ExpandedView({
   );
 
   const visibleProjectsWithVendor = useMemo(() => {
-    const projects = vendorPredicate
-      ? visibleProjects
-          .map((p) => ({ ...p, sessions: p.sessions.filter(vendorPredicate) }))
-          .filter((p) => p.sessions.length > 0)
-      : visibleProjects;
+    const unpinnedProjects = visibleProjects.filter(
+      (project) => !pinnedProjectKeys.has(project.projectKey),
+    );
+    const projects = unpinnedProjects.flatMap((project) => {
+      const matchingSessions = vendorPredicate
+        ? project.sessions.filter(vendorPredicate)
+        : project.sessions;
+      if (matchingSessions.length === 0) return [];
+      return [{
+        ...project,
+        sessions: matchingSessions.filter((session) => session.pinnedAt == null),
+      }];
+    });
+    return sortProjectsForSidebar(projects, filter.sortBy, filter.manualProjectOrder);
+  }, [
+    visibleProjects,
+    pinnedProjectKeys,
+    vendorPredicate,
+    filter.sortBy,
+    filter.manualProjectOrder,
+  ]);
+
+  // 折叠 rail 没有独立的 Pinned 项目瓷砖，因此项目面板必须保留置顶项目，
+  // 否则侧栏折叠后这些项目及其取消置顶入口都会完全不可达。
+  const visibleRailProjectsWithVendor = useMemo(() => {
+    const projects = visibleProjects.flatMap((project) => {
+      const matchingSessions = vendorPredicate
+        ? project.sessions.filter(vendorPredicate)
+        : project.sessions;
+      if (matchingSessions.length === 0) return [];
+      return [{
+        ...project,
+        sessions: matchingSessions.filter((session) => session.pinnedAt == null),
+      }];
+    });
     return sortProjectsForSidebar(projects, filter.sortBy, filter.manualProjectOrder);
   }, [visibleProjects, vendorPredicate, filter.sortBy, filter.manualProjectOrder]);
 
@@ -1099,7 +1214,14 @@ function ExpandedView({
     (visibleNewOrder: string[]) => {
       // baseline 与置顶段同序(pinnedSessionIdsInDisplayOrder 内部按 status→pinnedAt desc 排,含归档
       // 置顶),保证首次过滤态拖拽、manualPinnedOrder 还空时,隐藏置顶项不因 baseline 顺序不符而跳位。
-      const fullActivePinnedIds = pinnedSessionIdsInDisplayOrder([...sessions, ...remoteProjectSessions]);
+      const pinnedSessionIds = pinnedSessionIdsInDisplayOrder([
+        ...sessions,
+        ...remoteProjectSessions,
+      ]);
+      const fullActivePinnedIds = activePinnedSidebarEntryIds(
+        filter.manualPinnedOrder,
+        pinnedSessionIds,
+      );
       const merged = mergeVisibleReorder(
         normalizeManualPinnedOrder(filter.manualPinnedOrder, fullActivePinnedIds),
         visibleNewOrder,
@@ -1114,6 +1236,10 @@ function ExpandedView({
     return activityFilteredSessions.filter((s) => {
       if (s.pinnedAt != null) return false;
       if (vendorPredicate && !vendorPredicate(s)) return false;
+      if (s.workspaceKind !== 'dialogue') {
+        const pinnedProjectKey = projectIdentityKeyForSession(s);
+        if (pinnedProjectKey != null && pinnedProjectKeys.has(pinnedProjectKey)) return false;
+      }
       if (allowedProjects === null) return true;
       if (s.workspaceKind === 'dialogue') return false;
       const wd = normalizeWorkingDir(s.workingDir);
@@ -1121,7 +1247,7 @@ function ExpandedView({
       const key = projectIdentityKeyForSession(s);
       return key != null && allowedProjects.has(key);
     });
-  }, [activityFilteredSessions, vendorPredicate, filter.projectsAsSet]);
+  }, [activityFilteredSessions, vendorPredicate, filter.projectsAsSet, pinnedProjectKeys]);
 
   const [selectedSessionIds, setSelectedSessionIds] = useState<Set<string>>(() => new Set());
   const [selectionAnchorSessionId, setSelectionAnchorSessionId] = useState<string | null>(null);
@@ -1515,6 +1641,19 @@ function ExpandedView({
       }
     },
     [filter, patchLocal, sessions, sessionsById, t],
+  );
+
+  const handleToggleProjectPin = useCallback(
+    (project: ProjectNode, currentlyPinned: boolean) => {
+      const entryId = pinnedProjectEntryId(project.projectKey);
+      if (currentlyPinned) {
+        filter.removePin(entryId);
+      } else {
+        // New and re-pinned projects lead the unified project/conversation list.
+        filter.promotePin(entryId);
+      }
+    },
+    [filter],
   );
 
   const handleMoveSession = useCallback(
@@ -2216,9 +2355,48 @@ function ExpandedView({
           ) : (
             <>
               <PinnedSection
-                sessions={visiblePinned}
+                entries={visiblePinnedEntries}
                 allKnownProjects={projectUniverse.projects}
-                projectsFilter={pinnedFilter}
+                renderProject={(
+                  project,
+                  displaySessions,
+                  parentSectionCollapsed,
+                  sessionVariant,
+                ) => (
+                  <ProjectNodeView
+                    project={project}
+                    displaySessions={displaySessions}
+                    sessionVariant={sessionVariant}
+                    statusFilter={filter.status}
+                    isCollapsed={collapse.collapsed.has(project.projectKey)}
+                    parentSectionCollapsed={parentSectionCollapsed}
+                    activeSessionId={activeSessionId}
+                    runningSessionIds={displayRunningSessionIds}
+                    attachedSessionIds={attachedSessionIds}
+                    notifications={sidebarNotifications}
+                    scheduleSessionIndex={scheduleSessionIndex}
+                    selectedSessionIds={selectedSessionIds}
+                    disableSessionCollapse={false}
+                    onToggle={collapse.toggle}
+                    isProjectPinned
+                    onToggleProjectPin={handleToggleProjectPin}
+                    onRenameProject={handleProjectAliasChange}
+                    onSessionClick={handleSessionClick}
+                    onAction={handleActionClick}
+                    onRename={handleRename}
+                    onTogglePin={handleTogglePin}
+                    onMoveSession={handleMoveSession}
+                    projectOptions={projectPickerOptions}
+                    onScheduleAction={handleScheduleAction}
+                    onCreateInProject={handleCreateInProject}
+                    onOpenConversationSearch={handleOpenConversationSearch}
+                    onOpenInExplorer={handleOpenInExplorer}
+                    onLinkCodexProject={handleLinkCodexProject}
+                    linkingCodexProject={linkingCodexProject === project.projectKey}
+                    onBrowseFiles={handleBrowseFiles}
+                    onArchiveAll={handleArchiveAllInProject}
+                  />
+                )}
                 activeSessionId={activeSessionId}
                 runningSessionIds={displayRunningSessionIds}
                 attachedSessionIds={attachedSessionIds}
@@ -2275,6 +2453,7 @@ function ExpandedView({
               projectOptions={projectPickerOptions}
               onScheduleAction={handleScheduleAction}
               onToggleProject={collapse.toggle}
+              onToggleProjectPin={handleToggleProjectPin}
               onRenameProject={handleProjectAliasChange}
               onCollapseAll={collapse.collapseAll}
               onExpandAll={collapse.expandAll}
@@ -2370,7 +2549,8 @@ function ExpandedView({
           行为(hover 操作钮 / 右键菜单 / 重命名 / 移动 / schedule 操作 / 折叠上限
           与「显示全部」),见 railPanelStore 头注。 */}
       <RailPanels
-        projects={visibleProjectsWithVendor}
+        projects={visibleRailProjectsWithVendor}
+        pinnedProjectKeys={pinnedProjectKeys}
         unclassified={railUnclassified}
         dialogues={railDialogues}
         activeSessionId={activeSessionId}
@@ -2389,6 +2569,7 @@ function ExpandedView({
         onScheduleAction={handleScheduleAction}
         onCreateDialogue={handleCreateDialogue}
         onCreateInProject={handleCreateInProject}
+        onToggleProjectPin={handleToggleProjectPin}
       />
       {deleteScheduleDialog}
     </>
@@ -2620,6 +2801,7 @@ function RailPanelShell({
 
 interface RailPanelsProps {
   projects: ProjectNode[];
+  pinnedProjectKeys: ReadonlySet<string>;
   /** 未分类(草稿等)会话——展开态 UnclassifiedSection 同源,面板内平铺在项目列表之上。 */
   unclassified: Session[];
   dialogues: Session[];
@@ -2645,6 +2827,8 @@ interface RailPanelsProps {
   /** 在此项目内新建(项目行右键菜单 + 三级面板头部)——展开态 ProjectNode
    *  的 newInDirectory 主操作同源 handler(内置远程写保护)。 */
   onCreateInProject: (project: ProjectNode) => void;
+  /** 折叠态项目菜单仍需提供置顶/取消置顶，避免置顶项目只能展开侧栏后管理。 */
+  onToggleProjectPin: (project: ProjectNode, currentlyPinned: boolean) => void;
 }
 
 /**
@@ -2658,6 +2842,7 @@ interface RailPanelsProps {
  */
 function RailPanels({
   projects,
+  pinnedProjectKeys,
   unclassified,
   dialogues,
   activeSessionId,
@@ -2676,6 +2861,7 @@ function RailPanels({
   onScheduleAction,
   onCreateDialogue,
   onCreateInProject,
+  onToggleProjectPin,
 }: RailPanelsProps) {
   const { t } = useTranslation();
   const panelState = useSyncExternalStore(railPanelStore.subscribe, railPanelStore.getSnapshot);
@@ -3212,20 +3398,40 @@ function RailPanels({
               : null;
             const menuTargetBlocked = menuTarget != null && isDeviceLinkWriteBlocked(menuTarget);
             return (
-              <DropdownMenuItem
-                disabled={menuTarget == null || menuTargetBlocked}
-                onSelect={() => {
-                  setProjectMenu(null);
-                  if (!menuTarget || menuTargetBlocked) return;
-                  railPanelStore.closeAll();
-                  onCreateInProject(menuTarget);
-                }}
-                className="cursor-pointer text-sm text-[var(--msg-assistant-text)] hover:bg-[var(--cmd-palette-item-hover)]"
-              >
-                {menuTargetBlocked
-                  ? t('ccAgent.remoteSession.actionsUnavailable')
-                  : t('ccAgent.sidebar.projectAction.newInDirectory')}
-              </DropdownMenuItem>
+              <>
+                <DropdownMenuItem
+                  disabled={menuTarget == null}
+                  onSelect={() => {
+                    setProjectMenu(null);
+                    if (!menuTarget) return;
+                    onToggleProjectPin(
+                      menuTarget,
+                      pinnedProjectKeys.has(menuTarget.projectKey),
+                    );
+                  }}
+                  className="cursor-pointer text-sm text-[var(--msg-assistant-text)] hover:bg-[var(--cmd-palette-item-hover)]"
+                >
+                  {t(
+                    menuTarget && pinnedProjectKeys.has(menuTarget.projectKey)
+                      ? 'ccAgent.sidebar.projectAction.unpin'
+                      : 'ccAgent.sidebar.projectAction.pin',
+                  )}
+                </DropdownMenuItem>
+                <DropdownMenuItem
+                  disabled={menuTarget == null || menuTargetBlocked}
+                  onSelect={() => {
+                    setProjectMenu(null);
+                    if (!menuTarget || menuTargetBlocked) return;
+                    railPanelStore.closeAll();
+                    onCreateInProject(menuTarget);
+                  }}
+                  className="cursor-pointer text-sm text-[var(--msg-assistant-text)] hover:bg-[var(--cmd-palette-item-hover)]"
+                >
+                  {menuTargetBlocked
+                    ? t('ccAgent.remoteSession.actionsUnavailable')
+                    : t('ccAgent.sidebar.projectAction.newInDirectory')}
+                </DropdownMenuItem>
+              </>
             );
           })()}
         </DropdownMenuContent>
