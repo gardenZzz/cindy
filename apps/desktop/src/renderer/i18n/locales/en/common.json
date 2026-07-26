@@ -5323,6 +5323,10 @@
       "aiRenameRemoteOffline": "Remote device is not connected. Check the connection and try again",
       "aiRenameFailed": "AI rename failed, please try again"
     },
+    "autoTitle": {
+      "image": "Image",
+      "file": "File"
+    },
     "sessionHeader": {
       "untitled": "Untitled session",
       "moreActions": "More actions"

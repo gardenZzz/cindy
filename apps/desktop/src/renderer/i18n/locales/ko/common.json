@@ -5313,6 +5313,10 @@
       "aiRenameRemoteOffline": "원격 기기에 연결되어 있지 않습니다. 연결을 확인한 후 다시 시도해 주세요",
       "aiRenameFailed": "AI 이름 생성에 실패했습니다. 잠시 후 다시 시도해 주세요"
     },
+    "autoTitle": {
+      "image": "이미지",
+      "file": "파일"
+    },
     "sessionHeader": {
       "untitled": "제목 없는 세션",
       "moreActions": "더 보기"

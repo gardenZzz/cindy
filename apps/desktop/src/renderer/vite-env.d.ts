@@ -4144,6 +4144,17 @@ interface ElectronAPI {
     ) => Promise<{ title: string | null }>;
     /** 重命名输入框 Magic 按钮:按会话最新对话内容重新生成标题(失败返 title: null)。 */
     regenerateSessionTitle: (sessionId: string) => Promise<{ title: string | null }>;
+    /**
+     * 会话自动起名(权威实现在 main):立即占位 + 智能标题覆盖,条件写保证
+     * user rename wins。`done=true` 表示该会话已不需要再起名(已起过名或用户
+     * 手动改过名);瞬时失败返回 false,调用方应在下一条带文字的消息上重试。
+     */
+    autoTitle: (request: {
+      sessionId: string;
+      text: string;
+      agentKind: 'claude-code' | 'codex';
+      isUserText?: boolean;
+    }) => Promise<{ applied: boolean; done: boolean }>;
     helpAsk: (
       request: import('../shared/helpTypes').HelpAskRequest,
     ) => Promise<import('../shared/helpTypes').HelpAnswerResult>;

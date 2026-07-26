@@ -5313,6 +5313,10 @@
       "aiRenameRemoteOffline": "远程设备未连接，请检查连接后重试",
       "aiRenameFailed": "AI 命名失败，请稍后重试"
     },
+    "autoTitle": {
+      "image": "图片",
+      "file": "文件"
+    },
     "sessionHeader": {
       "untitled": "未命名对话",
       "moreActions": "更多操作"

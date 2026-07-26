@@ -1196,6 +1196,24 @@ export function createGhostSessionTap(sessionId: string): {
  * 快路径:没有任何启用意识声明钩子 → 零开销放行(不查 DB 不进网关),
  * 绝大多数用户走这条。任何异常收敛为放行(fail-open),绝不卡发送热路径。
  */
+/**
+ * 是否装有**启用中**的 will-user-message 拦截意识(纯本地判定,不触发钩子)。
+ *
+ * 调用方(自动起名)据此决定要不要把用户原话送去标题模型:那是一次独立的 AI 发送,
+ * 而拦截钩的全部意义就是不让某些内容到达 AI。这里只问"有没有人在管",不重复询问
+ * 钩子本身 —— 重复询问会让 Ghost 对同一条消息被问两次,产生它没预期的副作用。
+ */
+export function hasEnabledUserMessageHookGhost(): boolean {
+  try {
+    return availableGhosts().some(
+      (g) => g.enabled && g.manifest.subscribe?.hooks?.includes('will-user-message'),
+    );
+  } catch {
+    // 判定不了就按"有人在管"处理:宁可少一个智能标题,也不把内容送出去。
+    return true;
+  }
+}
+
 export async function screenGhostUserMessage(
   sessionId: string,
   text: string,
