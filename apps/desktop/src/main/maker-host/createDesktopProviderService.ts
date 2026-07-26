@@ -344,7 +344,15 @@ export function getDesktopProviderService(): ProviderService {
           // anthropic 清单的唯一来源是动态发现,而发现只在启动期与显式 OAuth 登录成功
           // 时触发。绑定是在这两个时机之后才建立的,启动期那次早被登录态 gate 掉 ——
           // 不在认领成功时补拉一次,供应商会停在「已连接 + 零模型」直到下次重启。
-          void refreshAnthropicModelsFromHttp();
+          //
+          // 磁盘缓存要先补:启动期的 loadAnthropicModelsFromDiskCache 同样因当时未绑定而
+          // 早退了。先把上次成功的清单摆出来,再去拉最新的 —— 否则这次 HTTP 一旦超时或
+          // 失败,明明有可用的缓存清单,用户还是一个模型都选不了(PR #548 review)。
+          void loadAnthropicModelsFromDiskCache()
+            .catch(() => undefined)
+            .finally(() => {
+              void refreshAnthropicModelsFromHttp();
+            });
         });
         return hasClaudeAiOAuth();
       },

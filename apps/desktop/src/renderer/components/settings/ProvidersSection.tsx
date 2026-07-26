@@ -1303,11 +1303,12 @@ export function ProvidersSection() {
   /**
    * 动态清单发现失败后的**用户主动**重试。
    *
-   * 发现失败刻意不自动重试(直连受限的网络下是结构性不可达,静默重试只会把「连不上」
-   * 拖成「一直在发现中」),所以这个按钮是唯一的恢复入口 —— 用户配好代理 / 网络恢复后
-   * 点一下即可,不必重启。成功与否都由 main 广播 PROVIDER_CHANGED 驱动列表刷新:
-   * 成功时清单直接出现在同一块区域,失败时理由就地更新 —— 两种结果都自解释,
-   * 不再弹 toast 重复一遍(只有 IPC 本身异常才需要额外提示)。
+   * host 只对暂时性失败(连不上 / 超时 / 上游 5xx)做有限次退避重试,地域拒绝、凭证被拒
+   * 这类确定性答复一次都不重试 —— 重试只会把真正的原因藏起来。所以自动退避停手之后,
+   * 这个按钮就是恢复入口:用户换好网络 / 代理出口后点一下即可,不必重启,并且会重开一轮
+   * 退避。成功与否都由 main 广播 PROVIDER_CHANGED 驱动列表刷新:成功时清单直接出现在
+   * 同一块区域,失败时理由就地更新 —— 两种结果都自解释,不再弹 toast 重复一遍(只有 IPC
+   * 本身异常才需要额外提示)。
    */
   const handleRediscoverModels = useCallback(
     async (p: ProviderView) => {
@@ -1490,8 +1491,8 @@ export function ProvidersSection() {
                     {/* 已连接却无模型(如 Codex 刚登录、models_cache 未生成;或网关清单拉取失败)
                         不能沿用未连接的「授权后…」文案——那对已连接供应商自相矛盾。
                         动态发现明确失败时更进一步:讲清**发生了什么 + 下一步**并给出重试入口
-                        (DESIGN.md「Errors = what happened + what to do」)——继续说「正在发现」
-                        对直连不通的用户就是假话,那个状态永远不会自己好转。 */}
+                        (DESIGN.md「Errors = what happened + what to do」)——被地域拒绝或凭证
+                        被拒的用户不会等来任何自动恢复,继续说「正在发现」就是假话。 */}
                     <span style={{ color: 'var(--text-tertiary)' }}>
                       {effectiveSelected.modelDiscoveryFailure
                         ? t(

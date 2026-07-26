@@ -18,6 +18,7 @@ const h = vi.hoisted(() => ({
   claudeCredentialPresent: true,
   grokCredentialPresent: true,
   refreshAnthropicModels: vi.fn(),
+  loadAnthropicDiskCache: vi.fn(async () => {}),
   anthropicDiscoveryFailure: null as {
     kind: string;
     at: string;
@@ -54,7 +55,7 @@ vi.mock('../grok-oauth-login.js', () => ({
 }));
 
 vi.mock('../model-discovery/anthropic.js', () => ({
-  loadAnthropicModelsFromDiskCache: vi.fn(async () => {}),
+  loadAnthropicModelsFromDiskCache: h.loadAnthropicDiskCache,
   refreshAnthropicModelsFromHttp: h.refreshAnthropicModels,
   getAnthropicModelDiscoveryFailure: () => h.anthropicDiscoveryFailure,
 }));
@@ -98,6 +99,7 @@ beforeEach(() => {
   h.grokCredentialPresent = true;
   h.anthropicDiscoveryFailure = null;
   h.refreshAnthropicModels.mockClear();
+  h.loadAnthropicDiskCache.mockClear();
 });
 
 afterEach(() => {
@@ -112,10 +114,14 @@ describe('native provider connection claim on read', () => {
     expect(isNativeProviderAuthBound('anthropic')).toBe(true);
     // 绑定刚建立 —— 启动期那次发现早被登录态 gate 掉,必须在这里补一次。
     expect(h.refreshAnthropicModels).toHaveBeenCalledTimes(1);
+    // 磁盘缓存同样要补:启动期那次 load 也因未绑定而早退了。不先摆出上次成功的清单,
+    // 这次 HTTP 一旦失败,明明有可用缓存用户还是零模型(PR #548 review)。
+    expect(h.loadAnthropicDiskCache).toHaveBeenCalledTimes(1);
 
     // 已绑定后不再重复认领,也不再反复打网络。
     await connectedMap();
     expect(h.refreshAnthropicModels).toHaveBeenCalledTimes(1);
+    expect(h.loadAnthropicDiskCache).toHaveBeenCalledTimes(1);
   });
 
   it('认领本机 xai 凭证(清单不走动态发现,不触发拉取)', async () => {

@@ -69,7 +69,10 @@ import {
   getDesktopSelectableCatalog,
   refreshDiscoveredCodexModels,
 } from './createDesktopProviderService.js';
-import { clearAnthropicDiscoveredModels } from './model-discovery/anthropic.js';
+import {
+  clearAnthropicDiscoveredModels,
+  setAnthropicDiscoveryFailureListener,
+} from './model-discovery/anthropic.js';
 import {
   buildDesktopClaudeRuntimeConfig,
   desktopCodexRuntimeConfig,
@@ -155,6 +158,25 @@ setActiveCatalogChangedListener((revision) => {
       error: error instanceof Error ? error.message : String(error),
     });
     return;
+  }
+});
+
+/**
+ * anthropic 清单发现的失败态变化 → 广播 PROVIDER_CHANGED。
+ *
+ * 归因不进 active catalog(清单没变,没有 revision 可言),但 renderer 往往在拉取失败
+ * **之前**就取走了 provider 快照(15s 超时那条路径尤其明显)。不主动通知,设置页会一直
+ * 停在「正在发现」而不是讲明失败理由(PR #548 review)。
+ */
+setAnthropicDiscoveryFailureListener(() => {
+  try {
+    // 复用既有的「刷 capabilities + 广播」收口:清单确实没变,这一步只是把 provider
+    // 快照重新推给 renderer,让它重取带上失败归因的 listProviders。
+    refreshSelectableModelsAndBroadcast({});
+  } catch (error) {
+    desktopMakerLogger.warn('anthropic discovery failure broadcast failed', {
+      error: error instanceof Error ? error.message : String(error),
+    });
   }
 });
 
