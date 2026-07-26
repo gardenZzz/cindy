@@ -223,7 +223,7 @@ async function extractVerifiedFiles(zipBuffer, platformKey, destDir) {
 /**
  * 确保指定平台的 platform-tools 二进制就位。
  *
- * @returns {Promise<{ status: 'skipped'|'installed', version: string, files?: string[] }>}
+ * @returns {Promise<{ status: 'skipped'|'installed', version: string, files?: string[], source?: string }>}
  */
 export async function ensureAndroidPlatformTools({
   platformKey = currentPlatformKey(),
@@ -363,6 +363,8 @@ if (process.argv[1] && fileURLToPath(import.meta.url) === path.resolve(process.a
       const p = path.join(BIN_ROOT, key, name);
       console.log(`${fs.existsSync(p) ? sha256File(p) : '(missing)'}  ${name}`);
     }
+  } else if (!args.platformKey || !isSupportedPlatformKey(args.platformKey)) {
+    log(`${args.platformKey ?? process.platform + '-' + process.arch}: not a supported platform, skip`);
   } else {
     ensureAndroidPlatformTools(args).catch((err) => {
       console.error(`ERROR: ${err.message}`);

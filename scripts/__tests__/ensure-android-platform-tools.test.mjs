@@ -139,9 +139,21 @@ test('verifyInstalled: source.properties 版本与 PINNED 不匹配时不算就�
 });
 
 test('verifyInstalled: 文件缺失时不算就位', () => {
+  // 只有 source.properties,三个二进制文件全部缺失 → 命中 "missing" 分支。
+  const root = tmpBinRoot('win32-x64', {
+    'source.properties': 'Pkg.Revision=32.0.0',
+  });
+  const r = verifyInstalled('win32-x64', root);
+  assert.equal(r.ok, false);
+  assert.match(r.reason, /missing/);
+});
+
+test('verifyInstalled: 文件内容被篡改时报 sha256 不匹配', () => {
   const root = tmpBinRoot('win32-x64', {
     'source.properties': 'Pkg.Revision=32.0.0',
     'adb.exe': 'not the real adb',
+    'AdbWinApi.dll': 'fake dll',
+    'AdbWinUsbApi.dll': 'fake dll',
   });
   const r = verifyInstalled('win32-x64', root);
   assert.equal(r.ok, false);
