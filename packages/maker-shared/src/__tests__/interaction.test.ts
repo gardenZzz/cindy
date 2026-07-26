@@ -15,7 +15,7 @@ import {
   buildPlanReviewDecisionSummary,
   buildPlanReviewEvidencePresentation,
   buildPluginSetupCancelDecision,
-  buildRemotePluginSetupSummary,
+  buildRemotePluginSetupPresentation,
   canStartInteractionResolve,
   encodeMultiSelectAnswer,
   extractPlanOutline,
@@ -581,37 +581,155 @@ describe('interaction shared model', () => {
     expect(buildPluginSetupCancelDecision({ kind: 'plugin_setup', requestId: 's1', revision: -1 })).toBeNull();
     expect(buildPluginSetupCancelDecision({ kind: 'permission', requestId: 'p1', revision: 1 })).toBeNull();
 
-    expect(buildRemotePluginSetupSummary({
+  });
+
+  it('projects a full read-only plugin setup status card for controllers', () => {
+    const presentation = buildRemotePluginSetupPresentation({
+      kind: 'plugin_setup',
+      requestId: 's1',
+      revision: 2,
+      ghost: {
+        id: 'cindy-web-search',
+        name: ' Cindy Web Search ',
+        iconDataUrl: 'data:image/png;base64,AAAA',
+      },
+      intro: ' 需要一个搜索 API key ',
+      steps: [
+        {
+          id: 'brave',
+          groupId: 'search-key',
+          groupMode: 'any_of',
+          title: ' Brave key ',
+          description: ' 用 Brave 的搜索 API ',
+          phase: 'failed',
+          errorCode: 'SAVE_FAILED',
+          action: {
+            id: 'inline:opaque',
+            kind: 'inline_form',
+            form: { fields: [{ id: 'value', type: 'secret', label: ' Brave API key ' }] },
+          },
+        },
+        {
+          id: 'tavily',
+          groupId: 'search-key',
+          groupMode: 'any_of',
+          title: 'Tavily key',
+          phase: 'pending',
+          action: { id: 'oauth:opaque', kind: 'oauth_connect' },
+        },
+        {
+          id: 'model',
+          groupId: 'model',
+          groupMode: 'any_of',
+          title: '连接模型服务',
+          phase: 'satisfied',
+        },
+      ],
+    });
+
+    expect(presentation).toEqual({
+      ghostName: 'Cindy Web Search',
+      iconDataUrl: 'data:image/png;base64,AAAA',
+      intro: '需要一个搜索 API key',
+      satisfiedCount: 1,
+      stepCount: 3,
+      terminal: false,
+      groups: [
+        {
+          id: 'search-key',
+          // 组内两项 → 「任选其一」
+          anyOf: true,
+          steps: [
+            {
+              id: 'brave',
+              title: 'Brave key',
+              description: '用 Brave 的搜索 API',
+              phase: 'failed',
+              errorCode: 'SAVE_FAILED',
+              actionKind: 'inline_form',
+              inlineFieldLabel: 'Brave API key',
+            },
+            {
+              id: 'tavily',
+              title: 'Tavily key',
+              description: null,
+              phase: 'pending',
+              errorCode: null,
+              actionKind: 'oauth_connect',
+              inlineFieldLabel: null,
+            },
+          ],
+        },
+        {
+          id: 'model',
+          // 单项组没有「任选其一」语义,提示只会让用户困惑
+          anyOf: false,
+          steps: [{
+            id: 'model',
+            title: '连接模型服务',
+            description: null,
+            phase: 'satisfied',
+            errorCode: null,
+            actionKind: null,
+            inlineFieldLabel: null,
+          }],
+        },
+      ],
+    });
+  });
+
+  it('collapses unknown plugin setup enums instead of passing them through to copy lookups', () => {
+    const presentation = buildRemotePluginSetupPresentation({
       kind: 'plugin_setup',
       requestId: 's1',
       revision: 1,
-      ghost: { id: 'cindy-web-search', name: 'Cindy Web Search' },
-      intro: ' 需要一个搜索 API key ',
+      terminal: true,
       steps: [
-        { id: 'brave', title: ' 配置 Brave key ' },
-        { id: 'tavily', title: 'Tavily key' },
-        { id: 'blank', title: '   ' },
+        // 被控端新版本引入的值:降级为 null,少一个徽标而不是查表查出 key 字面量
+        { id: 'a', title: 'A', phase: 'teleporting', errorCode: 'NOT_A_CODE', action: { id: 'x', kind: 'mind_control' } },
+        { id: 'b', title: '   ' },
         'not-a-step',
       ],
-    })).toEqual({
-      ghostName: 'Cindy Web Search',
-      intro: '需要一个搜索 API key',
-      stepTitles: ['配置 Brave key', 'Tavily key'],
     });
 
-    expect(buildRemotePluginSetupSummary({ kind: 'plugin_setup', requestId: 's1' })).toEqual({
-      ghostName: null,
-      intro: null,
-      stepTitles: [],
-    });
+    expect(presentation.terminal).toBe(true);
+    expect(presentation.stepCount).toBe(1);
+    expect(presentation.groups).toEqual([{
+      id: 'a-group',
+      anyOf: false,
+      steps: [{
+        id: 'a',
+        title: 'A',
+        description: null,
+        phase: null,
+        errorCode: null,
+        actionKind: null,
+        inlineFieldLabel: null,
+      }],
+    }]);
 
-    // 换个 kind 传进来必须返回空摘要,而不是从任意 request 上刮字段让误用「看起来正常」。
-    expect(buildRemotePluginSetupSummary({
+    // 远程 URL 图标一律丢弃:只接受内联 data:image/。
+    expect(buildRemotePluginSetupPresentation({
+      kind: 'plugin_setup',
+      requestId: 's1',
+      ghost: { id: 'g', name: 'G', iconDataUrl: 'https://example.com/icon.png' },
+    }).iconDataUrl).toBeNull();
+
+    // 换个 kind 传进来必须返回空投影,而不是从任意 request 上刮字段让误用「看起来正常」。
+    expect(buildRemotePluginSetupPresentation({
       kind: 'permission',
       requestId: 'p1',
       ghost: { id: 'x', name: 'Not a plugin setup' },
       intro: 'nope',
       steps: [{ id: 's', title: 'nope' }],
-    })).toEqual({ ghostName: null, intro: null, stepTitles: [] });
+    })).toEqual({
+      ghostName: null,
+      iconDataUrl: null,
+      intro: null,
+      groups: [],
+      satisfiedCount: 0,
+      stepCount: 0,
+      terminal: false,
+    });
   });
 });

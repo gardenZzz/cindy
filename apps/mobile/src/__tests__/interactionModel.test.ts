@@ -26,6 +26,9 @@ import {
   normalizeAskQuestions,
   pendingInteractionsBlockRemoteComposer,
   remoteInteractionHandling,
+  REMOTE_PLUGIN_SETUP_ACTION_KINDS,
+  REMOTE_PLUGIN_SETUP_ERROR_CODES,
+  REMOTE_PLUGIN_SETUP_PHASES,
   permissionRiskSummary,
   permissionTitle,
   selectActivePendingInteraction,
@@ -214,9 +217,9 @@ describe('interactionModel', () => {
     // 取消出口:没有出口 + 卡接管输入框 = 会话锁死(线上已复现)。
     expect(interactionPanelSource).toContain("if (kind === 'plugin_setup')");
     expect(interactionPanelSource).toContain('buildPluginSetupCancelDecision(item.request)');
-    expect(interactionPanelSource).toContain("t('interaction.panel.pluginSetupDesktopOnly')");
     expect(interactionPanelSource).toContain('interaction.unsupported.cancelButton');
-    // 摘要合并成一段再限行:每行各自 numberOfLines 会把总高度放大成 6 × 行数。
+    // 未知 kind 仍回退到 UnsupportedCard 的合并摘要:每行各自 numberOfLines 会把
+    // 总高度放大成 6 × 行数。
     expect(interactionPanelSource).toContain("const summaryText = (summaryLines ?? [contentToPreview(request)])");
     expect(interactionPanelSource).not.toContain('lines.map((line, index)');
     // 取消由被控端按 expectedRevision 裁决,不能乐观撤卡(撤了可能其实没取消);
@@ -237,6 +240,61 @@ describe('interactionModel', () => {
     expect(interactionBlocksRemoteComposer({
       request: { kind: 'permission', requestId: 'perm-1' },
     })).toBe(true);
+  });
+
+  it('renders plugin setup as a full read-only status card, not a flat summary', () => {
+    const interactionPanelSource = readFileSync(resolve(process.cwd(), 'src/session/InteractionPanel.tsx'), 'utf8');
+
+    // 手机端做不了配置动作,这张卡的全部价值在「看懂」:哪个插件、卡在哪一步、
+    // 为什么失败、回电脑端要做什么。退回扁平摘要就等于把这些信息又丢了。
+    expect(interactionPanelSource).toContain('function PluginSetupCard(');
+    expect(interactionPanelSource).toContain('buildRemotePluginSetupPresentation(item.request)');
+    expect(interactionPanelSource).not.toContain('pluginSetupSummaryLines');
+    expect(interactionPanelSource).toContain('interaction.pluginSetup.phase.${step.phase}');
+    expect(interactionPanelSource).toContain('interaction.pluginSetup.error.${step.errorCode}');
+    expect(interactionPanelSource).toContain('interaction.pluginSetup.action.${step.actionKind}');
+    // any_of 组要提示「任选其一」,否则用户以为每一步都得做。
+    expect(interactionPanelSource).toContain("t('interaction.pluginSetup.chooseOne')");
+    // 已 settle 的收尾帧不该再引导用户「去电脑端完成」。
+    expect(interactionPanelSource).toContain('presentation.terminal ? null');
+    // 状态色只用两个语义色 + 灰阶(mobile-design-guide §1)。
+    expect(interactionPanelSource).toContain('colors.statusReady');
+    expect(interactionPanelSource).toContain('colors.statusAccent');
+  });
+
+  it('keeps every plugin setup phase, error code and action kind translated in all locales', async () => {
+    const previous = i18n.language;
+    try {
+      for (const locale of ['zh-CN', 'en', 'ja', 'ko']) {
+        await i18n.changeLanguage(locale);
+        for (const phase of REMOTE_PLUGIN_SETUP_PHASES) {
+          const key = `interaction.pluginSetup.phase.${phase}`;
+          expect(i18n.t(key), `${locale} ${key}`).not.toBe(key);
+        }
+        for (const code of REMOTE_PLUGIN_SETUP_ERROR_CODES) {
+          const key = `interaction.pluginSetup.error.${code}`;
+          expect(i18n.t(key), `${locale} ${key}`).not.toBe(key);
+        }
+        for (const kind of REMOTE_PLUGIN_SETUP_ACTION_KINDS) {
+          // inline_form 走带字段名的专属文案,不在 action 目录里。
+          if (kind === 'inline_form') continue;
+          const key = `interaction.pluginSetup.action.${kind}`;
+          expect(i18n.t(key), `${locale} ${key}`).not.toBe(key);
+        }
+        for (const key of [
+          'interaction.pluginSetup.completeOnDesktop',
+          'interaction.pluginSetup.chooseOne',
+          'interaction.pluginSetup.progress',
+          'interaction.pluginSetup.desktopActionHint',
+          'interaction.pluginSetup.inlineFormAction',
+          'interaction.pluginSetup.inlineFormActionGeneric',
+        ]) {
+          expect(i18n.t(key), `${locale} ${key}`).not.toBe(key);
+        }
+      }
+    } finally {
+      await i18n.changeLanguage(previous);
+    }
   });
 
   it('localizes queue titles and kind labels instead of rendering the shared Chinese defaults', () => {

@@ -20,7 +20,7 @@ export {
   buildPlanReviewDecisionSummary,
   buildPlanReviewEvidencePresentation,
   buildPluginSetupCancelDecision,
-  buildRemotePluginSetupSummary,
+  buildRemotePluginSetupPresentation,
   canStartInteractionResolve,
   encodeMultiSelectAnswer,
   extractPlanOutline,
@@ -35,6 +35,9 @@ export {
   planReviewPlan,
   readRequestId,
   remoteInteractionHandling,
+  REMOTE_PLUGIN_SETUP_ACTION_KINDS,
+  REMOTE_PLUGIN_SETUP_ERROR_CODES,
+  REMOTE_PLUGIN_SETUP_PHASES,
   selectActivePendingInteraction,
   selectionFromAnswer,
   sessionScopedPermissionSuggestions,
@@ -43,6 +46,10 @@ export {
   type AskQuestionReviewPresentation,
   type PermissionReviewPresentation,
   type PlanReviewEvidencePresentation,
+  type RemotePluginSetupGroup,
+  type RemotePluginSetupPhase,
+  type RemotePluginSetupPresentation,
+  type RemotePluginSetupStep,
 } from '@cindy/maker-shared/interaction';
 
 export type MobilePermissionDecisionAction = 'allow-once' | 'always-allow';

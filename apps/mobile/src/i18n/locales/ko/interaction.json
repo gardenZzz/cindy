@@ -40,7 +40,6 @@
     "unsupportedType": "이 원격 상호작용 유형은 모바일에서 아직 지원되지 않습니다.",
     "unsupportedKind": "미지원",
     "desktopOnlyKind": "컴퓨터에서 처리",
-    "pluginSetupDesktopOnly": "이 플러그인 설정은 컴퓨터에서 완료해야 합니다.",
     "cancelRequest": "이 요청 취소",
     "cancelRequestAccessibility": "이 원격 요청 취소",
     "awaitingAnswer": "답변 대기",
@@ -179,5 +178,42 @@
     "enable": "켜기",
     "icloudTimeout": "사진이 아직 iCloud에서 다운로드 중이며 시간이 초과되었습니다. 네트워크를 확인하고 다시 시도하세요.",
     "photoNotReadable": "이 사진은 지금 읽을 수 없습니다(iCloud에서 다운로드가 완료되지 않았을 수 있습니다). 나중에 다시 시도하세요."
+  },
+  "pluginSetup": {
+    "completeOnDesktop": "제어 중인 데스크톱에서 설정을 완료하세요. 이 카드는 자동으로 업데이트됩니다.",
+    "chooseOne": "설정 방법을 하나 선택하세요",
+    "stepsHeading": "설정 단계",
+    "progress": "{{satisfied}}/{{total}} 완료",
+    "desktopActionHint": "컴퓨터에서 {{action}}",
+    "phase": {
+      "pending": "설정 대기",
+      "action_running": "진행 중…",
+      "waiting_external": "인증 대기 중…",
+      "verifying": "검증 중…",
+      "satisfied": "완료",
+      "failed": "실패",
+      "cancelled": "취소됨"
+    },
+    "error": {
+      "ACTION_FAILED": "설정 작업을 완료할 수 없습니다. 다시 시도하세요.",
+      "ACTION_STALE": "설정 내용이 변경되었습니다. 설정 작업을 다시 선택하세요.",
+      "AUTH_CANCELLED": "인증이 취소되었습니다. 필요한 경우 다시 인증하세요.",
+      "AUTH_FAILED": "인증을 완료할 수 없습니다. 다시 시도하세요.",
+      "INLINE_INVALID": "설정 내용이 올바르지 않습니다. 확인한 후 다시 시도하세요.",
+      "INLINE_UNAVAILABLE": "이 Cindy 버전에서는 채팅에서 이 설정을 저장할 수 없습니다. Cindy를 업데이트한 후 다시 시도하세요.",
+      "SAVE_FAILED": "설정을 저장할 수 없습니다. 다시 시도하세요.",
+      "WINDOW_CLOSED": "설정을 시작한 창이 닫혔습니다. 세션으로 돌아가 다시 시도하세요.",
+      "TARGET_UNAVAILABLE": "플러그인이 비활성화되었거나 제거되었거나 사용할 수 없습니다. 플러그인 상태를 확인한 후 다시 시도하세요.",
+      "ASSESSMENT_FAILED": "설정 상태를 새로 고칠 수 없습니다. 다시 시도하세요.",
+      "TIMEOUT": "설정 대기 시간이 초과되었습니다. 다시 시도하세요."
+    },
+    "action": {
+      "oauth_connect": "인증",
+      "open_plugin_settings": "설정 열기",
+      "manage_connection": "연결 관리",
+      "open_client_settings": "모델 설정 열기"
+    },
+    "inlineFormAction": "컴퓨터에서 {{label}} 입력",
+    "inlineFormActionGeneric": "컴퓨터에서 설정 입력"
   }
 }
