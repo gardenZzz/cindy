@@ -465,6 +465,70 @@ describe('ModelSelector trigger variants', () => {
     expect(trigger.querySelector('[data-model-promotion-badge]')).toBeNull();
   });
 
+  it('keeps a long subscription-backed field menu bounded and wheel-scrollable', () => {
+    const models: VisibleModelFixture[] = Array.from({ length: 40 }, (_, index) => ({
+      id: `subscription-model-${index + 1}`,
+      displayName: `Subscription Model ${index + 1}`,
+      contextWindow: 200000,
+      efforts: ['high'],
+      defaultEffort: 'high',
+    }));
+    const originalCapabilities = agentCapabilitiesRef.capabilities;
+    visibleModelsRef.models = models;
+    agentCapabilitiesRef.capabilities = {
+      availableModels: models,
+      effortLevels: [{ id: 'high', displayName: 'High' }],
+      hasFastMode: false,
+    };
+    providersRef.providers = [
+      {
+        id: 'anthropic',
+        name: 'Anthropic',
+        source: 'builtin',
+        agents: ['claude-code'],
+        auth: { method: 'oauth' },
+        routing: { 'claude-code': {} },
+        connected: true,
+        models: {
+          'claude-code': models.map((model) => ({
+            ...model,
+            name: model.displayName,
+          })),
+        },
+      },
+    ];
+
+    try {
+      render(
+        React.createElement(ModelSelector, {
+          modelId: models[0].id,
+          effort: 'high',
+          onModelChange: vi.fn(),
+          onEffortChange: vi.fn(),
+          vendorKey: 'cc',
+          triggerVariant: 'field',
+          currentProviderId: 'anthropic',
+          onProviderChange: vi.fn(),
+        }),
+      );
+
+      fireEvent.click(screen.getByRole('button', { name: /Current: Subscription Model 1/ }));
+      const list = screen.getByRole('listbox', { name: 'Model list' });
+
+      expect(list.className).toContain('max-h-[300px]');
+      expect(list.className).toContain('overflow-y-auto');
+      expect(list.className).toContain('overscroll-contain');
+      const options = within(list).getAllByRole('option');
+      expect(options).toHaveLength(40);
+      expect(options[0].textContent).toContain('Subscription Model 1');
+      expect(options[39].textContent).toContain('Subscription Model 40');
+    } finally {
+      visibleModelsRef.models = null;
+      agentCapabilitiesRef.capabilities = originalCapabilities;
+      providersRef.providers = providersRef.DEFAULT_PROVIDERS;
+    }
+  });
+
   it('reuses the parent pricing snapshot when the model content opens', () => {
     pricingRef.renderCalls = 0;
     render(
