@@ -1,3 +1,4 @@
+import { randomBytes } from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
 import { app } from 'electron';
@@ -186,7 +187,8 @@ export function isVoiceInputRecordingEnabled(): boolean {
 
 export function makeRecorderSessionId(): string {
   const stamp = new Date().toISOString().replace(/:/g, '-').replace(/\.\d+Z$/, 'Z');
-  const suffix = Math.random().toString(36).slice(2, 8);
+  // CSPRNG 4 bytes = 8 hex chars ≈ 32 bits entropy (CodeQL js/insecure-randomness)
+  const suffix = randomBytes(4).toString('hex');
   return `${stamp}-${suffix}`;
 }
 

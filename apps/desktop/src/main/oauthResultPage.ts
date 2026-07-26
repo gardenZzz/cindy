@@ -71,12 +71,14 @@ export function pickOAuthResultPageLang(acceptLanguage: string | undefined): OAu
   return 'en';
 }
 
-const RETURN_LABEL: Record<OAuthResultPageLang, (brandName: string) => string> = {
-  zh: (brandName) => `返回 ${brandName}`,
-  en: (brandName) => `Return to ${brandName}`,
-  ja: (brandName) => `${brandName} に戻る`,
-  ko: (brandName) => `${brandName}(으)로 돌아가기`,
-};
+function returnLabel(lang: OAuthResultPageLang, brandName: string): string {
+  switch (lang) {
+    case 'zh': return `返回 ${brandName}`;
+    case 'en': return `Return to ${brandName}`;
+    case 'ja': return `${brandName} に戻る`;
+    case 'ko': return `${brandName}(으)로 돌아가기`;
+  }
+}
 
 /** Builds the stable app-focus CTA shared by browser callback pages. */
 export function buildOAuthReturnAction(
@@ -86,7 +88,7 @@ export function buildOAuthReturnAction(
 ): { href: string; label: string } {
   return {
     href: `${DEEP_LINK_URL_PREFIX}focus/${encodeURIComponent(source)}`,
-    label: RETURN_LABEL[lang](brandName),
+    label: returnLabel(lang, brandName),
   };
 }
 
