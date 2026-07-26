@@ -444,8 +444,11 @@ export const MAKER_INVOKE = {
    * 且绝不无限轮询；地域拒绝、凭证被拒等确定性答复一次都不重试。所以自动重试停手后，
    * 用户仍需要一个「立刻再试一次」的入口：设置页在失败态下渲染「重试」，点了走这条
    * 通道，并重新开启一轮退避。返回查询型结构化结果 { ok, failure? }（规则 13 例外条款：
-   * renderer 要按 failure.kind 渲染分类文案）。只读、无密钥材料；完成后广播
-   * PROVIDER_CHANGED 让列表与清单刷新。
+   * renderer 要按 failure.kind 渲染分类文案）。只读、无密钥材料。
+   *
+   * **本通道自身不广播**：列表刷新由发现流程内部收口——成功经 active-catalog 的
+   * markChanged、失败经 setAnthropicDiscoveryFailureListener。handler 再广播一次只会让
+   * renderer 白 refetch 一遍。
    */
   PROVIDER_MODELS_REDISCOVER: 'maker:provider:models-rediscover',
   // Scheduler (Phase 4) — 9 个 invoke handler，对应 Scheduler 公共 API
