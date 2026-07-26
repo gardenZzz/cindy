@@ -468,6 +468,228 @@ describe('nodeRuntimeBroker · 启动瞬时失败重试(2026-07-24)', () => {
   });
 });
 
+describe('nodeRuntimeBroker · 意外死亡诊断(2026-07-26)', () => {
+  it('就绪后崩溃:在途请求与 crashed 状态都带临死前的 stderr 诊断行,且不泄露绝对路径', async () => {
+    const ghost = fakeGhost();
+    const child = new FakeNodeProcess(); // 不回 response,保持在途
+    const pushes: Array<Record<string, unknown>> = [];
+    const warn = vi.fn();
+    const broker = new GhostNodeRuntimeBroker({
+      getGhost: () => ghost,
+      sendToGhost: (_id, payload) => pushes.push(payload as unknown as Record<string, unknown>),
+      spawnProcess: () => child as unknown as NodeWorkerProcess,
+      log: { info: vi.fn(), warn },
+    });
+
+    const pending = broker.handleRequest('node-ghost', rpcRequest('slow'));
+    await vi.waitFor(() => expect(child.received).toHaveLength(1));
+    // 引导层先发 ready、后 require 插件入口,所以这类崩溃发生在启动期之后。
+    child.stderr.write(
+      "C:\\Users\\dev\\AppData\\Roaming\\cindy\\plugins\\demo\\node\\worker.cjs:74\n" +
+        "Object.defineProperty(process, 'stdin', {\n       ^\n\n" +
+        'TypeError: Cannot redefine property: stdin\n    at Object.<anonymous>\n',
+    );
+    await vi.waitFor(() =>
+      expect(warn).toHaveBeenCalledWith('ghost node stderr', expect.anything()),
+    );
+    child.emit('exit', 1, null);
+    child.stderr.end();
+
+    const result = await pending;
+    expect(result).toMatchObject({ ok: false, errorCode: 'PROCESS_EXITED' });
+    const message = (result as { message?: string }).message ?? '';
+    expect(message).toContain('code=1');
+    expect(message).toContain('Cannot redefine property: stdin');
+    expect(message).not.toContain('C:\\Users');
+    expect(message).not.toContain('AppData');
+    const crashed = pushes.find((p) => p.state === 'crashed') as { message?: string };
+    expect(crashed.message).toContain('Cannot redefine property: stdin');
+    expect(crashed.message).not.toContain('C:\\Users');
+  });
+
+  it('陈旧 stderr 不当死因:超过回看窗口只报退出码', async () => {
+    vi.useFakeTimers();
+    const ghost = fakeGhost();
+    const child = new FakeNodeProcess();
+    const broker = new GhostNodeRuntimeBroker({
+      getGhost: () => ghost,
+      spawnProcess: () => child as unknown as NodeWorkerProcess,
+    });
+
+    const pending = broker.handleRequest('node-ghost', rpcRequest('slow'));
+    await vi.advanceTimersByTimeAsync(10);
+    child.stderr.write('compiling scene 1...\n');
+    await vi.advanceTimersByTimeAsync(6_000);
+    child.emit('exit', 1, null);
+    child.stderr.end();
+    await vi.advanceTimersByTimeAsync(10);
+
+    const result = await pending;
+    expect(result).toMatchObject({ ok: false, errorCode: 'PROCESS_EXITED' });
+    const message = (result as { message?: string }).message ?? '';
+    expect(message).toContain('code=1');
+    expect(message).not.toContain('compiling scene 1');
+  });
+
+  it('exit 前的 drain 窗口:stderr 在 exit 后到达仍可截获', async () => {
+    vi.useFakeTimers();
+    const ghost = fakeGhost();
+    const child = new FakeNodeProcess();
+    const broker = new GhostNodeRuntimeBroker({
+      getGhost: () => ghost,
+      spawnProcess: () => child as unknown as NodeWorkerProcess,
+    });
+
+    const pending = broker.handleRequest('node-ghost', rpcRequest('slow'));
+    await vi.advanceTimersByTimeAsync(10);
+    child.emit('exit', 1, null);
+    // stderr 晚于 exit 到达(管道中的最后一段)
+    child.stderr.write('Error: EACCES permission denied\n');
+    child.stderr.end();
+    await vi.advanceTimersByTimeAsync(10);
+
+    const result = await pending;
+    const message = (result as { message?: string }).message ?? '';
+    expect(message).toContain('EACCES permission denied');
+  });
+
+  it('含空格的 Windows 路径被完整收敛为文件名', async () => {
+    const ghost = fakeGhost();
+    const child = new FakeNodeProcess();
+    const warn = vi.fn();
+    const broker = new GhostNodeRuntimeBroker({
+      getGhost: () => ghost,
+      spawnProcess: () => child as unknown as NodeWorkerProcess,
+      log: { info: vi.fn(), warn },
+    });
+
+    const pending = broker.handleRequest('node-ghost', rpcRequest('slow'));
+    await vi.waitFor(() => expect(child.received).toHaveLength(1));
+    child.stderr.write(
+      'Error: Cannot find module\n' +
+        '    at C:\\Users\\Jane Doe\\AppData\\Roaming\\cindy\\plugins\\demo\\worker.cjs:12\n',
+    );
+    await vi.waitFor(() => expect(warn).toHaveBeenCalled());
+    child.emit('exit', 1, null);
+    child.stderr.end();
+
+    const result = await pending;
+    const message = (result as { message?: string }).message ?? '';
+    expect(message).toContain('Cannot find module');
+    expect(message).not.toContain('Jane Doe');
+    expect(message).not.toContain('AppData');
+  });
+
+  it('含空格的 POSIX 路径被完整收敛为文件名', async () => {
+    const ghost = fakeGhost();
+    const child = new FakeNodeProcess();
+    const warn = vi.fn();
+    const broker = new GhostNodeRuntimeBroker({
+      getGhost: () => ghost,
+      spawnProcess: () => child as unknown as NodeWorkerProcess,
+      log: { info: vi.fn(), warn },
+    });
+
+    const pending = broker.handleRequest('node-ghost', rpcRequest('slow'));
+    await vi.waitFor(() => expect(child.received).toHaveLength(1));
+    child.stderr.write(
+      'Error: ENOENT /Users/jane/Library/Application Support/Cindy/plugins/demo/worker.cjs\n',
+    );
+    await vi.waitFor(() => expect(warn).toHaveBeenCalled());
+    child.emit('exit', 1, null);
+    child.stderr.end();
+
+    const result = await pending;
+    const message = (result as { message?: string }).message ?? '';
+    expect(message).toContain('ENOENT');
+    expect(message).not.toContain('Application Support');
+    expect(message).not.toContain('/Users/jane');
+  });
+
+  it('含撇号的 unquoted 路径被完整收敛为文件名', async () => {
+    const ghost = fakeGhost();
+    const child = new FakeNodeProcess();
+    const warn = vi.fn();
+    const broker = new GhostNodeRuntimeBroker({
+      getGhost: () => ghost,
+      spawnProcess: () => child as unknown as NodeWorkerProcess,
+      log: { info: vi.fn(), warn },
+    });
+
+    const pending = broker.handleRequest('node-ghost', rpcRequest('slow'));
+    await vi.waitFor(() => expect(child.received).toHaveLength(1));
+    child.stderr.write(
+      "Error: ENOENT\n    at C:\\Users\\O'Brien\\AppData\\Roaming\\cindy\\worker.js:12\n",
+    );
+    await vi.waitFor(() => expect(warn).toHaveBeenCalled());
+    child.emit('exit', 1, null);
+    child.stderr.end();
+
+    const result = await pending;
+    const message = (result as { message?: string }).message ?? '';
+    expect(message).toContain('ENOENT');
+    expect(message).not.toContain("O'Brien");
+    expect(message).not.toContain('AppData');
+  });
+
+  it('陈旧段不被后续良性 chunk 携带进回看窗口', async () => {
+    vi.useFakeTimers();
+    const ghost = fakeGhost();
+    const child = new FakeNodeProcess();
+    const broker = new GhostNodeRuntimeBroker({
+      getGhost: () => ghost,
+      spawnProcess: () => child as unknown as NodeWorkerProcess,
+    });
+
+    const pending = broker.handleRequest('node-ghost', rpcRequest('slow'));
+    await vi.advanceTimersByTimeAsync(10);
+    // 10 秒前写入一条错误日志
+    child.stderr.write('Error: old failure from initialization\n');
+    await vi.advanceTimersByTimeAsync(10_000);
+    // 紧邻退出前写入一条良性日志
+    child.stderr.write('heartbeat ok\n');
+    await vi.advanceTimersByTimeAsync(100);
+    child.emit('exit', 1, null);
+    child.stderr.end();
+    await vi.advanceTimersByTimeAsync(10);
+
+    const result = await pending;
+    const message = (result as { message?: string }).message ?? '';
+    // 只有"heartbeat ok"在窗口内,选取的诊断行不应含旧错误
+    expect(message).not.toContain('old failure from initialization');
+  });
+
+  it('凭证值出现在 stderr 诊断行中时被脱敏', async () => {
+    const ghost = fakeGhost();
+    // secretBindings 绑定到所有方法(包括 slow)
+    ghost.manifest.node!.secretBindings = [
+      { key: 'api_key', label: 'API Key', methods: ['slow'] },
+    ];
+    const child = new FakeNodeProcess();
+    const readSecret = vi.fn(() => 'sk-secret-token-12345');
+    const warn = vi.fn();
+    const broker = new GhostNodeRuntimeBroker({
+      getGhost: () => ghost,
+      readSecret,
+      spawnProcess: () => child as unknown as NodeWorkerProcess,
+      log: { info: vi.fn(), warn },
+    });
+
+    // 发一个带凭证的请求并保持 pending(不回复)
+    const pending = broker.handleRequest('node-ghost', rpcRequest('slow'));
+    await vi.waitFor(() => expect(child.received).toHaveLength(1));
+    child.stderr.write('Error: auth failed with token sk-secret-token-12345\n');
+    await vi.waitFor(() => expect(warn).toHaveBeenCalled());
+    child.emit('exit', 1, null);
+    child.stderr.end();
+
+    const result = await pending;
+    const message = (result as { message?: string }).message ?? '';
+    expect(message).toContain('[REDACTED]');
+    expect(message).not.toContain('sk-secret-token-12345');
+  });
+});
+
 describe('nodeRuntimeBroker · 权限与协议', () => {
   it('没声明 node 槽时拒绝且不启动进程', async () => {
     const ghost = fakeGhost();
