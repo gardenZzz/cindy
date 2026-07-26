@@ -11,6 +11,7 @@ import {
   Square,
 } from 'lucide-react-native';
 import {
+  Image,
   Pressable,
   ScrollView,
   StyleSheet,
@@ -34,7 +35,7 @@ import {
   buildInteractionResolveActionPresentation,
   buildPluginSetupCancelDecision,
   buildPlanReviewDecision,
-  buildRemotePluginSetupSummary,
+  buildRemotePluginSetupPresentation,
   canStartInteractionResolve,
   encodeMultiSelectAnswer,
   resolveInteractionResilient,
@@ -51,6 +52,8 @@ import {
   type AskQuestion,
   type PermissionReviewPresentation,
   type PlanReviewEvidencePresentation,
+  type RemotePluginSetupPhase,
+  type RemotePluginSetupStep,
 } from '@/session/interactionModel';
 import {
   clearAskUserDraft,
@@ -465,7 +468,7 @@ function InteractionItem({
       ? buildPluginSetupCancelDecision(item.request)
       : null;
     return (
-      <UnsupportedCard
+      <PluginSetupCard
         busy={busy}
         cancel={cancelDecision
           ? {
@@ -477,13 +480,8 @@ function InteractionItem({
             }),
           }
           : null}
-        kind={kind}
-        // 不是「暂不支持」:手机能看懂、能取消,只是配置动作必须回电脑端做完。
-        kindLabel={t('interaction.panel.desktopOnlyKind')}
-        message={t('interaction.panel.pluginSetupDesktopOnly')}
-        request={item.request}
+        item={item}
         requestId={requestId}
-        summaryLines={pluginSetupSummaryLines(item.request)}
         touchLayout={touchLayout}
       />
     );
@@ -1338,10 +1336,154 @@ function PlanReviewCard({
   );
 }
 
-function pluginSetupSummaryLines(request: PendingInteraction['request']): string[] {
-  const summary = buildRemotePluginSetupSummary(request);
-  return [summary.ghostName, summary.intro, ...summary.stepTitles]
-    .filter((line): line is string => typeof line === 'string' && line.length > 0);
+/**
+ * plugin_setup 的**只读**状态卡。
+ *
+ * 手机端做不了配置动作(Secret 输入与 OAuth 必须留在被控端,见
+ * docs/dev-rules/plugin-security-and-authoring.md §4 与 desktop 的
+ * interactionResolveOrigin),所以这张卡的价值全在「看懂」:哪个插件、卡在哪一步、
+ * 为什么失败、回电脑端要做什么。动作只有取消。
+ */
+function PluginSetupCard({
+  busy,
+  cancel,
+  item,
+  requestId,
+  touchLayout,
+}: {
+  busy: boolean;
+  cancel: { accessibilityLabel: string; label: string; onPress(): void } | null;
+  item: PendingInteraction;
+  requestId: string | null;
+  touchLayout: InteractionTouchLayout;
+}) {
+  const styles = useThemedStyles(makeStyles);
+  const { t } = useTranslation();
+  const presentation = useMemo(
+    () => buildRemotePluginSetupPresentation(item.request),
+    [item.request],
+  );
+  const title = presentation.ghostName ?? t('interaction.kinds.plugin_setup.title');
+  return (
+    <View style={cardStyle(styles, touchLayout)} testID="interaction.pluginSetup.card">
+      <View style={styles.compactCardHeader}>
+        {presentation.iconDataUrl ? (
+          <Image
+            accessibilityIgnoresInvertColors
+            // 纯装饰:插件名紧跟其后,读屏再念一次图标只是噪音。
+            accessibilityElementsHidden
+            importantForAccessibility="no"
+            source={{ uri: presentation.iconDataUrl }}
+            style={styles.pluginSetupIcon}
+            testID="interaction.pluginSetup.icon"
+          />
+        ) : null}
+        <View style={styles.compactCardTitleWrap}>
+          <Text style={styles.kind}>{t('interaction.panel.desktopOnlyKind')}</Text>
+          <Text numberOfLines={1} style={styles.compactCardTitle}>{title}</Text>
+        </View>
+        {presentation.stepCount > 0 ? (
+          <Text style={styles.pageText} testID="interaction.pluginSetup.progress">
+            {t('interaction.pluginSetup.progress', {
+              satisfied: presentation.satisfiedCount,
+              total: presentation.stepCount,
+            })}
+          </Text>
+        ) : null}
+      </View>
+      {presentation.intro ? (
+        <Text style={styles.body} numberOfLines={3}>{presentation.intro}</Text>
+      ) : null}
+      {presentation.groups.map((group) => (
+        <View key={group.id} style={styles.pluginSetupGroup}>
+          {group.anyOf ? (
+            <Text style={styles.pluginSetupGroupHint}>{t('interaction.pluginSetup.chooseOne')}</Text>
+          ) : null}
+          {group.steps.map((step) => (
+            <PluginSetupStepRow key={step.id} step={step} />
+          ))}
+        </View>
+      ))}
+      {/* 收尾帧已经 settle,再让用户「去电脑端完成」是错的引导。 */}
+      {presentation.terminal ? null : (
+        <Text style={styles.pluginSetupFootnote}>{t('interaction.pluginSetup.completeOnDesktop')}</Text>
+      )}
+      {cancel ? (
+        <View style={actionsStyle(styles, touchLayout)}>
+          <ResolveButton
+            accessibilityLabel={cancel.accessibilityLabel}
+            busy={busy}
+            label={cancel.label}
+            onPress={cancel.onPress}
+            requestId={requestId}
+            touchStyle={resolveButtonLayoutStyle(touchLayout, 'secondary')}
+            testID="interaction.unsupported.cancelButton"
+            variant="secondary"
+          />
+        </View>
+      ) : null}
+    </View>
+  );
+}
+
+/** 运行中的步骤:与桌面同语义,用 Heart Orange 表示「正在进行」。 */
+const PLUGIN_SETUP_RUNNING_PHASES: ReadonlySet<RemotePluginSetupPhase> = new Set([
+  'action_running',
+  'waiting_external',
+  'verifying',
+]);
+
+function PluginSetupStepRow({ step }: { step: RemotePluginSetupStep }) {
+  const styles = useThemedStyles(makeStyles);
+  const { colors } = useTheme();
+  const { t } = useTranslation();
+  const phaseColor = step.phase === 'satisfied'
+    ? colors.statusReady
+    : step.phase && PLUGIN_SETUP_RUNNING_PHASES.has(step.phase)
+      ? colors.statusAccent
+      : colors.textTertiary;
+  const phaseText = step.phase ? t(`interaction.pluginSetup.phase.${step.phase}`) : null;
+  const actionHint = step.actionKind === 'inline_form'
+    ? (step.inlineFieldLabel
+      ? t('interaction.pluginSetup.inlineFormAction', { label: step.inlineFieldLabel })
+      : t('interaction.pluginSetup.inlineFormActionGeneric'))
+    : step.actionKind
+      ? t('interaction.pluginSetup.desktopActionHint', {
+        action: t(`interaction.pluginSetup.action.${step.actionKind}`),
+      })
+      : null;
+  // 已完成的步骤不再提示「回电脑端做什么」——那是下一步该做的事。
+  const visibleActionHint = actionHint && step.phase !== 'satisfied' ? actionHint : null;
+  const errorText = step.errorCode ? t(`interaction.pluginSetup.error.${step.errorCode}`) : null;
+  return (
+    <View
+      // 聚合成一个读屏单元:标题 / 状态 / 待办 / 错误分开念会把一步拆成四条碎片。
+      accessible
+      accessibilityLabel={[step.title, phaseText, step.description, visibleActionHint, errorText]
+        .filter((part): part is string => !!part)
+        .join('，')}
+      style={styles.pluginSetupStep}
+      testID="interaction.pluginSetup.step"
+    >
+      <View style={styles.pluginSetupStepHeader}>
+        <Text numberOfLines={2} style={styles.pluginSetupStepTitle}>{step.title}</Text>
+        {phaseText ? (
+          <Text style={[styles.pluginSetupPhase, { color: phaseColor }]}>{phaseText}</Text>
+        ) : null}
+      </View>
+      {step.description ? (
+        <Text numberOfLines={2} style={styles.pluginSetupStepBody}>{step.description}</Text>
+      ) : null}
+      {visibleActionHint ? (
+        <Text style={styles.pluginSetupStepAction}>{visibleActionHint}</Text>
+      ) : null}
+      {errorText ? (
+        <Text style={styles.pluginSetupStepError} testID="interaction.pluginSetup.stepError">
+          {errorText}
+        </Text>
+      ) : null}
+    </View>
+  );
 }
 
 function UnsupportedCard({
@@ -1665,6 +1807,63 @@ const makeStyles = (colors: ThemeColors) => StyleSheet.create({
   },
   body: {
     color: colors.textSecondary,
+    fontSize: typeScale.caption,
+    lineHeight: lineHeight.caption,
+  },
+  pluginSetupIcon: {
+    borderRadius: radius.container,
+    flexShrink: 0,
+    height: iconSize.xxl,
+    width: iconSize.xxl,
+  },
+  pluginSetupGroup: {
+    gap: spacing.sm,
+  },
+  pluginSetupGroupHint: {
+    color: colors.textTertiary,
+    fontSize: typeScale.caption,
+    fontWeight: fontWeight.medium,
+    lineHeight: lineHeight.caption,
+  },
+  pluginSetupStep: {
+    gap: spacing.xs,
+  },
+  pluginSetupStepHeader: {
+    alignItems: 'baseline',
+    flexDirection: 'row',
+    gap: spacing.sm,
+  },
+  pluginSetupStepTitle: {
+    color: colors.textPrimary,
+    flex: 1,
+    fontSize: typeScale.footnote,
+    fontWeight: fontWeight.medium,
+    lineHeight: lineHeight.caption,
+    minWidth: 0,
+  },
+  pluginSetupPhase: {
+    // 颜色随 phase 内联(已完成 statusReady / 进行中 statusAccent / 其余 textTertiary)。
+    flexShrink: 0,
+    fontSize: typeScale.caption,
+    fontWeight: fontWeight.medium,
+  },
+  pluginSetupStepBody: {
+    color: colors.textTertiary,
+    fontSize: typeScale.caption,
+    lineHeight: lineHeight.caption,
+  },
+  pluginSetupStepAction: {
+    color: colors.textSecondary,
+    fontSize: typeScale.caption,
+    lineHeight: lineHeight.caption,
+  },
+  pluginSetupStepError: {
+    color: colors.errorText,
+    fontSize: typeScale.caption,
+    lineHeight: lineHeight.caption,
+  },
+  pluginSetupFootnote: {
+    color: colors.textTertiary,
     fontSize: typeScale.caption,
     lineHeight: lineHeight.caption,
   },
