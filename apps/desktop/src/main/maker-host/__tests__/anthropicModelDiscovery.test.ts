@@ -1071,6 +1071,33 @@ describe('HTTP 发现失败的归因与选择性重试', () => {
     }
   });
 
+  it('失败后成功但清单未变时同样通知 —— apply 的 early return 会吞掉这次广播', async () => {
+    // 先成功一次拿到清单,再失败,再用**同一份**清单成功:applyModels 因为 modelsChanged
+    // 为 false 直接 early return、不 markChanged,只有清失败态这条通知能让 UI 知道恢复了。
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(okResponse)
+      .mockRejectedValueOnce(new TypeError('fetch failed'))
+      .mockResolvedValue(okResponse);
+    vi.stubGlobal('fetch', fetchMock);
+
+    await refreshAnthropicModelsFromHttp();
+    expect(anthropicIds()).toEqual(['claude-opus-4-8']);
+
+    await refreshAnthropicModelsFromHttp();
+    expect(getAnthropicModelDiscoveryFailure()?.kind).toBe('network');
+
+    const onFailureChanged = vi.fn();
+    setAnthropicDiscoveryFailureListener(onFailureChanged);
+    try {
+      await refreshAnthropicModelsFromHttp();
+      expect(getAnthropicModelDiscoveryFailure()).toBeNull();
+      expect(onFailureChanged).toHaveBeenCalled();
+    } finally {
+      setAnthropicDiscoveryFailureListener(null);
+    }
+  });
+
   it('通知收口抛错不打断发现流程', async () => {
     setAnthropicDiscoveryFailureListener(() => {
       throw new Error('broadcast boom');

@@ -258,13 +258,26 @@ export function registerProviderHandlers(
   });
 
   // 动态清单重新发现（用户在失败态下点「重试」）：查询型返回,把最新失败归因回给 renderer
-  // 渲染分类文案;成功则 failure 缺席。契约上 deps.rediscoverModels 不抛 —— 发现内部只
-  // 记账不抛穿(见 model-discovery/anthropic),不认识的 providerId 也只返回 null,所以这里
-  // 不额外包 try/catch;真出异常按常规 IPC 错误上抛,不吞成「成功」。
+  // 渲染分类文案;成功则 failure 缺席。
+  //
+  // 意外异常转 INTERNAL(规则 13:IPC 错误必须是结构化 IpcErrorCode)。发现流程内部只记账
+  // 不抛穿,但那是多层实现细节共同保证的(缓存写入的 catch、广播收口的 catch);哪天有一层
+  // 变了,裸 Error 会以非结构化形态漏给 renderer —— 在边界上收口一次,代价可忽略。
+  //
+  // **不**在这里广播:发现流程自己已经收口了两条路径 —— 成功经 active-catalog 的
+  // markChanged、失败经 setAnthropicDiscoveryFailureListener,重复广播只会让 renderer 白
+  // refetch 一次。
   registry.handle(MAKER_INVOKE.PROVIDER_MODELS_REDISCOVER, async (_event, input: unknown) => {
     const providerId = requireProviderId(input);
-    const failure = await deps.rediscoverModels(providerId);
-    deps.broadcastChanged();
+    let failure: ProviderModelDiscoveryFailure | null;
+    try {
+      failure = await deps.rediscoverModels(providerId);
+    } catch (err) {
+      throwIpcError(
+        'INTERNAL',
+        `rediscover models failed: ${err instanceof Error ? err.message : String(err)}`,
+      );
+    }
     return failure ? { ok: false, failure } : { ok: true };
   });
 

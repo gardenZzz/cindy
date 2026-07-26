@@ -151,4 +151,30 @@ describe('calibrateDraftModel', () => {
       }),
     ).toBe('gpt-5.5');
   });
+
+  it('SSH 还要逐模型排除订阅直连 —— 供应商级过滤盖不住同一供应商里的混合清单', () => {
+    // 同一个已连接供应商里既有订阅直连模型(远端 bridge 不可达)又有可路由模型:
+    // 只做供应商级过滤会选中前者,必须按模型 id 再判一道。
+    const mixed = provider('xd', true, {
+      'claude-code': [model('chatgpt/gpt-5.5'), model('claude-sonnet-5')],
+    });
+    const input = {
+      providers: [mixed],
+      agent: 'claude-code' as const,
+      model: 'claude-opus-4-8',
+      chosenByUser: false,
+      providersLoading: false,
+    };
+
+    // 本地草稿:不排除,取清单里的第一个。
+    expect(calibrateDraftModel(input)).toBe('chatgpt/gpt-5.5');
+
+    // SSH 草稿:排除订阅直连后落到真正可路由的模型。
+    expect(
+      calibrateDraftModel({
+        ...input,
+        excludeModel: (m) => m.id.startsWith('chatgpt/') || m.id.startsWith('xai/'),
+      }),
+    ).toBe('claude-sonnet-5');
+  });
 });
