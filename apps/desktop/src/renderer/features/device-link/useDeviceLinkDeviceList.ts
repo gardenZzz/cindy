@@ -119,6 +119,13 @@ function ensureStarted(): void {
   if (started) return;
   started = true;
   const refresh = (): void => {
+    // 上一轮在尚无设备快照时失败只代表「该次请求已结算」。online / push 触发了新的
+    // 有意义重试后要重新进入 loading，直到这次请求成功或失败；否则失败后重连期间会
+    // 把 devices=null + settled=true 误当成权威空列表。
+    if (devices === null && initialRequestSettled) {
+      initialRequestSettled = false;
+      subs.forEach((fn) => fn());
+    }
     loadGeneration += 1; // 本次为最新一次拉取,作废所有更早的在途响应(见 loadGeneration 注释)。
     const gen = loadGeneration;
     window.electronAPI.deviceLink

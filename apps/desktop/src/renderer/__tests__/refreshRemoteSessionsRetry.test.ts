@@ -129,6 +129,19 @@ describe('refreshRemoteDeviceSessions retry', () => {
     expect(remoteProjectsStore.getMergedRemoteSessions().map((s) => s.id)).toContain('only');
   });
 
+  it('断连使在途快照失效 → 返回 superseded，不冒充终态请求失败', async () => {
+    const d = did();
+    const snapshot = deferred<Session[]>();
+    invoke.mockReturnValueOnce(snapshot.promise);
+
+    const refresh = refreshRemoteDeviceSessions(d, 'Mac B', { sleep: noSleep });
+    remoteProjectsStore.markAllDisconnected();
+    snapshot.resolve([session('stale')]);
+
+    await expect(refresh).resolves.toBe('superseded');
+    expect(remoteProjectsStore.getMergedRemoteSessions()).toHaveLength(0);
+  });
+
   it('首拉 active 列表时要求被控端补齐置顶,避免旧置顶被 200 条窗口截掉', async () => {
     const d = did();
     invoke.mockResolvedValueOnce([

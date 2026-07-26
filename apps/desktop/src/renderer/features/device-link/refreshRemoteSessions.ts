@@ -83,11 +83,12 @@ export interface RefreshOptions {
 
 /**
  * 重拉结果:
- *  - `ok`:成功落地最新快照(或本次被更新一次取代而让位,语义上无需调用方善后);
+ *  - `ok`:成功落地最新快照;
  *  - `revoked`:被控端在 bootstrap 期间撤销了访问权限 → 调用方应 handleRevoked;
+ *  - `superseded`:断连 / 清理等外部状态变化使本次快照失效 → 不是请求失败,等待后续重连;
  *  - `gave-up`:瞬态重试耗尽 / 永久非撤销错误 → 调用方照常收尾(push / reconnect 会兜底补上)。
  */
-export type RefreshResult = 'ok' | 'revoked' | 'gave-up';
+export type RefreshResult = 'ok' | 'revoked' | 'superseded' | 'gave-up';
 
 interface RefreshTask {
   promise: Promise<RefreshResult>;
@@ -256,7 +257,7 @@ async function runRefreshRemoteDeviceSessions(
 
   for (let attempt = 0; attempt < maxAttempts; attempt++) {
     // 被一次更新的重拉取代(期间又发起了新的 refresh)→ 停手,交给那一次(也避免无谓重试)。
-    if (!remoteProjectsStore.isLatestSnapshotEpoch(deviceId, epoch)) return 'gave-up';
+    if (!remoteProjectsStore.isLatestSnapshotEpoch(deviceId, epoch)) return 'superseded';
     try {
       const list = await window.electronAPI.deviceLink.invoke(deviceId, 'local-db:sessions:list', [
         LIST_LIMIT,
@@ -264,7 +265,7 @@ async function runRefreshRemoteDeviceSessions(
         { includePinned: true },
       ]);
       // 乱序保护:本次拉取已不是最新一次 → 丢弃,别覆盖更新的结果。
-      if (!remoteProjectsStore.isLatestSnapshotEpoch(deviceId, epoch)) return 'gave-up';
+      if (!remoteProjectsStore.isLatestSnapshotEpoch(deviceId, epoch)) return 'superseded';
       if (Array.isArray(list)) {
         if ((opts.snapshotMode ?? 'merge') === 'merge') {
           const sessions = list as Session[];
@@ -291,7 +292,7 @@ async function runRefreshRemoteDeviceSessions(
       }
       return 'ok'; // 成功
     } catch (err) {
-      if (!remoteProjectsStore.isLatestSnapshotEpoch(deviceId, epoch)) return 'gave-up';
+      if (!remoteProjectsStore.isLatestSnapshotEpoch(deviceId, epoch)) return 'superseded';
       const message = err instanceof Error ? err.message : String(err);
       // 访问被撤销:语义性终态,不重试、也不静默 give-up —— 让调用方 handleRevoked(见 ACCESS_REVOKED_MARKER)。
       if (message.includes(ACCESS_REVOKED_MARKER)) {

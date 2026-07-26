@@ -214,6 +214,31 @@ describe('remoteProjectsStore', () => {
     ]);
   });
 
+  it('tracks terminal bootstrap failures with stable snapshots and clears them after a successful snapshot', () => {
+    const before = remoteProjectsStore.getBootstrapFailedDeviceIds();
+    remoteProjectsStore.markBootstrapFailed('dev-B');
+    const failed = remoteProjectsStore.getBootstrapFailedDeviceIds();
+    expect(failed).not.toBe(before);
+    expect([...failed]).toEqual(['dev-B']);
+
+    remoteProjectsStore.markBootstrapFailed('dev-B');
+    expect(remoteProjectsStore.getBootstrapFailedDeviceIds()).toBe(failed);
+
+    remoteProjectsStore.setDeviceSessions('dev-B', 'B', []);
+    expect(remoteProjectsStore.getBootstrapFailedDeviceIds().size).toBe(0);
+  });
+
+  it('removeDevice and clear discard bootstrap failure state even before a shard exists', () => {
+    remoteProjectsStore.markBootstrapFailed('dev-A');
+    remoteProjectsStore.removeDevice('dev-A');
+    expect(remoteProjectsStore.getBootstrapFailedDeviceIds().size).toBe(0);
+
+    remoteProjectsStore.markBootstrapFailed('dev-A');
+    remoteProjectsStore.markBootstrapFailed('dev-B');
+    remoteProjectsStore.clear();
+    expect(remoteProjectsStore.getBootstrapFailedDeviceIds().size).toBe(0);
+  });
+
   it('clear resets everything', () => {
     remoteProjectsStore.setDeviceSessions('dev-B', 'B', [mk('s1'), mk('s2')]);
     remoteProjectsStore.clear();
