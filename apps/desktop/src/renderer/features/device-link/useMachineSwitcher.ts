@@ -22,7 +22,11 @@
  */
 
 import { useCallback, useMemo, useSyncExternalStore } from 'react';
-import { useRemoteDevices, type RemoteDeviceSummary } from './remoteProjectsStore';
+import {
+  useRemoteBootstrapFailedDeviceIds,
+  useRemoteDevices,
+  type RemoteDeviceSummary,
+} from './remoteProjectsStore';
 import { revokedDevicesStore } from './revokedDevicesStore';
 import {
   useDeviceLinkDeviceList,
@@ -43,6 +47,7 @@ export interface SelectedMachineConnectingInput {
   rawSelection: MachineSelection;
   devices: readonly SwitcherDevice[];
   syncedDevices: readonly RemoteDeviceSummary[];
+  bootstrapFailedDeviceIds: ReadonlySet<string>;
 }
 
 export interface RemoteSessionBootstrapLoadingInput {
@@ -50,6 +55,7 @@ export interface RemoteSessionBootstrapLoadingInput {
   deviceListSettled: boolean;
   devices: readonly SwitcherDevice[];
   syncedDevices: readonly RemoteDeviceSummary[];
+  bootstrapFailedDeviceIds: ReadonlySet<string>;
 }
 
 /**
@@ -62,19 +68,30 @@ export function shouldWaitForRemoteSessionBootstrap({
   deviceListSettled,
   devices,
   syncedDevices,
+  bootstrapFailedDeviceIds,
 }: RemoteSessionBootstrapLoadingInput): boolean {
   const selectedRemoteIds =
     selectedMachineId === MACHINE_ALL
       ? null
       : new Set(selectedMachineId.filter((id) => id !== MACHINE_LOCAL));
   if (selectedRemoteIds?.size === 0) return false;
-  if (!deviceListSettled) return true;
 
   const syncedIds = new Set(syncedDevices.map((device) => device.deviceId));
+  // 明确选择的远端设备若都已有权威 shard（包括 0 会话），设备目录的独立重试不应
+  // 把已知作用域重新挡回 loading；「所有」仍必须等目录结算，才能知道完整远端集合。
+  if (
+    selectedRemoteIds !== null &&
+    [...selectedRemoteIds].every((deviceId) => syncedIds.has(deviceId))
+  ) {
+    return false;
+  }
+  if (!deviceListSettled) return true;
+
   return devices.some(
     (device) =>
       device.status === 'connecting' &&
       !syncedIds.has(device.deviceId) &&
+      !bootstrapFailedDeviceIds.has(device.deviceId) &&
       (selectedRemoteIds === null || selectedRemoteIds.has(device.deviceId)),
   );
 }
@@ -89,12 +106,14 @@ export function shouldShowSelectedMachineConnectingPlaceholder({
   rawSelection,
   devices,
   syncedDevices,
+  bootstrapFailedDeviceIds,
 }: SelectedMachineConnectingInput): boolean {
   const effective = normalizeSelectedMachineId(rawSelection, selectableDeviceIds(devices));
   if (effective === MACHINE_ALL || effective.includes(MACHINE_LOCAL)) return false;
   for (const deviceId of effective) {
     const selectedDevice = devices.find((d) => d.deviceId === deviceId);
     if (selectedDevice?.status !== 'connecting') return false;
+    if (bootstrapFailedDeviceIds.has(deviceId)) return false;
     const cachedSessionCount =
       syncedDevices.find((d) => d.deviceId === deviceId)?.sessionCount ?? 0;
     if (cachedSessionCount > 0) return false;
@@ -141,10 +160,12 @@ export function useSelectedMachineConnecting(): boolean {
   const raw = useSelectedMachineId();
   const devices = useSwitcherDevices();
   const synced = useRemoteDevices();
+  const bootstrapFailedDeviceIds = useRemoteBootstrapFailedDeviceIds();
   return shouldShowSelectedMachineConnectingPlaceholder({
     rawSelection: raw,
     devices,
     syncedDevices: synced,
+    bootstrapFailedDeviceIds,
   });
 }
 
@@ -159,6 +180,7 @@ export function useRemoteSessionBootstrapLoading(
   const deviceListSettled = useDeviceLinkDeviceListSettled();
   const devices = useSwitcherDevices();
   const synced = useRemoteDevices();
+  const bootstrapFailedDeviceIds = useRemoteBootstrapFailedDeviceIds();
   return useMemo(
     () =>
       shouldWaitForRemoteSessionBootstrap({
@@ -166,8 +188,9 @@ export function useRemoteSessionBootstrapLoading(
         deviceListSettled,
         devices,
         syncedDevices: synced,
+        bootstrapFailedDeviceIds,
       }),
-    [selectedMachineId, deviceListSettled, devices, synced],
+    [selectedMachineId, deviceListSettled, devices, synced, bootstrapFailedDeviceIds],
   );
 }
 

@@ -38,6 +38,14 @@ interface DeviceShard {
 const shards = new Map<string, DeviceShard>();
 const subs = new Set<() => void>();
 /**
+ * 已完成一次 bootstrap、但以永久错误或重试耗尽告终且尚无权威 sessions shard 的设备。
+ * 这不是「权威空列表」：仅用于让侧边栏结束无限 loading；下一次 reconnect/bootstrap
+ * 开始时会清掉，成功 snapshot 也会清掉。
+ *
+ * 用不可变 Set 快照，保证 useSyncExternalStore 在内容不变时引用稳定。
+ */
+let bootstrapFailedDeviceIds: ReadonlySet<string> = new Set();
+/**
  * 设备改名通知订阅(deviceId → 新名)。设备名走 REST PATCH(Device.name,不进 sessions 表),
  * 服务端不广播 presence;listing tier 把设备名缓存在自己的 eligible 表,改名时同步通知接入器
  * 对齐缓存名,避免下一轮拉取用旧名回填。这与「会话真相」无关,是设备元数据的即时性补丁。
@@ -134,6 +142,17 @@ function recompute(): void {
   subs.forEach((fn) => fn());
 }
 
+/** 更新 bootstrap 失败快照但不通知；调用方与其它 mutation 合并成一次通知。 */
+function setBootstrapFailed(deviceId: string, failed: boolean): boolean {
+  const has = bootstrapFailedDeviceIds.has(deviceId);
+  if (has === failed) return false;
+  const next = new Set(bootstrapFailedDeviceIds);
+  if (failed) next.add(deviceId);
+  else next.delete(deviceId);
+  bootstrapFailedDeviceIds = next;
+  return true;
+}
+
 /** 给一条远端会话打上 device-link origin 标记(供 groupSessions + 传输层识别)。 */
 function stamp(
   session: Session,
@@ -160,16 +179,30 @@ const actions = {
     const connectionStatus: DeviceLinkConnectionStatus = 'connected';
     const stamped = rawSessions.map((s) => stamp(s, deviceId, deviceName, connectionStatus));
     const existing = shards.get(deviceId);
+    const failureCleared = setBootstrapFailed(deviceId, false);
     if (
       existing &&
       existing.connectionStatus === connectionStatus &&
       JSON.stringify(existing.sessions) === JSON.stringify(stamped)
     ) {
       // 内容不变但设备名可能变了(改名走 renameDevice,不经这里);保持引用不动。
+      if (failureCleared) subs.forEach((fn) => fn());
       return;
     }
     shards.set(deviceId, { deviceId, deviceName, connectionStatus, sessions: stamped });
     recompute();
+  },
+
+  /** bootstrap 永久失败 / 重试耗尽且没有 sessions shard：记录终态，避免侧边栏无限 loading。 */
+  markBootstrapFailed(deviceId: string): void {
+    if (!setBootstrapFailed(deviceId, true)) return;
+    subs.forEach((fn) => fn());
+  },
+
+  /** 新一轮 bootstrap 开始或 snapshot 成功：重新进入等待 / 已同步状态。 */
+  clearBootstrapFailure(deviceId: string): void {
+    if (!setBootstrapFailed(deviceId, false)) return;
+    subs.forEach((fn) => fn());
   },
 
   /**
@@ -286,8 +319,10 @@ const actions = {
     // 的 epoch 立即失效,且下次 bootstrap 拿到更高 epoch,不会与断连前在途的 epoch 撞值。即使尚未建
     // shard(首拉未完成就被移除)也要 bump,否则在途首拉 await 回来仍能通过 isLatestSnapshotEpoch 加回。
     snapshotEpoch.set(deviceId, (snapshotEpoch.get(deviceId) ?? 0) + 1);
-    if (!shards.delete(deviceId)) return;
-    recompute();
+    const shardDeleted = shards.delete(deviceId);
+    const failureCleared = setBootstrapFailed(deviceId, false);
+    if (shardDeleted) recompute();
+    else if (failureCleared) subs.forEach((fn) => fn());
   },
 
   /** 清空所有远端项目(登出 / device-link stopped / 卸载)。 */
@@ -295,7 +330,12 @@ const actions = {
     // 所有设备 epoch 无条件**自增**(不 clear-to-0,见 snapshotEpoch 注释的 ABA):清空时在途
     // 首拉立即失效;下一轮 bootstrap 拿到更高 epoch,不会与清空前的 epoch 撞值把陈旧 snapshot 盖回。
     for (const [k, v] of snapshotEpoch) snapshotEpoch.set(k, v + 1);
-    if (shards.size === 0) return;
+    const failureChanged = bootstrapFailedDeviceIds.size > 0;
+    if (failureChanged) bootstrapFailedDeviceIds = new Set();
+    if (shards.size === 0) {
+      if (failureChanged) subs.forEach((fn) => fn());
+      return;
+    }
     shards.clear();
     recompute();
   },
@@ -338,6 +378,11 @@ const actions = {
   /** 机器切换栏用:当前已同步或保留断线缓存的被控设备摘要列表(引用稳定 + 稳定排序)。 */
   getDeviceList(): RemoteDeviceSummary[] {
     return deviceListSnapshot;
+  },
+
+  /** 机器切换栏 loading 判定用：已终态失败且尚无权威 sessions shard 的设备 id。 */
+  getBootstrapFailedDeviceIds(): ReadonlySet<string> {
+    return bootstrapFailedDeviceIds;
   },
 
   /** snapshot 乱序保护:发起一次全量拉取前取新 epoch。 */
@@ -391,6 +436,11 @@ export function useRemoteProjectSessions(): Session[] {
 /** 组件内订阅:返回当前已连接的被控设备摘要列表(机器切换栏 chips)。 */
 export function useRemoteDevices(): RemoteDeviceSummary[] {
   return useSyncExternalStore(subscribe, actions.getDeviceList);
+}
+
+/** 组件内订阅：bootstrap 已终态失败、下一次重试尚未开始的设备集合。 */
+export function useRemoteBootstrapFailedDeviceIds(): ReadonlySet<string> {
+  return useSyncExternalStore(subscribe, actions.getBootstrapFailedDeviceIds);
 }
 
 /** 非组件上下文(presence 订阅器 / 传输层)读写入口。 */

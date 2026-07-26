@@ -141,6 +141,8 @@ export function useDeviceLinkRemoteProjects(): void {
      * 任一步返回 ACCESS_REVOKED → 标记已撤销并移除该设备;全程无撤销 → 清掉残留标记(恢复收尾)。
      */
     const runSubscribeAndBootstrap = async (deviceId: string, name: string): Promise<void> => {
+      // 新一轮 bootstrap 是有意义的重试：恢复 loading，直到本轮落下 snapshot 或再次终态失败。
+      remoteProjectsStore.clearBootstrapFailure(deviceId);
       try {
         await window.electronAPI.deviceLink.subscribe(deviceId, ['sessions']);
       } catch (err) {
@@ -152,13 +154,19 @@ export function useDeviceLinkRemoteProjects(): void {
       // (而非静默 give-up)→ 这里 handleRevoked,而不是继续预取能力 / 清撤销标记无视拒绝。
       const result = await refreshRemoteDeviceSessions(deviceId, name);
       if (result === 'revoked') return void handleRevoked(deviceId);
-      if (disposed) return;
+      if (disposed || !eligible.has(deviceId)) return;
+      if (result === 'gave-up' && !remoteProjectsStore.hasDevice(deviceId)) {
+        // 永久错误（如旧被控端 CHANNEL_NOT_ALLOWED）或瞬态重试耗尽：不是权威空列表，
+        // 但本轮 bootstrap 已有终态，不能让「所有」侧边栏永久停在 loading。
+        // superseded 表示断连 / 清理使请求失效，必须等重连，不能误记成终态失败。
+        remoteProjectsStore.markBootstrapFailed(deviceId);
+      }
       // 预取被控端能力(model/effort/fast/permission/fork/rewind),使首次打开远程会话时
       // 模型下拉等不为空、modelDefinitions 同步层已热。fire-and-forget,失败不阻断。
       void prefetchDeviceCapabilities(deviceId);
       void prefetchDeviceProviders(deviceId);
       void prefetchDeviceGitSafetySettings(deviceId);
-      // 未被撤销(ok 或瞬态 give-up):清掉可能残留的「已撤销」标记(被控端恢复 → 自动接回的收尾)。
+      // 未被撤销(ok 或普通失败):清掉可能残留的「已撤销」标记(被控端恢复 → 自动接回的收尾)。
       revokedDevicesStore.clearRevoked(deviceId);
     };
 
