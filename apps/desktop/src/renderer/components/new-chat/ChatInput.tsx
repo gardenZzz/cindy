@@ -1579,8 +1579,8 @@ export function ChatInput({
           'w-full min-h-[22px] max-h-[186px] overflow-y-auto py-[3px] -my-[3px] pr-[11px]',
           // tabular-nums:等宽数字。系统字体默认数字是比例宽度("1" 比 "2" 窄),
           // 多行列表 "1. / 2. / 3." 的点和正文会逐行漂移;等宽数字让前缀宽度
-          // 一致、列表自然对齐(纯文本 composer 做不了富文本悬挂缩进,这是
-          // 对齐问题的最小修复)。
+          // 一致、列表自然对齐。ComposerListIndentDecoration 会额外为整条列表
+          // 行保留换行后的视觉缩进。
           'text-[15px] leading-[22px] font-normal tabular-nums',
           'text-[var(--chat-input-text)]',
           'focus:outline-none',
