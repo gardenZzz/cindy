@@ -78,6 +78,28 @@ export function panelHasEditingFocus(): boolean {
   return ae.tagName === 'INPUT' || ae.tagName === 'TEXTAREA' || ae.isContentEditable;
 }
 
+/** 有模态浮层打开时抑制 hover 宽限收回。判定直接读模态浮层的标志性副作用——
+ *  body 上的 pointer-events:none(Radix DismissableLayer 在 modal 时挂上):
+ *  这正是面板指针保活失灵的唯一根源——mouseleave 的 relatedTarget 不再匹配
+ *  保活白名单、全局 pointermove 的 target 退化成 `<html>`,都会误判「指针已
+ *  离开」把面板连同刚弹出的菜单一起收掉(实测:行 ⋮ 菜单弹出即自动关闭;
+ *  右键菜单因光标恰好落在菜单内容上而幸免)。该状态存在时任何「指针已离开」
+ *  信号都不可信,抑制收回是唯一安全解;状态解除后下一次 pointermove 立即恢复
+ *  正常收回语义。对比全局扫描浮层 DOM 的方案(review 三连):
+ *  - 非模态 dialog(如全局 FindInPageBar 的常驻 role="dialog")不改 body,
+ *    指针语义完好,不会被误判抑制;
+ *  - 与面板无关的模态浮层打开期间,指针信号本身已不可信,抑制悬留、浮层
+ *    关闭后由下一次 pointermove 收回,是可达的最优行为;
+ *  - 纯 inline style 读取,热路径(全局 pointermove)零选择器解析开销,
+ *    也没有 :has 的引擎兼容面。 */
+function panelHasBlockingOverlay(): boolean {
+  return typeof document !== 'undefined' && document.body.style.pointerEvents === 'none';
+}
+
+function suppressAutoClose(): boolean {
+  return panelHasEditingFocus() || panelHasBlockingOverlay();
+}
+
 export const railPanelStore = {
   subscribe(listener: () => void): () => void {
     listeners.add(listener);
@@ -120,18 +142,25 @@ export const railPanelStore = {
     clearCloseTimer();
   },
   scheduleClose(): void {
-    if (panelHasEditingFocus()) return;
+    if (suppressAutoClose()) return;
     clearCloseTimer();
-    closeTimer = setTimeout(() => { closeTimer = null; railPanelStore.closeAll(); }, RAIL_PANEL_CLOSE_GRACE_MS);
+    closeTimer = setTimeout(() => {
+      closeTimer = null;
+      // 触发时再验一次:浮层可能在计时器排下之后、走完之前才挂载
+      // (点击 ⋮ → mouseleave 先到、菜单内容后 mount 的竞态)。
+      if (suppressAutoClose()) return;
+      railPanelStore.closeAll();
+    }, RAIL_PANEL_CLOSE_GRACE_MS);
   },
   cancelProjectClose(): void {
     clearProjectCloseTimer();
   },
   scheduleProjectClose(): void {
-    if (panelHasEditingFocus()) return;
+    if (suppressAutoClose()) return;
     clearProjectCloseTimer();
     projectCloseTimer = setTimeout(() => {
       projectCloseTimer = null;
+      if (suppressAutoClose()) return;
       if (state.openProjectKey) emit({ ...state, openProjectKey: null, projectAnchor: null });
     }, RAIL_PANEL_CLOSE_GRACE_MS);
   },
