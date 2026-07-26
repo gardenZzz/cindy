@@ -961,21 +961,32 @@ export function LoginPage() {
         footer={localModeFooter}
         bottomReserve={panelBottomReserve}
       >
-        {accountDeletionStatus && (
-          <AccountDeletionStatusPanel
-            status={accountDeletionStatus}
-            onDismiss={
-              accountDeletionStatus.status === 'completed'
-                ? () => {
-                    void clearAccountDeletionReceipt?.().catch(() => undefined);
-                    setAccountDeletionStatus(null);
-                  }
-                : undefined
-            }
-          />
-        )}
         {node}
       </LoginStage>
+      {/* 注销状态提示气泡(figma 678:1075「注销状态」组件集):浮层——不占文档流、
+          不推挤下方内容,z-30 盖过 stage 全部内容(低于拖拽条 z-40 与协议弹窗 z-50);
+          窗口顶 72px 恒定、水平窗口居中、宽 670 恒定,均不随 loginScale 缩放。
+          显隐与面板入场同节奏(只淡入,不参与位移)。 */}
+      {accountDeletionStatus && (
+        <AccountDeletionStatusPanel
+          status={accountDeletionStatus}
+          onDismiss={
+            accountDeletionStatus.status === 'completed'
+              ? () => {
+                  void clearAccountDeletionReceipt?.().catch(() => undefined);
+                  setAccountDeletionStatus(null);
+                }
+              : undefined
+          }
+          style={{
+            opacity: panelHidden ? 0 : 1,
+            pointerEvents: panelHidden ? 'none' : undefined,
+            transition: handoff.isPlaying
+              ? `opacity ${LOGIN_HANDOFF_TIMINGS.panelMs}ms ${LOGIN_HANDOFF_TIMINGS.panelEasing}`
+              : undefined,
+          }}
+        />
+      )}
       {/* 顶部 46px 拖拽条 overlay(附录 C §1.4 条4:独立层不占文档流;返回钮在
           面板区 y≫46px 不被遮挡;Win 控件 no-drag)。窗框双描边 chrome overlay 已于
           2026-07-22 随 PR #104 对齐(纯平白底 + 无窗框描边)移除 */}
@@ -1035,12 +1046,28 @@ function SocialProviderIcon({ provider }: { provider: SocialProvider }) {
   );
 }
 
+/**
+ * 注销状态提示气泡(figma 678:1075「注销状态」组件集,2026-07-25 用户拍板规格):
+ * 浮层组件——absolute 定位、不占布局流、盖在登录页一切元素(立绘/字标/面板/社交行)之上。
+ * 宽 670 恒定(窗口过窄 clamp `min(670px, 100vw-48px)`)、顶 72 恒定、水平居中,
+ * 均不随 loginScale 缩放;圆角 22、四边 padding 20、1px 描边,无图标/阴影/动画。
+ * 排版全居中:标题=正文同 20px/23px/Regular 400,仅以颜色区分
+ * (标题 login-control-text / 正文 login-secondary-text);标题↔正文 5px、
+ * 正文↔「我知道了」22px、「我知道了」↔气泡底 20px(=下 padding,文案拉长不变)。
+ * 「我知道了」= 下划线文字链(login-link-text 既有形态),视觉不变但点击热区
+ * 经 ±11px padding/负 margin 扩到 ≥44×44。状态:pending/processing 无按钮、
+ * completed 带「我知道了」;颜色全走 token(气泡底 login-deletion-bubble-bg,
+ * 描边 login-deletion-bubble-border,均为固定亮/暗值、不随扩展主题)。
+ */
 function AccountDeletionStatusPanel({
   status,
   onDismiss,
+  style,
 }: {
   status: AccountDeletionStatus;
   onDismiss?: () => void;
+  /** 浮层显隐(handoff 合流:与面板入场同节奏,只淡入不透明、不参与位移)。 */
+  style?: CSSProperties;
 }) {
   const { t } = useTranslation();
   const titleKey =
@@ -1059,10 +1086,11 @@ function AccountDeletionStatusPanel({
   return (
     <section
       aria-label={t(titleKey)}
-      className="mb-5 w-full rounded-xl border border-[var(--border-default)] bg-[var(--surface-chip)] px-4 py-3"
+      className="absolute left-1/2 top-[72px] z-30 w-[min(670px,calc(100vw-48px))] -translate-x-1/2 break-words rounded-[22px] border border-[var(--login-deletion-bubble-border)] bg-[var(--login-deletion-bubble-bg)] p-5 text-center"
+      style={style}
     >
-      <h2 className="text-14 font-medium text-[var(--text-primary)]">{t(titleKey)}</h2>
-      <p className="mt-1 text-12 leading-5 text-[var(--text-secondary)]">
+      <h2 className="text-[20px] font-normal leading-[23px] text-[var(--login-control-text)]">{t(titleKey)}</h2>
+      <p className="mt-[5px] text-[20px] font-normal leading-[23px] text-[var(--login-secondary-text)]">
         {t(copyKey, {
           date: formatAccountDeletionDate(status.deleteAfter),
         })}
@@ -1072,8 +1100,10 @@ function AccountDeletionStatusPanel({
           type="button"
           onClick={onDismiss}
           className={cn(
-            'mt-2 rounded-full px-2 py-1 text-12 text-[var(--text-secondary)]',
-            'transition-colors hover:bg-[var(--surface-hover)] hover:text-[var(--text-primary)]',
+            // 热区扩容:py 11px(11+23+11=45≥44)+ -mb 抵消,视觉间距保持 上22/下20 不变
+            'mt-[11px] -mb-[11px] border-0 bg-transparent px-3 py-[11px]',
+            'text-[20px] font-normal leading-[23px] text-[var(--login-control-text)] underline',
+            'hover:enabled:[color:var(--login-link-hover)] active:enabled:[color:var(--login-link-pressed)]',
             'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--focus-ring-soft)]',
           )}
         >

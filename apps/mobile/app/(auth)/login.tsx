@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
-import { Animated, Easing, Keyboard, Linking, Platform, StyleSheet, View } from 'react-native';
+import { Animated, Easing, Keyboard, Linking, Platform, Pressable, StyleSheet, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import type { AccountDeletionStatus, SocialProvider, VerificationKind } from '@cindy/auth-client';
 
@@ -18,7 +18,6 @@ import { acceptPrivacyConsent } from '@/analytics/analyticsConsentStore';
 import { initMobileTapdb } from '@/analytics/mobileTapdb';
 import { isNativeSocialProviderSupported } from '@/auth/nativeSocial';
 import { Text, TextInput } from '@/components/AppText';
-import { MainWindowActionButton } from '@/components/MobilePrimitives';
 import { useTheme, useThemedStyles, type ThemeColors } from '@/theme';
 import {
   LOGIN_HANDOFF_EASING,
@@ -32,6 +31,7 @@ import {
   createResendDeadline,
   LOGIN_CONSENT_ROW,
   LOGIN_CONTROL,
+  LOGIN_DELETION_BUBBLE,
   LOGIN_ERROR_TEXT,
   LOGIN_GROUP,
   LOGIN_LOADING_RING,
@@ -39,6 +39,8 @@ import {
   LOGIN_SSO_ORG_HINT_TOP,
   LOGIN_SUBTITLE,
   LOGIN_TITLE,
+  resolveDeletionBubbleFrame,
+  type LoginDeletionBubbleFrame,
   type LoginSurfaceMode,
 } from '@/auth/loginSkinLayout';
 import { LEGAL_LINKS } from '@/config/legalLinks';
@@ -1132,6 +1134,18 @@ export default function LoginScreen() {
   // reduced-motion/已登录直入由 Provider 收敛为 done,此处直落终态)
   const panelEntrance = usePanelEntrance(handoffPhase, stage.mode, stage.scale);
 
+  // 注销提示气泡(figma 678:1075):登录屏根容器 absolute 浮层,viewport 物理坐标,
+  // 不随键盘位移、不参与 stage 缩放;渲染序在登录组之后 = 盖过立绘/字标/面板/社交行,
+  // 协议弹窗仍在更上层(modal 拦截优先)。
+  const deletionBubbleFrame = accountDeletionStatus
+    ? resolveDeletionBubbleFrame(stage, insets.top)
+    : null;
+  // 气泡对读屏隐藏的条件:① 协议弹窗打开(气泡是弹窗兄弟浮层,不隐藏则 TalkBack 可
+  // 穿透读到文案、completed 态还能激活「我知道了」);② 入场未完成(opacity/pointerEvents
+  // 只管渲染与命中,读屏仍会念出不可见的注销状态)。iOS 走 accessibilityElementsHidden、
+  // Android 走 importantForAccessibility,两端都要给(PR #464 codex)。
+  const deletionBubbleA11yHidden = consentDialogOpen || handoffPhase !== 'done';
+
   return (
     <MobileLoginHandoffStage
       keyboardShiftPx={keyboardShift}
@@ -1176,21 +1190,39 @@ export default function LoginScreen() {
                 width: LOGIN_GROUP.width,
               }}
             >
-              {accountDeletionStatus ? (
-                <AccountDeletionStatusPanel
-                  onDismiss={
-                    accountDeletionStatus.status === 'completed'
-                      ? () => void auth.clearAccountDeletionReceipt()
-                      : undefined
-                  }
-                  status={accountDeletionStatus}
-                />
-              ) : null}
               {stateContent}
             </View>
           </Animated.View>
         </View>
       </View>
+      {accountDeletionStatus && deletionBubbleFrame ? (
+        // 入场门(PR #464 review,与桌面同口径):opacity 结构性跟随面板入场的
+        // Animated 值(splash=0 → handoff 渐显 → done=1,同一 usePanelEntrance 输出,
+        // 不新造状态机);pointerEvents 仅 done 放行——入场完成前气泡不可见也不可点。
+        <Animated.View
+          // 读屏隔离(见 deletionBubbleA11yHidden 注):iOS + Android 双端属性都给,
+          // 覆盖「协议弹窗打开」与「入场未完成」两种不该被念出的时刻。
+          accessibilityElementsHidden={deletionBubbleA11yHidden}
+          importantForAccessibility={
+            deletionBubbleA11yHidden ? 'no-hide-descendants' : 'auto'
+          }
+          // box-none 而非 auto:包装层铺满全屏(absoluteFill),RN 下全屏 View 即使透明
+          // 也会吃掉命中区、挡住下方登录组的输入框/按钮/社交入口(web 的穿透直觉不适用)。
+          // box-none = 自身不作触摸目标、子节点(气泡)照常可点(Greptile 审查 P1)。
+          pointerEvents={handoffPhase === 'done' ? 'box-none' : 'none'}
+          style={[StyleSheet.absoluteFill, { opacity: panelEntrance.opacity }]}
+        >
+          <AccountDeletionStatusPanel
+            frame={deletionBubbleFrame}
+            onDismiss={
+              accountDeletionStatus.status === 'completed'
+                ? () => void auth.clearAccountDeletionReceipt()
+                : undefined
+            }
+            status={accountDeletionStatus}
+          />
+        </Animated.View>
+      ) : null}
       {/* 服务条款和隐私协议确认弹窗(figma 602:822/602:1249):个人登录链路在
           radio 未勾选时统一拦截;同意=勾选并续接,不同意=留在登录页。stage 内
           全屏遮罩(继承首启亮色门主题上下文),zIndex 盖过登录组。 */}
@@ -1267,24 +1299,32 @@ function usePanelEntrance(
 }
 
 function AccountDeletionStatusPanel({
+  frame,
   onDismiss,
   status,
 }: {
+  frame: LoginDeletionBubbleFrame;
   onDismiss?: () => void;
   status: AccountDeletionStatus;
 }) {
   const styles = useThemedStyles(makeStyles);
   const pending = status.status === 'pending';
   return (
-    <View style={styles.deletionStatus} testID="login.accountDeletionStatus">
-      <Text style={styles.deletionStatusTitle}>
+    <View
+      style={[
+        styles.deletionBubble,
+        { left: frame.left, top: frame.top, width: frame.width },
+      ]}
+      testID="login.accountDeletionStatus"
+    >
+      <Text style={styles.deletionBubbleTitle}>
         {pending
           ? loginText('accountDeletionPendingTitle')
           : status.status === 'processing'
             ? loginText('accountDeletionProcessingTitle')
             : loginText('accountDeletionCompletedTitle')}
       </Text>
-      <Text style={styles.deletionStatusCopy}>
+      <Text style={styles.deletionBubbleCopy}>
         {pending
           ? loginText('accountDeletionPendingCopy').replace(
               '{date}',
@@ -1295,15 +1335,17 @@ function AccountDeletionStatusPanel({
             : loginText('accountDeletionCompletedCopy')}
       </Text>
       {onDismiss ? (
-        <MainWindowActionButton
-          action={{
-            label: loginText('accountDeletionDismiss'),
-            onPress: onDismiss,
-            testID: 'login.accountDeletionDismissButton',
-          }}
-          density="compact"
-          style={styles.fullButton}
-        />
+        <Pressable
+          accessibilityRole="button"
+          hitSlop={LOGIN_DELETION_BUBBLE.linkHitSlop}
+          onPress={onDismiss}
+          style={styles.deletionBubbleLink}
+          testID="login.accountDeletionDismissButton"
+        >
+          <Text style={styles.deletionBubbleLinkText}>
+            {loginText('accountDeletionDismiss')}
+          </Text>
+        </Pressable>
       ) : null}
     </View>
   );
@@ -1416,22 +1458,43 @@ const makeStyles = (colors: ThemeColors) =>
       gap: spacing.md,
       padding: spacing.lg,
     },
-    deletionStatus: {
-      borderColor: colors.borderStrong,
-      borderRadius: radius.control,
-      borderWidth: StyleSheet.hairlineWidth,
-      gap: spacing.sm,
-      padding: spacing.md,
+    // 注销提示气泡(figma 678:1075):不透明底 + 1px 描边(浮层盖立绘,必须不透明);
+    // left/top/width 由 resolveDeletionBubbleFrame 行内注入(物理 pt,不走 stage 缩放);
+    // 无图标/阴影/动画,高度内容撑开不固定。
+    deletionBubble: {
+      backgroundColor: colors.login.deletionBubbleBg,
+      borderColor: colors.login.deletionBubbleBorder,
+      borderRadius: LOGIN_DELETION_BUBBLE.radius,
+      borderWidth: LOGIN_DELETION_BUBBLE.borderWidth,
+      padding: LOGIN_DELETION_BUBBLE.padding,
+      position: 'absolute',
     },
-    deletionStatusTitle: {
-      color: colors.textPrimary,
-      fontSize: typeScale.body,
-      fontWeight: fontWeight.semibold,
+    deletionBubbleTitle: {
+      color: colors.login.controlText,
+      fontSize: LOGIN_DELETION_BUBBLE.font,
+      fontWeight: fontWeight.regular,
+      lineHeight: LOGIN_DELETION_BUBBLE.lineHeight,
+      textAlign: 'center',
     },
-    deletionStatusCopy: {
-      color: colors.textSecondary,
-      fontSize: typeScale.footnote,
-      lineHeight: lineHeight.caption,
+    deletionBubbleCopy: {
+      color: colors.login.secondaryText,
+      fontSize: LOGIN_DELETION_BUBBLE.font,
+      fontWeight: fontWeight.regular,
+      lineHeight: LOGIN_DELETION_BUBBLE.lineHeight,
+      marginTop: LOGIN_DELETION_BUBBLE.titleBodyGap,
+      textAlign: 'center',
+    },
+    deletionBubbleLink: {
+      alignSelf: 'center',
+      marginTop: LOGIN_DELETION_BUBBLE.bodyLinkGap,
+    },
+    deletionBubbleLinkText: {
+      color: colors.login.controlText,
+      fontSize: LOGIN_DELETION_BUBBLE.font,
+      fontWeight: fontWeight.regular,
+      lineHeight: LOGIN_DELETION_BUBBLE.lineHeight,
+      textAlign: 'center',
+      textDecorationLine: 'underline',
     },
     stepHeader: { gap: spacing.xs, marginBottom: spacing.xs },
     stepTitle: {
@@ -1502,7 +1565,6 @@ const makeStyles = (colors: ThemeColors) =>
       letterSpacing: spacing.sm,
       textAlign: 'center',
     },
-    fullButton: { minHeight: 48, minWidth: 0 },
     helper: {
       color: colors.textSecondary,
       fontSize: typeScale.footnote,

@@ -12,11 +12,13 @@ vi.mock('expo-localization', () => ({
 import {
   createResendDeadline,
   formatResendCountdown,
+  LOGIN_DELETION_BUBBLE,
   LOGIN_STAGE_LONG,
   LOGIN_STAGE_SHORT,
   PAD_LANDSCAPE_MIN_SCALE,
   RESEND_COUNTDOWN_SECONDS,
   resendCountdownRemaining,
+  resolveDeletionBubbleFrame,
   resolveLoginStage,
   resolveLoginSurface,
   resolveLoginSurfaceMode,
@@ -213,5 +215,73 @@ describe('loginSkin §3.6 平板/横竖屏 surface 构图(PR4b Step 5b.3;adaptat
     expect(horiz.mode).toBe('phone');
     expect(horiz.loginGroupScale).toBe(1);
     expect(horiz.phone).toBeDefined();
+  });
+});
+
+describe('loginSkin 注销提示气泡浮层布局(figma 678:1075,2026-07-26 用户拍板;物理 pt/dp,不走 stage 缩放)', () => {
+  it('常量契约:圆角/padding/描边/排版/间距/hitSlop/双分支定位参数逐字段命中拍板值', () => {
+    expect(LOGIN_DELETION_BUBBLE.radius).toBe(22);
+    expect(LOGIN_DELETION_BUBBLE.padding).toBe(20);
+    expect(LOGIN_DELETION_BUBBLE.borderWidth).toBe(1);
+    expect(LOGIN_DELETION_BUBBLE.font).toBe(20);
+    expect(LOGIN_DELETION_BUBBLE.lineHeight).toBe(23);
+    expect(LOGIN_DELETION_BUBBLE.titleBodyGap).toBe(5);
+    expect(LOGIN_DELETION_BUBBLE.bodyLinkGap).toBe(22);
+    expect(LOGIN_DELETION_BUBBLE.sideMargin).toBe(20);
+    expect(LOGIN_DELETION_BUBBLE.phone.maxWidth).toBe(335);
+    expect(LOGIN_DELETION_BUBBLE.pad.width).toBe(556);
+    expect(LOGIN_DELETION_BUBBLE.pad.top).toBe(72);
+    expect(LOGIN_DELETION_BUBBLE.pad.landscapeCenterRatio).toBe(0.75);
+    // 「我知道了」热区 ≥44×44(视觉不变,只扩 hitSlop):23 行高 + 上下 12 → 47
+    const slop = LOGIN_DELETION_BUBBLE.linkHitSlop;
+    expect(LOGIN_DELETION_BUBBLE.lineHeight + slop.top + slop.bottom).toBeGreaterThanOrEqual(44);
+    expect(slop.top).toBe(12);
+    expect(slop.bottom).toBe(12);
+    expect(slop.left).toBe(20);
+    expect(slop.right).toBe(20);
+  });
+
+  it('phone:top=safe-area 顶原样带出,宽 min(335, 屏宽−40),水平屏幕居中', () => {
+    // iPhone 390 宽:335 未满屏宽上限,left=(390-335)/2=27.5;top=insets.top(47)间距 0
+    const frame = resolveDeletionBubbleFrame(resolveLoginSurface(390, 844), 47);
+    expect(frame).toEqual({ left: 27.5, top: 47, width: 335 });
+    // safeTop 原样消费(0/59 等不同机型),不内嵌状态栏高
+    expect(resolveDeletionBubbleFrame(resolveLoginSurface(390, 844), 0).top).toBe(0);
+    expect(resolveDeletionBubbleFrame(resolveLoginSurface(393, 852), 59).top).toBe(59);
+    // 窄屏(Split View 320pt):宽 = 320-40=280,left=20(两侧边距 20)
+    const narrow = resolveDeletionBubbleFrame(resolveLoginSurface(320, 768), 20);
+    expect(narrow).toEqual({ left: 20, top: 20, width: 280 });
+  });
+
+  it('pad-portrait:top=72 固定,宽 556,中轴 = 屏幕中心(竖排构图,字标/表单居中)', () => {
+    // 744×1133 基准画布:中心 372,left=372-278=94
+    const frame = resolveDeletionBubbleFrame(resolveLoginSurface(744, 1133), 24);
+    expect(frame).toEqual({ left: 94, top: 72, width: 556 });
+    // 更宽 iPad 竖屏(820×1180):仍屏幕中心 410,left=132
+    const wide = resolveDeletionBubbleFrame(resolveLoginSurface(820, 1180), 24);
+    expect(wide.left).toBeCloseTo(132, 6);
+    expect(wide.top).toBe(72);
+  });
+
+  it('pad-landscape:top=72,宽 556,中轴 = 登录 stage 右半屏中心(左立绘右表单双栏,与字标同轴)', () => {
+    // 1180×820 基准画布:右半屏中心 885,left=885-278=607
+    const frame = resolveDeletionBubbleFrame(resolveLoginSurface(1180, 820), 24);
+    expect(frame).toEqual({ left: 607, top: 72, width: 556 });
+    // iPad mini 横屏(1133×744,height 受限):scale=min(1133/1180,744/820)=0.907317,
+    // offsetX=(1133-1180×scale)/2=31.1829;stage 右半屏中心 = 31.1829+885×scale=834.1585
+    // → left=556.1585(与字标同轴;若错用 viewport×0.75=849.75 会偏 15.6pt)
+    const mini = resolveDeletionBubbleFrame(resolveLoginSurface(1133, 744), 24);
+    expect(mini.left).toBeCloseTo(556.1585, 3);
+    expect(mini.top).toBe(72);
+    expect(mini.width).toBe(556);
+  });
+
+  it('pad-landscape 断点底线(1000×690):left clamp 屏内 margin≥0,气泡不越右缘', () => {
+    // scale clamp 0.85 → 中轴 ≈750.75,未 clamp 时 left=472.75、右缘 1028.75 越屏;
+    // clamp 后 left=1000-556=444,右缘 1000 贴屏边不出屏(退化 viewport 保可读)
+    const frame = resolveDeletionBubbleFrame(resolveLoginSurface(1000, 690), 24);
+    expect(frame.left).toBe(444);
+    expect(frame.left + frame.width).toBe(1000);
+    expect(frame.top).toBe(72);
   });
 });
