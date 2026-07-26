@@ -645,6 +645,8 @@ export const MAKER_PUSH = {
    * 模型选择器 live 刷新）。无 payload；收到即重拉 listProviders。
    */
   PROVIDER_CHANGED: 'maker:provider:changed',
+  /** 通用 OAuth Device Grant 的短期验证码进度（仅 renderer 展示，不落盘/不进日志）。 */
+  PROVIDER_OAUTH_PROGRESS: 'maker:provider:oauth:progress',
   /**
    * 自定义 MCP 服务器增删改后广播（renderer 设置页 McpServersSection refetch）。
    * 无 payload；收到即重拉 listCustomMcpServers。

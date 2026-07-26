@@ -23,6 +23,14 @@ export type ResponsesContentPart = ResponsesInputTextPart | ResponsesInputImageP
   [key: string]: unknown;
 };
 
+export interface ChatToolCallExtraContent {
+  [key: string]: unknown;
+  google?: {
+    [key: string]: unknown;
+    thought_signature?: string;
+  };
+}
+
 export type ResponsesInputItem =
   | {
       type?: 'message';
@@ -34,6 +42,7 @@ export type ResponsesInputItem =
       call_id: string;
       name: string;
       arguments: string;
+      extra_content?: ChatToolCallExtraContent;
     }
   | {
       type: 'function_call_output';
@@ -85,6 +94,8 @@ export interface ChatAssistantMessage {
     id: string;
     type: 'function';
     function: { name: string; arguments: string };
+    /** OpenAI 兼容层的厂商扩展；当前仅用于 Google Gemini thought signature。 */
+    extra_content?: ChatToolCallExtraContent;
   }>;
 }
 
@@ -139,6 +150,12 @@ export interface ChatBridgeCapabilities {
    * 开启后把具名 / required 的 tool_choice 降级为 'auto'。
    */
   forceAutoToolChoice?: boolean;
+  /**
+   * Gemini 3 在工具结果下一轮强制校验 thought signature。Responses 历史不承载 Google 的
+   * `tool_calls[].extra_content`，开启后按 Google 官方兼容说明给每步首个 call 写入
+   * `skip_thought_signature_validator`，避免桥接历史在首个工具调用后稳定 400。
+   */
+  googleThoughtSignaturePlaceholder?: boolean;
 }
 
 export interface ChatBridgeLogger {

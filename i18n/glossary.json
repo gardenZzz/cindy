@@ -13,6 +13,17 @@
   ],
   "terms": [
     {
+      "id": "device-code",
+      "status": "proposed",
+      "en": "Device Code",
+      "translations": {
+        "zh-CN": "设备码",
+        "ja": "デバイスコード",
+        "ko": "기기 코드"
+      },
+      "note": "OAuth 2.0 Device Authorization Grant 中由用户在另一设备验证页输入的一次性代码。当前先采用各语言直译，作为待产品裁决术语登记，避免后续界面出现“设备代码／配对码／认证码”等多套说法。"
+    },
+    {
       "id": "agent",
       "status": "decided",
       "en": "Agent",

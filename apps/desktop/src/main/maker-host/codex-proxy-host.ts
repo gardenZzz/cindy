@@ -201,6 +201,14 @@ const CHAT_BRIDGE_DEFAULT_CAPABILITIES: ChatBridgeCapabilities = {
   forceAutoToolChoice: true,
 };
 
+function isGoogleGeminiChatUpstream(upstream: string): boolean {
+  try {
+    return new URL(upstream).hostname === 'generativelanguage.googleapis.com';
+  } catch {
+    return false;
+  }
+}
+
 /**
  * Chat bridge 上游只收 host 明确构造的 header。绝不把 Codex/ChatGPT 请求 header
  * 原样透传，防止账号 id、OpenAI OAuth bearer 或内部 session 元数据泄漏给第三方。
@@ -218,6 +226,19 @@ function createChatBridgeDecision(
   // (与 observer 的 user-only 语义一致)。
   const providerId = route.providerId;
   const providerName = getActiveCatalog().providers.find((p) => p.id === providerId)?.name ?? providerId;
+  const capabilities: ChatBridgeCapabilities = isGoogleGeminiChatUpstream(
+    route.routing.upstream,
+  )
+    ? {
+        ...CHAT_BRIDGE_DEFAULT_CAPABILITIES,
+        // Gemini 的 OpenAI 兼容层原生理解 reasoning_effort 和具名 tool choice；同时不需要
+        // DeepSeek/Kimi 的 reasoning_content 占位。工具回放则必须带 Google thought signature。
+        reasoningField: 'reasoning_effort',
+        toolCallReasoningPlaceholder: false,
+        forceAutoToolChoice: false,
+        googleThoughtSignaturePlaceholder: true,
+      }
+    : CHAT_BRIDGE_DEFAULT_CAPABILITIES;
   const onUpstreamError = route.providerSource === 'user'
     ? ({ status, body }: { status: number; body: string }): void => {
         reportProviderUpstreamError({ agent: 'codex', providerId, providerName, status, bodyText: body });
@@ -225,11 +246,12 @@ function createChatBridgeDecision(
     : undefined;
   const handler = createResponsesChatHandler({
     upstreamBase: route.routing.upstream,
+    ...(route.routing.requestPath ? { chatCompletionsPath: route.routing.requestPath } : {}),
     buildHeaders: async () => headers,
     rewriteModel: (model: string) => stripPrefix && model.startsWith(stripPrefix)
       ? model.slice(stripPrefix.length)
       : model,
-    capabilities: CHAT_BRIDGE_DEFAULT_CAPABILITIES,
+    capabilities,
     ...(onUpstreamError ? { onUpstreamError } : {}),
   }, { logger: log });
   return {
