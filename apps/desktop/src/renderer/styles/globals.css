@@ -361,7 +361,35 @@ html:lang(ko) {
 .ProseMirror .composer-list-prefix-indent {
   padding-left: 1em;
 }
-.ProseMirror span.composer-list-line-indent {
+.ProseMirror .composer-list-fallback-container {
+  display: block;
+  box-sizing: border-box;
+  width: 100%;
+  padding-left: calc(1em + var(--composer-list-fallback-indent, 1.25em));
+  overflow-wrap: anywhere;
+}
+.ProseMirror .composer-list-fallback-prefix {
+  display: inline-block;
+  box-sizing: border-box;
+  width: calc(1em + var(--composer-list-fallback-indent, 1.25em));
+  margin-left: calc(-1em - var(--composer-list-fallback-indent, 1.25em));
+  white-space: nowrap;
+  vertical-align: top;
+}
+.ProseMirror .composer-list-fallback-unindented {
+  display: inline-block;
+  box-sizing: border-box;
+  width: calc(100% + 1em + var(--composer-list-fallback-indent, 1.25em));
+  margin-left: calc(-1em - var(--composer-list-fallback-indent, 1.25em));
+  vertical-align: top;
+  overflow-wrap: anywhere;
+}
+.ProseMirror .composer-list-fallback-break {
+  /* Keep native <br> line boxes so consecutive hard breaks retain intentional
+     blank lines inside a paragraph-level list fallback. */
+  display: inline;
+}
+.ProseMirror .composer-list-line-indent {
   display: inline-block;
   box-sizing: border-box;
   width: 100%;
@@ -370,11 +398,19 @@ html:lang(ko) {
   vertical-align: top;
   overflow-wrap: anywhere;
 }
-/* 只对没有自然断点的长数字/字母串启用强制断字。普通英文句子仍由
-   overflow-wrap:anywhere 保持自然单词边界，避免全局 break-all 造成逐字竖排。 */
-.ProseMirror .composer-list-long-run-indent {
-  word-break: break-all;
+.ProseMirror .composer-list-tab-indent {
+  /* Keep the fallback and the browser's tab advance deterministic until the
+     plugin view replaces the CSS variables with a measured Range width. */
+  tab-size: 8;
 }
+.ProseMirror .composer-list-cjk-font {
+  font-family:
+    'PingFang SC', 'Hiragino Sans GB', 'Microsoft YaHei UI', 'Microsoft YaHei', 'Noto Sans CJK SC',
+    'Source Han Sans SC', 'HarmonyOS Sans SC', sans-serif;
+}
+/* 没有自然断点的长数字/字母串拆成 marker/body 两个相邻盒子。marker
+   始终留在正文首行,body 独占剩余宽度;overflow-wrap:anywhere 仅在正文
+   需要溢出时启用紧急断字,普通英文仍优先按空格换行。 */
 .ProseMirror .composer-list-long-run-marker {
   display: inline-block;
   box-sizing: border-box;
@@ -390,10 +426,18 @@ html:lang(ko) {
   width: calc(100% - 1em - var(--composer-list-hang, 1.25em));
   max-width: calc(100% - 1em - var(--composer-list-hang, 1.25em));
   overflow-wrap: anywhere;
+  /* 该盒子只由 LONG_ALPHANUMERIC_BODY_RE 生成，正文没有自然断点；
+     因此可以安全地在串内断字，而不会影响普通英文句子的词边界。 */
   word-break: break-all;
   vertical-align: top;
 }
 .ProseMirror .voice-input-draft-replaced {
+  display: none;
+}
+/* Long-run body boxes can overlap a voice replacement in single-line rows.
+   The general multiline list path switches to the paragraph fallback while a
+   replacement is active, so its full-width row wrapper is never fragmented. */
+.ProseMirror .composer-list-long-run-body.voice-input-draft-replaced {
   display: none;
 }
 .ProseMirror [data-voice-draft-inline] {
