@@ -5313,6 +5313,10 @@
       "aiRenameRemoteOffline": "リモートデバイスに接続されていません。接続を確認してからもう一度お試しください",
       "aiRenameFailed": "AIによる命名に失敗しました。しばらくしてからもう一度お試しください"
     },
+    "autoTitle": {
+      "image": "画像",
+      "file": "ファイル"
+    },
     "sessionHeader": {
       "untitled": "無題のセッション",
       "moreActions": "その他の操作"
