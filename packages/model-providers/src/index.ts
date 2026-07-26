@@ -60,7 +60,13 @@ export {
   modelSupportsFastMode,
   sessionModelSupportsFastMode,
 } from './registry.js';
-export type { ConnectionState, ProviderView, ResolvedRoute } from './registry.js';
+export type {
+  ConnectionState,
+  ModelDiscoveryFailureState,
+  ProviderModelDiscoveryFailure,
+  ProviderView,
+  ResolvedRoute,
+} from './registry.js';
 
 export { isModelVisible, buildProviderSections, visibleModelUnion, resolveModelIconKind } from './sections.js';
 export type { SectionModel, ProviderSection, ModelIconKind } from './sections.js';

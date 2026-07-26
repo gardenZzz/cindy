@@ -437,6 +437,16 @@ export const MAKER_INVOKE = {
    * renderer 直接按空列表继续渲染,检测建议是增强而非依赖)。只读、无密钥材料。
    */
   PROVIDER_LOCAL_CLI_SCAN: 'maker:provider:local-cli-scan',
+  /**
+   * 「清单唯一来源是动态发现」的供应商（当前只有 anthropic 订阅）重新拉一次清单。
+   *
+   * 发现失败**不自动重试**（直连受限网络下是结构性不可达，静默重试只会把「连不上」
+   * 拖成「一直在发现中」），所以必须给用户一个主动重试的入口：设置页在失败态下渲染
+   * 「重试」，点了走这条通道。返回查询型结构化结果 { ok, failure? }（规则 13 例外条款：
+   * renderer 要按 failure.kind 渲染分类文案）。只读、无密钥材料；完成后广播
+   * PROVIDER_CHANGED 让列表与清单刷新。
+   */
+  PROVIDER_MODELS_REDISCOVER: 'maker:provider:models-rediscover',
   // Scheduler (Phase 4) — 9 个 invoke handler，对应 Scheduler 公共 API
   SCHEDULE_LIST: 'maker:schedule:list',
   SCHEDULE_GET: 'maker:schedule:get',

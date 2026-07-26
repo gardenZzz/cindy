@@ -18,16 +18,72 @@ import type { ProviderLogoKind } from './providerBranding.js';
 /** 各供应商是否已连接，由 host 注入。 */
 export type ConnectionState = Record<string, boolean>;
 
+/**
+ * 动态清单发现的失败归因。
+ *
+ * 只有「清单唯一来源是动态发现」的供应商才会有（如 Anthropic 订阅：静态目录段已退役，
+ * 拉不到 `/v1/models` 就是零模型）。这类供应商一旦发现失败，UI 若继续说「已连接，正在
+ * 发现模型」就是在骗用户——直连不通的网络环境下它永远不会自己好转。`kind` 决定 UI 说
+ * 什么，`detail` 只进日志与诊断，不直接展示（可能含上游原始错误文本）。
+ */
+export interface ProviderModelDiscoveryFailure {
+  /**
+   * 归因分两类，决定 host 该不该自动重试（判定在 host 侧，见各供应商的 discovery 实现）：
+   *
+   * **可能是暂时的 —— 值得重试**
+   *   network  —— 连不上（DNS 失败 / 连接被拒 / 链路不通）
+   *   timeout  —— 连上了但超时
+   *   upstream —— 上游 5xx / 429 等服务端侧故障
+   *
+   * **确定性拒绝 —— 重试没有意义，只会把「被拒绝」拖成「一直在发现中」**
+   *   regionBlocked —— 供应商不向当前所在地区提供服务（Anthropic 的
+   *                    `unsupported_country_region_territory`，400 / 403 都出现过，
+   *                    必须读响应体判定而不是只看状态码）
+   *   unauthorized  —— 凭证被拒（401）
+   *   forbidden     —— 请求被拒但不是地域原因（如 Cloudflare 对代理 / VPN 出口的拦截）
+   *   rejected      —— 其它 4xx
+   *   empty         —— 正常答复但没有任何可用模型
+   */
+  kind:
+    | 'network'
+    | 'timeout'
+    | 'upstream'
+    | 'regionBlocked'
+    | 'unauthorized'
+    | 'forbidden'
+    | 'rejected'
+    | 'empty';
+  detail?: string;
+  /** ISO 时间戳，用于展示「最近一次尝试」。 */
+  at: string;
+}
+
+/** 各供应商最近一次的清单发现失败，由 host 注入；成功即清除。 */
+export type ModelDiscoveryFailureState = Record<string, ProviderModelDiscoveryFailure | null>;
+
 /** 供应商 + 连接状态。 */
 export interface ProviderView extends Provider {
   connected: boolean;
   /** Non-secret presentation metadata resolved before routing details cross device-link. */
   logoKind?: ProviderLogoKind;
+  /** 动态清单发现的最近一次失败；成功或从未失败时缺席。 */
+  modelDiscoveryFailure?: ProviderModelDiscoveryFailure;
 }
 
 /** 把目录与连接状态合成 registry。 */
-export function buildRegistry(catalog: Catalog, connected: ConnectionState): ProviderView[] {
-  return catalog.providers.map((p) => ({ ...p, connected: connected[p.id] ?? false }));
+export function buildRegistry(
+  catalog: Catalog,
+  connected: ConnectionState,
+  discoveryFailures: ModelDiscoveryFailureState = {},
+): ProviderView[] {
+  return catalog.providers.map((p) => {
+    const failure = discoveryFailures[p.id];
+    return {
+      ...p,
+      connected: connected[p.id] ?? false,
+      ...(failure ? { modelDiscoveryFailure: failure } : {}),
+    };
+  });
 }
 
 /** 该 agent 兼容的所有供应商（不论连接与否）—— 供应商页「可用」列表用。 */

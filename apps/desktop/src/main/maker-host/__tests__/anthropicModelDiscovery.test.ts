@@ -44,6 +44,7 @@ import {
   noteAnthropicSdkSupportedModels,
   loadAnthropicModelsFromDiskCache,
   refreshAnthropicModelsFromHttp,
+  getAnthropicModelDiscoveryFailure,
   clearAnthropicDiscoveredModels,
   resetAnthropicDiscoveryForTest,
   waitForAnthropicDiscoveryIdleForTest,
@@ -821,5 +822,237 @@ describe('noteAnthropicSdkSupportedModels(登录态门控 + 合并纪律)', () =
       contextWindow: 900_000,
       efforts: ['low', 'high'],
     });
+  });
+});
+
+describe('HTTP 发现失败的归因与选择性重试', () => {
+  const okResponse = {
+    ok: true,
+    json: async () => ({
+      data: [{ id: 'claude-opus-4-8', display_name: 'Opus 4.8', type: 'model' }],
+      has_more: false,
+    }),
+  };
+  /** 非 2xx 响应:归因要读正文,所以 stub 必须给 text()。 */
+  function errorResponse(status: number, body = '') {
+    return { ok: false, status, text: async () => body };
+  }
+  const REGION_BLOCK_BODY = JSON.stringify({
+    type: 'error',
+    error: {
+      type: 'unsupported_country_region_territory',
+      message:
+        'Access to Anthropic models is not allowed from unsupported countries, regions, or territories.',
+    },
+  });
+
+  beforeEach(() => {
+    resetAnthropicDiscoveryForTest();
+    setAnthropicDiscoveredModels([]);
+    authState.loggedIn = true;
+    oauthRefreshMock.getValidClaudeAiOAuth.mockReset();
+    oauthRefreshMock.getValidClaudeAiOAuth.mockResolvedValue({ accessToken: 'test-token' });
+    vi.useFakeTimers();
+  });
+
+  afterEach(async () => {
+    vi.useRealTimers();
+    await clearAnthropicDiscoveredModels();
+    await waitForAnthropicDiscoveryIdleForTest();
+    resetAnthropicDiscoveryForTest();
+    setAnthropicDiscoveredModels([]);
+    vi.unstubAllGlobals();
+    await fsp.rm(TEST_USER_DATA, { recursive: true, force: true });
+  });
+
+  it('连不上归 network,并把 undici 的 cause code 记进 detail', async () => {
+    const err = new TypeError('fetch failed');
+    (err as Error & { cause?: unknown }).cause = { code: 'ENOTFOUND' };
+    vi.stubGlobal('fetch', vi.fn().mockRejectedValue(err));
+
+    await refreshAnthropicModelsFromHttp();
+
+    const failure = getAnthropicModelDiscoveryFailure();
+    expect(failure?.kind).toBe('network');
+    expect(failure?.detail).toContain('ENOTFOUND');
+    expect(typeof failure?.at).toBe('string');
+  });
+
+  it('超时归 timeout(TimeoutError 与 connect 超时 code 都算)', async () => {
+    const timeoutError = new Error('The operation was aborted due to timeout');
+    timeoutError.name = 'TimeoutError';
+    vi.stubGlobal('fetch', vi.fn().mockRejectedValue(timeoutError));
+    await refreshAnthropicModelsFromHttp();
+    expect(getAnthropicModelDiscoveryFailure()?.kind).toBe('timeout');
+
+    resetAnthropicDiscoveryForTest();
+    const connectTimeout = new TypeError('fetch failed');
+    (connectTimeout as Error & { cause?: unknown }).cause = { code: 'UND_ERR_CONNECT_TIMEOUT' };
+    vi.stubGlobal('fetch', vi.fn().mockRejectedValue(connectTimeout));
+    await refreshAnthropicModelsFromHttp();
+    expect(getAnthropicModelDiscoveryFailure()?.kind).toBe('timeout');
+  });
+
+  it('地域拒绝按正文识别,403 与 400 都算(状态码不足以判定)', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(errorResponse(403, REGION_BLOCK_BODY)));
+    await refreshAnthropicModelsFromHttp();
+    expect(getAnthropicModelDiscoveryFailure()?.kind).toBe('regionBlocked');
+
+    resetAnthropicDiscoveryForTest();
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(errorResponse(400, REGION_BLOCK_BODY)));
+    await refreshAnthropicModelsFromHttp();
+    expect(getAnthropicModelDiscoveryFailure()?.kind).toBe('regionBlocked');
+  });
+
+  it('同为 403 的 Cloudflare 式拒绝归 forbidden,不与地域拒绝混为一谈', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi
+        .fn()
+        .mockResolvedValue(
+          errorResponse(403, JSON.stringify({ error: { type: 'forbidden', message: 'Request not allowed' } })),
+        ),
+    );
+    await refreshAnthropicModelsFromHttp();
+    expect(getAnthropicModelDiscoveryFailure()?.kind).toBe('forbidden');
+  });
+
+  it('401 归 unauthorized;5xx / 429 归 upstream;其它 4xx 归 rejected', async () => {
+    for (const [status, kind] of [
+      [401, 'unauthorized'],
+      [503, 'upstream'],
+      [429, 'upstream'],
+      [418, 'rejected'],
+    ] as const) {
+      resetAnthropicDiscoveryForTest();
+      vi.stubGlobal('fetch', vi.fn().mockResolvedValue(errorResponse(status)));
+      await refreshAnthropicModelsFromHttp();
+      expect(getAnthropicModelDiscoveryFailure()?.kind).toBe(kind);
+    }
+  });
+
+  it('答复正常但没有可用模型归 empty', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn().mockResolvedValue({ ok: true, json: async () => ({ data: [], has_more: false }) }),
+    );
+    await refreshAnthropicModelsFromHttp();
+    expect(getAnthropicModelDiscoveryFailure()?.kind).toBe('empty');
+  });
+
+  it('暂时性失败(连不上)自动重试,成功即生效并清失败态', async () => {
+    const fetchMock = vi
+      .fn()
+      .mockRejectedValueOnce(new TypeError('fetch failed'))
+      .mockResolvedValue(okResponse);
+    vi.stubGlobal('fetch', fetchMock);
+
+    await refreshAnthropicModelsFromHttp();
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(getAnthropicModelDiscoveryFailure()?.kind).toBe('network');
+
+    await vi.advanceTimersByTimeAsync(2_000);
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(anthropicIds()).toEqual(['claude-opus-4-8']);
+    expect(getAnthropicModelDiscoveryFailure()).toBeNull();
+
+    // 成功后退避计数归零,不再排下一次。
+    await vi.advanceTimersByTimeAsync(120_000);
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+  });
+
+  it('上游 5xx 同样自动重试(服务端侧故障可能几秒后自愈)', async () => {
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(errorResponse(503))
+      .mockResolvedValue(okResponse);
+    vi.stubGlobal('fetch', fetchMock);
+
+    await refreshAnthropicModelsFromHttp();
+    await vi.advanceTimersByTimeAsync(2_000);
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(anthropicIds()).toEqual(['claude-opus-4-8']);
+  });
+
+  it('暂时性失败持续不好转时退避有限次后停手,不做无限轮询', async () => {
+    const fetchMock = vi.fn().mockRejectedValue(new TypeError('fetch failed'));
+    vi.stubGlobal('fetch', fetchMock);
+
+    await refreshAnthropicModelsFromHttp();
+    // 首次 + 3 次退避重试(2s / 8s / 30s)后停手。
+    await vi.advanceTimersByTimeAsync(2_000);
+    await vi.advanceTimersByTimeAsync(8_000);
+    await vi.advanceTimersByTimeAsync(30_000);
+    expect(fetchMock).toHaveBeenCalledTimes(4);
+
+    await vi.advanceTimersByTimeAsync(600_000);
+    expect(fetchMock).toHaveBeenCalledTimes(4);
+  });
+
+  it('地域拒绝一次都不重试 —— 同一请求再发一百次也是同一答复', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(errorResponse(403, REGION_BLOCK_BODY));
+    vi.stubGlobal('fetch', fetchMock);
+
+    await refreshAnthropicModelsFromHttp();
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+
+    await vi.advanceTimersByTimeAsync(600_000);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(getAnthropicModelDiscoveryFailure()?.kind).toBe('regionBlocked');
+  });
+
+  it('凭证被拒 / 请求被拒 / 空清单同样不重试', async () => {
+    for (const [status, body] of [
+      [401, ''],
+      [403, JSON.stringify({ error: { type: 'forbidden' } })],
+      [418, ''],
+    ] as const) {
+      resetAnthropicDiscoveryForTest();
+      const fetchMock = vi.fn().mockResolvedValue(errorResponse(status, body));
+      vi.stubGlobal('fetch', fetchMock);
+      await refreshAnthropicModelsFromHttp();
+      await vi.advanceTimersByTimeAsync(600_000);
+      expect(fetchMock).toHaveBeenCalledTimes(1);
+    }
+  });
+
+  it('确定性拒绝会取消上一轮暂时性失败排下的重试,失败理由不在两者间跳变', async () => {
+    const fetchMock = vi
+      .fn()
+      .mockRejectedValueOnce(new TypeError('fetch failed'))
+      .mockResolvedValue(errorResponse(403, REGION_BLOCK_BODY));
+    vi.stubGlobal('fetch', fetchMock);
+
+    await refreshAnthropicModelsFromHttp();
+    expect(getAnthropicModelDiscoveryFailure()?.kind).toBe('network');
+
+    // 排下的那次重试跑出「地域拒绝」——此后不该再有任何自动重试。
+    await vi.advanceTimersByTimeAsync(2_000);
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(getAnthropicModelDiscoveryFailure()?.kind).toBe('regionBlocked');
+
+    await vi.advanceTimersByTimeAsync(600_000);
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+  });
+
+  it('未登录时不暴露失败态(该讲的是「去连接」,不是上一个账号的失败理由)', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockRejectedValue(new TypeError('fetch failed')));
+    await refreshAnthropicModelsFromHttp();
+    expect(getAnthropicModelDiscoveryFailure()?.kind).toBe('network');
+
+    authState.loggedIn = false;
+    expect(getAnthropicModelDiscoveryFailure()).toBeNull();
+  });
+
+  it('登出 / 换号清掉失败态与待执行的重试', async () => {
+    const fetchMock = vi.fn().mockRejectedValue(new TypeError('fetch failed'));
+    vi.stubGlobal('fetch', fetchMock);
+    await refreshAnthropicModelsFromHttp();
+    expect(getAnthropicModelDiscoveryFailure()).not.toBeNull();
+
+    await clearAnthropicDiscoveredModels();
+    expect(getAnthropicModelDiscoveryFailure()).toBeNull();
+    await vi.advanceTimersByTimeAsync(600_000);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
   });
 });
