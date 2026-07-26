@@ -330,10 +330,10 @@ Cindy Mobile (React Native) has its own device-class rules (phone / pad portrait
 
 ### Light / Dark Dual-Mode Delivery Gate(双模式交付门槛)
 
-- **Every UI must support both Light and Dark modes.** When adding or changing any page, component, layout, style, motion, or UI copy, both modes must be completed within the same piece of work; designing, implementing, or verifying only one mode counts as incomplete.
+- **Every UI must be implemented for both Light and Dark modes.** When adding or changing any page, component, layout, style, motion, or UI copy, both modes must be designed and built within the same piece of work; designing or implementing only one mode counts as incomplete. **Visual QA in both modes is expected effort, not a blocking gate** — see the last bullet.
 - Both modes must cover every state actually touched by the change — default, hover, pressed, selected, focus, disabled, loading, empty, error, overlays and scrims. States the change does not touch need not be retrofitted just to tick a box.
 - Colors must be consumed through semantic tokens; hardcoded values or conditional patches that only fit one mode are forbidden. When the design mock provides only one mode, the other mode must still be filled in through the existing token system; if a clear semantic mapping is missing, request a design ruling first — never ship with a mode omitted.
-- Before delivery, verify the affected surfaces in both Light and Dark and record it honestly in the commit / PR verification notes. If either mode is unreadable, indistinguishable, missing states, or visibly regressed, the work is not done.
+- **Verification is best-effort and must be reported honestly.** Eyeballing the affected surfaces in both Light and Dark before delivery is the preferred path, but skipping it does not block the change — say plainly in the commit / PR verification notes which mode was actually checked and which was not. Never upgrade "reused existing themed styles / added no raw color values" into a claim that both modes were verified. If a mode *is* checked and comes back unreadable, indistinguishable, missing states, or visibly regressed, that is a real defect and must be fixed before delivery.
 
 ### Architecture
 
