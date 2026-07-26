@@ -103,6 +103,7 @@ interface UpstreamTarget {
   port: number;
   protocol: 'http:' | 'https:';
   basePath: string;  // 上游路径前缀(例 "" 或 "/v1")
+  baseQuery: string; // 不含前导 '?'
 }
 
 /**
@@ -125,6 +126,7 @@ function parseUpstream(upstream: string): UpstreamTarget {
     port: u.port ? Number(u.port) : (u.protocol === 'https:' ? 443 : 80),
     protocol: u.protocol,
     basePath: u.pathname.replace(/\/+$/, ''),  // 去末尾斜杠,防止后面拼出双斜杠
+    baseQuery: u.search.slice(1),
   };
 }
 
@@ -138,7 +140,8 @@ function formatUpstreamBase(t: UpstreamTarget): string {
   return (
     `${t.protocol}//${t.hostname}` +
     (t.port === defaultPort ? '' : `:${t.port}`) +
-    t.basePath
+    t.basePath +
+    (t.baseQuery ? `?${t.baseQuery}` : '')
   );
 }
 
@@ -249,6 +252,21 @@ function respondRoutingFailure(
     return;
   }
   res.destroy(err instanceof Error ? err : new Error(String(err)));
+}
+
+/** 路由层是最后的信任边界；任何调用方给出的路径覆盖都必须保持同源且不可注入 header。 */
+function isSafePathOverride(value: unknown): value is string {
+  return (
+    typeof value === 'string'
+    && value.length >= 1
+    && value.length <= 2_048
+    && value.startsWith('/')
+    && !value.startsWith('//')
+    && !value.includes('#')
+    && !value.includes('\\')
+    && !/[^\u0021-\u007e]/.test(value)
+    && !/%(?![0-9A-Fa-f]{2})/.test(value)
+  );
 }
 
 function isPromiseLike<T>(value: unknown): value is PromiseLike<T> {
@@ -604,6 +622,8 @@ function forward(
   clientModel = '',
   // 请求处理层解析好的出站代理;undefined = 直连(与扩展前字节级一致)。
   outboundProxy?: ResolvedOutboundProxy,
+  // 精确推理路径覆盖；省略时沿用客户端原始 path。
+  pathOverride?: string,
 ): void {
   // 客户端已断开(典型:400 缓冲期间断开后走到透明重试)——'close' 已经发过,
   // 下面挂的中断传播 listener 永远不会触发,直接不发起上游请求。
@@ -622,7 +642,14 @@ function forward(
     }
   }
   const reqFn = actualTarget.protocol === 'https:' ? httpsRequest : httpRequest;
-  const upstreamPath = `${actualTarget.basePath}${path.startsWith('/') ? path : '/' + path}`;
+  const routedPath = pathOverride ?? path;
+  const queryIndex = routedPath.indexOf('?');
+  const routedPathname = queryIndex === -1 ? routedPath : routedPath.slice(0, queryIndex);
+  const routedQuery = queryIndex === -1 ? '' : routedPath.slice(queryIndex + 1);
+  const upstreamPathname =
+    `${actualTarget.basePath}${routedPathname.startsWith('/') ? routedPathname : '/' + routedPathname}`;
+  const upstreamQuery = [actualTarget.baseQuery, routedQuery].filter(Boolean).join('&');
+  const upstreamPath = upstreamQuery ? `${upstreamPathname}?${upstreamQuery}` : upstreamPathname;
 
   // http.request 会把 options 原样透传给 agent.createConnection → net.connect,
   // 所以 socket 级 connect 选项运行时有效;但 @types/node 的 RequestOptions 没收录
@@ -758,6 +785,7 @@ function forward(
             responseObserver,
             clientModel,
             outboundProxy,
+            pathOverride,
           );
           return;
         }
@@ -992,7 +1020,20 @@ export async function createAnthropicCompatProxy(opts: ProxyOptions): Promise<Pr
     overrideTarget?: UpstreamTarget;
     headerOverride?: Record<string, string>;
     headerDelete?: readonly string[];
+    pathOverride?: string;
   } | null => {
+    const pathOverride = decision?.pathOverride;
+    if (pathOverride !== undefined && !isSafePathOverride(pathOverride)) {
+      respondRoutingFailure(
+        res,
+        logger,
+        reqId,
+        502,
+        'selected request path invalid',
+        new Error('routingTransform returned an unsafe pathOverride'),
+      );
+      return null;
+    }
     let overrideTarget: UpstreamTarget | undefined;
     try {
       overrideTarget = decision?.upstreamOverride
@@ -1014,6 +1055,7 @@ export async function createAnthropicCompatProxy(opts: ProxyOptions): Promise<Pr
       overrideTarget,
       headerOverride: decision?.headerOverride,
       headerDelete: decision?.headerDelete,
+      pathOverride,
     };
   };
 
@@ -1137,6 +1179,7 @@ export async function createAnthropicCompatProxy(opts: ProxyOptions): Promise<Pr
         opts.responseObserver,
         '',
         await resolveOutboundForTarget(route.target, reqId),
+        route.pathOverride,
       );
       return;
     }
@@ -1269,6 +1312,7 @@ export async function createAnthropicCompatProxy(opts: ProxyOptions): Promise<Pr
       opts.responseObserver,
       extractBodyModel(rawBody),
       await resolveOutboundForTarget(route.target, reqId),
+      route.pathOverride,
     );
   });
 

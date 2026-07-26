@@ -73,6 +73,51 @@ describe('createResponsesChatHandler', () => {
     expect(res.ended).toBe(true);
   });
 
+  it('preserves the upstream base query when applying the chat path', async () => {
+    const fetchImpl = vi.fn(async () =>
+      streamResponse([
+        { id: 'chat_1', choices: [{ delta: {}, finish_reason: 'stop' }] },
+      ]),
+    ) as typeof fetch;
+    const handler = createResponsesChatHandler({
+      upstreamBase: 'https://provider.example/gateway?tenant=acme',
+      chatCompletionsPath: '/infer?stream=1',
+      buildHeaders: async () => ({}),
+    }, { fetchImpl });
+    const res = new FakeResponse();
+    await handler.handle({ parsedBody: { model: 'm', input: 'hi' }, res: res as never });
+    expect(fetchImpl).toHaveBeenCalledWith(
+      'https://provider.example/gateway/infer?tenant=acme&stream=1',
+      expect.anything(),
+    );
+  });
+
+  it.each([
+    ['an invalid upstream base URL', 'ftp://provider.example/v1', '/chat/completions'],
+    ['an invalid chat path', 'https://provider.example/v1', '//attacker.example/chat'],
+    ['a raw non-ASCII chat path', 'https://provider.example/v1', '/café'],
+    ['a control character in the chat path', 'https://provider.example/v1', '/chat\u007f'],
+    ['a backslash in the chat path', 'https://provider.example/v1', '/v1\\chat'],
+    ['an incomplete percent escape', 'https://provider.example/v1', '/chat%2'],
+    ['an invalid percent escape', 'https://provider.example/v1', '/%ZZ'],
+  ])('reports %s as configuration failure before fetching', async (_case, upstreamBase, chatCompletionsPath) => {
+    const fetchImpl = vi.fn() as unknown as typeof fetch;
+    const buildHeaders = vi.fn(async () => ({ authorization: 'Bearer secret' }));
+    const handler = createResponsesChatHandler({
+      upstreamBase,
+      chatCompletionsPath,
+      buildHeaders,
+    }, { fetchImpl });
+    const res = new FakeResponse();
+
+    await handler.handle({ parsedBody: { model: 'm', input: 'hi' }, res: res as never });
+
+    expect(res.status).toBe(502);
+    expect(res.chunks.join('')).toContain('invalid_upstream_config');
+    expect(fetchImpl).not.toHaveBeenCalled();
+    expect(buildHeaders).not.toHaveBeenCalled();
+  });
+
   it('accepts a final SSE data event without a trailing newline', async () => {
     const fetchImpl = vi.fn(async () => new Response(
       'data: {"id":"chat_tail","choices":[{"delta":{"content":"tail"},"finish_reason":"stop"}]}',

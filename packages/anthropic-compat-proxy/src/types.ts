@@ -77,6 +77,11 @@ export type LocalRequestHandler = (args: {
 export interface RoutingDecision {
   /** 覆盖本次请求的上游 URL(完整 `http(s)://host[:port][/basePath]`);省略 = 用默认 `opts.upstream`。 */
   upstreamOverride?: string;
+  /**
+   * 覆盖本次请求追加到上游 base path 后的路径；必须是以单个 `/` 开头的同源路径。
+   * 典型用于兼容端点不是标准 `/responses` / `/v1/messages` 的供应商。
+   */
+  pathOverride?: string;
   /** 合并进 outbound headers 的字段(覆盖语义,小写 key);典型用于换 `authorization`。 */
   headerOverride?: Record<string, string>;
   /**
@@ -88,7 +93,7 @@ export interface RoutingDecision {
    */
   headerDelete?: string[];
   /**
-   * 本地 handler(见 LocalRequestHandler)。与上面三个转发字段**互斥**:设了 handler 时其余
+   * 本地 handler(见 LocalRequestHandler)。与上面四个转发字段**互斥**:设了 handler 时其余
    * 字段忽略、不发生任何上游转发。省略 = 转发语义,与本字段引入前字节级一致。
    */
   localHandler?: LocalRequestHandler;

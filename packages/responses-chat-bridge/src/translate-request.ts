@@ -5,6 +5,7 @@ import {
   type ChatDeveloperRole,
   type ChatCompletionsRequest,
   type ChatMessage,
+  type ChatToolCallExtraContent,
   type ResponsesContentPart,
   type ResponsesFunctionTool,
   type ResponsesInputItem,
@@ -13,6 +14,15 @@ import {
 
 function isPlainObject(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
+function cloneToolCallExtraContent(value: unknown): ChatToolCallExtraContent | undefined {
+  if (!isPlainObject(value)) return undefined;
+  const { google, ...rest } = value;
+  return {
+    ...rest,
+    ...(isPlainObject(google) ? { google: { ...google } } : {}),
+  };
 }
 
 function stringifyToolOutput(output: unknown): string {
@@ -82,10 +92,14 @@ interface TranslateInputOptions {
   developerRole: ChatDeveloperRole;
   /** thinking 模型:为带 tool_calls 但缺 reasoning_content 的 assistant 消息注入占位。 */
   toolCallReasoningPlaceholder: boolean;
+  /** Gemini 3 OpenAI 兼容层:为每步首个回放 tool call 注入官方允许的签名跳过值。 */
+  googleThoughtSignaturePlaceholder: boolean;
 }
 
 /** cc-switch 的占位口径:kimi/DeepSeek 要求 tool_call assistant 消息带非空 reasoning_content。 */
 const TOOL_CALL_REASONING_PLACEHOLDER = 'tool call';
+/** Google 官方文档允许在无法取得原始签名的注入式 function call 上使用的校验跳过值。 */
+const GOOGLE_THOUGHT_SIGNATURE_PLACEHOLDER = 'skip_thought_signature_validator';
 
 function flushAssistant(
   messages: ChatMessage[],
@@ -98,6 +112,22 @@ function flushAssistant(
   if (pending.content == null && !hasToolCalls) return null;
   if (hasToolCalls && opts.toolCallReasoningPlaceholder && !pending.reasoning_content) {
     pending.reasoning_content = TOOL_CALL_REASONING_PLACEHOLDER;
+  }
+  if (hasToolCalls && opts.googleThoughtSignaturePlaceholder) {
+    const firstCall = pending.tool_calls?.[0];
+    const thoughtSignature = firstCall?.extra_content?.google?.thought_signature;
+    if (
+      firstCall
+      && (typeof thoughtSignature !== 'string' || thoughtSignature.trim().length === 0)
+    ) {
+      firstCall.extra_content = {
+        ...firstCall.extra_content,
+        google: {
+          ...firstCall.extra_content?.google,
+          thought_signature: GOOGLE_THOUGHT_SIGNATURE_PLACEHOLDER,
+        },
+      };
+    }
   }
   messages.push(pending);
   return null;
@@ -170,10 +200,12 @@ function translateInput(input: ResponsesRequest['input'], opts: TranslateInputOp
       }
       assistant ??= { role: 'assistant', content: null, tool_calls: [] };
       assistant.tool_calls ??= [];
+      const extraContent = cloneToolCallExtraContent(item.extra_content);
       assistant.tool_calls.push({
         id: item.call_id,
         type: 'function',
         function: { name: item.name, arguments: item.arguments },
+        ...(extraContent ? { extra_content: extraContent } : {}),
       });
       continue;
     }
@@ -273,6 +305,7 @@ export function translateResponsesRequest(
   const messages = translateInput(input.input, {
     developerRole,
     toolCallReasoningPlaceholder: capabilities.toolCallReasoningPlaceholder === true,
+    googleThoughtSignaturePlaceholder: capabilities.googleThoughtSignaturePlaceholder === true,
   });
   if (input.instructions) {
     messages.unshift({ role: developerRole, content: input.instructions });
