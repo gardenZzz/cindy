@@ -3522,8 +3522,9 @@ interface ElectronAPI {
       detections: import('../shared/localCliDetect').LocalCliDetection[];
     }>;
     /**
-     * 重新发现动态清单（当前只有 anthropic 订阅）。发现失败不自动重试，这是用户在
-     * 失败态下主动点「重试」的入口；失败归因随结果回传，供 UI 渲染分类文案。
+     * 立即重新发现动态清单（当前只有 anthropic 订阅）。host 只对暂时性失败做有限次退避
+     * 重试、确定性拒绝不重试，所以这是用户在失败态下「立刻再试一次」的入口（同时重开
+     * 一轮退避）；失败归因随结果回传，供 UI 渲染分类文案。
      */
     rediscoverModels: (providerId: string) => Promise<{
       ok: boolean;

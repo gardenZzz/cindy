@@ -257,9 +257,10 @@ export function registerProviderHandlers(
     }
   });
 
-  // 动态清单重新发现（用户在失败态下主动点「重试」）：查询型返回,把最新失败归因回给
-  // renderer 渲染分类文案;成功则 failure 缺席。发现本身永不抛(内部只记账),这里的
-  // try/catch 只兜广播等收尾异常,不让重试按钮报未知错误。
+  // 动态清单重新发现（用户在失败态下点「重试」）：查询型返回,把最新失败归因回给 renderer
+  // 渲染分类文案;成功则 failure 缺席。契约上 deps.rediscoverModels 不抛 —— 发现内部只
+  // 记账不抛穿(见 model-discovery/anthropic),不认识的 providerId 也只返回 null,所以这里
+  // 不额外包 try/catch;真出异常按常规 IPC 错误上抛,不吞成「成功」。
   registry.handle(MAKER_INVOKE.PROVIDER_MODELS_REDISCOVER, async (_event, input: unknown) => {
     const providerId = requireProviderId(input);
     const failure = await deps.rediscoverModels(providerId);

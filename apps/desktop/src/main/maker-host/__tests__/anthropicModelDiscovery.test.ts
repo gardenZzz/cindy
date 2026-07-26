@@ -45,6 +45,7 @@ import {
   loadAnthropicModelsFromDiskCache,
   refreshAnthropicModelsFromHttp,
   getAnthropicModelDiscoveryFailure,
+  setAnthropicDiscoveryFailureListener,
   clearAnthropicDiscoveredModels,
   resetAnthropicDiscoveryForTest,
   waitForAnthropicDiscoveryIdleForTest,
@@ -1033,6 +1034,54 @@ describe('HTTP 发现失败的归因与选择性重试', () => {
 
     await vi.advanceTimersByTimeAsync(600_000);
     expect(fetchMock).toHaveBeenCalledTimes(2);
+  });
+
+  it('退避耗尽后,外部触发重开一轮退避(手动重试 / 认领不能只剩单次请求)', async () => {
+    const fetchMock = vi.fn().mockRejectedValue(new TypeError('fetch failed'));
+    vi.stubGlobal('fetch', fetchMock);
+
+    // 第一轮:首次 + 三档退避后停手。
+    await refreshAnthropicModelsFromHttp();
+    await vi.advanceTimersByTimeAsync(2_000);
+    await vi.advanceTimersByTimeAsync(8_000);
+    await vi.advanceTimersByTimeAsync(30_000);
+    expect(fetchMock).toHaveBeenCalledTimes(4);
+    await vi.advanceTimersByTimeAsync(600_000);
+    expect(fetchMock).toHaveBeenCalledTimes(4);
+
+    // 用户点「重试」= 外部触发:必须重新开一轮退避,而不是只发一次就再次卡死。
+    await refreshAnthropicModelsFromHttp();
+    expect(fetchMock).toHaveBeenCalledTimes(5);
+    await vi.advanceTimersByTimeAsync(2_000);
+    expect(fetchMock).toHaveBeenCalledTimes(6);
+    await vi.advanceTimersByTimeAsync(8_000);
+    await vi.advanceTimersByTimeAsync(30_000);
+    expect(fetchMock).toHaveBeenCalledTimes(8);
+  });
+
+  it('失败记账会通知收口,让已取走快照的 renderer 能重取到失败理由', async () => {
+    const onFailureChanged = vi.fn();
+    setAnthropicDiscoveryFailureListener(onFailureChanged);
+    try {
+      vi.stubGlobal('fetch', vi.fn().mockRejectedValue(new TypeError('fetch failed')));
+      await refreshAnthropicModelsFromHttp();
+      expect(onFailureChanged).toHaveBeenCalled();
+    } finally {
+      setAnthropicDiscoveryFailureListener(null);
+    }
+  });
+
+  it('通知收口抛错不打断发现流程', async () => {
+    setAnthropicDiscoveryFailureListener(() => {
+      throw new Error('broadcast boom');
+    });
+    try {
+      vi.stubGlobal('fetch', vi.fn().mockRejectedValue(new TypeError('fetch failed')));
+      await expect(refreshAnthropicModelsFromHttp()).resolves.toBeUndefined();
+      expect(getAnthropicModelDiscoveryFailure()?.kind).toBe('network');
+    } finally {
+      setAnthropicDiscoveryFailureListener(null);
+    }
   });
 
   it('未登录时不暴露失败态(该讲的是「去连接」,不是上一个账号的失败理由)', async () => {

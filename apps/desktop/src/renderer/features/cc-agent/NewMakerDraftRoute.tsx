@@ -150,7 +150,11 @@ import {
   getProjectPickerDisplayName,
   useProjectPickerOptions,
 } from '@/hooks/useProjectPickerOptions';
-import { resolveFastSupported, deriveModelsFromProviders } from '@/lib/providerModels';
+import {
+  resolveFastSupported,
+  deriveModelsFromProviders,
+  filterChatBridgedCodexProviders,
+} from '@/lib/providerModels';
 import { effectiveSourceIdForModel, getModel, providerOffersModel, sessionModelSupportsFastMode, connectedProvidersForAgent, type ProviderView } from '@cindy/model-providers';
 import { isSubscriptionDirectModel } from '../../../shared/subscriptionModels';
 import {
@@ -534,14 +538,53 @@ export function NewMakerDraftRoute() {
   // 模型级全局预设不靠它隔离,但仍用它校验来源 capability、保留旧 v2 兼容副本并路由
   // device-link 写穿。仅本地草稿用;device-link 走 dlSel 镜像、不读本机记忆
   // (下方 resolveDraftFast 只在本地分支调用)。
+  /**
+   * 草稿实际生效的模型 id —— 种子默认在这里被校准到「确有已连接来源」的模型。
+   *
+   * 必须算在 effectiveSourceId / effort / fast 之前:它们全部按这个模型推导。若只把校准
+   * 结果用在 draftInitialModel 上,会拿新模型配上按旧模型算出来的 effort / fastMode,
+   * 提交一份目标模型根本不支持的组合(PR #548 review)。
+   *
+   * 候选来源与 ChatInput 的发送门禁同口径:SSH 远程草稿排除仅本地可桥接的 Codex 来源,
+   * 否则会把一个在远端根本路由不出去的模型选成默认。device-link 草稿以被控端镜像为准,
+   * 整段不校准。
+   */
+  const calibrationProviders = useMemo(
+    () =>
+      filterChatBridgedCodexProviders(
+        localProviders,
+        capabilityAgentKind,
+        !!effectiveRemoteHostId,
+      ),
+    [localProviders, capabilityAgentKind, effectiveRemoteHostId],
+  );
+  const calibratedDraftModel = useMemo(() => {
+    if (isDeviceLinkDraft) return chatPrefs.model;
+    return calibrateDraftModel({
+      providers: calibrationProviders,
+      agent: capabilityAgentKind,
+      model: chatPrefs.model,
+      chosenByUser: draft.modelChosenByVendor[draft.vendor] === true,
+      providersLoading: localProvidersLoading,
+    });
+  }, [
+    isDeviceLinkDraft,
+    calibrationProviders,
+    capabilityAgentKind,
+    chatPrefs.model,
+    draft.modelChosenByVendor,
+    draft.vendor,
+    localProvidersLoading,
+  ]);
+
   const effectiveSourceId = useMemo<string | null>(() => {
     return effectiveSourceIdForModel(
       providers,
       chatPrefs.providerId ?? null,
-      chatPrefs.model,
+      calibratedDraftModel,
       capabilityAgentKind,
     );
-  }, [providers, capabilityAgentKind, chatPrefs.providerId, chatPrefs.model]);
+  }, [providers, capabilityAgentKind, chatPrefs.providerId, calibratedDraftModel]);
 
   // 首页是“下一次创建会话”的配置草稿,没有正在运行的当前模型需要保护。其它对话更新同一模型
   // 的全局预设后,即使该模型正显示在首页 trigger 上,也应立即采用新 effort / fast。真实会话仍
@@ -550,10 +593,17 @@ export function NewMakerDraftRoute() {
   const localDraftEffort = useMemo<Effort>(() => {
     if (isDeviceLinkDraft || !effectiveSourceId) return chatPrefs.effort;
     const provider = providers.find((item) => item.id === effectiveSourceId);
-    const model = provider ? getModel(provider, chatPrefs.model, capabilityAgentKind) : undefined;
+    // 按**校准后**的模型推导:effort 必须和最终提交的模型属于同一个能力集合。
+    const model = provider
+      ? getModel(provider, calibratedDraftModel, capabilityAgentKind)
+      : undefined;
     return resolveNewMakerDraftEffort({
       currentEffort: chatPrefs.effort,
-      presetEffort: getProviderModelEffort(capabilityAgentKind, effectiveSourceId, chatPrefs.model),
+      presetEffort: getProviderModelEffort(
+        capabilityAgentKind,
+        effectiveSourceId,
+        calibratedDraftModel,
+      ),
       efforts: model?.efforts ?? [],
       defaultEffort: model?.defaultEffort ?? null,
     });
@@ -562,7 +612,7 @@ export function NewMakerDraftRoute() {
     effectiveSourceId,
     providers,
     capabilityAgentKind,
-    chatPrefs.model,
+    calibratedDraftModel,
     chatPrefs.effort,
     modelPresetVersion,
   ]);
@@ -783,9 +833,10 @@ export function NewMakerDraftRoute() {
     const providerId = isDeviceLinkDraft
       ? (dlSel?.providerId ?? deviceLinkInitial?.providerId ?? null)
       : (chatPrefs.providerId ?? null);
+    // 本地取**校准后**的模型:fast 能力必须按最终提交的那个模型判定。
     const modelId = isDeviceLinkDraft
       ? (dlSel?.model ?? deviceLinkInitial?.model ?? chatPrefs.model)
-      : chatPrefs.model;
+      : calibratedDraftModel;
     return resolveFastSupported({
       deviceId: effectiveDeviceLinkDeviceId,
       deviceProviders,
@@ -801,6 +852,7 @@ export function NewMakerDraftRoute() {
     deviceLinkInitial,
     chatPrefs.providerId,
     chatPrefs.model,
+    calibratedDraftModel,
     effectiveDeviceLinkDeviceId,
     deviceProviders,
     localProviders,
@@ -815,7 +867,7 @@ export function NewMakerDraftRoute() {
       ? (deviceLinkInitial?.fastMode ?? false)
       : false
     : supportsFastMode
-      ? resolveDraftFast(chatPrefs.model)
+      ? resolveDraftFast(calibratedDraftModel)
       : false;
   // 计划模式草稿态:仅本地草稿支持(device-link 远程草稿 v1 不透传,入口也不显示;
   // 创建后进会话仍可经运行时隧道切换)。
@@ -828,30 +880,10 @@ export function NewMakerDraftRoute() {
     if (isDeviceLinkDraft && deviceLinkInitial) {
       return { model: deviceLinkInitial.model, effort: deviceLinkInitial.effort };
     }
-    // 种子默认模型是写死的产品默认,与本机连了哪些来源无关 —— 全新用户可能首屏就落在
-    // 一个零来源的模型上,Send 直接禁用。**只**校准用户从没显式选过的默认值,他自己
-    // 选过的一律不动(见 draftModelCalibration)。device-link 草稿以被控端镜像为准,不校准。
-    return {
-      model: calibrateDraftModel({
-        providers: localProviders,
-        agent: capabilityAgentKind,
-        model: chatPrefs.model,
-        chosenByUser: draft.modelChosenByVendor[draft.vendor] === true,
-        providersLoading: localProvidersLoading,
-      }),
-      effort: localDraftEffort,
-    };
-  }, [
-    isDeviceLinkDraft,
-    deviceLinkInitial,
-    chatPrefs.model,
-    localDraftEffort,
-    localProviders,
-    localProvidersLoading,
-    capabilityAgentKind,
-    draft.modelChosenByVendor,
-    draft.vendor,
-  ]);
+    // 校准在 calibratedDraftModel 一处完成,effort / fast / 来源都已按它推导 —— 这里
+    // 直接用,不再单独算一次(否则又会出现模型与能力参数不同源的分叉)。
+    return { model: calibratedDraftModel, effort: localDraftEffort };
+  }, [isDeviceLinkDraft, deviceLinkInitial, calibratedDraftModel, localDraftEffort]);
 
   // 远程草稿的权限档 / 来源同样取镜像 holder;本地走 chatPrefs。
   const chatInitialPermissionMode = isDeviceLinkDraft

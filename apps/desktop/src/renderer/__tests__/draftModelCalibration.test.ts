@@ -120,4 +120,35 @@ describe('calibrateDraftModel', () => {
       calibrateDraftModel({ ...base, providers: [disconnectedAnthropic], chosenByUser: false }),
     ).toBe('claude-opus-4-8');
   });
+
+  it('候选来源由调用方先过滤 —— SSH 草稿不该被推荐仅本地可桥接的来源', () => {
+    // 调用方(NewMakerDraftRoute)按 filterChatBridgedCodexProviders 先剔除 chat-bridged
+    // codex 来源;校准只在剩下的候选里挑,不会把远端根本路由不出去的模型选成默认。
+    const localOnlyBridge = provider('chatgpt', true, {
+      codex: [model('gpt-5.5-bridge')],
+    });
+    const routableEverywhere = provider('xd', true, { codex: [model('gpt-5.5')] });
+
+    // 未过滤(本地草稿):bridge 来源可用。
+    expect(
+      calibrateDraftModel({
+        providers: [localOnlyBridge, routableEverywhere],
+        agent: 'codex',
+        model: 'gpt-nonexistent',
+        chosenByUser: false,
+        providersLoading: false,
+      }),
+    ).toBe('gpt-5.5-bridge');
+
+    // 已过滤(SSH 草稿):只会落到远端也能路由的来源。
+    expect(
+      calibrateDraftModel({
+        providers: [routableEverywhere],
+        agent: 'codex',
+        model: 'gpt-nonexistent',
+        chosenByUser: false,
+        providersLoading: false,
+      }),
+    ).toBe('gpt-5.5');
+  });
 });

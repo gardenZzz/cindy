@@ -100,6 +100,14 @@ let lastFailure: ProviderModelDiscoveryFailure | null = null;
 const HTTP_RETRY_DELAYS_MS = [2_000, 8_000, 30_000] as const;
 let httpRetryTimer: NodeJS.Timeout | null = null;
 let httpRetryAttempt = 0;
+/**
+ * 失败态变化的收口(desktop host 注入 = 广播 PROVIDER_CHANGED)。
+ *
+ * 归因只活在本模块的内存里,不进 active-catalog —— 清单没变,catalog 也就没有 revision
+ * 变化可言。但 renderer 早在拉取失败**之前**就取走了 provider 快照(15s 超时那条路径
+ * 尤其明显),不主动通知的话它会一直显示「正在发现」,直到用户手动切页重取。
+ */
+let failureChangedListener: (() => void) | null = null;
 /** 缓存写入 / 删除严格串行,保证授权边界后的删除一定排在旧世代写入之后。 */
 let cacheMutationQueue: Promise<void> = Promise.resolve();
 let cacheTempSequence = 0;
@@ -787,7 +795,8 @@ function scheduleHttpRetry(generation: number): void {
   const timer = setTimeout(() => {
     httpRetryTimer = null;
     if (generation !== authGeneration || !hasClaudeAiOAuth()) return;
-    void refreshAnthropicModelsFromHttp().catch(() => undefined);
+    // fromRetry:这是退避链自身的下一档,不是新一轮 —— 不能重置计数,否则会无限轮询。
+    void refreshAnthropicModelsFromHttp({ fromRetry: true }).catch(() => undefined);
   }, delay);
   timer.unref?.();
   httpRetryTimer = timer;
@@ -815,11 +824,28 @@ function noteDiscoveryFailure(
     ...(detail ? { detail } : {}),
   };
   log.warn(`anthropic model discovery failed (${kind})`, { detail });
+  notifyFailureChanged();
   if (isRetryableFailure(kind)) {
     scheduleHttpRetry(generation);
     return;
   }
   cancelHttpRetry();
+}
+
+/**
+ * 注册失败态变化的收口(desktop host 装配时接广播;传 null 解绑)。监听器不可抛 ——
+ * 广播失败不该反过来打断发现流程。
+ */
+export function setAnthropicDiscoveryFailureListener(listener: (() => void) | null): void {
+  failureChangedListener = listener;
+}
+
+function notifyFailureChanged(): void {
+  try {
+    failureChangedListener?.();
+  } catch (err) {
+    log.warn('anthropic discovery failure broadcast failed', { error: String(err) });
+  }
 }
 
 /**
@@ -834,11 +860,18 @@ export function getAnthropicModelDiscoveryFailure(): ProviderModelDiscoveryFailu
 }
 
 /**
- * HTTP `/v1/models` 拉取(启动时 / 登录成功 / 绑定认领成功 / 用户手动重试)。
- * single-flight;失败只记日志 + 记账失败归因、保留现值(缓存是上次成功的真数据),
- * **不自动重试**(理由见 lastFailure 声明处);成功按合并纪律生效并持久化。
+ * HTTP `/v1/models` 拉取(启动时 / 登录成功 / 绑定认领成功 / 用户手动重试 / 自动重试)。
+ * single-flight;失败记日志 + 记账归因、保留现值(缓存是上次成功的真数据),并按归因决定
+ * 要不要自动重试(暂时性故障重试有限次,确定性拒绝一次都不重试,见 isRetryableFailure);
+ * 成功按合并纪律生效并持久化。
+ *
+ * `fromRetry` 仅由退避回调传入。**外部触发一律开启新一轮退避**:否则上一轮把三档用尽后
+ * `httpRetryAttempt` 停在上限,此后用户手动点「重试」或新的凭证认领再次触发发现时,这次
+ * 若又遇到暂时性失败就再也排不出自动重试 —— 链路稍后恢复也只能靠用户反复手点(PR #548
+ * review)。
  */
-export function refreshAnthropicModelsFromHttp(): Promise<void> {
+export function refreshAnthropicModelsFromHttp(options?: { fromRetry?: boolean }): Promise<void> {
+  if (!options?.fromRetry) cancelHttpRetry();
   // 只复用**同世代**的在途拉取:登出后世代已变,旧 promise 的结果注定作废,
   // 复用会吞掉换号后新账号的补拉。
   if (httpRefreshInflight && httpRefreshInflightGen === authGeneration) return httpRefreshInflight;
@@ -908,7 +941,8 @@ export function refreshAnthropicModelsFromHttp(): Promise<void> {
       mergeCapabilitiesWithPrevious(mapped);
     log.info(`anthropic models refreshed via HTTP: ${models.length}`);
     // 拿到有效清单 = 发现已恢复,清掉失败态与待执行的重试(放在 apply 之前:apply 只负责
-    // 生效,它因世代变化被 gate 掉时新世代会带着自己的触发重来)。
+    // 生效,它因世代变化被 gate 掉时新世代会带着自己的触发重来)。apply 自己会 markChanged
+    // 广播,所以这里不必再单独通知一次失败态变化。
     lastFailure = null;
     cancelHttpRetry();
     await applyModels(models, true, gen, explicitEffortIds, explicitFastModeIds);
