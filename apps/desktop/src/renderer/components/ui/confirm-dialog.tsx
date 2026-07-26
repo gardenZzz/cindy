@@ -136,7 +136,14 @@ export function ConfirmDialog({
             // 富内容 / 长正文可能超过视口高度:包一层限高滚动区,让标题与底部按钮
             // 固定、中间内容纵向滚动,避免整个弹窗被撑出屏幕后无法滚动到被裁掉的内容
             // (典型:插件更新确认框的权限变更清单)。
-            <div className="mt-2 min-h-0 flex-1 overflow-y-auto overscroll-contain">
+            <div
+              className={cn(
+                'min-h-0 flex-1 overflow-y-auto overscroll-contain',
+                // 保持旧间距:有 description 时紧跟标题 mt-2;仅富内容(无正文)
+                // 时沿用原 content 的 mt-3,避免 content-only 弹窗间距变化。
+                description ? 'mt-2' : 'mt-3',
+              )}
+            >
               {description && (
                 <AlertDialog.Description
                   className={cn('text-base text-[var(--confirm-desc)]', textClassName)}
