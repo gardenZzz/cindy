@@ -79,6 +79,7 @@ import { scanCodexCustomizations } from './customization-scanner.js';
 import { commandExecutionDisplayInput } from './command-display.js';
 import {
   newCodexRuntimeState,
+  isAuthMissingErrorMessage,
   translateErrorNotification,
   translateItemNotification,
   translateReasoningSummaryTextDelta,
@@ -89,6 +90,10 @@ import {
   extractRolloutUpdatePlanFunctionCallEvent,
   type CodexRuntimeState,
 } from './translator.js';
+import {
+  TurnRetryTracker,
+  buildBackendUnreachableMessage,
+} from './retry-escalation.js';
 import { AppServerHost, type ThreadEventHandlers, type ThreadSubscription } from './app-server/host.js';
 import { AppServerRequestTimeoutError } from './app-server/client.js';
 import { createStdioTransport } from './app-server/stdioTransport.js';
@@ -660,6 +665,14 @@ const TIGHTEN_INTERRUPT_ACK_TIMEOUT_MS = 10_000;
 // bounded so a live-but-unresponsive daemon cannot freeze the queued message or
 // ignore Stop.
 const PROFILE_LIFECYCLE_ACK_TIMEOUT_MS = 10_000;
+
+// thread/start / thread/resume / turn/start 的 RPC 上限。AppServerClient.request
+// 默认无超时 — 远端 daemon 失联 (SSH 隧道半开 / daemon 挂起但 socket 未断) 时
+// 裸 await 永久挂起, session 永远停在 generating (issue #677 同类断链面)。
+// 60s 足够覆盖慢 SSH 链路 + daemon 冷启动, 超时后走既有的「启动失败」收口
+// (terminal error + Done status)。注意: 超时只代表**我们不再等**, server 侧
+// 可能实际已建 thread/turn — 迟到事件按 stale turn 丢弃, 不影响 UI 复位。
+const CRITICAL_THREAD_RPC_TIMEOUT_MS = 60_000;
 
 // 计划批准后自动发起实施 turn 的固定输入 — 与官方 TUI 逐字一致
 // (codex-rs/tui/src/chatwidget/plan_implementation.rs 的
@@ -2081,6 +2094,10 @@ export class CodexAgent extends BaseAgent {
     // turn id 在同一 thread 内唯一;墓碑随 session handle 释放,不跨 session 泄漏。
     const completedTurnIds = new Set<string>();
     const terminalErroredTurnIds = new Set<string>();
+    // daemon 后端 retry-loop 的终局升级 (issue #677): 远端摸不到 Codex 后端时
+    // daemon 无限 willRetry, turn 永不收口。同 turn 重试超阈值 → 合成终态错误,
+    // 走与终态 error 完全相同的收口路径 (terminalErroredTurnIds + Done status)。
+    const turnRetryTracker = new TurnRetryTracker();
     const deferredTerminalTurnCompletions = new Map<string, TurnCompletedParams>();
     // 最近一次 thread/tokenUsage/updated 的 last 增量 + contextWindow,
     // 缓存供 turn end 日志读取 (协议本身不在 turn/completed 里带 usage)。
@@ -2584,7 +2601,9 @@ export class CodexAgent extends BaseAgent {
       try {
         acquireHostBindingLeaseIfNeeded();
         assertCurrentHost('thread/resume');
-        const resp = await host.request<ThreadResumeResponse>(Method.ThreadResume, params);
+        const resp = await host.request<ThreadResumeResponse>(Method.ThreadResume, params, {
+          timeoutMs: CRITICAL_THREAD_RPC_TIMEOUT_MS,
+        });
         assertCurrentHost('thread/resume');
         if (Object.hasOwn(resp, 'serviceTier')) {
           mutableServiceTier = normalizeServiceTier(resp.serviceTier) ?? null;
@@ -2647,7 +2666,9 @@ export class CodexAgent extends BaseAgent {
       try {
         acquireHostBindingLeaseIfNeeded();
         assertCurrentHost('thread/start');
-        const resp = await host.request<ThreadStartResponse>(Method.ThreadStart, params);
+        const resp = await host.request<ThreadStartResponse>(Method.ThreadStart, params, {
+          timeoutMs: CRITICAL_THREAD_RPC_TIMEOUT_MS,
+        });
         assertCurrentHost('thread/start');
         if (Object.hasOwn(resp, 'serviceTier')) {
           mutableServiceTier = normalizeServiceTier(resp.serviceTier) ?? null;
@@ -4121,6 +4142,8 @@ export class CodexAgent extends BaseAgent {
         translatorRt.lastAuthErrorKey = null;
         // 网络类 retry-loop 透出状态同理:新 turn 重新计数,可再透出一条。
         translatorRt.networkRetryNotice = null;
+        // retry 升级计数同样按 turn 隔离 — 新 turn 从零计。
+        turnRetryTracker.reset();
         log.debug('SDK ▶ turn start', {
           turnId: params.turn.id,
           model: mutableModel,
@@ -4264,7 +4287,8 @@ export class CodexAgent extends BaseAgent {
       },
       error: (params) => {
         if (shouldIgnoreStaleTurnEvent(params.turnId)) return;
-        const isTerminalError = params.willRetry !== true;
+        let effectiveParams = params;
+        let isTerminalError = params.willRetry !== true;
         const isTransportError = params.scope === 'transport';
         if (isTransportError) {
           subscriptionInvalidatedByTransport = true;
@@ -4275,7 +4299,7 @@ export class CodexAgent extends BaseAgent {
         const targetsCurrentTurn =
           params.turnId === currentTurnId || (params.turnId === '' && isTurnInFlight) || targetsPendingTurn;
         if (isTerminalError && isTransportError && !targetsCurrentTurn) {
-          translateErrorNotification(params, eventQueue, { rt: translatorRt, log });
+          translateErrorNotification(effectiveParams, eventQueue, { rt: translatorRt, log });
           return;
         }
         if (isTerminalError && !targetsCurrentTurn) {
@@ -4286,11 +4310,43 @@ export class CodexAgent extends BaseAgent {
           });
           return;
         }
+        // ── retry-loop 终局升级 (issue #677) ──
+        // 远端摸不到 Codex 后端时 daemon 无限发 willRetry=true — 协议层设计上
+        // willRetry 不收口, 但持续性不可达 (403 / Network unreachable / timeout)
+        // 意味着 retry 永远不会成功。同 turn 计数/时长超阈值后合成终态错误,
+        // 落入下面与原生终态 error 完全相同的收口路径。
+        // auth 缺失 (401) 排除: 它有「同步登录态」的等待式 UX, 升级会抢走那个路径。
+        if (!isTerminalError && targetsCurrentTurn) {
+          const rawMessage = params.error?.message ?? '';
+          if (!isAuthMissingErrorMessage(rawMessage)) {
+            const decision = turnRetryTracker.track(
+              params.turnId || currentTurnId || '(pending)',
+              Date.now(),
+            );
+            if (decision.escalate) {
+              const message = buildBackendUnreachableMessage({
+                isRemote: Boolean(opts.remoteHostId),
+                remoteHostId: opts.remoteHostId,
+                retryCount: decision.retryCount,
+                elapsedMs: decision.elapsedMs,
+                lastError: rawMessage,
+              });
+              log.error('codex retry-loop escalated to terminal error (backend unreachable)', {
+                threadId: params.threadId,
+                turnId: params.turnId,
+                retryCount: decision.retryCount,
+                elapsedMs: decision.elapsedMs,
+              });
+              effectiveParams = { ...params, willRetry: false, error: { message } };
+              isTerminalError = true;
+            }
+          }
+        }
         const wasTurnRunning = isTurnInFlight || targetsPendingTurn;
-        translateErrorNotification(params, eventQueue, { rt: translatorRt, log });
+        translateErrorNotification(effectiveParams, eventQueue, { rt: translatorRt, log });
         // 与 translator 的 terminal 判定保持一致：willRetry=false 或缺省都视为终态。
         if (!isTerminalError) return;
-        const terminalTurnId = params.turnId || currentTurnId;
+        const terminalTurnId = effectiveParams.turnId || currentTurnId;
         if (terminalTurnId) {
           terminalErroredTurnIds.add(terminalTurnId);
           dismissPendingUserInputForTurn(terminalTurnId, 'turn_failed');
@@ -4527,7 +4583,9 @@ export class CodexAgent extends BaseAgent {
         };
         let finalErr: unknown = null;
         try {
-          const resp = await host.request<TurnStartResponse>(Method.TurnStart, turnParams);
+          const resp = await host.request<TurnStartResponse>(Method.TurnStart, turnParams, {
+            timeoutMs: CRITICAL_THREAD_RPC_TIMEOUT_MS,
+          });
           markTurnConfigAccepted();
           if (rejectClosedOrCancelledSend(sendOpts, 'after turn/start')) {
             return;
@@ -4564,7 +4622,9 @@ export class CodexAgent extends BaseAgent {
                 ...(resumeModel && resumeModel !== 'gpt-5' ? { model: resumeModel } : {}),
                 ...(mutableServiceTier !== undefined ? { serviceTier: mutableServiceTier } : {}),
               };
-              const resumeResp = await host.request<ThreadResumeResponse>(Method.ThreadResume, resumeParams);
+              const resumeResp = await host.request<ThreadResumeResponse>(Method.ThreadResume, resumeParams, {
+                timeoutMs: CRITICAL_THREAD_RPC_TIMEOUT_MS,
+              });
               if (mutableModel === resumeModel && resumeModel === 'gpt-5' && resumeResp.model) {
                 mutableModel = resumeResp.model;
               }
@@ -4601,7 +4661,9 @@ export class CodexAgent extends BaseAgent {
                 }
               }
               log.info('thread/resume after stale daemon ok, retrying turn/start', { threadId });
-              const resp = await host.request<TurnStartResponse>(Method.TurnStart, turnParams);
+              const resp = await host.request<TurnStartResponse>(Method.TurnStart, turnParams, {
+                timeoutMs: CRITICAL_THREAD_RPC_TIMEOUT_MS,
+              });
               markTurnConfigAccepted();
               if (rejectClosedOrCancelledSend(sendOpts, 'after turn/start retry')) {
                 return;

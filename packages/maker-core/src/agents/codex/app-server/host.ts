@@ -484,6 +484,10 @@ export class AppServerHost {
   /**
    * 透传 JSON-RPC request 到底层 client (会先 ensureStarted)。
    * thread/start / turn/start / turn/interrupt / thread/resume / thread/fork 都走这里。
+   *
+   * `opts.timeoutMs` 按需传入: 裸 RPC 默认**无超时** (协议上 response 可能任意晚),
+   * 但 turn/start 这类「daemon 失联就永远挂住」的关键路径应显式给上限 —
+   * 超时 reject 后上层按 turn 启动失败收口, 而不是让 UI 无限 generating。
    */
   async request<R = unknown>(
     method: string,
