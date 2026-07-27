@@ -28,6 +28,15 @@ describe('composer list document normalization', () => {
     });
   });
 
+  it('restores a generated seven-digit ordered continuation as one list', () => {
+    const document = plainTextToComposerDocument('999999. first\n1000000. second');
+    expect(document.content?.[0]).toMatchObject({
+      type: 'orderedList',
+      attrs: { start: 999999, marker: '.' },
+    });
+    expect(document.content?.[0]?.content).toHaveLength(2);
+  });
+
   it('keeps surrounding paragraphs and task bodies intact', () => {
     expect(plainTextToComposerDocument('intro\n- [ ] todo\n- [x] done\noutro')).toEqual({
       type: 'doc',

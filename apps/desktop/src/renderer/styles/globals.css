@@ -326,14 +326,14 @@ html:lang(ko) {
    (command-palette F2.5). The Placeholder extension injects
    `p.is-editor-empty::before` with the placeholder text in a `data-*`
    attribute; we style it to match the old textarea placeholder. */
-.ProseMirror p.is-editor-empty:first-child::before {
+.ProseMirror > p.is-editor-empty:first-child::before {
   content: attr(data-placeholder);
   color: var(--chat-input-placeholder-subtle);
   float: left;
   height: 0;
   pointer-events: none;
 }
-[data-voice-draft-active='true'] .ProseMirror p.is-editor-empty:first-child::before {
+[data-voice-draft-active='true'] .ProseMirror > p.is-editor-empty:first-child::before {
   content: none;
 }
 .ProseMirror {

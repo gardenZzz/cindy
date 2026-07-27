@@ -13,8 +13,8 @@ import { Selection, TextSelection } from '@tiptap/pm/state';
 import type { EditorView } from '@tiptap/pm/view';
 
 const BULLET_MARKER_RE = /^([-+*•])([ \t]+)$/;
-const ORDERED_MARKER_RE = /^([1-9]\d{0,5})([.)])([ \t]+)$/;
-const CJK_ORDERED_MARKER_RE = /^([1-9]\d{0,5})(、)$/;
+const ORDERED_MARKER_RE = /^([1-9]\d{0,6})([.)])([ \t]+)$/;
+const CJK_ORDERED_MARKER_RE = /^([1-9]\d{0,6})(、)$/;
 
 type BulletMarker = '-' | '+' | '*' | '•';
 type OrderedMarker = '.' | ')' | '、';
@@ -55,9 +55,8 @@ function isFenceClosing(text: string, state: FenceState): boolean {
   return pattern.test(text);
 }
 
-function paragraphOffsetIsInsideFence(paragraph: PMNode, offset: number): boolean {
-  const text = paragraph.textBetween(0, offset, '\n', '\n');
-  let fence: FenceState | null = null;
+function scanFenceState(text: string, initialFence: FenceState | null): FenceState | null {
+  let fence = initialFence;
   for (const line of text.split('\n')) {
     if (fence) {
       if (isFenceClosing(line, fence)) fence = null;
@@ -65,7 +64,20 @@ function paragraphOffsetIsInsideFence(paragraph: PMNode, offset: number): boolea
     }
     fence = fenceOpening(line);
   }
-  return fence !== null;
+  return fence;
+}
+
+function paragraphOffsetIsInsideFence(paragraph: PMNode, offset: number): boolean {
+  return scanFenceState(paragraph.textBetween(0, offset, '\n', '\n'), null) !== null;
+}
+
+function documentFenceStateBefore(doc: PMNode, position: number): FenceState | null {
+  let fence: FenceState | null = null;
+  doc.forEach((node, nodeOffset) => {
+    if (nodeOffset >= position || node.type.name !== 'paragraph') return;
+    fence = scanFenceState(node.textBetween(0, node.content.size, '\n', '\n'), fence);
+  });
+  return fence;
 }
 
 function plainListParagraphMarker(text: string): PlainListParagraphMarker | null {
@@ -77,7 +89,7 @@ function plainListParagraphMarker(text: string): PlainListParagraphMarker | null
       attrs: { marker: bullet[1], separator: bullet[2] },
     };
   }
-  const ordered = text.match(/^([1-9]\d{0,5})([.)])([ \t]+)/);
+  const ordered = text.match(/^([1-9]\d{0,6})([.)])([ \t]+)/);
   if (ordered) {
     return {
       kind: 'ordered',
@@ -85,7 +97,7 @@ function plainListParagraphMarker(text: string): PlainListParagraphMarker | null
       attrs: { start: Number(ordered[1]), marker: ordered[2], separator: ordered[3] },
     };
   }
-  const cjkOrdered = text.match(/^([1-9]\d{0,5})(、)([ \t]*)/);
+  const cjkOrdered = text.match(/^([1-9]\d{0,6})(、)([ \t]*)/);
   if (cjkOrdered) {
     return {
       kind: 'ordered',
@@ -134,7 +146,7 @@ function hardBreakListInputRule(
       if (!paragraphType || !itemType) return null;
 
       const leadingParagraph = paragraph.type.create(paragraph.attrs, before, paragraph.marks);
-      const listParagraph = paragraphType.create(null, after);
+      const listParagraph = paragraph.type.create(paragraph.attrs, after, paragraph.marks);
       const list = type.create(
         (match.data?.attributes as Record<string, unknown> | undefined) ?? {},
         itemType.create(null, listParagraph),
@@ -505,11 +517,24 @@ export function isTrailingEmptyTopLevelParagraph(view: EditorView): boolean {
   );
 }
 
+export function isTopLevelBlockSelection(view: EditorView): boolean {
+  const { state } = view;
+  const { $from, $to } = state.selection;
+  return (
+    !state.selection.empty &&
+    $from.depth === 1 &&
+    $to.depth === 1 &&
+    $from.parentOffset === 0 &&
+    $to.parentOffset === $to.parent.content.size
+  );
+}
+
 export function promoteTrailingPlainListParagraph(view: EditorView): boolean {
   const trailing = getTrailingPlainListParagraph(view);
   if (!trailing) return false;
   const { state } = view;
   const { paragraph, marker, paragraphPosition } = trailing;
+  if (documentFenceStateBefore(state.doc, paragraphPosition)) return false;
 
   const paragraphType = state.schema.nodes.paragraph;
   const itemType = state.schema.nodes.listItem;

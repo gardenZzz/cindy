@@ -38,7 +38,7 @@ export interface SerializedComposerContent {
 type OrderedMarker = '.' | ')' | '、';
 
 const EMPTY_LIST_ITEM_MARKER_RE =
-  /(?:^|\n)[ \t]*(?:[1-9]\d{0,5}[.)][ \t]+|[1-9]\d{0,5}、[ \t]*|[-+*•][ \t]+)$/;
+  /(?:^|\n)[ \t]*(?:[1-9]\d{0,6}[.)][ \t]+|[1-9]\d{0,6}、[ \t]*|[-+*•][ \t]+)$/;
 
 const TAB_SIZE = 4;
 
@@ -56,8 +56,8 @@ function expandedIndentWidth(text: string): number {
 
 function literalListContinuationPrefix(text: string): string | null {
   const match =
-    text.match(/^([ \t]+)(?:[-+*•]|[1-9]\d{0,5}[.)])([ \t]+)/) ??
-    text.match(/^([ \t]+)[1-9]\d{0,5}、[ \t]*/);
+    text.match(/^([ \t]+)(?:[-+*•]|[1-9]\d{0,6}[.)])([ \t]+)/) ??
+    text.match(/^([ \t]+)[1-9]\d{0,6}、[ \t]*/);
   if (!match) return null;
   return ' '.repeat(expandedIndentWidth(match[0]));
 }
@@ -161,7 +161,7 @@ function serializeComposerDocument(
         const quoteText = formatQuoteForSend(
           composerQuoteAttrsToChatQuote(child.attrs as ComposerQuoteAttrs),
         );
-        if (prefix) {
+      if (prefix || continuationIndent) {
           // A quote chip inside a list item is part of that item. Keeping it
           // in the current text block preserves the list marker. Put the
           // encoded quote on its own continuation lines so history parsing
@@ -189,7 +189,7 @@ function serializeComposerDocument(
         const textAfterIndent = alreadyIndented
           ? childText.slice(continuationAfterQuote.length)
           : childText;
-        const needsQuoteBoundary = /^>[ \t]/.test(textAfterIndent);
+        const needsQuoteBoundary = /^>(?:[ \t]|$)/.test(textAfterIndent);
         buffer += `${needsQuoteBoundary ? '\n\n' : '\n'}${
           alreadyIndented ? '' : continuationAfterQuote
         }`;
@@ -363,6 +363,25 @@ function serializeComposerDocument(
             .map((line) => `${literalContinuation}${line}`)
             .join('\n'),
         });
+        return;
+      }
+      const inlineQuoteOffset = (() => {
+        let offset = 0;
+        for (let index = 0; index < node.childCount; index += 1) {
+          const child = node.child(index);
+          if (child.type.name === COMPOSER_QUOTE_NODE_TYPE) return offset;
+          offset += child.nodeSize;
+        }
+        return null;
+      })();
+      const inlineLiteralContinuation =
+        inlineQuoteOffset !== null
+          ? literalListContinuationPrefix(
+              node.textBetween(0, inlineQuoteOffset, '\n', '\uFFFC'),
+            )
+          : null;
+      if (inlineLiteralContinuation) {
+        serializeParagraph(node, nodeOffset, '', inlineLiteralContinuation);
         return;
       }
       serializeParagraph(node, nodeOffset);

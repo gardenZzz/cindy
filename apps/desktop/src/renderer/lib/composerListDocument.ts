@@ -17,7 +17,7 @@ interface ComposerLine {
 }
 
 const BULLET_RE = /^([-+*•])([ \t]+)/;
-const ORDERED_RE = /^([1-9]\d{0,5})([.)、])([ \t]*)/;
+const ORDERED_RE = /^([1-9]\d{0,6})([.)、])([ \t]*)/;
 
 function inlineNodeText(node: JSONContent): string {
   if (node.type === 'text') return node.text ?? '';
