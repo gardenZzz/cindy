@@ -12,9 +12,11 @@ import { liftListItem, splitListItem } from '@tiptap/pm/schema-list';
 import { Selection, TextSelection } from '@tiptap/pm/state';
 import type { EditorView } from '@tiptap/pm/view';
 
-const ORDERED_MARKER_RE = /^\s*(\d{1,6})([.)])\s$/;
-const CJK_ORDERED_MARKER_RE = /^\s*(\d{1,6})(、)$/;
+const BULLET_MARKER_RE = /^([-+*•])([ \t]+)$/;
+const ORDERED_MARKER_RE = /^(\d{1,6})([.)])\s$/;
+const CJK_ORDERED_MARKER_RE = /^(\d{1,6})(、)$/;
 
+type BulletMarker = '-' | '+' | '*' | '•';
 type OrderedMarker = '.' | ')' | '、';
 
 interface OrderedListAttrs {
@@ -39,7 +41,11 @@ interface PlainListParagraphMarker {
 function plainListParagraphMarker(text: string): PlainListParagraphMarker | null {
   const bullet = text.match(/^([-+*•])([ \t]+)/);
   if (bullet) {
-    return { kind: 'bullet', prefixLength: bullet[0].length, attrs: {} };
+    return {
+      kind: 'bullet',
+      prefixLength: bullet[0].length,
+      attrs: { marker: bullet[1], separator: bullet[2] },
+    };
   }
   const ordered = text.match(/^(\d{1,6})([.)])([ \t]+)/);
   if (ordered) {
@@ -133,6 +139,25 @@ export const ComposerBulletList = Node.create({
   group: 'block',
   content: 'listItem+',
   defining: true,
+  addAttributes() {
+    return {
+      marker: {
+        default: '-',
+        parseHTML: (element) => {
+          const value = element.getAttribute('data-marker');
+          return value === '+' || value === '*' || value === '•' ? value : '-';
+        },
+        renderHTML: (attributes) =>
+          attributes.marker === '-' ? {} : { 'data-marker': attributes.marker },
+      },
+      separator: {
+        default: ' ',
+        parseHTML: (element) => element.getAttribute('data-separator') || ' ',
+        renderHTML: (attributes) =>
+          attributes.separator === ' ' ? {} : { 'data-separator': attributes.separator },
+      },
+    };
+  },
   parseHTML() {
     return [{ tag: 'ul' }];
   },
@@ -142,10 +167,17 @@ export const ComposerBulletList = Node.create({
   addInputRules() {
     return [
       wrappingInputRule({
-        find: /^\s*([-+*•])\s$/,
+        find: BULLET_MARKER_RE,
         type: this.type,
+        getAttributes: (match) => ({
+          marker: match[1] as BulletMarker,
+          separator: match[2],
+        }),
       }),
-      hardBreakListInputRule(/^\s*([-+*•])\s$/, this.type),
+      hardBreakListInputRule(BULLET_MARKER_RE, this.type, (match) => ({
+        marker: match[1] as BulletMarker,
+        separator: match[2],
+      })),
     ];
   },
 });
@@ -187,8 +219,18 @@ export const ComposerOrderedList = Node.create({
   parseHTML() {
     return [{ tag: 'ol' }];
   },
-  renderHTML({ HTMLAttributes }) {
-    return ['ol', mergeAttributes(HTMLAttributes), 0];
+  renderHTML({ node, HTMLAttributes }) {
+    const start = Number(node.attrs.start);
+    const lastItem = start + Math.max(node.childCount - 1, 0);
+    const markerDigits =
+      Number.isInteger(start) && start > 0 && Number.isInteger(lastItem)
+        ? String(lastItem).length
+        : 1;
+    return [
+      'ol',
+      mergeAttributes(HTMLAttributes, { 'data-marker-digits': String(markerDigits) }),
+      0,
+    ];
   },
   addInputRules() {
     return [

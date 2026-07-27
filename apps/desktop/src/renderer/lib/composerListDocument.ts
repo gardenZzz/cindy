@@ -7,6 +7,7 @@ interface ListMarker {
   kind: ListKind;
   prefixLength: number;
   marker: string;
+  separator: string;
   start?: number;
 }
 
@@ -72,7 +73,8 @@ function parseListMarker(text: string): ListMarker | null {
     return {
       kind: 'bullet',
       prefixLength: bullet[0].length,
-      marker: 'bullet',
+      marker: bullet[1],
+      separator: bullet[2],
     };
   }
 
@@ -88,6 +90,7 @@ function parseListMarker(text: string): ListMarker | null {
       prefixLength:
         marker === '、' ? ordered[1].length + marker.length : ordered[0].length,
       marker,
+      separator: marker === '、' ? ordered[3] : ordered[3],
       start: Number(ordered[1]),
     };
   }
@@ -126,17 +129,25 @@ function listFromLines(
       content: [paragraphFromLine({ content, text: '' }, paragraphAttrs)],
     };
   });
+  const attrs =
+    marker.kind === 'ordered'
+      ? { start: marker.start ?? 1, marker: marker.marker }
+      : marker.marker === '-' && marker.separator === ' '
+        ? undefined
+        : { marker: marker.marker, separator: marker.separator };
   return {
     type: marker.kind === 'ordered' ? 'orderedList' : 'bulletList',
-    ...(marker.kind === 'ordered'
-      ? { attrs: { start: marker.start ?? 1, marker: marker.marker } }
-      : {}),
+    ...(attrs ? { attrs } : {}),
     content: items,
   };
 }
 
 function sameListMarker(left: ListMarker, right: ListMarker): boolean {
-  return left.kind === right.kind && left.marker === right.marker;
+  return (
+    left.kind === right.kind &&
+    left.marker === right.marker &&
+    left.separator === right.separator
+  );
 }
 
 function canAppendListLine(
@@ -149,14 +160,47 @@ function canAppendListLine(
   return next.start === (current.start ?? 1) + currentLineCount;
 }
 
-function paragraphToBlocks(paragraph: JSONContent): JSONContent[] {
+interface FenceState {
+  char: '`' | '~';
+  length: number;
+}
+
+function fenceOpening(text: string): FenceState | null {
+  const match = text.match(/^ {0,3}(`{3,}|~{3,})(.*)$/);
+  if (!match) return null;
+  if (match[1][0] === '`' && match[2].includes('`')) return null;
+  return { char: match[1][0] as FenceState['char'], length: match[1].length };
+}
+
+function isFenceClosing(text: string, state: FenceState): boolean {
+  const escapedChar = state.char === '`' ? '`' : '~';
+  const pattern = new RegExp(`^ {0,3}${escapedChar}{${state.length},}[ \\t]*$`);
+  return pattern.test(text);
+}
+
+function paragraphToBlocks(
+  paragraph: JSONContent,
+  initialFence: FenceState | null,
+): { blocks: JSONContent[]; fence: FenceState | null } {
   const lines = splitParagraphLines(paragraph);
-  if (!lines.some((line) => parseListMarker(line.text))) return [paragraph];
+  if (!lines.some((line) => parseListMarker(line.text)) && !initialFence) {
+    let fence: FenceState | null = initialFence;
+    for (const line of lines) {
+      const opening = fenceOpening(line.text);
+      if (fence) {
+        if (isFenceClosing(line.text, fence)) fence = null;
+      } else if (opening) {
+        fence = opening;
+      }
+    }
+    return { blocks: [paragraph], fence };
+  }
 
   const blocks: JSONContent[] = [];
   let plainLines: ComposerLine[] = [];
   let listLines: ComposerLine[] = [];
   let listMarker: ListMarker | null = null;
+  let fence = initialFence;
 
   const flushPlain = () => {
     if (plainLines.length === 0) return;
@@ -171,6 +215,19 @@ function paragraphToBlocks(paragraph: JSONContent): JSONContent[] {
   };
 
   for (const line of lines) {
+    if (fence) {
+      flushList();
+      plainLines.push(line);
+      if (isFenceClosing(line.text, fence)) fence = null;
+      continue;
+    }
+    const opening = fenceOpening(line.text);
+    if (opening) {
+      flushList();
+      plainLines.push(line);
+      fence = opening;
+      continue;
+    }
     const marker = parseListMarker(line.text);
     if (!marker) {
       flushList();
@@ -190,12 +247,17 @@ function paragraphToBlocks(paragraph: JSONContent): JSONContent[] {
   }
   flushList();
   flushPlain();
-  return blocks;
+  return { blocks, fence };
 }
 
 function canMergeLists(left: JSONContent, right: JSONContent): boolean {
   if (left.type !== right.type) return false;
-  if (left.type === 'bulletList') return true;
+  if (left.type === 'bulletList') {
+    return (
+      (left.attrs?.marker ?? '-') === (right.attrs?.marker ?? '-') &&
+      (left.attrs?.separator ?? ' ') === (right.attrs?.separator ?? ' ')
+    );
+  }
   const leftStart = Number(left.attrs?.start);
   const rightStart = Number(right.attrs?.start);
   return (
@@ -225,9 +287,14 @@ export function normalizeComposerDocumentJSON(document: JSONContent): JSONConten
   if (document.type !== 'doc' || !Array.isArray(document.content)) return document;
 
   const normalized: JSONContent[] = [];
+  let fence: FenceState | null = null;
   for (const node of document.content) {
-    const blocks = node.type === 'paragraph' ? paragraphToBlocks(node) : [node];
-    for (const block of blocks) {
+    const result: { blocks: JSONContent[]; fence: FenceState | null } =
+      node.type === 'paragraph'
+        ? paragraphToBlocks(node, fence)
+        : { blocks: [node], fence };
+    fence = result.fence;
+    for (const block of result.blocks) {
       const previous = normalized.at(-1);
       if (previous && canMergeLists(previous, block)) {
         normalized[normalized.length - 1] = mergeLists(previous, block);

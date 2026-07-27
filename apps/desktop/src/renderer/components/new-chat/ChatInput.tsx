@@ -154,7 +154,7 @@ import { getAppShortcutCombos } from '@/lib/appShortcutStore';
 import { getNextPermissionMode } from '@/lib/permissionModeCycle';
 import { matchesKeyboardEvent } from '../../../shared/appShortcuts';
 import { createLogger } from '@/lib/logger';
-import { serializeEditorContent } from './composerContentSerialization';
+import { serializeEditorContent, serializeEditorSlice } from './composerContentSerialization';
 import {
   composerDocumentContainsList,
   normalizeComposerDocumentJSON,
@@ -1386,6 +1386,7 @@ export function ChatInput({
       SlashCommandDecoration,
     ],
     editorProps: {
+      clipboardTextSerializer: (slice) => serializeEditorSlice(editorRef.current, slice),
       attributes: {
         class: cn(
           // py + 负 my:.ProseMirror 自身是 overflow 裁剪容器,inline 装饰
