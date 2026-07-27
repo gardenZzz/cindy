@@ -133,6 +133,9 @@ interface ForwardRecord {
   /** 本地 Proxy 连接失败的节流日志状态。 */
   lastLocalErrorAt: number;
   localErrorCount: number;
+  /** 上次实际打日志时的 localErrorCount — suppressedCount 报「距上次日志被吞掉
+   *  几条」而不是单调总计数 (review: PR #715 copilot R3)。 */
+  lastLocalErrorLoggedCount: number;
 }
 
 /**
@@ -539,6 +542,7 @@ export class RemoteHost {
       armed: false,
       lastLocalErrorAt: 0,
       localErrorCount: 0,
+      lastLocalErrorLoggedCount: 0,
     };
     this.forwards.set(key, record);
     if (this.status === 'ready') {
@@ -839,13 +843,18 @@ export class RemoteHost {
       const now = Date.now();
       if (now - rec.lastLocalErrorAt > 30_000) {
         rec.lastLocalErrorAt = now;
+        const suppressed = rec.localErrorCount - rec.lastLocalErrorLoggedCount;
+        rec.lastLocalErrorLoggedCount = rec.localErrorCount;
         this.log.warn('ssh remote forward: local target unreachable', {
           id: this.id,
           localTarget: forwardKey(rec.spec),
           error: err.message,
-          suppressedCount: rec.localErrorCount,
+          suppressedCount: suppressed,
         });
       }
+      // error 后 socket 必须销毁 (review: PR #715 copilot R3) — 只关 channel
+      // 不 destroy 会把本地侧留成半开, Proxy 进程上积 CLOSE_WAIT。
+      sock.destroy();
       try { channel.close(); } catch { /* already gone */ }
     });
     channel.on('error', () => {
@@ -1134,6 +1143,10 @@ export class RemoteHost {
       // (StaleForwardArmError), 不会误标 armed。
       record.arming = undefined;
     }
+    // 分发器挂在旧 client 上 — 清掉引用, 否则 RemoteHost 长期持有死 client
+    // (抑制 GC + 多次重连后旧 client 上 listener 堆积, review: PR #715
+    // copilot R3)。新 client 首次 arm 时 attachForwardListener 会重新挂。
+    this.forwardListenerClient = null;
   }
 
   private setStatus(next: RemoteStatus): void {
