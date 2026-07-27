@@ -77,9 +77,7 @@ export function findGhostCommandMatch(
       // A command after a leading structured list is not a message-start
       // command. Let the placement path insert the selected command before
       // that list instead of replacing the later paragraph.
-      if (para.textContent.trim().length > 0) return null;
-      paraPos += para.nodeSize;
-      continue;
+      return null;
     }
     let childPos = paraPos + 1; // 段落内容起点
     for (let ci = 0; ci < para.childCount; ci++) {
