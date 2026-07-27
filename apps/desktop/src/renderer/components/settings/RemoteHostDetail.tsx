@@ -13,10 +13,10 @@
  * that's Phase C (RemoteAgent as a BaseAgent subclass).
  */
 
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState, useSyncExternalStore } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useNavigate } from 'react-router-dom';
-import { CheckCircle2, AlertCircle, Play, Upload, Sparkles } from 'lucide-react';
+import { CheckCircle2, AlertCircle, Play, Upload, Sparkles, Waypoints } from 'lucide-react';
 
 import { cn } from '@/lib/utils';
 import { toast } from '@/lib/toast';
@@ -25,6 +25,7 @@ import { useConfirmDialog } from '@/components/ui/confirm-dialog-provider';
 import { Spinner } from '@/components/ui/spinner';
 import * as sessionService from '@/lib/sessionService';
 import { buildCodexSyncWarning } from '@/utils/codexAuthSync';
+import { remoteSshHostsStore } from '@/lib/remoteSshHostsStore';
 
 type AgentKind = RemoteAgentKind;
 const AGENT_KINDS: ReadonlyArray<AgentKind> = ['claude-code', 'codex'];
@@ -240,9 +241,73 @@ export function RemoteHostDetail({ hostId }: Props) {
         <QuickTestPanel hostId={hostId} availableKinds={installedKinds} />
       )}
 
+      <AgentProxyTunnelCard hostId={hostId} />
+
       {agents.codex.probe?.installed && (
         <StartRemoteSessionPanel hostId={hostId} />
       )}
+    </div>
+  );
+}
+
+// ── agent proxy tunnel status card ──────────────────────────────────────────
+//
+// 「Agent 流量走本地 Proxy」pref 开启时显示隧道实时状态。快照来自
+// remoteSshHostsStore (main 端 status push 驱动, withPrefs 携带 tunnel state)。
+
+function AgentProxyTunnelCard({ hostId }: { hostId: string }) {
+  const { t } = useTranslation();
+  const snap = useSyncExternalStore(
+    (cb) => remoteSshHostsStore.subscribe(cb),
+    () => remoteSshHostsStore.get()?.find((h) => h.config.id === hostId) ?? null,
+  );
+  // 触发一次 ensure, 保证 cold start (没开过 Settings 列表) 也有快照。
+  useEffect(() => {
+    void remoteSshHostsStore.ensure();
+  }, []);
+
+  const pref = snap?.agentProxy ?? null;
+  if (!pref) return null;
+  const tunnel = snap?.agentProxyTunnel ?? null;
+  const localTarget = `${pref.localHost}:${pref.localPort}`;
+
+  let icon;
+  let text: string;
+  let isError = false;
+  if (tunnel?.active && tunnel.remotePort != null) {
+    icon = <CheckCircle2 size={14} />;
+    text = t('settings.remote.detail.agentProxyActive', {
+      port: tunnel.remotePort,
+      target: localTarget,
+    });
+  } else if (tunnel?.lastError) {
+    icon = <AlertCircle size={14} />;
+    text = t('settings.remote.detail.agentProxyError', { message: tunnel.lastError });
+    isError = true;
+  } else {
+    icon = <Spinner size={12} />;
+    text = t('settings.remote.detail.agentProxyPending', { target: localTarget });
+  }
+
+  return (
+    <div className="flex flex-col gap-2">
+      <p
+        className="text-13 font-medium"
+        style={{ color: 'var(--settings-section-sublabel)' }}
+      >
+        {t('settings.remote.detail.agentProxyTitle')}
+      </p>
+      <div
+        className="flex items-center gap-2 rounded-lg p-3 text-12"
+        style={{
+          border: '1px solid var(--settings-theme-card-border)',
+          color: isError ? 'var(--error-fg, #dc2626)' : 'var(--settings-integration-subtitle)',
+        }}
+      >
+        <Waypoints size={14} className="shrink-0" />
+        {icon}
+        <span className="break-all">{text}</span>
+      </div>
     </div>
   );
 }
