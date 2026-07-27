@@ -13,8 +13,8 @@ import { Selection, TextSelection } from '@tiptap/pm/state';
 import type { EditorView } from '@tiptap/pm/view';
 
 const BULLET_MARKER_RE = /^([-+*•])([ \t]+)$/;
-const ORDERED_MARKER_RE = /^([1-9]\d{0,6})([.)])([ \t]+)$/;
-const CJK_ORDERED_MARKER_RE = /^([1-9]\d{0,6})(、)$/;
+const ORDERED_MARKER_RE = /^([1-9]\d{0,7})([.)])([ \t]+)$/;
+const CJK_ORDERED_MARKER_RE = /^([1-9]\d{0,7})(、)$/;
 
 type BulletMarker = '-' | '+' | '*' | '•';
 type OrderedMarker = '.' | ')' | '、';
@@ -89,7 +89,7 @@ function plainListParagraphMarker(text: string): PlainListParagraphMarker | null
       attrs: { marker: bullet[1], separator: bullet[2] },
     };
   }
-  const ordered = text.match(/^([1-9]\d{0,6})([.)])([ \t]+)/);
+  const ordered = text.match(/^([1-9]\d{0,7})([.)])([ \t]+)/);
   if (ordered) {
     return {
       kind: 'ordered',
@@ -97,7 +97,7 @@ function plainListParagraphMarker(text: string): PlainListParagraphMarker | null
       attrs: { start: Number(ordered[1]), marker: ordered[2], separator: ordered[3] },
     };
   }
-  const cjkOrdered = text.match(/^([1-9]\d{0,6})(、)([ \t]*)/);
+  const cjkOrdered = text.match(/^([1-9]\d{0,7})(、)([ \t]*)/);
   if (cjkOrdered) {
     return {
       kind: 'ordered',

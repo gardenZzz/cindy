@@ -143,4 +143,54 @@ describe('placeGhostAtComposerStart', () => {
       },
     ]);
   });
+
+  it('does not replace a command that appears after leading list content', () => {
+    const editor = new Editor({
+      extensions: [
+        Document,
+        Paragraph,
+        Text,
+        ComposerListItem,
+        ComposerBulletList,
+        ComposerOrderedList,
+        MentionChipNode,
+      ],
+      content: {
+        type: 'doc',
+        content: [
+          {
+            type: 'bulletList',
+            content: [
+              {
+                type: 'listItem',
+                content: [
+                  {
+                    type: 'paragraph',
+                    content: [{ type: 'text', text: 'first' }],
+                  },
+                ],
+              },
+            ],
+          },
+          {
+            type: 'paragraph',
+            content: [{ type: 'text', text: '$old later text' }],
+          },
+        ],
+      },
+    });
+    editors.push(editor);
+
+    expect(placeGhostAtComposerStart(editor, ghost('mivo'), [ghost('mivo'), ghost('old')])).toBe(
+      true,
+    );
+    expect(editor.getJSON().content?.[0]).toEqual({
+      type: 'paragraph',
+      content: [{ type: 'text', text: '$mivo ' }],
+    });
+    expect(editor.getJSON().content?.[2]).toEqual({
+      type: 'paragraph',
+      content: [{ type: 'text', text: '$old later text' }],
+    });
+  });
 });

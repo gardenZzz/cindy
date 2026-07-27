@@ -147,6 +147,11 @@ describe('composer structured list input rules', () => {
       attrs: { start: 3, marker: ')' },
     },
     {
+      typed: '10000000. ',
+      listType: 'orderedList',
+      attrs: { start: 10000000, marker: '.' },
+    },
+    {
       typed: '2、',
       listType: 'orderedList',
       attrs: { start: 2, marker: '、' },
@@ -1184,6 +1189,40 @@ describe('composer structured list serialization', () => {
     ]);
   });
 
+  it('keeps a pasted quote-like chip separate from a list quote chip', () => {
+    const editor = makeEditor({
+      type: 'doc',
+      content: [
+        {
+          type: 'bulletList',
+          content: [
+            {
+              type: 'listItem',
+              content: [
+                {
+                  type: 'paragraph',
+                  content: [
+                    { type: COMPOSER_QUOTE_NODE_TYPE, attrs: { text: 'quoted' } },
+                    {
+                      type: 'pastedTextChip',
+                      attrs: { text: '> pasted reply', display: '> pasted reply' },
+                    },
+                  ],
+                },
+              ],
+            },
+          ],
+        },
+      ],
+    });
+
+    expect(parseChatQuoteSegments(serializeEditorContent(editor).text)).toEqual([
+      { kind: 'text', text: '- ' },
+      { kind: 'quote', quote: { text: 'quoted' } },
+      { kind: 'text', text: '  > pasted reply' },
+    ]);
+  });
+
   it('reuses a hard-break continuation line for a list quote chip', () => {
     const editor = makeEditor({
       type: 'doc',
@@ -1216,6 +1255,40 @@ describe('composer structured list serialization', () => {
     expect(parseChatQuoteSegments(serialized)).toEqual([
       { kind: 'text', text: '- before' },
       { kind: 'quote', quote: { text: 'quoted' } },
+    ]);
+  });
+
+  it('does not duplicate an indented break after a list quote chip', () => {
+    const editor = makeEditor({
+      type: 'doc',
+      content: [
+        {
+          type: 'bulletList',
+          content: [
+            {
+              type: 'listItem',
+              content: [
+                {
+                  type: 'paragraph',
+                  content: [
+                    { type: COMPOSER_QUOTE_NODE_TYPE, attrs: { text: 'quoted' } },
+                    { type: 'hardBreak' },
+                    { type: 'text', text: 'after' },
+                  ],
+                },
+              ],
+            },
+          ],
+        },
+      ],
+    });
+
+    const serialized = serializeEditorContent(editor).text;
+    expect(serialized).not.toContain('\n  \n  ');
+    expect(parseChatQuoteSegments(serialized)).toEqual([
+      { kind: 'text', text: '- ' },
+      { kind: 'quote', quote: { text: 'quoted' } },
+      { kind: 'text', text: '  after' },
     ]);
   });
 
