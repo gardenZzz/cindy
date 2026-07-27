@@ -357,6 +357,31 @@ describe('RemoteHost remote forwarding', () => {
     });
   });
 
+  it('re-arms on the current connection when forwardIn resolves on a stale one (review P1)', async () => {
+    // arm 在飞期间断线/重连: 旧 client 的迟到成功不得把隧道误标 armed —
+    // 应在旧 client 上 unbind 并在当前连接上重试。
+    const client1 = new ManualForwardClient();
+    const client2 = new ManualForwardClient();
+    const host = makeReadyHost(client1);
+    const pending = host.ensureRemoteForward({ localHost: '127.0.0.1', localPort: 7890 });
+    // 断线/重连窗口: markForwardsDisarmed 清掉在飞 arm 引用, client 换成新连接。
+    (host as unknown as { markForwardsDisarmed(): void }).markForwardsDisarmed();
+    (host as unknown as { client: unknown }).client = client2;
+    // 旧连接迟到成功 → StaleForwardArmError → armWithStaleRetry 立即在 client2 重试。
+    client1.succeed(DEFAULT_REMOTE_FORWARD_PORT_BASE);
+    await flush();
+    expect(client1.unforwardInCalls).toContainEqual({
+      addr: '127.0.0.1',
+      port: DEFAULT_REMOTE_FORWARD_PORT_BASE,
+    });
+    // 重试落在 client2 上, 完成绑定。
+    expect(client2.pending.has(DEFAULT_REMOTE_FORWARD_PORT_BASE)).toBe(true);
+    client2.succeed(DEFAULT_REMOTE_FORWARD_PORT_BASE);
+    const fwd = await pending;
+    expect(fwd.remotePort).toBe(DEFAULT_REMOTE_FORWARD_PORT_BASE);
+    expect(host.listRemoteForwards()[0]?.armed).toBe(true);
+  });
+
   it('keeps the wish when re-arm fails, without throwing (logged only)', async () => {
     const client1 = new FakeClient();
     const host = makeReadyHost(client1);

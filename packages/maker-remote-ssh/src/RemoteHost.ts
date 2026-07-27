@@ -135,6 +135,13 @@ interface ForwardRecord {
   localErrorCount: number;
 }
 
+/**
+ * arm 在飞期间连接被换 (断线/重连), forwardIn 的迟到成功落在旧 client 上。
+ * armForward 以此错误收尾; ensureRemoteForward / rearmForwards 识别后立即
+ * 在当前连接重试一次, 而不是把隧道误标 active 或等下次 reconnect。
+ */
+class StaleForwardArmError extends Error {}
+
 function forwardKey(spec: Pick<RemoteForwardSpec, 'localHost' | 'localPort'>): string {
   return `${spec.localHost}:${spec.localPort}`;
 }
@@ -521,7 +528,7 @@ export class RemoteHost {
     if (existing) {
       // 已登记但未 arm (连接刚建好 / 上次 arm 失败) — 趁 ready 补一次。
       if (!existing.armed && this.status === 'ready') {
-        await this.armForwardDeduped(existing);
+        await this.armWithStaleRetry(existing);
       }
       return this.forwardHandle(key, existing);
     }
@@ -535,9 +542,25 @@ export class RemoteHost {
     };
     this.forwards.set(key, record);
     if (this.status === 'ready') {
-      await this.armForwardDeduped(record);
+      await this.armWithStaleRetry(record);
     }
     return this.forwardHandle(key, record);
+  }
+
+  /**
+   * arm + 旧连接迟到回调的一次即时重试 (见 StaleForwardArmError)。
+   * 其余错误原样抛出给调用方 (session 路径 fail-closed / ready-hook 记状态)。
+   */
+  private async armWithStaleRetry(record: ForwardRecord): Promise<void> {
+    try {
+      await this.armForwardDeduped(record);
+    } catch (err) {
+      if (err instanceof StaleForwardArmError && this.status === 'ready') {
+        await this.armForwardDeduped(record);
+        return;
+      }
+      throw err;
+    }
   }
 
   /**
@@ -573,10 +596,26 @@ export class RemoteHost {
         record.armed = false;
         // 连接活着就显式 unforward; 断线时服务端侧随连接消失, 无需操作。
         if (this.status === 'ready' && this.client) {
+          // 与 forwardIn 对称的看门狗 (review: PR #715 五轮审核 P2): 半开连接
+          // 上 ssh2 global request 回调可能丢失, 裸 await 会把 Settings 的
+          // 关闭 proxy / 更新 host 流程永久挂住。超时后照常返回 — record 已
+          // 摘除, 服务端残留随连接死亡消失。
           await new Promise<void>((resolve) => {
+            const timer = setTimeout(() => {
+              this.log.warn('unforwardIn timed out — proceeding (server remnant dies with connection)', {
+                id: this.id,
+                port: record.remotePort,
+              });
+              resolve();
+            }, 5_000);
+            timer.unref?.();
             try {
-              this.client!.unforwardIn('127.0.0.1', record.remotePort, () => resolve());
+              this.client!.unforwardIn('127.0.0.1', record.remotePort, () => {
+                clearTimeout(timer);
+                resolve();
+              });
             } catch {
+              clearTimeout(timer);
               resolve();
             }
           });
@@ -665,6 +704,23 @@ export class RemoteHost {
         });
         throw new Error(`remote forward to ${forwardKey(record.spec)} was closed while arming`);
       }
+      // 连接代际校验 (review: PR #715 五轮审核 P1): arm 在飞期间发生了
+      // 断线/重连的话, this.client 已换成新连接, 这个绑定落在旧 (将死) 连接
+      // 上 — 若不拦截, record 会被误标 armed, rearmForwards 见 armed 直接
+      // 跳过, 隧道「以为建好了实际新连接上没有」。旧 client 上 best-effort
+      // 拆除 (多半已死), 以专门错误收尾让调用方立即在当前连接重试。
+      if (this.client !== client) {
+        this.log.warn('forwardIn resolved on a stale connection — unbinding and re-arming', {
+          id: this.id,
+          port: bound,
+        });
+        try {
+          client.unforwardIn('127.0.0.1', bound, () => { /* best-effort; client likely dead */ });
+        } catch { /* dead */ }
+        throw new StaleForwardArmError(
+          `remote forward to ${forwardKey(record.spec)} armed on a stale connection`,
+        );
+      }
       record.remotePort = bound;
       record.armed = true;
       this.log.info('ssh remote forward armed', {
@@ -686,15 +742,28 @@ export class RemoteHost {
     for (const record of this.forwards.values()) {
       const prevPort = record.remotePort;
       record.armed = false;
-      try {
-        await this.armForwardDeduped(record);
-      } catch (err) {
+      // 旧连接的迟到 arm 回调会以 StaleForwardArmError 收尾 — 当前连接还没
+      // arm, 立即重试一次 (record.arming 已被 finally 清掉, 可重新发起)。
+      // 其余错误 (端口占用 / sshd 拒绝) 不重试, 等下次 reconnect 或 session
+      // 路径的 ensureRemoteForward 显式触发。
+      let armed = false;
+      let lastErr: Error | null = null;
+      for (let attempt = 0; attempt < 2 && !armed; attempt++) {
+        try {
+          await this.armForwardDeduped(record);
+          armed = true;
+        } catch (err) {
+          lastErr = err as Error;
+          if (!(err instanceof StaleForwardArmError)) break;
+        }
+      }
+      if (!armed) {
         // arm 失败不阻断连接 — 记日志, 下次 reconnect 再试; session 路径
         // (ensureRemoteForward on ready host) 会显式重试并拿到错误。
         this.log.warn('ssh remote forward re-arm failed', {
           id: this.id,
           localTarget: forwardKey(record.spec),
-          error: (err as Error).message,
+          error: lastErr?.message,
         });
         continue;
       }
@@ -715,9 +784,12 @@ export class RemoteHost {
   private armForwardDeduped(record: ForwardRecord): Promise<void> {
     if (record.armed) return Promise.resolve();
     if (!record.arming) {
-      record.arming = this.armForward(record).finally(() => {
-        record.arming = undefined;
+      // finally 只在引用仍是自己时清 — markForwardsDisarmed 可能在在飞期间
+      // 清掉旧引用, 新 arm 已重新赋值; 无条件清会误删新 promise 再造竞争。
+      const p = this.armForward(record).finally(() => {
+        if (record.arming === p) record.arming = undefined;
       });
+      record.arming = p;
     }
     return record.arming;
   }
@@ -1048,6 +1120,10 @@ export class RemoteHost {
   private markForwardsDisarmed(): void {
     for (const record of this.forwards.values()) {
       record.armed = false;
+      // 在飞 arm 是在旧连接上发起的 — 清掉引用让新连接的 rearm 重新发起,
+      // 旧 promise 的迟到成功由 armForward 的连接代际校验拦截
+      // (StaleForwardArmError), 不会误标 armed。
+      record.arming = undefined;
     }
   }
 

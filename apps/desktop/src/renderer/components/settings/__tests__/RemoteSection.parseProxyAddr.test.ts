@@ -27,5 +27,9 @@ describe('parseProxyAddrInput', () => {
     expect(parseProxyAddrInput('host:0')).toBeNull();
     expect(parseProxyAddrInput('host:70000')).toBeNull();
     expect(parseProxyAddrInput('bad host:7890')).toBeNull();
+    // 端口必须纯数字 — parseInt 的静默截断 ("7890abc" → 7890) 不接受。
+    expect(parseProxyAddrInput('host:7890abc')).toBeNull();
+    expect(parseProxyAddrInput('[::1]:7890abc')).toBeNull();
+    expect(parseProxyAddrInput('host:7890 ')).toEqual({ localHost: 'host', localPort: 7890 }); // 整串 trim 后合法
   });
 });

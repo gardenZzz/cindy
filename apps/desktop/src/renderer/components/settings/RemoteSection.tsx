@@ -295,13 +295,19 @@ export function parseProxyAddrInput(input: string): { localHost: string; localPo
   if (!s) return null;
   const bracket = /^\[([^\]]+)\]:(\d+)$/.exec(s);
   if (bracket) {
-    const localPort = parseInt(bracket[2]!, 10);
-    return bracket[1] && Number.isInteger(localPort) ? { localHost: bracket[1]!, localPort } : null;
+    const localPort = Number(bracket[2]);
+    return bracket[1] && Number.isInteger(localPort) && localPort >= 1 && localPort <= 65535
+      ? { localHost: bracket[1]!, localPort }
+      : null;
   }
   const idx = s.lastIndexOf(':');
   if (idx <= 0) return null;
   const localHost = s.slice(0, idx).trim();
-  const localPort = parseInt(s.slice(idx + 1), 10);
+  const portText = s.slice(idx + 1);
+  // 严格数字校验 (review: PR #715 五轮审核 P2): parseInt 会把 "7890abc"
+  // 静默截断成 7890, 表单和 main 侧都会接受这个并非用户本意的端口。
+  if (!/^\d+$/.test(portText)) return null;
+  const localPort = Number(portText);
   if (!localHost || /\s/.test(localHost) || !Number.isInteger(localPort)) return null;
   if (localPort < 1 || localPort > 65535) return null;
   return { localHost, localPort };

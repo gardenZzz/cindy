@@ -79,7 +79,7 @@ import { scanCodexCustomizations } from './customization-scanner.js';
 import { commandExecutionDisplayInput } from './command-display.js';
 import {
   newCodexRuntimeState,
-  isAuthMissingErrorMessage,
+  isAuthRelatedErrorMessage,
   translateErrorNotification,
   translateItemNotification,
   translateReasoningSummaryTextDelta,
@@ -4340,15 +4340,32 @@ export class CodexAgent extends BaseAgent {
         // willRetry 不收口, 但持续性不可达 (403 / Network unreachable / timeout)
         // 意味着 retry 永远不会成功。同 turn 计数/时长超阈值后合成终态错误,
         // 落入下面与原生终态 error 完全相同的收口路径。
-        // auth 缺失 (401) 排除: 它有「同步登录态」的等待式 UX, 升级会抢走那个路径。
+        // auth 相关错误 (缺失 401 / 无效凭证 marker) 排除: 它们走 auth 修复 UX
+        // (「同步登录态」/ 重新登录), 升级成「后端不可达」会抢路径并误导排查
+        // (review: PR #715 五轮审核 P1 — 判定与 translator 共用 isAuthRelated*)。
         if (!isTerminalError && targetsCurrentTurn) {
           const rawMessage = params.error?.message ?? '';
-          if (!isAuthMissingErrorMessage(rawMessage)) {
+          if (!isAuthRelatedErrorMessage(rawMessage)) {
             const decision = turnRetryTracker.track(
               params.turnId || currentTurnId || '(pending)',
               Date.now(),
             );
             if (decision.escalate) {
+              // 本地收口后 daemon 侧原 turn 还在无限 retry — fire-and-forget 补
+              // interrupt, 否则它继续烧远端资源, 还可能与下一轮 send 的新 turn
+              // 撞车 (review: PR #715 五轮审核 P1)。失败仅 warn: 本地已按终态
+              // 处理, daemon 死亡/重启时该 turn 自然消失。
+              if (params.threadId && params.turnId) {
+                host.request(Method.TurnInterrupt, {
+                  threadId: params.threadId,
+                  turnId: params.turnId,
+                }).catch((e: unknown) => {
+                  log.warn('escalated turn interrupt failed (best-effort)', {
+                    turnId: params.turnId,
+                    error: e instanceof Error ? e.message : String(e),
+                  });
+                });
+              }
               const message = buildBackendUnreachableMessage({
                 isRemote: Boolean(opts.remoteHostId),
                 remoteHostId: opts.remoteHostId,
