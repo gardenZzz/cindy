@@ -232,6 +232,26 @@ describe('claimDetectedNativeProviderAuth', () => {
     expect(isNativeProviderAuthBound('anthropic')).toBe(true);
   });
 
+  it('修 revoked 时保住别人的归属,并对其余 provider 保守抑制', () => {
+    // 直接重写成「只有本次授权的这家」会抹掉 openai 的 owner-b,那份残留凭证下一次就会被
+    // 认领给 owner-a —— 用一次修复换来一个新的越权口子(PR #548 review)。
+    fs.mkdirSync(userDataDir, { recursive: true });
+    fs.writeFileSync(bindingFile, JSON.stringify({ openai: 'owner-b', revoked: 1 }));
+
+    bindNativeProviderAuth('anthropic');
+    const after = JSON.parse(fs.readFileSync(bindingFile, 'utf8'));
+    expect(after.openai).toBe('owner-b'); // 别人的归属原样保留
+    expect(after.anthropic).toBe('owner-a');
+
+    // 坏掉的 revoked 无从得知谁被撤销过,不能直接丢弃(丢弃 = 给所有残留凭证放行)。
+    expect(after.revoked).toMatchObject({ openai: 'owner-a', xai: 'owner-a' });
+    expect(after.revoked).not.toHaveProperty('anthropic');
+    expect(claimDetectedNativeProviderAuth('xai', () => true)).toBe(false);
+    // 本次授权的这家不受抑制,且 owner-b 的 openai 依然轮不到 owner-a。
+    expect(isNativeProviderAuthBound('anthropic')).toBe(true);
+    expect(isNativeProviderAuthBound('openai')).toBe(false);
+  });
+
   it('文件确实不存在 = 合法首次状态,照常认领', () => {
     // 与「读失败」必须分开:ENOENT 是全新安装的正常形态,挡掉它等于把自动继承整条废掉。
     expect(fs.existsSync(bindingFile)).toBe(false);

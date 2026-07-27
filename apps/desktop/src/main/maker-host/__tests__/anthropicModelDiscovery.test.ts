@@ -1057,6 +1057,26 @@ describe('HTTP 发现失败的归因与选择性重试', () => {
     expect(getAnthropicModelDiscoveryFailure()).toBeNull();
   });
 
+  it('401 后强制刷新自身故障归 upstream(不是 unauthorized),重试链继续', async () => {
+    // token 端点超时 / 5xx / 拿不到刷新锁 ≠ 授权被拒。归 unauthorized 会取消全部重试、
+    // 还叫用户去断开重连,而 refresh token 很可能完全有效(PR #548 review)。
+    const fetchMock = vi.fn().mockResolvedValueOnce(errorResponse(401)).mockResolvedValue(okResponse);
+    vi.stubGlobal('fetch', fetchMock);
+    oauthRefreshMock.getValidClaudeAiOAuth
+      .mockResolvedValueOnce({ accessToken: 'test-token' }) // 首次取 token
+      .mockRejectedValueOnce(new Error('token endpoint 503')) // 强制刷新失败
+      .mockResolvedValue({ accessToken: 'test-token-2' });
+
+    await refreshAnthropicModelsFromHttp();
+    const failure = getAnthropicModelDiscoveryFailure();
+    expect(failure?.kind).toBe('upstream');
+    expect(failure?.detail).toContain('token refresh failed');
+
+    await vi.advanceTimersByTimeAsync(2_000);
+    expect(anthropicIds()).toEqual(['claude-opus-4-8']);
+    expect(getAnthropicModelDiscoveryFailure()).toBeNull();
+  });
+
   it('暂时性失败(连不上)自动重试,成功即生效并清失败态', async () => {
     const fetchMock = vi
       .fn()

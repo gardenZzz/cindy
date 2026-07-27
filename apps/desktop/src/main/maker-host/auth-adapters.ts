@@ -46,7 +46,11 @@ import {
   terminateCodexLoginProcess,
 } from './codex-auth-state.js';
 import { CODEX_GATEWAY_ENV_KEY, CODEX_PROVIDER_OAUTH_PLACEHOLDER_KEY } from './codex-gateway-config.js';
-import { clearClaudeAiOAuth, hasClaudeAiOAuth } from './claude-credentials-store.js';
+import {
+  clearClaudeAiOAuth,
+  hasClaudeAiOAuth,
+  hasClaudeAiOAuthUnbound,
+} from './claude-credentials-store.js';
 import {
   disconnectClaudeAiOAuth,
   getClaudeAiOAuthForSpawn,
@@ -303,7 +307,18 @@ export class DesktopClaudeAuthAdapter implements AuthAdapter {
     invalidateClaudeOAuthRefresh();
     try {
       if (hasClaudeAiOAuth()) clearClaudeAiOAuth();
-      unbindNativeProviderAuth('anthropic');
+      // 凭证删除是 best-effort 的(clearClaudeAiOAuth 的 unlink 失败静默吞掉)。删干净了就
+      // **不**留抑制标记 —— 服务端作废不是用户意图,本机 CLI 重新登录后仍应享有设计内的自动
+      // 继承;可一旦没删掉,slot 空 + 凭证还在,下一次可信读取就会把这份刚被作废的凭证认领
+      // 回来、拿它重启发现,再 401、再 invalidate,在「已连接 / 失效」之间打转
+      // (PR #548 review)。所以按残留与否分流。
+      const residual = hasClaudeAiOAuthUnbound();
+      unbindNativeProviderAuth('anthropic', residual ? { revoked: true } : undefined);
+      if (residual) {
+        log.warn('claude credential still present after invalidate; suppressing auto-claim', {
+          reason,
+        });
+      }
     } catch (e) {
       log.warn('clear claude oauth on invalidate failed', {
         error: e instanceof Error ? e.message : String(e),
