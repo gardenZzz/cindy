@@ -3425,6 +3425,9 @@ export function registerMakerIpc(maker: Maker, options: RegisterMakerIpcOptions 
     listPresets: () => getActiveCatalog().presets ?? [],
     testConnection: (input) => testProviderConnection(input),
     fetchModels: (spec) => fetchProviderModels(spec),
+    // 重新发现会用订阅凭证发起真实上游请求，限主页面 sender（子 frame / WebView 拒绝）。
+    assertTrustedSender: (event) =>
+      assertTrustedAppRendererEvent(event as Parameters<typeof assertTrustedAppRendererEvent>[0]),
     // 动态清单重新发现：目前只有 anthropic 订阅是「清单唯一来源是动态发现」的供应商。
     // 拉取内部只记账不抛，完成后现读一次失败归因回给 renderer。
     rediscoverModels: async (providerId) => {
