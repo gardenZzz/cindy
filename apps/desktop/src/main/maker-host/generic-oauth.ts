@@ -31,6 +31,7 @@ import {
   type OAuthResultPageLang,
 } from '../oauthResultPage.js';
 import { desktopMakerLogger } from './logger-adapter.js';
+import { outboundFetch } from './outbound-fetch.js';
 
 const log = desktopMakerLogger.child('generic-oauth');
 
@@ -77,7 +78,8 @@ function sleepWithAbort(ms: number, signal: AbortSignal): Promise<void> {
 
 let io: GenericOAuthIo = {
   storage: { read: () => null, write: () => false, remove: () => {} },
-  fetchImpl: fetch,
+  // 第三方 provider 的 token / device / refresh 端点多在境外,默认走吃系统代理的通道。
+  fetchImpl: outboundFetch,
   openExternal: async () => {
     throw new Error('generic-oauth openExternal not configured');
   },
