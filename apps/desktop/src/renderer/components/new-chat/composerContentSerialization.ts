@@ -189,7 +189,20 @@ function serializeComposerDocument(
       }
 
       if (continuationAfterQuote !== null) {
-        const childText = child.isText ? (child.text ?? '') : '';
+        if (child.type.name === 'hardBreak') {
+          // The quote parser needs a blank-line boundary, while the hard
+          // break itself still needs one indented continuation line. Emit
+          // both together so we do not leave an indentation-only line
+          // between two separately serialized breaks.
+          buffer += `\n\n${continuationIndent}`;
+          continuationAfterQuote = null;
+          return;
+        }
+        const childText = child.isText
+          ? (child.text ?? '')
+          : child.type.name === 'pastedTextChip'
+            ? String((child.attrs as PastedTextChipAttrs).text ?? '')
+            : '';
         const alreadyIndented =
           child.isText && childText.startsWith(continuationAfterQuote);
         const textAfterIndent = alreadyIndented

@@ -74,6 +74,10 @@ export function findGhostCommandMatch(
   for (let pi = 0; pi < doc.childCount; pi++) {
     const para = doc.child(pi);
     if (para.type.name !== 'paragraph') {
+      // A command after a leading structured list is not a message-start
+      // command. Let the placement path insert the selected command before
+      // that list instead of replacing the later paragraph.
+      if (para.textContent.trim().length > 0) return null;
       paraPos += para.nodeSize;
       continue;
     }
