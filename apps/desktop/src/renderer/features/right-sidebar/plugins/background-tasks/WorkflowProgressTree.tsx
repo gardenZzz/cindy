@@ -43,13 +43,15 @@ function agentStateIcon(state: string) {
       return CircleStop;
     case 'queued':
     case 'pending':
+    case 'start':
       return CircleDashed;
     default:
-      return LoaderCircle; // running / start / progress / 未知 → 转圈
+      return LoaderCircle; // running / progress / 未知 → 转圈
   }
 }
 
-/** 非终态且非等待态(running/start/progress/未知)才转圈。 */
+/** 非终态且非等待态(running/progress/未知)才转圈。'start' 对齐官方 CLI 与
+ *  方块条:已入队未跑,不转圈(避免同屏「树行转圈 vs 方块灰」自相矛盾)。 */
 function isSpinning(state: string): boolean {
   switch (state) {
     case 'done':
@@ -60,6 +62,7 @@ function isSpinning(state: string): boolean {
     case 'killed':
     case 'queued':
     case 'pending':
+    case 'start':
       return false;
     default:
       return true;

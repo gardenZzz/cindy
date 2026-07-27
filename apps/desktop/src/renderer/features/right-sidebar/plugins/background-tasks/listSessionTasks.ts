@@ -264,12 +264,16 @@ export function listSessionTasks(input: {
     });
   }
 
-  // 孤儿 update:仅会话运行中列出(LIVE 占位;空闲态是陈旧残留,不复播)。
-  // map 按 taskId + parentToolUseId 多 key 存同一 update,按 taskId 去重。
-  if (isSessionStreaming && taskUpdates) {
+  // 孤儿 update:运行中的始终列出(workflow / 子 agent 内部启动的长命后台命令
+  // 可能跨 turn 存活,seed 快照持续证明其真实在跑 —— 空闲态从列表消失会与状态栏
+  // 计数自相矛盾,且用户失去单停入口);终态孤儿仅会话运行中列出(LIVE 占位;
+  // 空闲态是陈旧残留,不复播)。map 按 taskId + parentToolUseId 多 key 存同一
+  // update,按 taskId 去重。
+  if (taskUpdates) {
     const seenTaskIds = new Set<string>();
     let orphanOrder = messages.length;
     for (const update of taskUpdates.values()) {
+      if (!isSessionStreaming && update.status !== 'running') continue;
       const primaryKey = update.parentToolUseId ?? update.taskId;
       if (
         seenTaskIds.has(update.taskId) ||

@@ -129,7 +129,9 @@ describe('孤儿 local_bash 不进聊天流', () => {
     expect(items.some((it) => it.type === 'agent_task')).toBe(true);
   });
 
-  it('有 toolCall 配对的父会话后台 Bash 照常出卡', () => {
+  it('父会话自己的后台 Bash(parentToolUseId 命中消息里的 Bash 调用)必须出「后台命令」卡', () => {
+    // #247 存量功能:该卡的唯一渲染来源是孤儿循环(Bash toolCall 走 tool_segment,
+    // 不进 agent_task 配对),过滤收窄必须放行它 —— 严格断言 agent_task 卡存在。
     const bashCall: ChatMessage = {
       clientId: 'b1',
       role: 'tool_use',
@@ -143,13 +145,33 @@ describe('孤儿 local_bash 不进聊天流', () => {
       ['tu-b1', { ...mkBashUpdate('bash-b1', 'running'), parentToolUseId: 'tu-b1' }],
     ]);
     const { items } = buildRenderItems(messages, taskUpdates);
-    // 后台 Bash 走 tool_segment 或 agent_task 皆算可见;这里断言它没有被整体吞掉。
-    const visible = items.some(
-      (it) =>
-        (it.type === 'agent_task' &&
-          (it.toolCall?.clientId === 'b1' || it.update?.taskId === 'bash-b1')) ||
-        (it.type === 'tool_segment' && it.toolCalls.some((c) => c.clientId === 'b1')),
+    const card = items.find(
+      (it) => it.type === 'agent_task' && it.update?.taskId === 'bash-b1',
     );
-    expect(visible).toBe(true);
+    expect(card).toBeTruthy();
+  });
+
+  it('workflow 内部 agent 的后台 Bash(parentToolUseId 不在父会话消息里)不出聊天卡', () => {
+    const messages: ChatMessage[] = [mkUser('u1'), mkAssistant('a1', '在跑了。')];
+    const taskUpdates = new Map<string, AgentTaskUpdate>([
+      ['bash-sub', { ...mkBashUpdate('bash-sub', 'running'), parentToolUseId: 'tu-inside-subagent' }],
+    ]);
+    const { items } = buildRenderItems(messages, taskUpdates);
+    expect(items.some((it) => it.type === 'agent_task')).toBe(false);
+  });
+
+  it('无最终正文的 turn(legacy 分组路径)里,stopped workflow 卡同样平铺', () => {
+    // 场景:workflow 被用户 Stop,turn 没有 sealed 正文 → groupAnsweredTurnItems
+    // handled:false 回落 groupLegacyWorkRuns —— 三条分组路径必须同语义。
+    const messages: ChatMessage[] = [
+      mkUser('u1'),
+      mkWorkflowCall('wf1'),
+      mkResult('r1', 'tu-wf1'),
+    ];
+    const taskUpdates = new Map<string, AgentTaskUpdate>([
+      ['tu-wf1', mkWorkflowUpdate('task-wf-1', 'stopped', 'tu-wf1')],
+    ]);
+    const items = groupWorkRuns(buildRenderItems(messages, taskUpdates).items, false);
+    expect(isFoldedIntoWorkGroup(items, 'wf1')).toBe(false);
   });
 });
