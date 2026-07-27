@@ -23,6 +23,10 @@
 
 import { redactSensitiveText } from '@cindy/maker-shared/error-redaction';
 import { applyCodexPlanSnapshotOnDone } from '@cindy/maker-shared/message-render';
+import {
+  normalizeWorkflowProgressEntries,
+  type WorkflowProgressEntry,
+} from '@cindy/maker-shared/agent-task';
 import type { MessageRole, Message, MessageAutomationOrigin } from '@/lib/ccAgent.types';
 import type { AttachedFile, MentionedResource, SerializedAttachedFile } from '@/lib/fileTypes';
 import type {
@@ -437,6 +441,12 @@ export interface AgentTaskUpdate {
   model?: string;
   reasoningEffort?: string;
   receiverThreadIds?: string[];
+  /**
+   * workflow 逐 agent 进度树(taskType=local_workflow 时由 task_progress 事件携带)。
+   * CLI 对纯心跳帧节流省略本字段,merge 必须沿用上一帧,绝不能清空。
+   * 与 `@cindy/maker-shared/agent-task` 的 AgentTaskUpdate 保持 lockstep。
+   */
+  workflowProgress?: WorkflowProgressEntry[];
   createdAt?: string;
   updatedAt?: string;
 }
@@ -1751,6 +1761,7 @@ function normalizeAgentTaskUpdate(
         ...(typeof usageRaw.durationMs === 'number' ? { durationMs: usageRaw.durationMs } : {}),
       }
     : undefined;
+  const workflowProgress = normalizeWorkflowProgressEntries(raw.workflowProgress);
   return {
     provider,
     taskId: taskId ?? parentToolUseId!,
@@ -1781,6 +1792,7 @@ function normalizeAgentTaskUpdate(
           ),
         }
       : {}),
+    ...(workflowProgress ? { workflowProgress } : {}),
     ...(typeof raw.createdAt === 'string' && raw.createdAt ? { createdAt: raw.createdAt } : {}),
     ...(typeof raw.updatedAt === 'string' && raw.updatedAt ? { updatedAt: raw.updatedAt } : {}),
   };
@@ -1800,6 +1812,8 @@ function mergeAgentTaskUpdate(
     summary: next.summary ?? prev.summary,
     outputFile: next.outputFile ?? prev.outputFile,
     lastToolName: next.lastToolName ?? prev.lastToolName,
+    // CLI 节流帧不带 workflowProgress(undefined = 沿用旧树),必须保留上一帧。
+    workflowProgress: next.workflowProgress ?? prev.workflowProgress,
     createdAt: prev.createdAt ?? next.createdAt,
     updatedAt: next.updatedAt ?? prev.updatedAt,
   };
