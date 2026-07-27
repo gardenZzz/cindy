@@ -59,6 +59,7 @@ import {
 import { getSessionProvider } from './session-provider-store.js';
 import { composeResponseObservers } from './claude-rate-limit-headers-observer.js';
 import { createProviderUpstreamErrorObserver, reportProviderUpstreamError } from './provider-upstream-error-observer.js';
+import { createXaiProxyAuthInvalidationObserver } from './xai-auth-invalidation-host.js';
 import { encryptedStripController, imageGenerationStripController } from './thread-strip-controllers.js';
 import { createMakerLogger } from './logger-adapter.js';
 import { resolveDesktopOutboundProxy } from './outbound-proxy-resolver.js';
@@ -1411,8 +1412,9 @@ export async function ensureCodexProxyReady(): Promise<void> {
         upstream: () => buildCodexGatewayBaseUrl(),
         transformRequest: createTransformRequestChain(),
         routingTransform: createModelRoutingTransform(),
-        // 组合两个只读观察器:service-tier 抽取 + 自定义供应商上游错误分类广播
-        // (后者仅 status≥400 且会话路由到 user 供应商时才 tee,成功路径零开销)。
+        // 组合三个只读观察器:service-tier 抽取 + 自定义供应商上游错误分类广播 + xAI 凭证
+        // 失效收口(后两者分别仅在 status≥400 路由到 user 供应商、401/403 且上游为 api.x.ai
+        // 时才 tee,成功路径零开销)。
         responseObserver: composeResponseObservers(
           createCodexResponseObserver(),
           createProviderUpstreamErrorObserver({
@@ -1425,6 +1427,9 @@ export async function ensureCodexProxyReady(): Promise<void> {
             resolveUserProviderName: (providerId) =>
               getActiveCatalog().providers.find((provider) => provider.id === providerId)?.name ?? null,
           }),
+          // xai 是 builtin 来源,上面那个 observer 的 user-only 语义覆盖不到它;订阅 OAuth
+          // 被上游作废后必须有人收口,否则 codex agent 下会连环 403 而 UI 仍显示已连接。
+          createXaiProxyAuthInvalidationObserver(),
         ),
         maxRequestBodyBytes: CODEX_PROXY_MAX_REQUEST_BODY_BYTES,
         // 请求体 dump 默认关(dev trace 级别 + agent 高并发会刷爆 main event loop
