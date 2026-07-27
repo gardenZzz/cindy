@@ -16,5 +16,6 @@
   "pluginApiBaseUrl": "https://plugin.cindy.com.cn",
   "cdnBaseUrl": "https://hotfix.cindy.com.cn/cindy",
   "mobileUpdateBaseUrl": "https://mobile-update.cindy.com.cn",
+  "authDesktopCallbackUrl": "https://auth.cindy.com.cn/api/auth/desktop/callback",
   "review": "0.1.0"
 }
