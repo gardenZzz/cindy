@@ -41,6 +41,13 @@ function orderedListMarker(node: ProseMirrorNode): OrderedMarker {
   return node.attrs.marker === ')' || node.attrs.marker === '、' ? node.attrs.marker : '.';
 }
 
+function orderedListSeparator(node: ProseMirrorNode, marker: OrderedMarker): string {
+  if (marker === '、') return '';
+  return typeof node.attrs.separator === 'string' && /^[ \t]+$/.test(node.attrs.separator)
+    ? node.attrs.separator
+    : ' ';
+}
+
 function bulletListMarker(node: ProseMirrorNode): string {
   const marker = node.attrs.marker;
   return marker === '+' || marker === '*' || marker === '•' ? marker : '-';
@@ -252,12 +259,13 @@ function serializeComposerDocument(
         ? listNode.attrs.start
         : 1;
     const marker = orderedListMarker(listNode);
+    const separator = orderedListSeparator(listNode, marker);
 
     listNode.forEach((item, itemOffset, itemIndex) => {
       if (item.type.name !== 'listItem') return;
       const itemPosition = listPosition + 1 + itemOffset;
       const itemMarker = isOrdered
-        ? `${start + itemIndex}${marker}${marker === '、' ? '' : ' '}`
+        ? `${start + itemIndex}${marker}${separator}`
         : `${bulletListMarker(listNode)}${bulletListSeparator(listNode)}`;
       const itemIndent = `${indent}${' '.repeat(itemMarker.length)}`;
       let firstParagraph = true;

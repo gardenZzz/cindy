@@ -13,7 +13,7 @@ import { Selection, TextSelection } from '@tiptap/pm/state';
 import type { EditorView } from '@tiptap/pm/view';
 
 const BULLET_MARKER_RE = /^([-+*•])([ \t]+)$/;
-const ORDERED_MARKER_RE = /^(\d{1,6})([.)])\s$/;
+const ORDERED_MARKER_RE = /^(\d{1,6})([.)])([ \t]+)$/;
 const CJK_ORDERED_MARKER_RE = /^(\d{1,6})(、)$/;
 
 type BulletMarker = '-' | '+' | '*' | '•';
@@ -22,6 +22,7 @@ type OrderedMarker = '.' | ')' | '、';
 interface OrderedListAttrs {
   start: number;
   marker: OrderedMarker;
+  separator: string;
 }
 
 interface SelectedTaskPrefix {
@@ -52,7 +53,7 @@ function plainListParagraphMarker(text: string): PlainListParagraphMarker | null
     return {
       kind: 'ordered',
       prefixLength: ordered[0].length,
-      attrs: { start: Number(ordered[1]), marker: ordered[2] },
+      attrs: { start: Number(ordered[1]), marker: ordered[2], separator: ordered[3] },
     };
   }
   const cjkOrdered = text.match(/^(\d{1,6})(、)([ \t]*)/);
@@ -187,6 +188,7 @@ function orderedAttrs(match: RegExpMatchArray): OrderedListAttrs {
   return {
     start: Number(match[1] ?? 1),
     marker,
+    ...(marker === '、' ? { separator: '' } : { separator: match[3] ?? ' ' }),
   };
 }
 
@@ -213,6 +215,17 @@ export const ComposerOrderedList = Node.create({
         },
         renderHTML: (attributes) =>
           attributes.marker === '.' ? {} : { 'data-marker': attributes.marker },
+      },
+      separator: {
+        default: ' ',
+        parseHTML: (element) => {
+          const marker = element.getAttribute('data-marker');
+          return marker === '、' ? '' : element.getAttribute('data-separator') || ' ';
+        },
+        renderHTML: (attributes) =>
+          attributes.marker === '、' || attributes.separator === ' '
+            ? {}
+            : { 'data-separator': attributes.separator },
       },
     };
   },
