@@ -16,7 +16,8 @@
  */
 
 import { EventEmitter } from 'node:events';
-import { Client, type ConnectConfig, type ClientChannel } from 'ssh2';
+import net from 'node:net';
+import { Client, type ConnectConfig, type ClientChannel, type TcpConnectionDetails } from 'ssh2';
 
 import type { HostConfig, HostSnapshot, RemoteStatus } from './types.js';
 import { resolveAuth } from './credentials.js';
@@ -83,6 +84,59 @@ export interface ExecResult {
 export interface ExecStreamOpts {
   pty?: boolean;
   env?: Record<string, string>;
+}
+
+// ── Remote TCP forwarding (OpenSSH `ssh -R` 等价物) ─────────────────────────
+//
+// 用途: 让远端进程 (codex daemon / claude CLI) 把 HTTPS_PROXY 指向远端
+// 127.0.0.1 上的一个端口, 该端口的连接经**同一条 SSH 连接**的多路复用通道
+// 转回本机, 再 pipe 到用户自己的本地 Proxy (如 127.0.0.1:7890)。Cindy 不提供
+// Proxy, 只提供这条隧道。
+//
+// 为什么复用同一条 ssh2 Client 而不起第二条连接: SSH 协议按 channel id 解
+// 复用, forwardIn 的 tcp-forward channel 与 exec channel 在同一条连接上互
+// 不干扰 —— 消息不会"打乱"。多路复用是 SSH 的原生能力。
+//
+// 端口策略: 用**固定首选端口**而不是 port 0, 这样断线重连后隧道口不变,
+// 远端 daemon env (HTTPS_PROXY=http://127.0.0.1:<port>) 不用跟着重写。
+// 首选端口被占用时向后探测少量候选; 真换端口时通过 onRearmed 通知上层
+// (上层在下次 session start 时重写远端 env marker 并重启 daemon, 自愈)。
+
+/** 首选远端绑定端口基数; 被占用时向后探测 PORT_SCAN_SPAN 个候选。 */
+export const DEFAULT_REMOTE_FORWARD_PORT_BASE = 17893;
+const REMOTE_FORWARD_PORT_SCAN_SPAN = 8;
+
+export interface RemoteForwardSpec {
+  /** 本机 (运行 Cindy 的机器) 转发目标 — 用户本地 Proxy 的监听地址。 */
+  localHost: string;
+  localPort: number;
+  /** 远端 127.0.0.1 首选绑定端口; 缺省 DEFAULT_REMOTE_FORWARD_PORT_BASE。 */
+  preferredRemotePort?: number;
+  /** 断线重连后端口被重绑到不同值时回调一次 (首次绑定不回调)。 */
+  onRearmed?: (remotePort: number) => void;
+}
+
+export interface RemoteForward {
+  /** 当前实际绑定的远端端口 (重连后可能变化)。 */
+  readonly remotePort: number;
+  /** 停止转发并释放登记。幂等。 */
+  close(): Promise<void>;
+}
+
+interface ForwardRecord {
+  spec: RemoteForwardSpec;
+  remotePort: number;
+  /** forwardIn 已在当前 live client 上注册成功。 */
+  armed: boolean;
+  /** 进行中的 arm, 去重 ensureRemoteForward 与 rearmForwards 的并发竞争。 */
+  arming?: Promise<void>;
+  /** 本地 Proxy 连接失败的节流日志状态。 */
+  lastLocalErrorAt: number;
+  localErrorCount: number;
+}
+
+function forwardKey(spec: Pick<RemoteForwardSpec, 'localHost' | 'localPort'>): string {
+  return `${spec.localHost}:${spec.localPort}`;
 }
 
 export interface ExecStreamHandle {
@@ -226,6 +280,13 @@ export class RemoteHost {
    * Reset at the start of every connect attempt.
    */
   private hostKeyError: string | null = null;
+  /**
+   * 已登记的 remote forwarding 愿望清单 (key = localHost:localPort)。
+   * 连接断开不清空 — 重连成功后 doConnect 会逐个 re-arm, 尽量绑回原端口。
+   */
+  private forwards = new Map<string, ForwardRecord>();
+  /** 'tcp connection' 是按 client 实例挂的, 每次 doConnect 新建 client 都要重挂。 */
+  private forwardListenerClient: Client | null = null;
 
   constructor(config: HostConfig, deps: RemoteHostDeps) {
     this.id = config.id;
@@ -305,6 +366,7 @@ export class RemoteHost {
   async disconnect(): Promise<void> {
     this.userDisconnected = true;
     this.clearReconnectTimer();
+    this.markForwardsDisarmed();
     if (this.client) {
       try {
         this.client.end();
@@ -432,6 +494,250 @@ export class RemoteHost {
         resolve(wrapChannel(channel));
       });
     });
+  }
+
+  // ── remote TCP forwarding (ssh -R) ────────────────────────────────────────
+
+  /**
+   * 登记并 (若已连接) 立即建立一条 remote forwarding: 远端 127.0.0.1:<port>
+   * 进来的 TCP 连接经本 SSH 连接转回, pipe 到本机 spec.localHost:localPort。
+   *
+   * 幂等: 同 (localHost, localPort) 重复调用返回同一条 forward。
+   * 未连接时只登记愿望, 下次 connect 成功后自动 arm (doConnect → rearmForwards)。
+   *
+   * 安全约束: 远端只绑 127.0.0.1 — 隧道口仅远端本机进程可达, 不对远端所在
+   * 网络暴露 (即不要 GatewayPorts 语义)。本地目标由调用方 (用户 pref) 显式
+   * 指定, 通常是 127.0.0.1 上的 Proxy 端口。
+   */
+  async ensureRemoteForward(spec: RemoteForwardSpec): Promise<RemoteForward> {
+    if (!spec.localHost || /\s/.test(spec.localHost)) {
+      throw new Error(`ensureRemoteForward: invalid localHost "${spec.localHost}"`);
+    }
+    if (!Number.isInteger(spec.localPort) || spec.localPort < 1 || spec.localPort > 65535) {
+      throw new Error(`ensureRemoteForward: invalid localPort ${spec.localPort}`);
+    }
+    const key = forwardKey(spec);
+    const existing = this.forwards.get(key);
+    if (existing) {
+      // 已登记但未 arm (连接刚建好 / 上次 arm 失败) — 趁 ready 补一次。
+      if (!existing.armed && this.status === 'ready') {
+        await this.armForwardDeduped(existing);
+      }
+      return this.forwardHandle(key, existing);
+    }
+
+    const record: ForwardRecord = {
+      spec,
+      remotePort: spec.preferredRemotePort ?? DEFAULT_REMOTE_FORWARD_PORT_BASE,
+      armed: false,
+      lastLocalErrorAt: 0,
+      localErrorCount: 0,
+    };
+    this.forwards.set(key, record);
+    if (this.status === 'ready') {
+      await this.armForwardDeduped(record);
+    }
+    return this.forwardHandle(key, record);
+  }
+
+  /**
+   * 当前登记的 forward 列表 (诊断 / snapshot 用)。armed=false 表示愿望已
+   * 登记但当前没在转发 (未连接 / arm 失败待重连)。
+   */
+  listRemoteForwards(): Array<{ localHost: string; localPort: number; remotePort: number; armed: boolean }> {
+    return Array.from(this.forwards.values()).map((r) => ({
+      localHost: r.spec.localHost,
+      localPort: r.spec.localPort,
+      remotePort: r.remotePort,
+      armed: r.armed,
+    }));
+  }
+
+  /** 关闭并清除所有已登记 forward (pref 关闭路径)。连接断开时是纯本地清理。 */
+  async closeAllRemoteForwards(): Promise<void> {
+    const keys = Array.from(this.forwards.keys());
+    for (const key of keys) {
+      const record = this.forwards.get(key);
+      if (!record) continue;
+      await this.forwardHandle(key, record).close();
+    }
+  }
+
+  private forwardHandle(key: string, record: ForwardRecord): RemoteForward {
+    return {
+      get remotePort() {
+        return record.remotePort;
+      },
+      close: async () => {
+        if (!this.forwards.delete(key)) return;
+        record.armed = false;
+        // 连接活着就显式 unforward; 断线时服务端侧随连接消失, 无需操作。
+        if (this.status === 'ready' && this.client) {
+          await new Promise<void>((resolve) => {
+            try {
+              this.client!.unforwardIn('127.0.0.1', record.remotePort, () => resolve());
+            } catch {
+              resolve();
+            }
+          });
+        }
+      },
+    };
+  }
+
+  /**
+   * 在当前 client 上注册 forwardIn。端口冲突 / sshd 拒绝时按候选序列重试,
+   * 全部失败抛错 (调用方决定是登记愿望待重试还是直接失败)。
+   *
+   * 每次 forwardIn 带 10s 看门狗: 连接在请求在飞时断开的话, ssh2 对
+   * outstanding global request 的回调不保证触发, 裸 await 会永久挂起。
+   */
+  private async armForward(record: ForwardRecord): Promise<void> {
+    const client = this.requireReady();
+    this.attachForwardListener(client);
+
+    const base = record.spec.preferredRemotePort ?? DEFAULT_REMOTE_FORWARD_PORT_BASE;
+    const errors: string[] = [];
+    for (let i = 0; i < REMOTE_FORWARD_PORT_SCAN_SPAN; i++) {
+      const port = base + i;
+      const bound = await new Promise<number | null>((resolve) => {
+        const timer = setTimeout(() => {
+          errors.push(`${port}: forwardIn timed out after 10s`);
+          resolve(null);
+        }, 10_000);
+        timer.unref?.();
+        try {
+          client.forwardIn('127.0.0.1', port, (err, boundPort) => {
+            clearTimeout(timer);
+            if (err) {
+              errors.push(`${port}: ${err.message}`);
+              resolve(null);
+            } else {
+              resolve(boundPort || port);
+            }
+          });
+        } catch (err) {
+          clearTimeout(timer);
+          errors.push(`${port}: ${(err as Error).message}`);
+          resolve(null);
+        }
+      });
+      if (bound == null) continue;
+      record.remotePort = bound;
+      record.armed = true;
+      this.log.info('ssh remote forward armed', {
+        id: this.id,
+        remotePort: bound,
+        localTarget: forwardKey(record.spec),
+      });
+      return;
+    }
+    throw new Error(
+      `remote port forwarding failed on ${this.id} (tried 127.0.0.1:${base}–${base + REMOTE_FORWARD_PORT_SCAN_SPAN - 1}). ` +
+      `The remote sshd may disallow remote forwarding (AllowTcpForwarding) or the ports are busy. ` +
+      errors.slice(0, 3).join('; '),
+    );
+  }
+
+  /** connect 成功后重挂所有已登记 forward; 端口变了通知上层。 */
+  private async rearmForwards(): Promise<void> {
+    for (const record of this.forwards.values()) {
+      const prevPort = record.remotePort;
+      record.armed = false;
+      try {
+        await this.armForwardDeduped(record);
+      } catch (err) {
+        // arm 失败不阻断连接 — 记日志, 下次 reconnect 再试; session 路径
+        // (ensureRemoteForward on ready host) 会显式重试并拿到错误。
+        this.log.warn('ssh remote forward re-arm failed', {
+          id: this.id,
+          localTarget: forwardKey(record.spec),
+          error: (err as Error).message,
+        });
+        continue;
+      }
+      if (record.remotePort !== prevPort) {
+        this.log.warn('ssh remote forward re-bound to a different port', {
+          id: this.id,
+          prevPort,
+          remotePort: record.remotePort,
+        });
+        try {
+          record.spec.onRearmed?.(record.remotePort);
+        } catch { /* listener must not throw */ }
+      }
+    }
+  }
+
+  /** 同一条 forward 的并发 arm 共享一个 in-flight promise。 */
+  private armForwardDeduped(record: ForwardRecord): Promise<void> {
+    if (record.armed) return Promise.resolve();
+    if (!record.arming) {
+      record.arming = this.armForward(record).finally(() => {
+        record.arming = undefined;
+      });
+    }
+    return record.arming;
+  }
+
+  /** 每个 client 实例挂一次 'tcp connection' 分发器。 */
+  private attachForwardListener(client: Client): void {
+    if (this.forwardListenerClient === client) return;
+    this.forwardListenerClient = client;
+    client.on('tcp connection', (details: TcpConnectionDetails, accept, reject) => {
+      this.handleForwardedConnection(details, accept, reject);
+    });
+  }
+
+  private handleForwardedConnection(
+    details: TcpConnectionDetails,
+    accept: () => ClientChannel,
+    reject: () => void,
+  ): void {
+    let record: ForwardRecord | undefined;
+    for (const r of this.forwards.values()) {
+      if (r.armed && r.remotePort === details.destPort) {
+        record = r;
+        break;
+      }
+    }
+    if (!record) {
+      reject();
+      return;
+    }
+    const rec = record;
+    const channel = accept();
+    const sock = net.connect({ host: rec.spec.localHost, port: rec.spec.localPort });
+
+    sock.on('error', (err) => {
+      // 本地 Proxy 没起 / 拒连 — 远端 agent 会看到连接立刻被断, 错误在
+      // agent 侧浮现 (proxy connect failed)。这里只做节流日志。
+      rec.localErrorCount += 1;
+      const now = Date.now();
+      if (now - rec.lastLocalErrorAt > 30_000) {
+        rec.lastLocalErrorAt = now;
+        this.log.warn('ssh remote forward: local target unreachable', {
+          id: this.id,
+          localTarget: forwardKey(rec.spec),
+          error: err.message,
+          suppressedCount: rec.localErrorCount,
+        });
+      }
+      try { channel.close(); } catch { /* already gone */ }
+    });
+    channel.on('error', () => {
+      sock.destroy();
+    });
+    // 远端关掉转发 channel → 本地到 Proxy 的 socket 同步销毁; 否则本地
+    // Proxy 侧会积一堆半开连接 (pipe 的 end 只处理正常 EOF, 不覆盖 destroy)。
+    channel.on('close', () => {
+      sock.destroy();
+    });
+    sock.on('close', () => {
+      try { channel.close(); } catch { /* already gone */ }
+    });
+    channel.pipe(sock);
+    sock.pipe(channel);
   }
 
   // ── internals ────────────────────────────────────────────────────────────
@@ -565,6 +871,9 @@ export class RemoteHost {
         this.reconnectAttempts = 0;
         this.setStatus('ready');
         this.log.info('ssh ready', { id: this.id, auth: auth.label });
+        // 后台重挂已登记的 remote forwards; 不阻塞 connect 返回 (session
+        // 路径会自己 await ensureRemoteForward 拿到 arm 错误)。
+        void this.rearmForwards();
         resolve();
       };
 
@@ -634,6 +943,7 @@ export class RemoteHost {
 
   private handlePostReadyClose(): void {
     this.client = null;
+    this.markForwardsDisarmed();
     if (this.userDisconnected) {
       this.setStatus('disconnected');
       return;
@@ -689,6 +999,13 @@ export class RemoteHost {
     if (this.reconnectTimer) {
       clearTimeout(this.reconnectTimer);
       this.reconnectTimer = null;
+    }
+  }
+
+  /** 连接断了后服务端侧的转发监听随之消失; 愿望保留, 等下次 ready 重挂。 */
+  private markForwardsDisarmed(): void {
+    for (const record of this.forwards.values()) {
+      record.armed = false;
     }
   }
 
