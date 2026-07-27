@@ -1005,6 +1005,18 @@ export function refreshAnthropicModelsFromHttp(options?: {
     if (mapped.length === 0) {
       // 上游答了但一个可用模型都没有 —— 清单没有静态兜底,停在空清单等于供应商不可用,
       // 同样记账为失败,不让 UI 停在「正在发现」。
+      //
+      // 但要分清是哪一种「没有」:data 本来就是空数组 = 这个账号确实没有可用模型,是确定性
+      // 事实,该按 empty 停下不重试;data 非空却一条都映射不出来 = 响应字段缺失或上游改版,
+      // 那是上游故障,归 empty 会既取消重试、又叫用户去查账号权限(PR #548 review)。
+      if (entries.length > 0) {
+        noteDiscoveryFailure(
+          gen,
+          'upstream',
+          `payload listed ${entries.length} entries but none mapped to a usable model`,
+        );
+        return;
+      }
       noteDiscoveryFailure(gen, 'empty');
       return;
     }

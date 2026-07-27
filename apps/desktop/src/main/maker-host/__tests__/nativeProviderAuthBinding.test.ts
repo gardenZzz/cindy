@@ -199,6 +199,20 @@ describe('claimDetectedNativeProviderAuth', () => {
     expect(claimDetectedNativeProviderAuth('anthropic', () => true)).toBe(false);
   });
 
+  it('绑定文件读不出来时,显式登出也不覆盖它', () => {
+    // 用户要的是「登出这一个 provider」。覆盖损坏文件 = 写出一份只剩撤销标记的新文件,
+    // 其余 provider 从此无主,下一次可信读取就会把它们的残留凭证认领给当前账号 ——
+    // 正是上一条刚堵掉的那个洞的另一个入口(PR #548 review)。
+    fs.mkdirSync(userDataDir, { recursive: true });
+    fs.writeFileSync(bindingFile, '{ this is not json');
+
+    unbindNativeProviderAuth('anthropic', { revoked: true });
+    expect(fs.readFileSync(bindingFile, 'utf8')).toBe('{ this is not json');
+    // 不写标记不等于放开:同一条件下认领本来就被拒,用户看到的也一直是未连接。
+    expect(claimDetectedNativeProviderAuth('anthropic', () => true)).toBe(false);
+    expect(isNativeProviderAuthBound('anthropic')).toBe(false);
+  });
+
   it('文件确实不存在 = 合法首次状态,照常认领', () => {
     // 与「读失败」必须分开:ENOENT 是全新安装的正常形态,挡掉它等于把自动继承整条废掉。
     expect(fs.existsSync(bindingFile)).toBe(false);

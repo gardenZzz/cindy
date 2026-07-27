@@ -1035,6 +1035,28 @@ describe('HTTP 发现失败的归因与选择性重试', () => {
     expect(getAnthropicModelDiscoveryFailure()?.kind).toBe('empty');
   });
 
+  it('data 非空却一条都映射不出来归 upstream(不是 empty),并继续重试', async () => {
+    // 「这个账号没有可用模型」是确定性事实,该停;「上游答的结构不对」是故障,该重试。
+    // 两者都会走到 mapped.length === 0,一律归 empty 就会既取消重试、又叫用户去查账号
+    // 权限(PR #548 review)。
+    const malformed = {
+      ok: true,
+      json: async () => ({ data: [{ type: 'model' }, { display_name: 'no id' }], has_more: false }),
+    };
+    const fetchMock = vi.fn().mockResolvedValueOnce(malformed).mockResolvedValue(okResponse);
+    vi.stubGlobal('fetch', fetchMock);
+
+    await refreshAnthropicModelsFromHttp();
+    const failure = getAnthropicModelDiscoveryFailure();
+    expect(failure?.kind).toBe('upstream');
+    expect(failure?.detail).toContain('2 entries');
+
+    await vi.advanceTimersByTimeAsync(2_000);
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(anthropicIds()).toEqual(['claude-opus-4-8']);
+    expect(getAnthropicModelDiscoveryFailure()).toBeNull();
+  });
+
   it('暂时性失败(连不上)自动重试,成功即生效并清失败态', async () => {
     const fetchMock = vi
       .fn()
