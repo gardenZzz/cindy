@@ -161,7 +161,7 @@ function serializeComposerDocument(
         const quoteText = formatQuoteForSend(
           composerQuoteAttrsToChatQuote(child.attrs as ComposerQuoteAttrs),
         );
-      if (prefix || continuationIndent) {
+        if (prefix || continuationIndent) {
           // A quote chip inside a list item is part of that item. Keeping it
           // in the current text block preserves the list marker. Put the
           // encoded quote on its own continuation lines so history parsing
