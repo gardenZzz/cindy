@@ -3108,6 +3108,7 @@
       "modelWeeklyLabel": "{{model}} 周限",
       "windowSegment": "{{label}} 剩余 {{remaining}}",
       "resetAt": "{{at}} 重置",
+      "resetInAt": "{{countdown}}后重置（{{at}}）",
       "windowLine": "{{label}} 剩余 {{remaining}}(已用 {{used}})",
       "sessionValueLabel": "本对话价值 {{cost}}",
       "planLine": "套餐 {{plan}}",
