@@ -185,17 +185,19 @@ function paragraphToBlocks(
   initialFence: FenceState | null,
 ): { blocks: JSONContent[]; fence: FenceState | null } {
   const lines = splitParagraphLines(paragraph);
-  if (!lines.some((line) => parseListMarker(line.text)) && !initialFence) {
-    let fence: FenceState | null = initialFence;
-    for (const line of lines) {
-      const opening = fenceOpening(line.text);
-      if (fence) {
-        if (isFenceClosing(line.text, fence)) fence = null;
-      } else if (opening) {
-        fence = opening;
-      }
+  let scannedFence: FenceState | null = initialFence;
+  let hasPromotableList = false;
+  for (const line of lines) {
+    if (scannedFence) {
+      if (isFenceClosing(line.text, scannedFence)) scannedFence = null;
+      continue;
     }
-    return { blocks: [paragraph], fence };
+    if (parseListMarker(line.text)) hasPromotableList = true;
+    const opening = fenceOpening(line.text);
+    if (opening) scannedFence = opening;
+  }
+  if (!hasPromotableList) {
+    return { blocks: [paragraph], fence: scannedFence };
   }
 
   const blocks: JSONContent[] = [];
