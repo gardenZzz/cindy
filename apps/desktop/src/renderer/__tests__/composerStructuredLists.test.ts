@@ -106,6 +106,11 @@ describe('composer structured list input rules', () => {
       attrs: {},
     },
     {
+      typed: '• ',
+      listType: 'bulletList',
+      attrs: {},
+    },
+    {
       typed: '1. ',
       listType: 'orderedList',
       attrs: { start: 1, marker: '.' },
@@ -548,6 +553,23 @@ describe('composer live plain-list promotion', () => {
 
     expect(promoteTrailingPlainListParagraph(editor.view)).toBe(false);
     expect(editor.state.doc.lastChild?.type.name).toBe('paragraph');
+  });
+
+  it('promotes a trailing bullet-glyph row inserted outside input rules', () => {
+    const editor = makeEditor({
+      type: 'doc',
+      content: [
+        {
+          type: 'paragraph',
+          content: [{ type: 'text', text: '• item' }],
+        },
+      ],
+    });
+    selectDocumentEnd(editor);
+
+    expect(promoteTrailingPlainListParagraph(editor.view)).toBe(true);
+    expect(editor.state.doc.firstChild?.type.name).toBe('bulletList');
+    expect(editor.state.doc.firstChild?.firstChild?.textContent).toBe('item');
   });
 });
 

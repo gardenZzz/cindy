@@ -135,6 +135,16 @@ function sameListMarker(left: ListMarker, right: ListMarker): boolean {
   return left.kind === right.kind && left.marker === right.marker;
 }
 
+function canAppendListLine(
+  current: ListMarker,
+  currentLineCount: number,
+  next: ListMarker,
+): boolean {
+  if (!sameListMarker(current, next)) return false;
+  if (current.kind === 'bullet') return true;
+  return next.start === (current.start ?? 1) + currentLineCount;
+}
+
 function paragraphToBlocks(paragraph: JSONContent): JSONContent[] {
   const lines = splitParagraphLines(paragraph);
   if (!lines.some((line) => parseListMarker(line.text))) return [paragraph];
@@ -169,7 +179,7 @@ function paragraphToBlocks(paragraph: JSONContent): JSONContent[] {
       plainLines.push(line);
       continue;
     }
-    if (listMarker && !sameListMarker(listMarker, marker)) flushList();
+    if (listMarker && !canAppendListLine(listMarker, listLines.length, marker)) flushList();
     flushPlain();
     listMarker ??= marker;
     listLines.push(line);

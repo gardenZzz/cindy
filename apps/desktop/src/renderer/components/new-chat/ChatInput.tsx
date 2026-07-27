@@ -5004,7 +5004,7 @@ export function ChatInput({
 
             {/* Browser comment chip:页面评论收敛为一个「N 条注释」胶囊,
             hover 浮出逐条预览(截图缩略 + 目标标签 + 评论文字,可逐条删),
-            X 清空全部。发送时序化为 `# Browser comments:` 段 + 截图附件。 */}
+            X 清空全部。发送时序列化为 `# Browser comments:` 段 + 截图附件。 */}
             {browserComments.length > 0 && (
               <div className="pb-1.5">
                 <div className="group/bcomment relative inline-flex">
