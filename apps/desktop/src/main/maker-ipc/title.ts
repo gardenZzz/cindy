@@ -87,7 +87,7 @@ async function readSessionProviderIdFromDb(sessionId: string): Promise<string | 
 /** 某 agent 下已连接的供应商视图列表(实时连接态)。失败 → []。 */
 async function listConnectedProvidersForAgent(agentKind: AgentKind): Promise<ProviderView[]> {
   try {
-    const all = await getDesktopProviderService().listProviders();
+    const all = await getDesktopProviderService().listProviders({ allowSideEffects: true });
     return connectedProvidersForAgent(all, agentKind);
   } catch {
     return [];

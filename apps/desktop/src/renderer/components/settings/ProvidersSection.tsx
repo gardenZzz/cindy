@@ -1483,8 +1483,12 @@ export function ProvidersSection() {
                     style={{ borderColor: 'var(--settings-theme-card-border)' }}
                   >
                     <span style={{ color: 'var(--text-tertiary)' }}>
+                      {/* 有清单时必须换一套措辞:空态那套说的是「拿不到模型列表」,而列表就
+                          显示在这条横幅下面 —— 照搬等于当着用户的面说一句他能一眼看穿的假话。
+                          这里讲的是「没能刷新,你看到的是上次的结果」,每个归因各自的处置建议
+                          照旧保留(DESIGN.md「Errors = what happened + what to do」)。 */}
                       {t(
-                        `settings.providers.detail.discoveryFailed.${effectiveSelected.modelDiscoveryFailure.kind}`,
+                        `settings.providers.detail.discoveryFailedStale.${effectiveSelected.modelDiscoveryFailure.kind}`,
                       )}
                     </span>
                     <PillButton

@@ -47,6 +47,14 @@ function readBindingsOrFail(): { ok: true; bindings: BindingFile } | { ok: false
   try {
     const value = JSON.parse(raw) as unknown;
     if (!value || typeof value !== 'object' || Array.isArray(value)) return { ok: false };
+    // revoked 也要验型:下游用 `provider in bindings.revoked` 判定,而 `in` 的右操作数是
+    // 原始值时直接抛 TypeError —— 一个被手工修坏的字段会让认领、迁移、登出乃至重新授权
+    // 全部炸在这里(PR #548 review)。同样按不可读处理:只读判定退到 fail-closed,用户再次
+    // 显式授权时 bindNativeProviderAuth 会重写整份文件,自然修好。
+    const revoked = (value as { revoked?: unknown }).revoked;
+    if (revoked !== undefined && (typeof revoked !== 'object' || revoked === null || Array.isArray(revoked))) {
+      return { ok: false };
+    }
     return { ok: true, bindings: value as BindingFile };
   } catch {
     return { ok: false };
