@@ -290,6 +290,7 @@
         "agentProxyTitle": "Agent proxy tunnel",
         "agentProxyActive": "Remote 127.0.0.1:{{port}} → local {{target}} · established",
         "agentProxyPending": "Establishing tunnel → local {{target}}",
+        "agentProxyWaiting": "Host not connected; tunnel will be established on reconnect → local {{target}}",
         "agentProxyError": "Tunnel failed: {{message}}",
         "button": {
           "install": "Install",

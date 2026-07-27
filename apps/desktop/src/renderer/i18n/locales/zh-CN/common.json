@@ -290,6 +290,7 @@
         "agentProxyTitle": "Agent Proxy 隧道",
         "agentProxyActive": "远端 127.0.0.1 端口 {{port}} → 本机 {{target}} · 已建立",
         "agentProxyPending": "隧道建立中 → 本机 {{target}}",
+        "agentProxyWaiting": "主机未连接，重连后自动建立 → 本机 {{target}}",
         "agentProxyError": "隧道建立失败：{{message}}",
         "button": {
           "install": "安装",
@@ -7377,7 +7378,6 @@
         "cancelFailed": "取消订阅失败，请稍后重试。"
       },
       "topupCard": {
-
         "action": "购买点数"
       }
     },
