@@ -18,6 +18,13 @@ describe('computeListContinuation', () => {
       });
     });
 
+    it('八位数序号正常接续', () => {
+      expect(computeListContinuation('10000000. item')).toEqual({
+        action: 'continue',
+        insert: '10000001. ',
+      });
+    });
+
     it('保留分隔符后的多余空白', () => {
       expect(computeListContinuation('3.  foo')).toEqual({ action: 'continue', insert: '4.  ' });
     });
