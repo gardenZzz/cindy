@@ -3108,6 +3108,7 @@
       "modelWeeklyLabel": "{{model}} 주간",
       "windowSegment": "{{label}} {{remaining}} 남음",
       "resetAt": "{{at}} 재설정",
+      "resetInAt": "{{countdown}} 후 재설정 ({{at}})",
       "windowLine": "{{label}} 남음 {{remaining}} (사용 {{used}})",
       "sessionValueLabel": "세션 가치 {{cost}}",
       "planLine": "플랜 {{plan}}",
