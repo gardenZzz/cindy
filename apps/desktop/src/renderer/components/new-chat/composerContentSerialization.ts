@@ -454,9 +454,11 @@ export function serializeEditorSlice(editor: Editor | null, slice: Slice): strin
     }
     let replaced = state.tr.replace(0, state.doc.content.size, slice).doc;
     const sourceIndex = sourceListDepth === null ? null : $from.index(sourceListDepth);
-    const firstOrderedList = (() => {
+    const findFirstOrderedList = (
+      document: ProseMirrorNode,
+    ): { node: ProseMirrorNode; position: number } | null => {
       let found: { node: ProseMirrorNode; position: number } | null = null;
-      replaced.descendants((node, position) => {
+      document.descendants((node, position) => {
         if (found === null && node.type.name === 'orderedList') {
           found = { node, position };
           return false;
@@ -464,7 +466,8 @@ export function serializeEditorSlice(editor: Editor | null, slice: Slice): strin
         return found === null;
       });
       return found;
-    })();
+    };
+    let firstOrderedList = findFirstOrderedList(replaced);
 
     // A text-only slice from inside a list item loses the enclosing list.
     // Rebuild the selected source items so plain-text copies keep their marker.
@@ -478,6 +481,7 @@ export function serializeEditorSlice(editor: Editor | null, slice: Slice): strin
           state.doc.content.size,
           new Slice(Fragment.from(copiedList), 0, 0),
         ).doc;
+        firstOrderedList = findFirstOrderedList(replaced);
       }
     }
 
@@ -496,12 +500,16 @@ export function serializeEditorSlice(editor: Editor | null, slice: Slice): strin
         }
         return firstContentPosition === null;
       });
-      const $firstContent = replaced.resolve(firstContentPosition ?? 0);
-      let orderedListPosition: number | null = null;
-      for (let depth = $firstContent.depth; depth > 0; depth -= 1) {
-        if ($firstContent.node(depth).type.name !== 'orderedList') continue;
-        orderedListPosition = $firstContent.before(depth);
-        break;
+      let orderedListPosition: number | null = firstContentPosition === null
+        ? firstOrderedList?.position ?? null
+        : null;
+      if (firstContentPosition !== null) {
+        const $firstContent = replaced.resolve(firstContentPosition);
+        for (let depth = $firstContent.depth; depth > 0; depth -= 1) {
+          if ($firstContent.node(depth).type.name !== 'orderedList') continue;
+          orderedListPosition = $firstContent.before(depth);
+          break;
+        }
       }
       if (orderedListPosition !== null) {
         const node = replaced.nodeAt(orderedListPosition);

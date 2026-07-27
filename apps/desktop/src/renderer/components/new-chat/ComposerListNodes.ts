@@ -554,12 +554,19 @@ export function isTrailingEmptyTopLevelParagraph(view: EditorView): boolean {
 export function isTopLevelBlockSelection(view: EditorView): boolean {
   const { state } = view;
   const { $from, $to } = state.selection;
-  return (
+  const spansTopLevelBlocks =
     !state.selection.empty &&
     $from.depth === 1 &&
     $to.depth === 1 &&
     $from.parentOffset === 0 &&
     $to.parentOffset === $to.parent.content.size
+  if (spansTopLevelBlocks) return true;
+  return (
+    !state.selection.empty &&
+    $from.depth === 0 &&
+    $to.depth === 0 &&
+    $from.pos === 0 &&
+    $to.pos === state.doc.content.size
   );
 }
 

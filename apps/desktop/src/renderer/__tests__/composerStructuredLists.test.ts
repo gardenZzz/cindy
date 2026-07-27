@@ -5,7 +5,7 @@ import Document from '@tiptap/extension-document';
 import Paragraph from '@tiptap/extension-paragraph';
 import Text from '@tiptap/extension-text';
 import HardBreak from '@tiptap/extension-hard-break';
-import { TextSelection } from '@tiptap/pm/state';
+import { AllSelection, TextSelection } from '@tiptap/pm/state';
 
 import {
   ComposerBulletList,
@@ -784,6 +784,19 @@ describe('composer live plain-list promotion', () => {
     expect(editor.state.doc.firstChild?.type.name).toBe('paragraph');
   });
 
+  it('recognizes a whole-document selection as a top-level block selection', () => {
+    const editor = makeEditor({
+      type: 'doc',
+      content: [
+        { type: 'paragraph', content: [{ type: 'text', text: 'first' }] },
+        { type: 'paragraph', content: [{ type: 'text', text: 'second' }] },
+      ],
+    });
+    editor.view.dispatch(editor.state.tr.setSelection(new AllSelection(editor.state.doc)));
+
+    expect(isTopLevelBlockSelection(editor.view)).toBe(true);
+  });
+
   it('promotes a trailing bullet-glyph row inserted outside input rules', () => {
     const editor = makeEditor({
       type: 'doc',
@@ -1485,6 +1498,41 @@ describe('composer structured list serialization', () => {
     );
 
     expect(serializeEditorSlice(editor, slice)).toBe('2. eco');
+  });
+
+  it('keeps the visible ordinal when copying an empty ordered-list item', () => {
+    const editor = makeEditor({
+      type: 'doc',
+      content: [
+        {
+          type: 'orderedList',
+          attrs: { start: 1, marker: '.' },
+          content: [
+            {
+              type: 'listItem',
+              content: [{ type: 'paragraph', content: [{ type: 'text', text: 'first' }] }],
+            },
+            {
+              type: 'listItem',
+              content: [{ type: 'paragraph' }],
+            },
+          ],
+        },
+      ],
+    });
+    let emptyParagraphPosition = 0;
+    editor.state.doc.descendants((node, position) => {
+      if (node.type.name === 'paragraph' && node.content.size === 0) {
+        emptyParagraphPosition = position;
+      }
+    });
+    editor.commands.setTextSelection(emptyParagraphPosition + 1);
+    const slice = editor.state.doc.slice(
+      emptyParagraphPosition,
+      emptyParagraphPosition + 1,
+    );
+
+    expect(serializeEditorSlice(editor, slice)).toBe('2. ');
   });
 
   it('adjusts the nested ordered list that contains the copied selection start', () => {
