@@ -13,6 +13,7 @@ import {
   ComposerOrderedList,
   handleStructuredListBackspace,
   handleStructuredListBreak,
+  isTopLevelBlockSelection,
   isTrailingEmptyTopLevelParagraph,
   promoteTrailingPlainListParagraph,
 } from '@/components/new-chat/ComposerListNodes';
@@ -626,6 +627,16 @@ describe('composer live plain-list promotion', () => {
     expect(isTrailingEmptyTopLevelParagraph(editor.view)).toBe(true);
   });
 
+  it('recognizes a whole top-level paragraph selection for structured paste', () => {
+    const editor = makeEditor({
+      type: 'doc',
+      content: [{ type: 'paragraph', content: [{ type: 'text', text: 'replace me' }] }],
+    });
+    editor.commands.setTextSelection({ from: 1, to: 11 });
+
+    expect(isTopLevelBlockSelection(editor.view)).toBe(true);
+  });
+
   it('promotes a trailing pasted row beside an existing structured list', () => {
     const editor = makeEditor({
       type: 'doc',
@@ -660,6 +671,7 @@ describe('composer live plain-list promotion', () => {
     const editor = makeEditor({
       type: 'doc',
       content: [
+        { type: 'paragraph', content: [{ type: 'text', text: 'parent' }] },
         {
           type: 'paragraph',
           content: [{ type: 'text', text: '3.14159' }],
@@ -723,6 +735,20 @@ describe('composer live plain-list promotion', () => {
     expect(promoteTrailingPlainListParagraph(editor.view)).toBe(true);
     expect(editor.state.doc.firstChild?.type.name).toBe('bulletList');
     expect(editor.state.doc.firstChild?.firstChild?.textContent).toBe('item');
+  });
+
+  it('does not promote a marker inside an unclosed fenced block', () => {
+    const editor = makeEditor({
+      type: 'doc',
+      content: [
+        { type: 'paragraph', content: [{ type: 'text', text: '```' }] },
+        { type: 'paragraph', content: [{ type: 'text', text: '1. literal' }] },
+      ],
+    });
+    selectDocumentEnd(editor);
+
+    expect(promoteTrailingPlainListParagraph(editor.view)).toBe(false);
+    expect(editor.state.doc.lastChild?.type.name).toBe('paragraph');
   });
 });
 
@@ -1021,6 +1047,26 @@ describe('composer structured list serialization', () => {
     );
   });
 
+  it('keeps an inline restored quote under its literal list row', () => {
+    const editor = makeEditor({
+      type: 'doc',
+      content: [
+        { type: 'paragraph', content: [{ type: 'text', text: 'parent' }] },
+        {
+          type: 'paragraph',
+          content: [
+            { type: 'text', text: '  - child' },
+            { type: COMPOSER_QUOTE_NODE_TYPE, attrs: { text: 'quoted' } },
+          ],
+        },
+      ],
+    });
+
+    expect(serializeEditorContent(editor).text).toBe(
+      'parent\n  - child\n    > <!-- cindy-composer-quote -->\n    > quoted',
+    );
+  });
+
   it('keeps quote-like reply text separate from a list quote chip', () => {
     const editor = makeEditor({
       type: 'doc',
@@ -1050,6 +1096,37 @@ describe('composer structured list serialization', () => {
       { kind: 'text', text: '- ' },
       { kind: 'quote', quote: { text: 'quoted' } },
       { kind: 'text', text: '  > reply' },
+    ]);
+  });
+
+  it('keeps a bare quote marker separate from a list quote chip', () => {
+    const editor = makeEditor({
+      type: 'doc',
+      content: [
+        {
+          type: 'bulletList',
+          content: [
+            {
+              type: 'listItem',
+              content: [
+                {
+                  type: 'paragraph',
+                  content: [
+                    { type: COMPOSER_QUOTE_NODE_TYPE, attrs: { text: 'quoted' } },
+                    { type: 'text', text: '>' },
+                  ],
+                },
+              ],
+            },
+          ],
+        },
+      ],
+    });
+
+    expect(parseChatQuoteSegments(serializeEditorContent(editor).text)).toEqual([
+      { kind: 'text', text: '- ' },
+      { kind: 'quote', quote: { text: 'quoted' } },
+      { kind: 'text', text: '  >' },
     ]);
   });
 

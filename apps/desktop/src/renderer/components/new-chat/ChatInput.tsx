@@ -35,6 +35,7 @@ import {
   handleStructuredListBackspace,
   handleStructuredListBreak,
   hasTrailingPlainListParagraph,
+  isTopLevelBlockSelection,
   isTrailingEmptyTopLevelParagraph,
   promoteTrailingPlainListParagraph,
 } from './ComposerListNodes';
@@ -1526,23 +1527,29 @@ export function ChatInput({
           const { state } = view;
           const { $from } = state.selection;
           const pasteIntoTrailingEmptyLine = isTrailingEmptyTopLevelParagraph(view);
+          const pasteIntoBlockSelection = isTopLevelBlockSelection(view);
 
-          if (composerDocumentContainsList(normalizedPaste) && pasteIntoTrailingEmptyLine) {
+          if (
+            composerDocumentContainsList(normalizedPaste) &&
+            (pasteIntoTrailingEmptyLine || pasteIntoBlockSelection)
+          ) {
             event.preventDefault();
             const paragraphPosition = $from.before(1);
             const replacement = (normalizedPaste.content ?? []).map((node) =>
               state.schema.nodeFromJSON(node),
             );
-            if ($from.parent.content.size > 0) {
+            if (pasteIntoTrailingEmptyLine && $from.parent.content.size > 0) {
               replacement.unshift(state.schema.nodes.paragraph.create());
             }
             const fragment = Fragment.from(replacement);
-            const tr = state.tr.replaceWith(
-              paragraphPosition,
-              paragraphPosition + $from.parent.nodeSize,
-              fragment,
-            );
-            tr.setSelection(TextSelection.atEnd(tr.doc));
+            const tr = pasteIntoTrailingEmptyLine
+              ? state.tr.replaceWith(
+                  paragraphPosition,
+                  paragraphPosition + $from.parent.nodeSize,
+                  fragment,
+                )
+              : state.tr.replaceSelection(new Slice(fragment, 0, 0));
+            if (pasteIntoTrailingEmptyLine) tr.setSelection(TextSelection.atEnd(tr.doc));
             view.dispatch(tr.scrollIntoView());
             return true;
           }
@@ -1690,6 +1697,20 @@ export function ChatInput({
             return true;
           }
           return false;
+        }
+
+        // A history undo intentionally restores the marker as plain text. Keep
+        // the queued live promotion from immediately converting it again.
+        if (
+          event.key.toLowerCase() === 'z' &&
+          (event.metaKey || event.ctrlKey) &&
+          !event.shiftKey &&
+          !event.altKey
+        ) {
+          suppressListNormalizationRef.current = true;
+          queueMicrotask(() => {
+            suppressListNormalizationRef.current = false;
+          });
         }
 
         // ↑ / ↓ — browse user message history when editor is empty
@@ -2555,7 +2576,7 @@ export function ChatInput({
       // alone.
       if (storageKey !== undefined) {
         const draft = getComposerDraft(storageKey);
-        if (draft?.text && editor.isEmpty) {
+        if (draft?.text && composerDocIsEmpty(editor.state.doc)) {
           isRestoringRef.current = true;
           try {
             editor.commands.setContent(normalizeComposerDocumentJSON(draft.text));
@@ -2691,7 +2712,7 @@ export function ChatInput({
         : null;
       const textUnchanged =
         JSON.stringify(normalizedDraftText) ===
-        JSON.stringify(editor.isEmpty ? null : editor.getJSON());
+        JSON.stringify(composerDocIsEmpty(editor.state.doc) ? null : editor.getJSON());
       if (textUnchanged) {
         if (!editor.isFocused) editor.commands.focus();
         return;
