@@ -23,9 +23,9 @@ export interface ListPrefixMatch {
 // checkbox 允许行在 `]` 处截止(`(\s+|$)`),这样 "- [ ]" 也能识别成空项退出。
 const CHECKBOX_RE = /^(\s*)([-+*])(\s+)\[[ xX]\](\s+|$)/;
 const BULLET_RE = /^(\s*)([-+*•])(\s+)/;
-const ORDERED_RE = /^(\s*)(\d{1,8})([.)])(\s+)/;
+const ORDERED_RE = /^(\s*)(\d{1,9})([.)])(\s+)/;
 // 中文顿号序号(`1、`)不要求后随空格,符合中文输入习惯。
-const ORDERED_CJK_RE = /^(\s*)(\d{1,8})(、)(\s*)/;
+const ORDERED_CJK_RE = /^(\s*)(\d{1,9})(、)(\s*)/;
 const QUOTE_RE = /^(\s*)(>)(\s+)/;
 
 /**

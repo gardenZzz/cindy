@@ -81,6 +81,8 @@ function isPureLineBreakText(text: string): boolean {
   return true;
 }
 
+const LIST_ROW_MARKER_RE = /^(?:[-+*•][ \t]+|[1-9]\d{0,8}[.)][ \t]+|[1-9]\d{0,8}、[ \t]*)/;
+
 function normalizeTopLevelQuoteNodes(document: JSONContent | null | undefined): JSONContent[] {
   const source =
     document?.type === 'doc' && Array.isArray(document.content) ? document.content : [];
@@ -155,6 +157,7 @@ export function quoteSegmentsToComposerDocument(
   const content: JSONContent[] = [];
   let inlineContent: JSONContent[] = [];
   let hasContent = false;
+  let quoteJustEnded = false;
 
   const finishParagraph = () => {
     content.push(paragraph(inlineContent));
@@ -165,6 +168,7 @@ export function quoteSegmentsToComposerDocument(
     if (segment.kind === 'quote') {
       inlineContent.push(quoteNode(segment.quote));
       hasContent = true;
+      quoteJustEnded = true;
       continue;
     }
     if (!segment.text) continue;
@@ -180,8 +184,12 @@ export function quoteSegmentsToComposerDocument(
     }
     const lines = segment.text.split('\n');
     lines.forEach((line, index) => {
+      if (quoteJustEnded && line && LIST_ROW_MARKER_RE.test(line) && inlineContent.length > 0) {
+        finishParagraph();
+      }
       if (line) inlineContent.push({ type: 'text', text: line });
       if (index < lines.length - 1) finishParagraph();
+      if (line) quoteJustEnded = false;
     });
   }
   if (!hasContent) return null;

@@ -317,6 +317,22 @@ describe('composer structured list input rules', () => {
     expect(editor.state.doc.firstChild?.textContent).toBe('```1. ');
   });
 
+  it('keeps hard-break markers literal after a preceding open fence', () => {
+    const editor = makeEditor({
+      type: 'doc',
+      content: [
+        { type: 'paragraph', content: [{ type: 'text', text: '```' }] },
+        { type: 'paragraph', content: [{ type: 'hardBreak' }] },
+      ],
+    });
+    selectDocumentEnd(editor);
+
+    typeThroughInputRules(editor, '1. ');
+
+    expect(editor.state.doc.lastChild?.type.name).toBe('paragraph');
+    expect(editor.state.doc.lastChild?.textContent).toBe('1. ');
+  });
+
   it('keeps ordinary list markers literal after a preceding open fence', () => {
     const editor = makeEditor({
       type: 'doc',
@@ -504,6 +520,33 @@ describe('composer structured list keyboard commands', () => {
     selectDocumentEnd(editor);
 
     expect(handleStructuredListBackspace(editor.view)).toBe(true);
+    expect(editor.getJSON().content).toEqual([{ type: 'paragraph' }]);
+  });
+
+  it('treats a whitespace-only CJK marker item as empty on break', () => {
+    const editor = makeEditor({
+      type: 'doc',
+      content: [
+        {
+          type: 'orderedList',
+          attrs: { start: 1, marker: '、', separator: '' },
+          content: [
+            {
+              type: 'listItem',
+              content: [
+                {
+                  type: 'paragraph',
+                  content: [{ type: 'text', text: ' ' }],
+                },
+              ],
+            },
+          ],
+        },
+      ],
+    });
+    selectDocumentEnd(editor);
+
+    expect(handleStructuredListBreak(editor.view)).toBe(true);
     expect(editor.getJSON().content).toEqual([{ type: 'paragraph' }]);
   });
 
