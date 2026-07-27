@@ -3265,6 +3265,8 @@
         "fileSub": "Files",
         "openReview": "打开审查",
         "reviewSub": "Review",
+        "openBackgroundTasks": "打开后台任务",
+        "backgroundTasksSub": "Background tasks",
         "openBrowser": "打开浏览器",
         "browserSub": "Browser",
         "openTerminal": "打开终端",

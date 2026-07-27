@@ -3265,6 +3265,8 @@
         "fileSub": "Files",
         "openReview": "리뷰 열기",
         "reviewSub": "Review",
+        "openBackgroundTasks": "백그라운드 작업 열기",
+        "backgroundTasksSub": "Background tasks",
         "openBrowser": "브라우저 열기",
         "browserSub": "Browser",
         "openTerminal": "터미널 열기",
