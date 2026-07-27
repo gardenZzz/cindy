@@ -589,19 +589,27 @@ export class RemoteHost {
    * 在当前 client 上注册 forwardIn。端口冲突 / sshd 拒绝时按候选序列重试,
    * 全部失败抛错 (调用方决定是登记愿望待重试还是直接失败)。
    *
-   * 每次 forwardIn 带 10s 看门狗: 连接在请求在飞时断开的话, ssh2 对
-   * outstanding global request 的回调不保证触发, 裸 await 会永久挂起。
+   * 候选顺序: 先试上次实际绑定的端口 (record.remotePort) — 重连后隧道口
+   * 尽量不变, 远端进程 env (HTTPS_PROXY=http://127.0.0.1:<port>) 不用跟着
+   * 重写; 再按首选基数顺延。每次 forwardIn 带 10s 看门狗: 连接在请求在飞
+   * 时断开的话, ssh2 对 outstanding global request 的回调不保证触发,
+   * 裸 await 会永久挂起。
    */
   private async armForward(record: ForwardRecord): Promise<void> {
     const client = this.requireReady();
     this.attachForwardListener(client);
 
     const base = record.spec.preferredRemotePort ?? DEFAULT_REMOTE_FORWARD_PORT_BASE;
-    const errors: string[] = [];
+    const candidates = [record.remotePort];
     for (let i = 0; i < REMOTE_FORWARD_PORT_SCAN_SPAN; i++) {
-      const port = base + i;
+      if (!candidates.includes(base + i)) candidates.push(base + i);
+    }
+    const errors: string[] = [];
+    for (const port of candidates) {
       const bound = await new Promise<number | null>((resolve) => {
+        let settled = false;
         const timer = setTimeout(() => {
+          settled = true;
           errors.push(`${port}: forwardIn timed out after 10s`);
           resolve(null);
         }, 10_000);
@@ -609,6 +617,21 @@ export class RemoteHost {
         try {
           client.forwardIn('127.0.0.1', port, (err, boundPort) => {
             clearTimeout(timer);
+            if (settled) {
+              // 看门狗已判失败, 迟到的成功会在服务端留下没有 record 的野
+              // 监听 (端口被占 + 连接被默默转走) — 立刻拆除。
+              if (!err) {
+                this.log.warn('late forwardIn success after watchdog timeout — unbinding', {
+                  id: this.id,
+                  port: boundPort || port,
+                });
+                try {
+                  client.unforwardIn('127.0.0.1', boundPort || port, () => { /* best-effort */ });
+                } catch { /* client may be dead */ }
+              }
+              return;
+            }
+            settled = true;
             if (err) {
               errors.push(`${port}: ${err.message}`);
               resolve(null);
@@ -618,11 +641,30 @@ export class RemoteHost {
           });
         } catch (err) {
           clearTimeout(timer);
+          if (settled) return;
+          settled = true;
           errors.push(`${port}: ${(err as Error).message}`);
           resolve(null);
         }
       });
       if (bound == null) continue;
+      // close() 可能发生在 arm 在飞期间: record 已被摘除的话, 刚绑上的
+      // 端口同样是野监听 — 立即 unforward, 以失败收尾 (armForwardDeduped
+      // 的调用方都已 catch)。
+      if (this.forwards.get(forwardKey(record.spec)) !== record) {
+        this.log.warn('forward closed while arming — unbinding just-bound port', {
+          id: this.id,
+          port: bound,
+        });
+        await new Promise<void>((resolve) => {
+          try {
+            client.unforwardIn('127.0.0.1', bound, () => resolve());
+          } catch {
+            resolve();
+          }
+        });
+        throw new Error(`remote forward to ${forwardKey(record.spec)} was closed while arming`);
+      }
       record.remotePort = bound;
       record.armed = true;
       this.log.info('ssh remote forward armed', {
@@ -633,7 +675,7 @@ export class RemoteHost {
       return;
     }
     throw new Error(
-      `remote port forwarding failed on ${this.id} (tried 127.0.0.1:${base}–${base + REMOTE_FORWARD_PORT_SCAN_SPAN - 1}). ` +
+      `remote port forwarding failed on ${this.id} (tried 127.0.0.1:${candidates.join(',')}). ` +
       `The remote sshd may disallow remote forwarding (AllowTcpForwarding) or the ports are busy. ` +
       errors.slice(0, 3).join('; '),
     );

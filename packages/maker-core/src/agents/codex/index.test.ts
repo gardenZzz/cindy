@@ -6208,6 +6208,69 @@ describe('CodexAgent turn lifecycle', () => {
     await handle.close();
   });
 
+  it('ignores an orphan turnStarted after a failed turn/start and interrupts it server-side (greptile P1)', async () => {
+    // turn/start RPC 失败 (超时/拒绝) 不代表 server 没建 turn — daemon 实际
+    // 建了的 turn 迟到的 started 不得重新激活已报终态错误的会话。
+    let failTurnStart = true;
+    const agent = new CodexAgent(createDeps());
+    const host = installFakeHost(agent, (method) => {
+      if (method === Method.TurnStart) {
+        if (failTurnStart) {
+          throw new Error('codex app-server turn/start timed out after 60000ms');
+        }
+        return { turn: { id: 'turn-2' } };
+      }
+      return undefined;
+    });
+    const handle = await agent.startSession({
+      sessionId: 'session-orphan-turnstarted',
+      model: 'gpt-5.4',
+      workingDir: '/repo',
+    });
+    const subscribeCalls = host.subscribeThread.mock.calls as unknown as Array<[string, ThreadEventHandlers]>;
+    const handlers = subscribeCalls[0]?.[1];
+    const iterator = handle.events()[Symbol.asyncIterator]();
+
+    await handle.send({ type: 'user', content: 'hello' });
+    // send 开头先推 status isRunning:true, 然后才是 turn/start 失败的终态序列。
+    expect(await nextEvent(iterator)).toMatchObject({
+      type: 'status',
+      data: { isRunning: true },
+    });
+    expect(await nextEvent(iterator)).toMatchObject({
+      type: 'error',
+      data: { isTerminal: true },
+    });
+    expect(await nextEvent(iterator)).toMatchObject({
+      type: 'status',
+      data: { status: 'Done', isRunning: false },
+    });
+
+    // daemon 实际建了 turn → 迟到 started: 立墓碑 + 补 interrupt, 不重新激活。
+    handlers.turnStarted?.({
+      threadId: 'start-thread-id',
+      turn: { id: 'orphan-turn-id' },
+    });
+    expect(handle.isTurnRunning?.()).toBe(false);
+    expect(handle.getCurrentTurnId?.()).toBeNull();
+    await vi.waitFor(() => {
+      expect(host.request).toHaveBeenCalledWith(
+        Method.TurnInterrupt,
+        expect.objectContaining({ turnId: 'orphan-turn-id' }),
+      );
+    });
+    // 孤儿事件不再产生任何 UI 事件。
+    await expect(nextEvent(iterator)).rejects.toThrow('timed out waiting for event');
+
+    // 守卫不挡后续正常发送: 下一次 turn/start 成功后 turn 正常激活
+    // (handleTurnStartResp 清守卫标记并置 currentTurnId)。
+    failTurnStart = false;
+    await handle.send({ type: 'user', content: 'again' });
+    expect(handle.isTurnRunning?.()).toBe(true);
+    expect(handle.getCurrentTurnId?.()).toBe('turn-2');
+    await handle.close();
+  });
+
   it('clears running state and emits done status after terminal error notification', async () => {
     const agent = new CodexAgent(createDeps());
     const host = installFakeHost(agent);

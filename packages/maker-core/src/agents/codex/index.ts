@@ -2087,6 +2087,9 @@ export class CodexAgent extends BaseAgent {
     let currentTurnId: string | null = null;
     let isTurnInFlight = false;
     let isTurnStartPending = false;
+    // turn/start RPC 失败(超时/拒绝)后置位: server 可能实际已建 turn,
+    // 迟到的孤儿 turnStarted 由 turnStarted handler 拦下并补 interrupt。
+    let turnStartFailedWithoutTurnId = false;
     type TurnCompletedParams = Parameters<NonNullable<ThreadEventHandlers['turnCompleted']>>[0];
     // 正常完成的 turn 也必须保留墓碑:app-server 允许 turn/completed 早于仍在
     // 后台收尾的 item 事件到达。没有这层墓碑时,currentTurnId 已清空,迟到 item
@@ -4122,6 +4125,28 @@ export class CodexAgent extends BaseAgent {
         if (shouldIgnoreStaleTurnEvent(params.turn.id)) return;
         // 终态已先到的 turn (墓碑) 不得被乱序晚到的 started 重新置活。
         if (turnsCompletedBeforeStartResp.has(params.turn.id)) return;
+        // turn/start RPC 已失败(超时/拒绝)但 daemon 实际已建 turn — 迟到的孤儿
+        // turnStarted 不得重新激活已报终态错误的会话 (greptile P1): 立墓碑 +
+        // 补 interrupt 让 daemon 停掉这个没人消费的 turn。仅在没有新 turn/start
+        // 在飞时判定 — 在飞期间到达的 started 按正常路径处理 (与成功路径的
+        // started-先于-resp 乱序共存; 该固有歧义不由本守卫承担)。
+        if (turnStartFailedWithoutTurnId && !isTurnStartPending && currentTurnId === null) {
+          terminalErroredTurnIds.add(params.turn.id);
+          log.warn('ignoring orphan turnStarted from a failed turn/start — interrupting server-side turn', {
+            turnId: params.turn.id,
+            threadId,
+          });
+          if (threadId) {
+            host.request(Method.TurnInterrupt, { threadId, turnId: params.turn.id })
+              .catch((e: unknown) => {
+                log.warn('orphan turn interrupt failed (best-effort)', {
+                  turnId: params.turn.id,
+                  error: e instanceof Error ? e.message : String(e),
+                });
+              });
+          }
+          return;
+        }
         threadMayHaveRollout = true;
         const wasSameTurn = currentTurnId === params.turn.id;
         currentTurnId = params.turn.id;
@@ -4553,6 +4578,9 @@ export class CodexAgent extends BaseAgent {
         // 普通 LLM 错误 / 超时 / auth 失败照原路径报错。
         const handleTurnStartResp = (resp: TurnStartResponse): void => {
           if (resp.turn?.id) {
+            // turn/start 成功 → 孤儿守卫解除 (上次失败的 RPC 若也有迟到 started,
+            // 那是一次新的语义重叠, 由 turn id 匹配路径处理)。
+            turnStartFailedWithoutTurnId = false;
             // 墓碑: 该 turn 的终态已抢在本响应之前到达 (典型: 收紧补中断后
             // turnCompleted(interrupted) 先回), 不得重新置活, 否则会话卡 running。
             const alreadyCompleted = turnsCompletedBeforeStartResp.has(resp.turn.id);
@@ -4690,6 +4718,10 @@ export class CodexAgent extends BaseAgent {
           // failed 分支同语义), 否则 planCycleActive 泄漏, 下一条常规消息仍会
           // 携带 collaborationMode plan(勾选与 chip 早已熄灭, 行为与 UI 脱节)。
           endPlanCycleAfterPreStartFailure('turn/start failed');
+          // RPC 级失败(超时/拒绝)不代表 server 没建 turn — daemon 可能已接受
+          // turn/start 只是响应没回来。立孤儿守卫: 之后迟到的 turnStarted 不得
+          // 重新激活会话 (greptile P1: 已报终态错误的会话又回到 generating)。
+          turnStartFailedWithoutTurnId = true;
           log.error('turn/start failed', { error: String(finalErr) });
           eventQueue.push({
             type: 'error',

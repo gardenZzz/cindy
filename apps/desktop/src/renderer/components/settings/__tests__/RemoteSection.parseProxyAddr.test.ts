@@ -12,9 +12,9 @@ describe('parseProxyAddrInput', () => {
     expect(parseProxyAddrInput('[::1]:7890')).toEqual({ localHost: '::1', localPort: 7890 });
   });
 
-  it('takes the last colon so bare IPv6 without brackets is rejected (ambiguous)', () => {
-    // ::1:7890 → lastIndexOf(':') 切出 host=': :1' 含空白? 不含 — host='::1', port=7890。
-    // 裸 IPv6 语义模糊, 这里的行为是接受 last-colon 切分结果; 文档推荐 bracket 形态。
+  it('accepts bare IPv6 by splitting at the last colon (bracket form recommended)', () => {
+    // ::1:7890 → lastIndexOf(':') 切出 host='::1', port=7890。裸 IPv6 语义
+    // 模糊但有确定行为: 按 last-colon 切分接受; 文档/UI hint 推荐 bracket 形态。
     expect(parseProxyAddrInput('::1:7890')).toEqual({ localHost: '::1', localPort: 7890 });
   });
 
