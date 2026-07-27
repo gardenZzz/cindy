@@ -26,13 +26,36 @@ function bindingPath(): string {
   return path.join(app.getPath('userData'), 'native-provider-auth.json');
 }
 
-function readBindings(): BindingFile {
+/**
+ * 读绑定文件，**区分「确实还没有这个文件」与「有但读不出来」**。
+ *
+ * 只读判定（isNativeProviderAuthBound）两者都当空处理即可——空 = 未绑定 = fail-closed。
+ * 但认领路径不行：把损坏 / 不可读一律当成「名额空着」，等于在归属信息丢失的那一刻
+ * 把共享 keychain 里的凭证判给当前账号，而且随后的 writeBindings 会把损坏文件连同
+ * 里面原有的归属一起覆盖掉，永久失去恢复依据（PR #548 review）。
+ */
+function readBindingsOrFail(): { ok: true; bindings: BindingFile } | { ok: false } {
+  let raw: string;
   try {
-    const value = JSON.parse(fs.readFileSync(bindingPath(), 'utf8')) as unknown;
-    return value && typeof value === 'object' ? (value as BindingFile) : {};
-  } catch {
-    return {};
+    raw = fs.readFileSync(bindingPath(), 'utf8');
+  } catch (err) {
+    // 文件不存在 = 合法的首次状态（还没有任何人绑定过）；其它读失败（EACCES / EIO 等）
+    // 说明归属不明，不能当成空。
+    if ((err as NodeJS.ErrnoException | null)?.code === 'ENOENT') return { ok: true, bindings: {} };
+    return { ok: false };
   }
+  try {
+    const value = JSON.parse(raw) as unknown;
+    if (!value || typeof value !== 'object' || Array.isArray(value)) return { ok: false };
+    return { ok: true, bindings: value as BindingFile };
+  } catch {
+    return { ok: false };
+  }
+}
+
+function readBindings(): BindingFile {
+  const read = readBindingsOrFail();
+  return read.ok ? read.bindings : {};
 }
 
 function writeBindings(value: BindingFile): void {
@@ -96,7 +119,11 @@ export function migrateLegacyNativeProviderAuthBindings(
   ownerId: string,
   available: Partial<Record<NativeProviderId, boolean>>,
 ): void {
-  const bindings = readBindings();
+  // 同 claimDetectedNativeProviderAuth:一次性迁移也是写路径,归属读不出来就不能推进
+  // (还会把 legacyClaimOwner 名额一起消费掉,损失不可逆)。
+  const read = readBindingsOrFail();
+  if (!read.ok) return;
+  const bindings = read.bindings;
   if (bindings.legacyClaimOwner) return;
 
   const next: BindingFile = { ...bindings, legacyClaimOwner: ownerId };
@@ -139,7 +166,11 @@ export function claimDetectedNativeProviderAuth(
   // Callers reached from an async settle (Codex reconcile) additionally pin an
   // owner+generation snapshot; this guard is the floor every caller gets.
   if (isAppSessionBoundaryPending()) return false;
-  const bindings = readBindings();
+  // 归属文件读不出来 = 归属不明,一律不认领:这条路径是**写**路径,把损坏当空会把共享
+  // keychain 里可能属于别人的凭证判给当前账号,并覆盖掉原有归属(PR #548 review)。
+  const read = readBindingsOrFail();
+  if (!read.ok) return false;
+  const bindings = read.bindings;
   // Key-presence, not truthiness: a corrupted/empty-string slot must count as
   // "claimed by unknown" and fail closed, never as re-claimable (matches
   // unbindNativeProviderAuth's `in` pattern).

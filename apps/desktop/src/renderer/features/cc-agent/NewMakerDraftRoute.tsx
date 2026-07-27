@@ -865,11 +865,16 @@ export function NewMakerDraftRoute() {
 
   // Fast 可用判定:本地 + device-link 统一走 resolveFastSupported(共享 per-provider 逻辑,
   // 控制端不另写远程判断;旧被控端回退拍平 caps 见 helper)。device-link 的来源/模型取被控端镜像
-  // (dlSel live > deviceLinkInitial seed),本地取 chatPrefs —— 即"被控端会话实际会路由到的来源"。
+  // (dlSel live > deviceLinkInitial seed),本地取**校准后的生效来源** —— 即会话实际会路由
+  // 到的那个来源。
   const supportsFastMode = useMemo(() => {
+    // 本地不能用 chatPrefs.providerId:它常是 null,而 fast 是 per-provider 能力。默认来源
+    // 被隐藏 / SSH 排除、模型由另一个来源提供时,这里会去查那个被排除的来源 —— 要么藏掉本
+    // 该有的 Fast 开关,要么把 Fast 开在不支持它的来源上。effort / fast 记忆 / 写回都已按
+    // effectiveSourceId 推导,只剩这处没跟上(PR #548 review)。
     const providerId = isDeviceLinkDraft
       ? (dlSel?.providerId ?? deviceLinkInitial?.providerId ?? null)
-      : (chatPrefs.providerId ?? null);
+      : effectiveSourceId;
     // 本地取**校准后**的模型:fast 能力必须按最终提交的那个模型判定。
     const modelId = isDeviceLinkDraft
       ? (dlSel?.model ?? deviceLinkInitial?.model ?? chatPrefs.model)
@@ -887,7 +892,7 @@ export function NewMakerDraftRoute() {
     isDeviceLinkDraft,
     dlSel,
     deviceLinkInitial,
-    chatPrefs.providerId,
+    effectiveSourceId,
     chatPrefs.model,
     calibratedDraftModel,
     effectiveDeviceLinkDeviceId,

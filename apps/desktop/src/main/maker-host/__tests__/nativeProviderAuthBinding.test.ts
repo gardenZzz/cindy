@@ -180,6 +180,31 @@ describe('claimDetectedNativeProviderAuth', () => {
     expect(claimDetectedNativeProviderAuth('anthropic', () => true)).toBe(true);
   });
 
+  it('绑定文件读不出来时不认领,也不覆盖它', () => {
+    // 「归属信息丢失」不等于「没人绑过」。把损坏当空,等于在最不该下判断的时刻把共享
+    // keychain 里的凭证判给当前账号,随后的写入还会把原有归属彻底盖掉(PR #548 review)。
+    fs.mkdirSync(userDataDir, { recursive: true });
+    fs.writeFileSync(bindingFile, '{ this is not json');
+
+    expect(claimDetectedNativeProviderAuth('anthropic', () => true)).toBe(false);
+    expect(isNativeProviderAuthBound('anthropic')).toBe(false);
+    expect(fs.readFileSync(bindingFile, 'utf8')).toBe('{ this is not json');
+
+    // 一次性 legacy 迁移同样不推进 —— 它还会顺手消费掉 legacyClaimOwner 名额。
+    migrateLegacyNativeProviderAuthBindings('owner-a', { anthropic: true });
+    expect(fs.readFileSync(bindingFile, 'utf8')).toBe('{ this is not json');
+
+    // JSON 合法但根不是对象(数组 / 标量)同样按不可读处理。
+    fs.writeFileSync(bindingFile, '["owner-a"]');
+    expect(claimDetectedNativeProviderAuth('anthropic', () => true)).toBe(false);
+  });
+
+  it('文件确实不存在 = 合法首次状态,照常认领', () => {
+    // 与「读失败」必须分开:ENOENT 是全新安装的正常形态,挡掉它等于把自动继承整条废掉。
+    expect(fs.existsSync(bindingFile)).toBe(false);
+    expect(claimDetectedNativeProviderAuth('anthropic', () => true)).toBe(true);
+  });
+
   it('treats corrupted falsy slot values as claimed-by-unknown and fails closed', () => {
     // 键存在但值为假(损坏 / 异常写入):按「归属不明」拒绝,绝不重认领。
     fs.mkdirSync(userDataDir, { recursive: true });
