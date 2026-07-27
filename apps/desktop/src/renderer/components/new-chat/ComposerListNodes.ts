@@ -13,8 +13,8 @@ import { Selection, TextSelection } from '@tiptap/pm/state';
 import type { EditorView } from '@tiptap/pm/view';
 
 const BULLET_MARKER_RE = /^([-+*•])([ \t]+)$/;
-const ORDERED_MARKER_RE = /^(\d{1,6})([.)])([ \t]+)$/;
-const CJK_ORDERED_MARKER_RE = /^(\d{1,6})(、)$/;
+const ORDERED_MARKER_RE = /^([1-9]\d{0,5})([.)])([ \t]+)$/;
+const CJK_ORDERED_MARKER_RE = /^([1-9]\d{0,5})(、)$/;
 
 type BulletMarker = '-' | '+' | '*' | '•';
 type OrderedMarker = '.' | ')' | '、';
@@ -48,7 +48,7 @@ function plainListParagraphMarker(text: string): PlainListParagraphMarker | null
       attrs: { marker: bullet[1], separator: bullet[2] },
     };
   }
-  const ordered = text.match(/^(\d{1,6})([.)])([ \t]+)/);
+  const ordered = text.match(/^([1-9]\d{0,5})([.)])([ \t]+)/);
   if (ordered) {
     return {
       kind: 'ordered',
@@ -56,7 +56,7 @@ function plainListParagraphMarker(text: string): PlainListParagraphMarker | null
       attrs: { start: Number(ordered[1]), marker: ordered[2], separator: ordered[3] },
     };
   }
-  const cjkOrdered = text.match(/^(\d{1,6})(、)([ \t]*)/);
+  const cjkOrdered = text.match(/^([1-9]\d{0,5})(、)([ \t]*)/);
   if (cjkOrdered) {
     return {
       kind: 'ordered',
@@ -172,6 +172,8 @@ export const ComposerBulletList = Node.create({
       wrappingInputRule({
         find: BULLET_MARKER_RE,
         type: this.type,
+        joinPredicate: (match, before) =>
+          before.attrs.marker === match[1] && before.attrs.separator === match[2],
         getAttributes: (match) => ({
           marker: match[1] as BulletMarker,
           separator: match[2],
@@ -192,6 +194,15 @@ function orderedAttrs(match: RegExpMatchArray): OrderedListAttrs {
     marker,
     ...(marker === '、' ? { separator: '' } : { separator: match[3] ?? ' ' }),
   };
+}
+
+function canJoinOrderedList(match: RegExpMatchArray, before: PMNode): boolean {
+  const attrs = orderedAttrs(match);
+  return (
+    before.attrs.marker === attrs.marker &&
+    (before.attrs.separator ?? (attrs.marker === '、' ? '' : ' ')) === attrs.separator &&
+    before.attrs.start + before.childCount === attrs.start
+  );
 }
 
 export const ComposerOrderedList = Node.create({
@@ -252,11 +263,13 @@ export const ComposerOrderedList = Node.create({
       wrappingInputRule({
         find: ORDERED_MARKER_RE,
         type: this.type,
+        joinPredicate: canJoinOrderedList,
         getAttributes: orderedAttrs,
       }),
       wrappingInputRule({
         find: CJK_ORDERED_MARKER_RE,
         type: this.type,
+        joinPredicate: canJoinOrderedList,
         getAttributes: orderedAttrs,
       }),
       hardBreakListInputRule(ORDERED_MARKER_RE, this.type, orderedAttrs),

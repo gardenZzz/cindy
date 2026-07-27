@@ -5,6 +5,7 @@ import Document from '@tiptap/extension-document';
 import Paragraph from '@tiptap/extension-paragraph';
 import Text from '@tiptap/extension-text';
 import HardBreak from '@tiptap/extension-hard-break';
+import { Fragment, Slice } from '@tiptap/pm/model';
 import { TextSelection } from '@tiptap/pm/state';
 
 import {
@@ -15,6 +16,7 @@ import {
   handleStructuredListBreak,
   promoteTrailingPlainListParagraph,
 } from '@/components/new-chat/ComposerListNodes';
+import { plainTextToComposerDocument } from '@/lib/composerListDocument';
 import {
   serializeEditorContent,
   serializeEditorSlice,
@@ -168,6 +170,38 @@ describe('composer structured list input rules', () => {
 
     expect(editor.state.doc.firstChild?.type.name).toBe('paragraph');
     expect(editor.state.doc.firstChild?.textContent).toBe('  - ');
+  });
+
+  it.each(['0. ', '0001. '])('keeps %s as plain text', (typed) => {
+    const editor = makeEditor();
+
+    typeThroughInputRules(editor, typed);
+
+    expect(editor.state.doc.firstChild?.type.name).toBe('paragraph');
+    expect(editor.state.doc.firstChild?.textContent).toBe(typed);
+  });
+
+  it('does not join an explicitly non-contiguous ordered marker with the preceding list', () => {
+    const editor = makeEditor({
+      type: 'doc',
+      content: [
+        {
+          type: 'orderedList',
+          attrs: { start: 1, marker: '.' },
+          content: [{ type: 'listItem', content: [{ type: 'paragraph', content: [{ type: 'text', text: 'first' }] }] }],
+        },
+        { type: 'paragraph' },
+      ],
+    });
+    selectDocumentEnd(editor);
+
+    typeThroughInputRules(editor, '3. ');
+
+    expect(editor.state.doc.childCount).toBe(2);
+    expect(editor.state.doc.firstChild?.type.name).toBe('orderedList');
+    expect(editor.state.doc.firstChild?.childCount).toBe(1);
+    expect(editor.state.doc.lastChild?.type.name).toBe('orderedList');
+    expect(editor.state.doc.lastChild?.attrs.start).toBe(3);
   });
 
   it('reserves enough marker width for long ordered-list numbers', () => {
@@ -822,6 +856,105 @@ describe('composer structured list serialization', () => {
       { kind: 'quote', quote: { text: 'quoted' } },
       { kind: 'text', text: '  after' },
     ]);
+  });
+
+  it('does not duplicate restored continuation indentation after a list quote', () => {
+    const editor = makeEditor({
+      type: 'doc',
+      content: [
+        {
+          type: 'bulletList',
+          content: [
+            {
+              type: 'listItem',
+              content: [
+                {
+                  type: 'paragraph',
+                  content: [
+                    { type: COMPOSER_QUOTE_NODE_TYPE, attrs: { text: 'quoted' } },
+                    { type: 'text', text: '  after' },
+                  ],
+                },
+              ],
+            },
+          ],
+        },
+      ],
+    });
+
+    expect(serializeEditorContent(editor).text).toBe(
+      '- \n  > <!-- cindy-composer-quote -->\n  > quoted\n  after',
+    );
+  });
+
+  it('keeps adjacent list quote chips as separate quote segments', () => {
+    const editor = makeEditor({
+      type: 'doc',
+      content: [
+        {
+          type: 'bulletList',
+          content: [
+            {
+              type: 'listItem',
+              content: [
+                {
+                  type: 'paragraph',
+                  content: [
+                    { type: COMPOSER_QUOTE_NODE_TYPE, attrs: { text: 'first' } },
+                    { type: COMPOSER_QUOTE_NODE_TYPE, attrs: { text: 'second' } },
+                  ],
+                },
+              ],
+            },
+          ],
+        },
+      ],
+    });
+
+    const serialized = serializeEditorContent(editor).text;
+    expect(parseChatQuoteSegments(serialized)).toEqual([
+      { kind: 'text', text: '- ' },
+      { kind: 'quote', quote: { text: 'first' } },
+      { kind: 'quote', quote: { text: 'second' } },
+    ]);
+  });
+
+  it('preserves an empty structured list item separator at the end of serialized text', () => {
+    const editor = makeEditor({
+      type: 'doc',
+      content: [
+        {
+          type: 'orderedList',
+          attrs: { start: 2, marker: '.' },
+          content: [{ type: 'listItem', content: [{ type: 'paragraph' }] }],
+        },
+      ],
+    });
+
+    expect(serializeEditorContent(editor).text).toBe('2. ');
+  });
+
+  it('inserts normalized list blocks at a non-terminal selection', () => {
+    const editor = makeEditor({
+      type: 'doc',
+      content: [
+        { type: 'paragraph', content: [{ type: 'text', text: 'before' }] },
+        { type: 'paragraph', content: [{ type: 'text', text: 'after' }] },
+      ],
+    });
+    editor.commands.setTextSelection(2);
+    const replacement = plainTextToComposerDocument('1. first\n2. second').content!.map((node) =>
+      editor.state.schema.nodeFromJSON(node),
+    );
+    const tr = editor.state.tr.replaceSelection(new Slice(Fragment.from(replacement), 0, 0));
+    editor.view.dispatch(tr);
+
+    expect(editor.state.doc.textContent).toContain('first');
+    expect(editor.state.doc.textContent).toContain('second');
+    expect(editor.state.doc.childCount).toBeGreaterThan(2);
+    expect(editor.state.doc.content.content.some((node) => node.type.name === 'orderedList')).toBe(
+      true,
+    );
   });
 
   it('preserves nested markers and projects atom ranges into wire offsets', () => {

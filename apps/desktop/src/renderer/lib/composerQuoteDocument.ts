@@ -213,6 +213,7 @@ export function serializeComposerContentBlocks(blocks: readonly ComposerSerializ
 /** Serialize blocks and project block-relative presentation ranges into wire offsets. */
 export function serializeComposerContentBlocksWithRanges(
   blocks: readonly ComposerSerializedBlock[],
+  options: { preserveTrailingWhitespace?: boolean } = {},
 ): {
   text: string;
   agentReferences: AgentInputReference[];
@@ -275,7 +276,7 @@ export function serializeComposerContentBlocksWithRanges(
   });
 
   const leadingTrim = serialized.length - serialized.trimStart().length;
-  const text = serialized.trim();
+  const text = options.preserveTrailingWhitespace ? serialized.trimStart() : serialized.trim();
   return {
     text,
     agentReferences: agentReferences
