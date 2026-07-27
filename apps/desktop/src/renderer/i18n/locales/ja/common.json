@@ -2456,6 +2456,7 @@
       "perm": {
         "grantsTitle": "インストール後に持つ権限:",
         "toolsGroup": "登録ツール",
+        "toolsDiffGroup": "登録ツールの変更",
         "itemCount": "{{count}} 件",
         "cindyImageGenerate": "画像生成(Cindy に代行依頼)",
         "cindyImageEdit": "画像編集(Cindy に代行依頼、自身が生成した画像のみ)",

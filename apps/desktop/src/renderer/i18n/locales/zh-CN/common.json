@@ -2456,6 +2456,7 @@
       "perm": {
         "grantsTitle": "安装后它将拥有：",
         "toolsGroup": "注册工具",
+        "toolsDiffGroup": "注册工具变化",
         "itemCount": "{{count}} 项",
         "cindyImageGenerate": "图像生成(请 Cindy 代办)",
         "cindyImageEdit": "图像编辑(请 Cindy 代办，仅限它自己生成的图)",

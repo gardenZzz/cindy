@@ -34,7 +34,7 @@ import {
 import { patchDraft } from '@/state/newMakerDraft';
 import { ghostInstallErrorKey } from '@/cindy-brain/installErrorKey';
 import { confirmAndInstallGhost, pickAndUpdateGhost } from '@/cindy-brain/installFlow';
-import { GhostPermissionDiffView, GhostPermissionList } from '@/cindy-brain/GhostPermissionList';
+import { GhostPermissionList, GhostUpdateReview } from '@/cindy-brain/GhostPermissionList';
 import { cn } from '@/lib/utils';
 import { Switch } from '@/components/ui/switch';
 import { getLastWorkingDir, subscribeToLastWorkingDir } from '@/state/lastWorkingDir';
@@ -452,7 +452,7 @@ export function GhostPluginPage() {
             from: installedGhost?.manifest.version ?? next.version,
             to: next.version,
           }),
-          content: <GhostPermissionDiffView diff={diff} />,
+          content: <GhostUpdateReview diff={diff} />,
           maxWidth: 520,
           confirmText: t('settings.ghosts.updateConfirm.confirm'),
           cancelText: t('settings.ghosts.updateConfirm.cancel'),
@@ -741,17 +741,13 @@ export function GhostPluginPage() {
         description: isUpdate
           ? t('settings.ghosts.market.updateConfirmDescription')
           : t('settings.ghosts.market.installConfirmDescription'),
-        content: (
-          <div
-            className="overflow-y-auto overscroll-contain pr-1"
-            style={{ maxHeight: 'min(56vh, 520px)', scrollbarGutter: 'stable' }}
-          >
-            {isUpdate ? (
-              <GhostPermissionDiffView diff={diff!} />
-            ) : (
-              <GhostPermissionList items={ghostPermissionItems(marketDetail.manifest)} />
-            )}
-          </div>
+        // 限高与滚动交给共享 ConfirmDialog(max-h-[85vh] + 内部滚动区 + 打开时
+        // 闪一下滚动条),这里不再自套一层 min(56vh,520px) —— 两层限高会让
+        // "到底了没有"取决于内外层谁先触底(2026-07-27 收口)。
+        content: isUpdate ? (
+          <GhostUpdateReview diff={diff!} />
+        ) : (
+          <GhostPermissionList items={ghostPermissionItems(marketDetail.manifest)} />
         ),
         maxWidth: 520,
         confirmText: isUpdate
