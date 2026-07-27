@@ -974,10 +974,27 @@ export function refreshAnthropicModelsFromHttp(options?: {
       // 一次就能恢复 —— 否则用户明明只需静默续期,却被告知要断开重连,而且清单为空时他
       // 连个能用的模型都挑不出来(PR #548 review;运行时 401 回调走的也是这条路)。
       if (kind === 'unauthorized' && !options?.afterForcedRefresh) {
+        let refreshError: unknown = null;
         const refreshed = await getValidClaudeAiOAuth({
           forceRefresh: true,
           staleToken: oauth.accessToken,
-        }).catch(() => null);
+        }).catch((err: unknown) => {
+          refreshError = err;
+          return null;
+        });
+        // 刷新链路自己出故障(token 端点超时 / 5xx / 拿不到刷新锁)不等于「授权被拒」。归
+        // unauthorized 会取消全部重试、并叫用户去断开重连,可 refresh token 很可能完全有效,
+        // 过一会儿再刷就成了 —— 那期间用户白白守着一份空清单(PR #548 review)。
+        if (refreshError !== null) {
+          noteDiscoveryFailure(
+            gen,
+            'upstream',
+            `401 then forced token refresh failed: ${
+              refreshError instanceof Error ? refreshError.message : String(refreshError)
+            }`,
+          );
+          return;
+        }
         if (
           refreshed?.accessToken &&
           refreshed.accessToken !== oauth.accessToken &&

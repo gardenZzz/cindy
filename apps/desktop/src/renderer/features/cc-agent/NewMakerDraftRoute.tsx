@@ -582,22 +582,39 @@ export function NewMakerDraftRoute() {
     effectiveRemoteHostId,
     modelVisibilityVersion,
   ]);
+  /**
+   * **自动**选择用的候选:再剔掉清单发现失败的供应商。
+   *
+   * 失败时我们刻意保留上次成功的清单(设置页也已改口径,明说那是上次获取的结果),但那份
+   * 清单只适合「用户自己点进去选」,不适合当成默认值送人:unauthorized / regionBlocked 这
+   * 类确定性失败下,把从没选过模型的用户自动落到这个来源,首条消息必然失败 —— 正是这套
+   * 校准要消灭的状态(PR #548 review)。
+   *
+   * 用户显式表达过(选过模型、或存了显式来源)时不做这层剔除:他选的就该生效,而且来源解析
+   * 也必须还能指到那个供应商。全部供应商都在失败态时同样退回完整候选 —— 那时没有更好的
+   * 选择,给个陈旧清单也好过一个都挑不出来。
+   */
+  const draftModelChosenByUser = draft.modelChosenByVendor[draft.vendor] === true;
+  const autoCalibrationProviders = useMemo(() => {
+    if (draftModelChosenByUser || chatPrefs.providerId) return calibrationProviders;
+    const healthy = calibrationProviders.filter((p) => !p.modelDiscoveryFailure);
+    return healthy.length > 0 ? healthy : calibrationProviders;
+  }, [calibrationProviders, draftModelChosenByUser, chatPrefs.providerId]);
   const calibratedDraftModel = useMemo(() => {
     if (isDeviceLinkDraft) return chatPrefs.model;
     return calibrateDraftModel({
-      providers: calibrationProviders,
+      providers: autoCalibrationProviders,
       agent: capabilityAgentKind,
       model: chatPrefs.model,
-      chosenByUser: draft.modelChosenByVendor[draft.vendor] === true,
+      chosenByUser: draftModelChosenByUser,
       providersLoading: localProvidersLoading,
     });
   }, [
     isDeviceLinkDraft,
-    calibrationProviders,
+    autoCalibrationProviders,
     capabilityAgentKind,
     chatPrefs.model,
-    draft.modelChosenByVendor,
-    draft.vendor,
+    draftModelChosenByUser,
     localProvidersLoading,
   ]);
 
@@ -607,7 +624,11 @@ export function NewMakerDraftRoute() {
     // 于是 providerId 落 null、main 挑到被排除的原生默认,而 ChatInput 看到的是允许的
     // 那个来源、Send 照常放行,最后在远端失败(PR #548 review)。
     // device-link 草稿以被控端目录为准,不参与本地过滤。
-    const source = isDeviceLinkDraft ? providers : calibrationProviders;
+    //
+    // 用与挑模型同一份候选:自动路径已剔除失败态供应商,来源解析若还看得见它们,就会把刚
+    // 挑好的健康模型重新指回那个已知失败的原生默认来源(PR #548 review)。用户显式表达过时
+    // autoCalibrationProviders 本身就等于完整候选,不受影响。
+    const source = isDeviceLinkDraft ? providers : autoCalibrationProviders;
     return effectiveSourceIdForModel(
       source,
       chatPrefs.providerId ?? null,
@@ -617,7 +638,7 @@ export function NewMakerDraftRoute() {
   }, [
     isDeviceLinkDraft,
     providers,
-    calibrationProviders,
+    autoCalibrationProviders,
     capabilityAgentKind,
     chatPrefs.providerId,
     calibratedDraftModel,

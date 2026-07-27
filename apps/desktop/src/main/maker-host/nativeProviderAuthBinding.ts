@@ -5,6 +5,7 @@ import path from 'node:path';
 import { getActiveAppSession, isAppSessionBoundaryPending } from '../appSessionState.js';
 
 type NativeProviderId = 'anthropic' | 'openai' | 'xai';
+const NATIVE_PROVIDER_IDS = ['anthropic', 'openai', 'xai'] as const satisfies readonly NativeProviderId[];
 type BindingFile = Partial<Record<NativeProviderId, string>> & {
   legacyClaimOwner?: string;
   /**
@@ -34,7 +35,14 @@ function bindingPath(): string {
  * 把共享 keychain 里的凭证判给当前账号，而且随后的 writeBindings 会把损坏文件连同
  * 里面原有的归属一起覆盖掉，永久失去恢复依据（PR #548 review）。
  */
-function readBindingsOrFail(): { ok: true; bindings: BindingFile } | { ok: false } {
+type BindingRead =
+  | { ok: true; bindings: BindingFile }
+  /** 文件本身读不出来 / 根不是对象：整份归属都无从判断，没有可挽救的部分。 */
+  | { ok: false; reason: 'unreadable' }
+  /** 根有效、各 provider 归属可信，只有 revoked 这个字段被改坏。 */
+  | { ok: false; reason: 'badRevoked'; bindings: Omit<BindingFile, 'revoked'> };
+
+function readBindingsOrFail(): BindingRead {
   let raw: string;
   try {
     raw = fs.readFileSync(bindingPath(), 'utf8');
@@ -42,22 +50,29 @@ function readBindingsOrFail(): { ok: true; bindings: BindingFile } | { ok: false
     // 文件不存在 = 合法的首次状态（还没有任何人绑定过）；其它读失败（EACCES / EIO 等）
     // 说明归属不明，不能当成空。
     if ((err as NodeJS.ErrnoException | null)?.code === 'ENOENT') return { ok: true, bindings: {} };
-    return { ok: false };
+    return { ok: false, reason: 'unreadable' };
   }
   try {
     const value = JSON.parse(raw) as unknown;
-    if (!value || typeof value !== 'object' || Array.isArray(value)) return { ok: false };
+    if (!value || typeof value !== 'object' || Array.isArray(value)) {
+      return { ok: false, reason: 'unreadable' };
+    }
     // revoked 也要验型:下游用 `provider in bindings.revoked` 判定,而 `in` 的右操作数是
     // 原始值时直接抛 TypeError —— 一个被手工修坏的字段会让认领、迁移、登出乃至重新授权
-    // 全部炸在这里(PR #548 review)。同样按不可读处理:只读判定退到 fail-closed,用户再次
-    // 显式授权时 bindNativeProviderAuth 会重写整份文件,自然修好。
+    // 全部炸在这里(PR #548 review)。
+    //
+    // 但坏的只是这一个字段:同一份文件里各 provider 的归属仍然是可信的,要单独交出来。
+    // 认领 / 迁移 / 登出照样得 fail-closed(不知道谁被撤销过就不能认领),而显式授权可以
+    // 只修 revoked、保住其余归属 —— 否则一次「修复」会把别人的 owner 抹掉,反倒开出新的
+    // 误认领口子(PR #548 review)。
     const revoked = (value as { revoked?: unknown }).revoked;
     if (revoked !== undefined && (typeof revoked !== 'object' || revoked === null || Array.isArray(revoked))) {
-      return { ok: false };
+      const { revoked: _bad, ...rest } = value as BindingFile;
+      return { ok: false, reason: 'badRevoked', bindings: rest };
     }
     return { ok: true, bindings: value as BindingFile };
   } catch {
-    return { ok: false };
+    return { ok: false, reason: 'unreadable' };
   }
 }
 
@@ -88,14 +103,35 @@ export function isNativeProviderAuthBound(provider: NativeProviderId): boolean {
 export function bindNativeProviderAuth(provider: NativeProviderId): void {
   const owner = getActiveAppSession().dataOwnerId;
   if (!owner) throw new Error('cannot bind native provider auth without an active data owner');
-  const bindings = readBindings();
-  // 显式授权 = 用户重新表达了「我要连它」，撤销标记就此作废。
-  if (bindings.revoked && provider in bindings.revoked) {
-    const revoked = { ...bindings.revoked };
-    delete revoked[provider];
-    bindings.revoked = revoked;
+  const read = readBindingsOrFail();
+  if (read.ok) {
+    const bindings = read.bindings;
+    // 显式授权 = 用户重新表达了「我要连它」，撤销标记就此作废。
+    if (bindings.revoked && provider in bindings.revoked) {
+      const revoked = { ...bindings.revoked };
+      delete revoked[provider];
+      bindings.revoked = revoked;
+    }
+    writeBindings({ ...bindings, [provider]: owner });
+    return;
   }
-  writeBindings({ ...bindings, [provider]: owner });
+  if (read.reason === 'badRevoked') {
+    // 只有 revoked 坏掉:各 provider 的归属仍然可信,必须原样保留 —— 直接重写成「只有本次
+    // 授权的这一家」会抹掉别人的 owner,那份凭证下一次就会被自动认领给当前账号,等于用一次
+    // 修复换来一个新的越权口子(PR #548 review)。
+    //
+    // 坏掉的 revoked 无法得知谁被撤销过,不能简单丢弃(丢弃 = 给所有残留凭证放行)。保守重建:
+    // 除本次显式授权的这家外,其余 native provider 一律按「撤销过」对待,自动继承就此关闭,
+    // 用户对它们各自显式授权即可恢复。
+    const rebuilt: Partial<Record<NativeProviderId, string>> = {};
+    for (const other of NATIVE_PROVIDER_IDS) {
+      if (other !== provider) rebuilt[other] = owner;
+    }
+    writeBindings({ ...read.bindings, revoked: rebuilt, [provider]: owner });
+    return;
+  }
+  // 整份都读不出来:没有可保留的归属,只能重写。用户此刻正显式授权,不写等于连不上。
+  writeBindings({ [provider]: owner });
 }
 
 /**
@@ -144,7 +180,7 @@ export function migrateLegacyNativeProviderAuthBindings(
   if (bindings.legacyClaimOwner) return;
 
   const next: BindingFile = { ...bindings, legacyClaimOwner: ownerId };
-  for (const provider of ['anthropic', 'openai', 'xai'] as const) {
+  for (const provider of NATIVE_PROVIDER_IDS) {
     // 显式登出过的 provider 一律跳过:这条一次性迁移同样不能把用户弃用掉的残留凭证
     // 认领回来(PR #548 review)。
     if (bindings.revoked && provider in bindings.revoked) continue;
