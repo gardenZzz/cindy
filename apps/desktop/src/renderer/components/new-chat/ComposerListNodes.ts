@@ -39,6 +39,35 @@ interface PlainListParagraphMarker {
   attrs: Record<string, unknown>;
 }
 
+interface FenceState {
+  char: '`' | '~';
+  length: number;
+}
+
+function fenceOpening(text: string): FenceState | null {
+  const match = text.match(/^ {0,3}(`{3,}|~{3,})(.*)$/);
+  if (!match || (match[1][0] === '`' && match[2].includes('`'))) return null;
+  return { char: match[1][0] as FenceState['char'], length: match[1].length };
+}
+
+function isFenceClosing(text: string, state: FenceState): boolean {
+  const pattern = new RegExp(`^ {0,3}${state.char}{${state.length},}[ \\t]*$`);
+  return pattern.test(text);
+}
+
+function paragraphOffsetIsInsideFence(paragraph: PMNode, offset: number): boolean {
+  const text = paragraph.textBetween(0, offset, '\n', '\n');
+  let fence: FenceState | null = null;
+  for (const line of text.split('\n')) {
+    if (fence) {
+      if (isFenceClosing(line, fence)) fence = null;
+      continue;
+    }
+    fence = fenceOpening(line);
+  }
+  return fence !== null;
+}
+
 function plainListParagraphMarker(text: string): PlainListParagraphMarker | null {
   const bullet = text.match(/^([-+*•])([ \t]+)/);
   if (bullet) {
@@ -96,6 +125,7 @@ function hardBreakListInputRule(
       const markerOffset = range.from - paragraphStart;
       const hardBreak = paragraph.nodeAt(markerOffset - 1);
       if (hardBreak?.type.name !== 'hardBreak') return null;
+      if (paragraphOffsetIsInsideFence(paragraph, markerOffset)) return null;
 
       const before = paragraph.content.cut(0, markerOffset - hardBreak.nodeSize);
       const after = paragraph.content.cut(range.to - paragraphStart);
@@ -455,6 +485,24 @@ function getTrailingPlainListParagraph(view: EditorView): {
 
 export function hasTrailingPlainListParagraph(view: EditorView): boolean {
   return getTrailingPlainListParagraph(view) !== null;
+}
+
+export function isTrailingEmptyTopLevelParagraph(view: EditorView): boolean {
+  const { state } = view;
+  const { $from } = state.selection;
+  if (
+    !state.selection.empty ||
+    $from.depth !== 1 ||
+    $from.parent.type.name !== 'paragraph' ||
+    $from.parentOffset !== $from.parent.content.size ||
+    $from.after(1) !== state.doc.content.size
+  ) {
+    return false;
+  }
+  return (
+    $from.parent.content.size === 0 ||
+    ($from.parent.childCount === 1 && $from.parent.firstChild?.type.name === 'hardBreak')
+  );
 }
 
 export function promoteTrailingPlainListParagraph(view: EditorView): boolean {

@@ -5,7 +5,6 @@ import Document from '@tiptap/extension-document';
 import Paragraph from '@tiptap/extension-paragraph';
 import Text from '@tiptap/extension-text';
 import HardBreak from '@tiptap/extension-hard-break';
-import { Fragment, Slice } from '@tiptap/pm/model';
 import { TextSelection } from '@tiptap/pm/state';
 
 import {
@@ -14,9 +13,9 @@ import {
   ComposerOrderedList,
   handleStructuredListBackspace,
   handleStructuredListBreak,
+  isTrailingEmptyTopLevelParagraph,
   promoteTrailingPlainListParagraph,
 } from '@/components/new-chat/ComposerListNodes';
-import { plainTextToComposerDocument } from '@/lib/composerListDocument';
 import {
   serializeEditorContent,
   serializeEditorSlice,
@@ -292,6 +291,24 @@ describe('composer structured list input rules', () => {
     expect(list?.type.name).toBe('orderedList');
     expect(list?.attrs).toMatchObject({ start: 1, marker: '.' });
     expect(list?.lastChild?.textContent).toBe('12e21ed');
+  });
+
+  it('keeps markers literal after a hard break inside a fenced code block', () => {
+    const editor = makeEditor({
+      type: 'doc',
+      content: [
+        {
+          type: 'paragraph',
+          content: [{ type: 'text', text: '```' }, { type: 'hardBreak' }],
+        },
+      ],
+    });
+    selectDocumentEnd(editor);
+
+    typeThroughInputRules(editor, '1. ');
+
+    expect(editor.state.doc.firstChild?.type.name).toBe('paragraph');
+    expect(editor.state.doc.firstChild?.textContent).toBe('```1. ');
   });
 });
 
@@ -593,6 +610,22 @@ describe('composer structured list keyboard commands', () => {
 });
 
 describe('composer live plain-list promotion', () => {
+  it('recognizes only the trailing empty top-level paragraph as a list-paste boundary', () => {
+    const editor = makeEditor({
+      type: 'doc',
+      content: [
+        { type: 'paragraph', content: [{ type: 'text', text: 'before' }] },
+        { type: 'paragraph' },
+      ],
+    });
+
+    editor.commands.setTextSelection(2);
+    expect(isTrailingEmptyTopLevelParagraph(editor.view)).toBe(false);
+
+    selectDocumentEnd(editor);
+    expect(isTrailingEmptyTopLevelParagraph(editor.view)).toBe(true);
+  });
+
   it('promotes a trailing pasted row beside an existing structured list', () => {
     const editor = makeEditor({
       type: 'doc',
@@ -883,6 +916,34 @@ describe('composer structured list serialization', () => {
     expect(serializeEditorContent(editor).text).toBe('-\tparent\n    - child');
   });
 
+  it('indents hard-break continuation lines inside a list item', () => {
+    const editor = makeEditor({
+      type: 'doc',
+      content: [
+        {
+          type: 'bulletList',
+          content: [
+            {
+              type: 'listItem',
+              content: [
+                {
+                  type: 'paragraph',
+                  content: [
+                    { type: 'text', text: 'first' },
+                    { type: 'hardBreak' },
+                    { type: 'text', text: 'second' },
+                  ],
+                },
+              ],
+            },
+          ],
+        },
+      ],
+    });
+
+    expect(serializeEditorContent(editor).text).toBe('- first\n  second');
+  });
+
   it('keeps a dragged quote inside its list item', () => {
     const editor = makeEditor({
       type: 'doc',
@@ -939,6 +1000,56 @@ describe('composer structured list serialization', () => {
     expect(parseChatQuoteSegments(serialized)).toEqual([
       { kind: 'text', text: 'parent\n  - child' },
       { kind: 'quote', quote: { text: 'quoted' } },
+    ]);
+  });
+
+  it('indents a restored quote after a no-space CJK list marker', () => {
+    const editor = makeEditor({
+      type: 'doc',
+      content: [
+        { type: 'paragraph', content: [{ type: 'text', text: 'parent' }] },
+        { type: 'paragraph', content: [{ type: 'text', text: '  2、项目' }] },
+        {
+          type: 'paragraph',
+          content: [{ type: COMPOSER_QUOTE_NODE_TYPE, attrs: { text: 'quoted' } }],
+        },
+      ],
+    });
+
+    expect(serializeEditorContent(editor).text).toBe(
+      'parent\n  2、项目\n    > <!-- cindy-composer-quote -->\n    > quoted',
+    );
+  });
+
+  it('keeps quote-like reply text separate from a list quote chip', () => {
+    const editor = makeEditor({
+      type: 'doc',
+      content: [
+        {
+          type: 'bulletList',
+          content: [
+            {
+              type: 'listItem',
+              content: [
+                {
+                  type: 'paragraph',
+                  content: [
+                    { type: COMPOSER_QUOTE_NODE_TYPE, attrs: { text: 'quoted' } },
+                    { type: 'text', text: '> reply' },
+                  ],
+                },
+              ],
+            },
+          ],
+        },
+      ],
+    });
+
+    const serialized = serializeEditorContent(editor).text;
+    expect(parseChatQuoteSegments(serialized)).toEqual([
+      { kind: 'text', text: '- ' },
+      { kind: 'quote', quote: { text: 'quoted' } },
+      { kind: 'text', text: '  > reply' },
     ]);
   });
 
@@ -1043,27 +1154,40 @@ describe('composer structured list serialization', () => {
     expect(serializeEditorContent(editor).text).toBe('2. ');
   });
 
-  it('inserts normalized list blocks at a non-terminal selection', () => {
+  it('keeps partial inline boundaries when copying one ordered-list item', () => {
     const editor = makeEditor({
       type: 'doc',
       content: [
-        { type: 'paragraph', content: [{ type: 'text', text: 'before' }] },
-        { type: 'paragraph', content: [{ type: 'text', text: 'after' }] },
+        {
+          type: 'orderedList',
+          attrs: { start: 1, marker: '.' },
+          content: [
+            {
+              type: 'listItem',
+              content: [{ type: 'paragraph', content: [{ type: 'text', text: 'first' }] }],
+            },
+            {
+              type: 'listItem',
+              content: [{ type: 'paragraph', content: [{ type: 'text', text: 'second' }] }],
+            },
+          ],
+        },
       ],
     });
-    editor.commands.setTextSelection(2);
-    const replacement = plainTextToComposerDocument('1. first\n2. second').content!.map((node) =>
-      editor.state.schema.nodeFromJSON(node),
+    let secondTextPosition = 0;
+    editor.state.doc.descendants((node, position) => {
+      if (node.isText && node.text === 'second') secondTextPosition = position;
+    });
+    editor.commands.setTextSelection({
+      from: secondTextPosition + 1,
+      to: secondTextPosition + 4,
+    });
+    const slice = editor.state.doc.slice(
+      editor.state.selection.from,
+      editor.state.selection.to,
     );
-    const tr = editor.state.tr.replaceSelection(new Slice(Fragment.from(replacement), 0, 0));
-    editor.view.dispatch(tr);
 
-    expect(editor.state.doc.textContent).toContain('first');
-    expect(editor.state.doc.textContent).toContain('second');
-    expect(editor.state.doc.childCount).toBeGreaterThan(2);
-    expect(editor.state.doc.content.content.some((node) => node.type.name === 'orderedList')).toBe(
-      true,
-    );
+    expect(serializeEditorSlice(editor, slice)).toBe('2. eco');
   });
 
   it('preserves nested markers and projects atom ranges into wire offsets', () => {
