@@ -3265,6 +3265,8 @@
         "fileSub": "Files",
         "openReview": "レビューを開く",
         "reviewSub": "Review",
+        "openBackgroundTasks": "バックグラウンドタスクを開く",
+        "backgroundTasksSub": "Background tasks",
         "openBrowser": "ブラウザを開く",
         "browserSub": "Browser",
         "openTerminal": "ターミナルを開く",
