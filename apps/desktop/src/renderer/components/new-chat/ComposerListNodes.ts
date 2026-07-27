@@ -142,10 +142,10 @@ export const ComposerBulletList = Node.create({
   addInputRules() {
     return [
       wrappingInputRule({
-        find: /^\s*([-+*])\s$/,
+        find: /^\s*([-+*•])\s$/,
         type: this.type,
       }),
-      hardBreakListInputRule(/^\s*([-+*])\s$/, this.type),
+      hardBreakListInputRule(/^\s*([-+*•])\s$/, this.type),
     ];
   },
 });

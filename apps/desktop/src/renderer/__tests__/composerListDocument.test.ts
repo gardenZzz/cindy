@@ -87,6 +87,48 @@ describe('composer list document normalization', () => {
     });
   });
 
+  it('keeps non-contiguous ordered rows as separate lists', () => {
+    expect(
+      normalizeComposerDocumentJSON({
+        type: 'doc',
+        content: [
+          {
+            type: 'paragraph',
+            content: [
+              { type: 'text', text: '1. first' },
+              { type: 'hardBreak' },
+              { type: 'text', text: '3. third' },
+            ],
+          },
+        ],
+      }),
+    ).toEqual({
+      type: 'doc',
+      content: [
+        {
+          type: 'orderedList',
+          attrs: { start: 1, marker: '.' },
+          content: [
+            {
+              type: 'listItem',
+              content: [{ type: 'paragraph', content: [{ type: 'text', text: 'first' }] }],
+            },
+          ],
+        },
+        {
+          type: 'orderedList',
+          attrs: { start: 3, marker: '.' },
+          content: [
+            {
+              type: 'listItem',
+              content: [{ type: 'paragraph', content: [{ type: 'text', text: 'third' }] }],
+            },
+          ],
+        },
+      ],
+    });
+  });
+
   it('leaves existing structured content unchanged', () => {
     const document = {
       type: 'doc' as const,
