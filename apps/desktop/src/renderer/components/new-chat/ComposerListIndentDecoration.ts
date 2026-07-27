@@ -1,8 +1,9 @@
 /**
- * Tiptap 扩展 —— composer 列表行缩进(纯视觉,对齐 Claude 原生 App 的
- * "进入列表模式"反馈)。
+ * Tiptap 扩展 —— composer 纯文本 Markdown 列表的兼容缩进。
  *
- * 行为:当某一"行"(段落内以 hardBreak 划分)以列表 / 待办 / 引用前缀开头
+ * 结构化 bullet / ordered list 由 schema 和原生列表布局负责；本扩展只处理
+ * 粘贴或旧草稿中仍为文本的列表，以及待办 / 引用前缀。当某一"行"
+ * (段落内以 hardBreak 划分)以列表 / 待办 / 引用前缀开头
  * (`1. ` / `- ` / `- [ ] ` / `> ` 等,与列表接续共用 matchListPrefix 判定),
  * 单行段落使用 node decoration,hardBreak 分隔的多行段落按行使用 inline
  * decoration；连续数字/字母正文使用 marker/body 两个盒子，避免长串把
@@ -21,7 +22,7 @@
  *   全量成本可忽略,不值得做增量映射);
  * - IME composition 开始前临时移除 decoration,结束后的下一轮 task 再按
  *   当前 doc 补算,避免微软拼音输入时改写 composition DOM;
- * - 这是纯文本编辑器的视觉缩进,不改变 doc JSON / 发送文本。
+ * - 这是兼容文本行的视觉缩进,不改变 doc JSON / 发送文本。
  */
 import { Extension } from '@tiptap/core';
 import { Plugin, PluginKey } from '@tiptap/pm/state';
@@ -49,6 +50,10 @@ type ListDecorationPluginState = {
 
 type CompositionMeta = 'suspend' | 'resume';
 
+interface ComposerListIndentOptions {
+  structuredLists: boolean;
+}
+
 const PLUGIN_STATE_KEY = new PluginKey<ListDecorationPluginState>(
   'composerListIndentDecorationState',
 );
@@ -60,6 +65,8 @@ const CJK_PUNCTUATION_RE = /[\u3000-\u303f\uff00-\uffef]/;
 // 普通句子里偶然出现长 token 时，交给 overflow-wrap:anywhere，保留空格
 // 的自然断词行为，避免把整句变成逐字断行。
 const LONG_ALPHANUMERIC_BODY_RE = /^\s*[A-Za-z0-9]{12,}\s*$/;
+const PROMOTABLE_TOP_LEVEL_LIST_RE =
+  /^(?:[-+*•][ \t]+|\d{1,6}[.)][ \t]+|\d{1,6}、[ \t]*)/;
 
 interface ListIndentValues {
   ch: number;
@@ -149,6 +156,7 @@ export function buildListIndentDecorations(
   doc: PMNode,
   slashCommandMatches: ReadonlyArray<Pick<SlashCommandMatch, 'from' | 'to'>> = [],
   voiceReplacementRange: VoiceInputReplacementRange | null = null,
+  structuredLists = false,
 ): DecorationSet {
   const decorations: Decoration[] = [];
 
@@ -200,9 +208,21 @@ export function buildListIndentDecorations(
     lineEndOffset = block.content.size;
     flushLine(); // 段落最后一行
 
+    const compatibilityMatch = (line: (typeof lines)[number]) => {
+      const match = matchListPrefix(line.text);
+      if (
+        match &&
+        structuredLists &&
+        !line.hasInlineAtom &&
+        PROMOTABLE_TOP_LEVEL_LIST_RE.test(line.text)
+      ) {
+        return null;
+      }
+      return match;
+    };
     const lineMatches = lines.map((line) => ({
       line,
-      match: matchListPrefix(line.text),
+      match: compatibilityMatch(line),
     }));
     const hasFallbackLine = lineMatches.some(({ line, match }) => {
       if (!match) return false;
@@ -243,7 +263,7 @@ export function buildListIndentDecorations(
     }
 
     const addLineDecoration = (line: (typeof lines)[number]) => {
-      const match = matchListPrefix(line.text);
+      const match = compatibilityMatch(line);
       if (!match) {
         if (hasFallbackLine && lines.length > 1 && line.end > line.start) {
           const hasCjkPunctuation = CJK_PUNCTUATION_RE.test(line.text);
@@ -316,7 +336,7 @@ export function buildListIndentDecorations(
 
     if (lines.length === 1) {
       const [line] = lines;
-      const match = line && matchListPrefix(line.text);
+      const match = line && compatibilityMatch(line);
       const prefix = match ? line.text.slice(0, match.prefixLength) : '';
       const body = line && match ? line.text.slice(match.prefixLength) : '';
       const from = line ? contentBase + line.start : contentBase;
@@ -398,11 +418,18 @@ export function buildListIndentDecorations(
   return DecorationSet.create(doc, decorations);
 }
 
-export const ComposerListIndentDecoration = Extension.create({
+export const ComposerListIndentDecoration = Extension.create<ComposerListIndentOptions>({
   name: 'composerListIndentDecoration',
+
+  addOptions() {
+    return {
+      structuredLists: false,
+    };
+  },
 
   addProseMirrorPlugins() {
     let resumeTimer: ReturnType<typeof setTimeout> | null = null;
+    const structuredLists = this.options.structuredLists;
 
     return [
       new Plugin<ListDecorationPluginState>({
@@ -414,6 +441,8 @@ export const ComposerListIndentDecoration = Extension.create({
               decorations: buildListIndentDecorations(
                 state.doc,
                 findSlashCommandMatches(state.doc, roster),
+                null,
+                structuredLists,
               ),
               suspendedForComposition: false,
             };
@@ -446,6 +475,7 @@ export const ComposerListIndentDecoration = Extension.create({
                 tr.doc,
                 findSlashCommandMatches(tr.doc, roster),
                 voiceReplacement.range,
+                structuredLists,
               ),
               suspendedForComposition: false,
             };
