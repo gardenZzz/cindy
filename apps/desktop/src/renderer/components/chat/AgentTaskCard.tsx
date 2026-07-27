@@ -6,6 +6,7 @@ import {
   ChevronRight,
   CircleStop,
   LoaderCircle,
+  PanelRight,
   Square,
   SquareTerminal,
   Workflow,
@@ -17,9 +18,9 @@ import { Collapse } from '@/components/ui/collapse';
 import { Spinner } from '@/components/ui/spinner';
 import type { AgentTaskUpdate, ChatMessage } from '@/hooks/useCCAgentChat';
 import { isRemoteSession } from '@/lib/makerTransport';
+import { openBackgroundTasksTab } from '@/features/right-sidebar/lib/openBackgroundTasksTab';
 import { cn } from '@/lib/utils';
 import { formatModelShortLabel } from '@/lib/modelShortLabel';
-import { WorkflowAgentTree } from './WorkflowAgentTree';
 
 interface AgentTaskCardProps {
   toolCall?: ChatMessage;
@@ -32,8 +33,8 @@ interface AgentTaskCardProps {
    */
   subagentModel?: string;
   /**
-   * workflow-card: 当前会话 id。仅 workflow 卡片用来经 IPC 拉逐 agent 进度树
-   * (getWorkflowProgress(sessionId, taskId));普通 Agent/Task 卡片不需要。
+   * 当前会话 id。workflow 卡用于打开右栏后台任务面板并定位详情;stop 按钮
+   * 定位任务也依赖它。
    */
   sessionId?: string;
 }
@@ -98,8 +99,8 @@ export function AgentTaskCard({ toolCall, update, result, subagentModel, session
   );
   // workflow-card: Workflow 工具在父会话事件流里是单个 local_workflow 任务(内部子 agent
   // 不发独立 task 事件,只有 workflow 级聚合进度)。按 taskType / toolName 识别:标题优先取
-  // workflowName、头像换 Workflow 图标、provider 标签显示 "Workflow";其余(状态 / 聚合
-  // usage / 展开详情)复用本卡既有逻辑。
+  // workflowName、头像换 Workflow 图标、provider 标签显示 "Workflow"。workflow 卡不展开 ——
+  // 主视图在右栏「后台任务」面板,整卡是打开面板并定位详情的入口。
   const isWorkflow = update?.taskType === 'local_workflow' || toolCall?.toolName === 'Workflow';
   // bash-task-card: 后台 Bash(run_in_background)与子 Agent 共用本卡,但视觉上
   // 是「后台命令」—— 终端图标 + shell provider 标签,避免用户把跑测试的 bash
@@ -152,6 +153,45 @@ export function AgentTaskCard({ toolCall, update, result, subagentModel, session
       .finally(() => setStopping(false));
   }, [sessionId, update?.taskId]);
 
+  // workflow 卡整卡点击 → 打开右栏后台任务面板并定位本任务;sessionId / taskId
+  // 任一缺失(历史孤儿卡)时降级 no-op,外观不变。
+  const workflowTaskId = update?.taskId;
+  const openInPanel = useCallback(() => {
+    if (!sessionId || !workflowTaskId) return;
+    void openBackgroundTasksTab(sessionId, { focusTaskId: workflowTaskId });
+  }, [sessionId, workflowTaskId]);
+
+  // workflow 摘要行:当前运行中 agent 的 phaseTitle + 已收口/总数。收口词表与后台
+  // 任务面板同口径(事件流 done/error;wf 文件 failed/stopped/killed)。
+  const workflowSummary = useMemo(() => {
+    if (!isWorkflow) return null;
+    const entries = update?.workflowProgress;
+    if (!entries || entries.length === 0) return null;
+    let total = 0;
+    let done = 0;
+    let phase: string | undefined;
+    for (const entry of entries) {
+      if (entry.type !== 'workflow_agent') continue;
+      total += 1;
+      const state = entry.state;
+      if (
+        state === 'done' ||
+        state === 'error' ||
+        state === 'failed' ||
+        state === 'stopped' ||
+        state === 'killed'
+      ) {
+        done += 1;
+      } else if (
+        (state === 'start' || state === 'progress' || state === 'running') &&
+        entry.phaseTitle
+      ) {
+        phase = entry.phaseTitle;
+      }
+    }
+    return total > 0 ? { phase, done, total } : null;
+  }, [isWorkflow, update?.workflowProgress]);
+
   const meta = useMemo(() => {
     const parts: Array<{ key: string; text: string }> = [
       { key: 'provider', text: providerLabel },
@@ -169,28 +209,22 @@ export function AgentTaskCard({ toolCall, update, result, subagentModel, session
 
   return (
     <div className="flex w-full justify-start">
-      <div
-        // workflow-card: /workflows 命令据此 data 属性在**本会话作用域内**定位最近一张
-        // workflow 卡(data-workflow-session 限定会话,防多会话同挂 DOM 时选错),并用
-        // data-workflow-expandkey(= 本卡的 useExpandedBlockMemory blockId)命令式展开它。
-        {...(isWorkflow
-          ? {
-              'data-workflow-card': 'true',
-              'data-workflow-session': sessionId ?? '',
-              'data-workflow-expandkey': blockId,
-            }
-          : {})}
-        className="w-full rounded-[12px] border border-[var(--border-default)] bg-[var(--surface-elevated)] px-3 py-2"
-      >
-        {/* 折叠头 = 展开 toggle + 可选的停止按钮。button 不能嵌套,停止按钮以
-            兄弟节点挂在 toggle 右侧(仅 running 时出现)。 */}
+      <div className="w-full rounded-[12px] border border-[var(--border-default)] bg-[var(--surface-elevated)] px-3 py-2">
+        {/* 头部按钮:普通卡 = 展开 toggle;workflow 卡 = 打开后台任务面板入口。
+            button 不能嵌套,停止按钮以兄弟节点挂在右侧(仅 running 时出现)。 */}
         <div className="flex w-full items-start gap-2">
         <button
           type="button"
-          onClick={toggle}
+          onClick={isWorkflow ? openInPanel : toggle}
           className="flex min-w-0 flex-1 items-start gap-2 text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--focus-ring)]"
-          aria-expanded={expanded}
-          aria-label={expanded ? t('chat.agentTask.hideDetails') : t('chat.agentTask.showDetails')}
+          {...(isWorkflow
+            ? { 'aria-label': t('chat.agentTask.openInPanel') }
+            : {
+                'aria-expanded': expanded,
+                'aria-label': expanded
+                  ? t('chat.agentTask.hideDetails')
+                  : t('chat.agentTask.showDetails'),
+              })}
         >
           <span className="mt-[2px] inline-flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-[var(--surface-chip)] text-[var(--text-secondary)]">
             <AvatarIcon size={14} aria-hidden="true" />
@@ -226,16 +260,41 @@ export function AgentTaskCard({ toolCall, update, result, subagentModel, session
                 </Fragment>
               ))}
             </span>
-          </span>
-          <ChevronRight
-            size={14}
-            className={cn(
-              'mt-1 shrink-0 text-[var(--text-tertiary)]',
-              'transition-transform duration-[var(--motion-fast,150ms)]',
-              expanded && 'rotate-90',
+            {workflowSummary && (
+              <span
+                data-workflow-progress-line="true"
+                className="mt-0.5 block truncate text-12 leading-4 text-[var(--text-tertiary)]"
+              >
+                {workflowSummary.phase
+                  ? t('chat.agentTask.workflowProgressLine', {
+                      phase: workflowSummary.phase,
+                      done: workflowSummary.done,
+                      total: workflowSummary.total,
+                    })
+                  : t('chat.agentTask.workflowProgressCount', {
+                      done: workflowSummary.done,
+                      total: workflowSummary.total,
+                    })}
+              </span>
             )}
-            aria-hidden="true"
-          />
+          </span>
+          {isWorkflow ? (
+            <PanelRight
+              size={14}
+              className="mt-1 shrink-0 text-[var(--text-tertiary)]"
+              aria-hidden="true"
+            />
+          ) : (
+            <ChevronRight
+              size={14}
+              className={cn(
+                'mt-1 shrink-0 text-[var(--text-tertiary)]',
+                'transition-transform duration-[var(--motion-fast,150ms)]',
+                expanded && 'rotate-90',
+              )}
+              aria-hidden="true"
+            />
+          )}
         </button>
         {canStop && (
           <button
@@ -257,31 +316,25 @@ export function AgentTaskCard({ toolCall, update, result, subagentModel, session
         )}
         </div>
 
-        <Collapse open={expanded}>
-          <div className="mt-2 border-l-2 border-[var(--agent-actions-rail)] pl-3 text-13 leading-5 text-[var(--text-secondary)]">
-            {description && <p className="mb-1">{description}</p>}
-            {summary && <p className="mb-1 whitespace-pre-wrap">{summary}</p>}
-            {update?.lastToolName && (
-              <p className="text-12 leading-4 text-[var(--text-tertiary)]">
-                {t('chat.agentTask.lastTool', { tool: update.lastToolName })}
-              </p>
-            )}
-            {update?.outputFile && (
-              <p className="text-12 leading-4 text-[var(--text-tertiary)]">
-                {t('chat.agentTask.outputFile', { path: update.outputFile })}
-              </p>
-            )}
-            {/* workflow-card: 逐 agent 进度树(增强)。读不到记录 → 渲染 null,上面的
-                workflow 级信息(名字/状态/聚合 usage)照常展示,即 v1 形态优雅回退。 */}
-            {isWorkflow && (
-              <WorkflowAgentTree
-                {...(sessionId ? { sessionId } : {})}
-                {...(update?.taskId ? { taskId: update.taskId } : {})}
-                isRunning={status === 'running'}
-              />
-            )}
-          </div>
-        </Collapse>
+        {/* workflow 卡不渲染展开区:详情(逐 agent 进度树等)在后台任务面板。 */}
+        {!isWorkflow && (
+          <Collapse open={expanded}>
+            <div className="mt-2 border-l-2 border-[var(--agent-actions-rail)] pl-3 text-13 leading-5 text-[var(--text-secondary)]">
+              {description && <p className="mb-1">{description}</p>}
+              {summary && <p className="mb-1 whitespace-pre-wrap">{summary}</p>}
+              {update?.lastToolName && (
+                <p className="text-12 leading-4 text-[var(--text-tertiary)]">
+                  {t('chat.agentTask.lastTool', { tool: update.lastToolName })}
+                </p>
+              )}
+              {update?.outputFile && (
+                <p className="text-12 leading-4 text-[var(--text-tertiary)]">
+                  {t('chat.agentTask.outputFile', { path: update.outputFile })}
+                </p>
+              )}
+            </div>
+          </Collapse>
+        )}
       </div>
     </div>
   );

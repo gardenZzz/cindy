@@ -4347,6 +4347,9 @@
         "stopped": "停止済み"
       },
       "stop": "このタスクを停止",
+      "openInPanel": "バックグラウンドタスクパネルで開く",
+      "workflowProgressLine": "{{phase}} · {{done}}/{{total}} Agent",
+      "workflowProgressCount": "{{done}}/{{total}} Agent",
       "tokens": "{{count}} tokens",
       "toolUses_one": "{{count}} 回のツール使用",
       "toolUses_other": "{{count}} 回のツール使用",

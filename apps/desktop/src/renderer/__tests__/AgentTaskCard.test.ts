@@ -13,6 +13,12 @@ vi.mock('react-i18next', () => ({
       if (key === 'chat.agentTask.status.running') return 'Running';
       if (key === 'chat.agentTask.tokens') return `${vars?.count} tokens`;
       if (key === 'chat.agentTask.toolUses') return `${vars?.count} tool uses`;
+      if (key === 'chat.agentTask.workflowProgressLine') {
+        return `${vars?.phase} · ${vars?.done}/${vars?.total} Agent`;
+      }
+      if (key === 'chat.agentTask.workflowProgressCount') {
+        return `${vars?.done}/${vars?.total} Agent`;
+      }
       return key;
     },
   }),
@@ -23,6 +29,13 @@ vi.mock('@/hooks/useExpandedBlockMemory', () => ({
     expanded: true,
     setExpanded: vi.fn(),
   }),
+}));
+
+const { openBackgroundTasksTabMock } = vi.hoisted(() => ({
+  openBackgroundTasksTabMock: vi.fn().mockResolvedValue(undefined),
+}));
+vi.mock('@/features/right-sidebar/lib/openBackgroundTasksTab', () => ({
+  openBackgroundTasksTab: openBackgroundTasksTabMock,
 }));
 
 import { AgentTaskCard } from '@/components/chat/AgentTaskCard';
@@ -185,5 +198,154 @@ describe('AgentTaskCard', () => {
       }),
     );
     expect(stopButton(noSession.container)).toBeNull();
+  });
+
+  // workflow-card:整卡 = 后台任务面板入口 -------------------------------------
+  const headerButton = (container: HTMLElement) =>
+    container.querySelector<HTMLButtonElement>('button[aria-label="chat.agentTask.openInPanel"]');
+
+  it('opens the background tasks panel focused on the task when a workflow card is clicked', () => {
+    openBackgroundTasksTabMock.mockClear();
+    const { container } = render(
+      React.createElement(AgentTaskCard, {
+        sessionId: 'session-1',
+        update: {
+          provider: 'claude-code',
+          taskId: 'wf-1',
+          status: 'running',
+          taskType: 'local_workflow',
+          workflowName: 'Release pipeline',
+        },
+      }),
+    );
+    const btn = headerButton(container);
+    expect(btn).not.toBeNull();
+    // workflow 卡不是展开 toggle:无 aria-expanded。
+    expect(btn!.hasAttribute('aria-expanded')).toBe(false);
+    act(() => {
+      btn!.click();
+    });
+    expect(openBackgroundTasksTabMock).toHaveBeenCalledWith('session-1', { focusTaskId: 'wf-1' });
+  });
+
+  it('degrades to a no-op when sessionId or taskId is missing on a workflow card', () => {
+    openBackgroundTasksTabMock.mockClear();
+    const { container } = render(
+      React.createElement(AgentTaskCard, {
+        // sessionId 缺失 → 点击不跳转,外观不变。
+        update: {
+          provider: 'claude-code',
+          taskId: 'wf-1',
+          status: 'running',
+          taskType: 'local_workflow',
+        },
+      }),
+    );
+    const btn = headerButton(container);
+    expect(btn).not.toBeNull();
+    act(() => {
+      btn!.click();
+    });
+    expect(openBackgroundTasksTabMock).not.toHaveBeenCalled();
+  });
+
+  it('renders no inline expand region for workflow cards', () => {
+    const { container } = render(
+      React.createElement(AgentTaskCard, {
+        sessionId: 'session-1',
+        update: {
+          provider: 'claude-code',
+          taskId: 'wf-1',
+          status: 'completed',
+          taskType: 'local_workflow',
+          workflowName: 'Release pipeline',
+          description: 'WORKFLOW_DESCRIPTION_HIDDEN',
+          summary: 'WORKFLOW_SUMMARY_HIDDEN',
+        },
+      }),
+    );
+    // useExpandedBlockMemory mock 恒为 expanded=true,仍不得渲染展开区内容。
+    expect(container.textContent).not.toContain('WORKFLOW_DESCRIPTION_HIDDEN');
+    expect(container.textContent).not.toContain('WORKFLOW_SUMMARY_HIDDEN');
+    expect(container.querySelector('[aria-expanded]')).toBeNull();
+  });
+
+  const progressLine = (container: HTMLElement) =>
+    container.querySelector('[data-workflow-progress-line="true"]');
+
+  it('renders the live progress line from workflowProgress entries', () => {
+    const { container } = render(
+      React.createElement(AgentTaskCard, {
+        sessionId: 'session-1',
+        update: {
+          provider: 'claude-code',
+          taskId: 'wf-1',
+          status: 'running',
+          taskType: 'local_workflow',
+          workflowProgress: [
+            { type: 'workflow_phase', index: 0, title: 'Build' },
+            { type: 'workflow_agent', index: 1, label: 'a', phaseTitle: 'Build', state: 'done' },
+            { type: 'workflow_agent', index: 2, label: 'b', phaseTitle: 'Test', state: 'progress' },
+            { type: 'workflow_agent', index: 3, label: 'c', phaseTitle: 'Test', state: 'error' },
+          ],
+        },
+      }),
+    );
+    expect(progressLine(container)?.textContent).toBe('Test · 2/3 Agent');
+  });
+
+  it('falls back to counts only when no running agent carries a phaseTitle', () => {
+    const { container } = render(
+      React.createElement(AgentTaskCard, {
+        sessionId: 'session-1',
+        update: {
+          provider: 'claude-code',
+          taskId: 'wf-1',
+          status: 'completed',
+          taskType: 'local_workflow',
+          workflowProgress: [
+            { type: 'workflow_agent', index: 0, label: 'a', state: 'done' },
+            { type: 'workflow_agent', index: 1, label: 'b', state: 'done' },
+          ],
+        },
+      }),
+    );
+    expect(progressLine(container)?.textContent).toBe('2/2 Agent');
+  });
+
+  it('renders no progress line when workflowProgress is absent, and keeps non-workflow cards off the panel entry', () => {
+    openBackgroundTasksTabMock.mockClear();
+    const workflow = render(
+      React.createElement(AgentTaskCard, {
+        sessionId: 'session-1',
+        update: {
+          provider: 'claude-code',
+          taskId: 'wf-1',
+          status: 'running',
+          taskType: 'local_workflow',
+        },
+      }),
+    );
+    expect(progressLine(workflow.container)).toBeNull();
+
+    const normal = render(
+      React.createElement(AgentTaskCard, {
+        sessionId: 'session-1',
+        update: {
+          provider: 'claude-code',
+          taskId: 'task-1',
+          status: 'running',
+          title: 'Inspect files',
+        },
+      }),
+    );
+    // 普通卡头部仍是展开 toggle,不触发面板。
+    const toggleBtn = normal.container.querySelector<HTMLButtonElement>('button[aria-expanded]');
+    expect(toggleBtn).not.toBeNull();
+    act(() => {
+      toggleBtn!.click();
+    });
+    expect(openBackgroundTasksTabMock).not.toHaveBeenCalled();
+    expect(progressLine(normal.container)).toBeNull();
   });
 });

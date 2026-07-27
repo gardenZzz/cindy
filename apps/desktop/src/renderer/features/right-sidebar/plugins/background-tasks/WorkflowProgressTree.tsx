@@ -5,8 +5,7 @@
  * - 数据由上层用 buildWorkflowTreeModel 合并好后传入;本组件不拉数据、不轮询、无状态;
  * - 无列表动画(DESIGN.md §14.4:静态渲染;唯一动效是 Spinner 的 compositor-only 转圈);
  * - 颜色全走语义 token,Light/Dark 同源;
- * - 状态图标/词表口径与聊天流 WorkflowAgentTree 一致,并补齐事件流词表
- *   (start/progress → 转圈)。
+ * - 状态图标/词表覆盖两套词表:wf 文件词表 + 事件流词表(start/progress → 转圈)。
  */
 
 import {

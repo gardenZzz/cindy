@@ -139,7 +139,7 @@ export function buildWorkflowTreeModel(input: {
 /**
  * entries 主结构:workflow_phase 条目出现顺序定 phase 顺序(同名只保留首个),
  * workflow_agent 按 phaseTitle 归组;不属于任何 phase 的进末尾 title=null 组。
- * 分组口径与 WorkflowAgentTree 一致:没有 agent 的 phase 不产出分组。
+ * 分组口径:没有 agent 的 phase 不产出分组。
  */
 function groupsFromEntries(
   entries: readonly WorkflowProgressEntry[],
