@@ -8,6 +8,7 @@ import type { DbClient } from '../../localDb/client/DbClient.js';
 import { clearCurrentDbClient, setCurrentDbClient } from '../../localDb/client/current.js';
 import * as schema from '../../localDb/schema.js';
 import { listCustomProviders } from '../../maker-host/custom-provider-store.js';
+import { throwIpcError } from '../../utils/ipcValidate.js';
 import { MAKER_INVOKE } from '../channels.js';
 import { registerProviderHandlers, type ProviderHandlerDeps } from '../providerHandlers.js';
 import { IpcHarness } from './helpers/ipcHarness.js';
@@ -108,6 +109,61 @@ describe('provider:list IPC handler', () => {
       }),
     );
     await expect(harness.invoke(MAKER_INVOKE.PROVIDER_LIST)).rejects.toThrow('boom');
+  });
+});
+
+describe('provider:models-rediscover handler', () => {
+  it('校验 sender 后才发起重新发现;不可信 sender 直接拒绝', async () => {
+    const harness = new IpcHarness();
+    const assertTrustedSender = vi.fn((_event: unknown) => {
+      throwIpcError('PERMISSION_DENIED', '此操作只能从 Cindy 主页面发起');
+    });
+    const deps = makeDeps({ assertTrustedSender });
+    registerProviderHandlers(harness, deps);
+
+    await expect(
+      harness.invoke(MAKER_INVOKE.PROVIDER_MODELS_REDISCOVER, 'anthropic'),
+    ).rejects.toThrow(/PERMISSION_DENIED/);
+    // 拒绝发生在任何上游动作之前:绝不让不可信 sender 触发带凭证的请求。
+    expect(deps.rediscoverModels).not.toHaveBeenCalled();
+  });
+
+  it('成功时返回 ok 且不重复广播(发现流程自己收口)', async () => {
+    const harness = new IpcHarness();
+    const deps = makeDeps();
+    registerProviderHandlers(harness, deps);
+
+    await expect(harness.invoke(MAKER_INVOKE.PROVIDER_MODELS_REDISCOVER, 'anthropic')).resolves.toEqual({
+      ok: true,
+    });
+    expect(deps.rediscoverModels).toHaveBeenCalledWith('anthropic');
+    expect(deps.broadcastChanged).not.toHaveBeenCalled();
+  });
+
+  it('回传失败归因供 renderer 渲染分类文案', async () => {
+    const harness = new IpcHarness();
+    const failure = { kind: 'regionBlocked' as const, at: '2026-07-27T00:00:00.000Z' };
+    registerProviderHandlers(harness, makeDeps({ rediscoverModels: vi.fn(async () => failure) }));
+
+    await expect(
+      harness.invoke(MAKER_INVOKE.PROVIDER_MODELS_REDISCOVER, 'anthropic'),
+    ).resolves.toEqual({ ok: false, failure });
+  });
+
+  it('意外异常转结构化 INTERNAL,不以裸 Error 漏给 renderer', async () => {
+    const harness = new IpcHarness();
+    registerProviderHandlers(
+      harness,
+      makeDeps({
+        rediscoverModels: vi.fn(async () => {
+          throw new Error('disk full');
+        }),
+      }),
+    );
+
+    await expect(
+      harness.invoke(MAKER_INVOKE.PROVIDER_MODELS_REDISCOVER, 'anthropic'),
+    ).rejects.toThrow(/INTERNAL/);
   });
 });
 

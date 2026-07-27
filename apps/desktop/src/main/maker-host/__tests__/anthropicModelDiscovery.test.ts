@@ -932,6 +932,72 @@ describe('HTTP 发现失败的归因与选择性重试', () => {
     }
   });
 
+  it('200 但正文坏掉归 upstream(破损代理 / CDN 截断),不能说成「连不上」', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn().mockResolvedValue({
+        ok: true,
+        json: async () => {
+          throw new SyntaxError('Unexpected end of JSON input');
+        },
+      }),
+    );
+    await refreshAnthropicModelsFromHttp();
+    const failure = getAnthropicModelDiscoveryFailure();
+    expect(failure?.kind).toBe('upstream');
+    expect(failure?.detail).toContain('malformed response body');
+  });
+
+  it('401 先强制换一枚 token 重试一次;换到新 token 且成功就不该报「请重新连接」', async () => {
+    oauthRefreshMock.getValidClaudeAiOAuth.mockReset();
+    oauthRefreshMock.getValidClaudeAiOAuth
+      .mockResolvedValueOnce({ accessToken: 'stale-token' })
+      .mockResolvedValueOnce({ accessToken: 'fresh-token' })
+      .mockResolvedValue({ accessToken: 'fresh-token' });
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(errorResponse(401))
+      .mockResolvedValue(okResponse);
+    vi.stubGlobal('fetch', fetchMock);
+
+    await refreshAnthropicModelsFromHttp();
+
+    expect(oauthRefreshMock.getValidClaudeAiOAuth).toHaveBeenCalledWith(
+      expect.objectContaining({ forceRefresh: true, staleToken: 'stale-token' }),
+    );
+    expect(anthropicIds()).toEqual(['claude-opus-4-8']);
+    expect(getAnthropicModelDiscoveryFailure()).toBeNull();
+  });
+
+  it('强制换 token 后仍是 401 就如实报 unauthorized,不无限换', async () => {
+    oauthRefreshMock.getValidClaudeAiOAuth.mockReset();
+    oauthRefreshMock.getValidClaudeAiOAuth
+      .mockResolvedValueOnce({ accessToken: 'stale-token' })
+      .mockResolvedValue({ accessToken: 'fresh-token' });
+    const fetchMock = vi.fn().mockResolvedValue(errorResponse(401));
+    vi.stubGlobal('fetch', fetchMock);
+
+    await refreshAnthropicModelsFromHttp();
+
+    // 首次 + 换 token 后一次,不再继续。
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(getAnthropicModelDiscoveryFailure()?.kind).toBe('unauthorized');
+    await vi.advanceTimersByTimeAsync(600_000);
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+  });
+
+  it('换不到新 token(刷新失败 / 仍是同一枚)时直接如实报 unauthorized', async () => {
+    oauthRefreshMock.getValidClaudeAiOAuth.mockReset();
+    oauthRefreshMock.getValidClaudeAiOAuth.mockResolvedValue({ accessToken: 'stale-token' });
+    const fetchMock = vi.fn().mockResolvedValue(errorResponse(401));
+    vi.stubGlobal('fetch', fetchMock);
+
+    await refreshAnthropicModelsFromHttp();
+
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(getAnthropicModelDiscoveryFailure()?.kind).toBe('unauthorized');
+  });
+
   it('答复正常但没有可用模型归 empty', async () => {
     vi.stubGlobal(
       'fetch',

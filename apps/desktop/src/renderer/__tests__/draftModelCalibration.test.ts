@@ -177,4 +177,39 @@ describe('calibrateDraftModel', () => {
       }),
     ).toBe('claude-sonnet-5');
   });
+
+  it('用户隐藏 / 默认收起的模型不会被选成默认(与选择器可见性同口径)', () => {
+    // 校准若扫原始清单,会选中一个选择器里根本看不到的模型,与用户的可见性设置冲突。
+    const p = provider('xd', true, {
+      'claude-code': [model('claude-haiku-4-5'), model('claude-sonnet-5')],
+    });
+    const hidden = new Set(['xd:claude-haiku-4-5']);
+
+    expect(
+      calibrateDraftModel({
+        providers: [p],
+        agent: 'claude-code',
+        model: 'claude-opus-4-8',
+        chosenByUser: false,
+        providersLoading: false,
+        excludeModel: (m, providerId) => hidden.has(`${providerId}:${m.id}`),
+      }),
+    ).toBe('claude-sonnet-5');
+  });
+
+  it('excludeModel 拿得到 providerId —— 可见性 override 是按 (agent, 来源, 模型) 记的', () => {
+    const seen: Array<[string, string]> = [];
+    calibrateDraftModel({
+      providers: [provider('xd', true, { 'claude-code': [model('claude-sonnet-5')] })],
+      agent: 'claude-code',
+      model: 'claude-opus-4-8',
+      chosenByUser: false,
+      providersLoading: false,
+      excludeModel: (m, providerId) => {
+        seen.push([providerId, m.id]);
+        return false;
+      },
+    });
+    expect(seen).toContainEqual(['xd', 'claude-sonnet-5']);
+  });
 });

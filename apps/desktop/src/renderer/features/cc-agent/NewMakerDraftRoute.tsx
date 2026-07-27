@@ -139,7 +139,7 @@ import {
   type AgentCapabilities,
 } from '@/hooks/useAgentCapabilities';
 import { useProviders } from '@/hooks/useProviders';
-import { isModelEnabled } from '@/state/modelVisibilityPrefs';
+import { isModelEnabled, useModelVisibilityVersion } from '@/state/modelVisibilityPrefs';
 import {
   useDeviceProviders,
   evictDeviceProviders,
@@ -552,6 +552,8 @@ export function NewMakerDraftRoute() {
    *     compat-proxy。必须逐模型判,同一供应商可能既有可路由模型又有订阅直连模型。
    * device-link 草稿以被控端镜像为准,整段不校准(被控端跑完整 app,两道排除都不适用)。
    */
+  // 可见性 override 变更要重算校准候选(与 ModelSelector 同一份订阅源)。
+  const modelVisibilityVersion = useModelVisibilityVersion();
   const calibrationProviders = useMemo(
     () =>
       filterChatBridgedCodexProviders(
@@ -569,9 +571,13 @@ export function NewMakerDraftRoute() {
       model: chatPrefs.model,
       chosenByUser: draft.modelChosenByVendor[draft.vendor] === true,
       providersLoading: localProvidersLoading,
-      ...(effectiveRemoteHostId
-        ? { excludeModel: (m: CatalogModel) => isSubscriptionDirectModel(m.id) }
-        : {}),
+      excludeModel: (m: CatalogModel, providerId: string) => {
+        // 用户在设置里隐藏 / 默认收起的模型不该被选成默认 —— 那会让草稿以一个选择器里
+        // 根本看不到的模型启动,和他自己的可见性设置直接冲突(与 ModelSelector 同口径)。
+        if (!isModelEnabled(capabilityAgentKind, providerId, m)) return true;
+        // SSH 远程:订阅直连的 bridge 只挂本地 compat-proxy,远端选中必失败。
+        return !!effectiveRemoteHostId && isSubscriptionDirectModel(m.id);
+      },
     });
   }, [
     isDeviceLinkDraft,
@@ -582,6 +588,7 @@ export function NewMakerDraftRoute() {
     draft.vendor,
     localProvidersLoading,
     effectiveRemoteHostId,
+    modelVisibilityVersion,
   ]);
 
   const effectiveSourceId = useMemo<string | null>(() => {
@@ -896,9 +903,15 @@ export function NewMakerDraftRoute() {
   const chatInitialPermissionMode = isDeviceLinkDraft
     ? (deviceLinkInitial?.permissionMode ?? chatPrefs.permissionMode)
     : chatPrefs.permissionMode;
+  // 模型被校准过时**不能**再沿用 chatPrefs.providerId:那是上一次显式选中的来源,而校准
+  // 恰恰发生在「它已经不提供这个模型 / 已断开」的时候。继续带着它建会话会产出 model 与
+  // provider 错配的一对,把首条请求路由到一个根本不服务该模型的上游(PR #548 review)。
+  // 置 null = 交回默认路由,由 main 按模型选可用来源。
+  const localProviderIdForDraft =
+    calibratedDraftModel === chatPrefs.model ? (chatPrefs.providerId ?? null) : null;
   const chatInitialProviderId = isDeviceLinkDraft
     ? (deviceLinkInitial?.providerId ?? null)
-    : (chatPrefs.providerId ?? null);
+    : localProviderIdForDraft;
 
   // 弹窗确认添加后的落点:SSH 立即建会话 + navigate;device-link 把当前草稿指向被控端项目,
   // 首条消息发出时走既有 create-on-send 链路(见下方 isDeviceLinkDraft 分支)。

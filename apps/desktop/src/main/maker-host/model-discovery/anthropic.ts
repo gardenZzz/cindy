@@ -708,6 +708,14 @@ class DiscoveryHttpError extends Error {
 /** 响应体只留够判定与诊断的前缀,避免把上游的大 HTML 错误页整个搬进日志。 */
 const ERROR_BODY_SNIPPET_LIMIT = 2_000;
 
+/** HTTP 200 但正文不是可解析的 JSON:上游/中间层的问题,与链路不通要分开归因。 */
+class DiscoveryResponseError extends Error {
+  constructor(detail: string) {
+    super(`malformed response body: ${detail}`);
+    this.name = 'DiscoveryResponseError';
+  }
+}
+
 /**
  * 地域拒绝的识别标记。Anthropic 对不支持的国家 / 地区返回
  * `unsupported_country_region_territory`,**400 与 403 都出现过**(取决于是否经中间层),
@@ -737,6 +745,8 @@ function classifyDiscoveryError(err: unknown): {
   kind: ProviderModelDiscoveryFailure['kind'];
   detail: string;
 } {
+  // 200 + 坏正文:上游侧问题,归 upstream(可重试),不是「连不上」。
+  if (err instanceof DiscoveryResponseError) return { kind: 'upstream', detail: err.message };
   if (err instanceof DiscoveryHttpError) {
     const detail = err.body ? `HTTP ${err.status}: ${err.body}` : `HTTP ${err.status}`;
     if (looksRegionBlocked(err.status, err.body)) return { kind: 'regionBlocked', detail };
@@ -870,7 +880,11 @@ export function getAnthropicModelDiscoveryFailure(): ProviderModelDiscoveryFailu
  * 若又遇到暂时性失败就再也排不出自动重试 —— 链路稍后恢复也只能靠用户反复手点(PR #548
  * review)。
  */
-export function refreshAnthropicModelsFromHttp(options?: { fromRetry?: boolean }): Promise<void> {
+export function refreshAnthropicModelsFromHttp(options?: {
+  fromRetry?: boolean;
+  /** 内部用:本次已经是「401 → 强制换 token」后的那一次,不再递归换第二次。 */
+  afterForcedRefresh?: boolean;
+}): Promise<void> {
   if (!options?.fromRetry) cancelHttpRetry();
   // 只复用**同世代**的在途拉取:登出后世代已变,旧 promise 的结果注定作废,
   // 复用会吞掉换号后新账号的补拉。
@@ -899,7 +913,16 @@ export function refreshAnthropicModelsFromHttp(options?: { fromRetry?: boolean }
           const body = await res.text().catch(() => '');
           throw new DiscoveryHttpError(res.status, body.slice(0, ERROR_BODY_SNIPPET_LIMIT));
         }
-        const body = (await res.json()) as { data?: unknown[]; has_more?: boolean; last_id?: string };
+        // 200 但正文坏掉(破损代理 / CDN 截断)是**上游**的问题,不是链路不通 —— 单独标记,
+        // 否则会归到 network,让用户白查网络和 Proxy(PR #548 review)。
+        let body: { data?: unknown[]; has_more?: boolean; last_id?: string };
+        try {
+          body = (await res.json()) as typeof body;
+        } catch (parseErr) {
+          throw new DiscoveryResponseError(
+            parseErr instanceof Error ? parseErr.message : String(parseErr),
+          );
+        }
         if (Array.isArray(body.data)) entries.push(...body.data);
         url =
           body.has_more && typeof body.last_id === 'string'
@@ -909,6 +932,30 @@ export function refreshAnthropicModelsFromHttp(options?: { fromRetry?: boolean }
     } catch (err) {
       // 失败不清列表:现值(含磁盘缓存)是上次成功的真数据;SDK 通道随后仍会精化。
       const { kind, detail } = classifyDiscoveryError(err);
+      // 401 先别急着判「确定性拒绝」:本地 expiresAt 未到时 getValidClaudeAiOAuth 会原样
+      // 返回旧 token,而服务端可能已经拒绝它。refresh token 还有效的话,强制换一枚再试
+      // 一次就能恢复 —— 否则用户明明只需静默续期,却被告知要断开重连,而且清单为空时他
+      // 连个能用的模型都挑不出来(PR #548 review;运行时 401 回调走的也是这条路)。
+      if (kind === 'unauthorized' && !options?.afterForcedRefresh) {
+        const refreshed = await getValidClaudeAiOAuth({
+          forceRefresh: true,
+          staleToken: oauth.accessToken,
+        }).catch(() => null);
+        if (
+          refreshed?.accessToken &&
+          refreshed.accessToken !== oauth.accessToken &&
+          gen === authGeneration &&
+          hasClaudeAiOAuth()
+        ) {
+          httpRefreshInflight = null;
+          log.info('anthropic /v1/models got 401; retrying once with a force-refreshed token');
+          await refreshAnthropicModelsFromHttp({
+            fromRetry: options?.fromRetry ?? false,
+            afterForcedRefresh: true,
+          });
+          return;
+        }
+      }
       noteDiscoveryFailure(gen, kind, detail);
       return;
     }

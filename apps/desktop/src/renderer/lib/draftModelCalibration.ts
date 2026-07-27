@@ -28,12 +28,12 @@ export function pickConnectedModelForAgent(
   providers: readonly ProviderView[],
   agent: AgentKind,
   preferredModelId: string,
-  excludeModel?: (model: CatalogModel) => boolean,
+  excludeModel?: (model: CatalogModel, providerId: string) => boolean,
 ): string | null {
   const connected = connectedProvidersForAgent([...providers], agent);
   if (connected.length === 0) return null;
   const usable = (provider: ProviderView): CatalogModel[] =>
-    (provider.models[agent] ?? []).filter((m) => !excludeModel?.(m));
+    (provider.models[agent] ?? []).filter((m) => !excludeModel?.(m, provider.id));
   for (const provider of connected) {
     if (usable(provider).some((m) => m.id === preferredModelId)) return preferredModelId;
   }
@@ -54,12 +54,14 @@ export interface DraftModelCalibrationInput {
   /** 供应商清单是否仍在加载：加载期不校准，避免首帧把默认模型闪成别的。 */
   providersLoading: boolean;
   /**
-   * 逐模型排除（与选择器的可见性口径同源）。SSH 远程草稿要传
-   * `isSubscriptionDirectModel`：订阅直连模型（`chatgpt/` / `xai/`）的 bridge 只挂在本地
-   * compat-proxy，远程模式不经它，选中必失败——供应商级过滤盖不住这一层，因为同一个
-   * 供应商可能既有可路由的模型、又有订阅直连模型。
+   * 逐模型排除（与选择器的可见性口径同源）。两类必须在这里判，供应商级过滤盖不住——
+   * 同一个供应商可能既有可路由 / 可见的模型，又有该排除的模型：
+   *   - **用户隐藏或默认收起的模型**：`ModelSelector` 用 `isModelEnabled` 过滤，校准若扫
+   *     原始清单，会选中一个选择器里根本看不到的模型，与用户的可见性设置直接冲突；
+   *   - **订阅直连模型**（`chatgpt/` / `xai/`，仅 SSH 远程草稿）：bridge 只挂在本地
+   *     compat-proxy，远程模式不经它，选中必失败。
    */
-  excludeModel?: (model: CatalogModel) => boolean;
+  excludeModel?: (model: CatalogModel, providerId: string) => boolean;
 }
 
 /** 返回草稿应当展示 / 发送的模型 id（不可校准时原样返回，绝不返回空）。 */
