@@ -19,6 +19,7 @@ import { Spinner } from '@/components/ui/spinner';
 import type { AgentTaskUpdate, ChatMessage } from '@/hooks/useCCAgentChat';
 import { isRemoteSession } from '@/lib/makerTransport';
 import { openBackgroundTasksTab } from '@/features/right-sidebar/lib/openBackgroundTasksTab';
+import { WorkflowAgentStrip } from '@/features/right-sidebar/plugins/background-tasks/WorkflowAgentStrip';
 import { cn } from '@/lib/utils';
 import { formatModelShortLabel } from '@/lib/modelShortLabel';
 
@@ -195,6 +196,17 @@ export function AgentTaskCard({ toolCall, update, result, subagentModel, session
     return total > 0 ? { phase, done, total } : null;
   }, [isWorkflow, update?.workflowProgress]);
 
+  // 方块条数据:workflow_agent 条目按 spawn 顺序透传(state/label)。
+  const workflowAgentCells = useMemo(() => {
+    if (!isWorkflow) return [];
+    return (update?.workflowProgress ?? [])
+      .filter((entry) => entry.type === 'workflow_agent')
+      .map((entry) => ({
+        ...(entry.state !== undefined ? { state: entry.state } : {}),
+        ...(entry.label !== undefined ? { label: entry.label } : {}),
+      }));
+  }, [isWorkflow, update?.workflowProgress]);
+
   const meta = useMemo(() => {
     const parts: Array<{ key: string; text: string }> = [
       { key: 'provider', text: providerLabel },
@@ -278,6 +290,12 @@ export function AgentTaskCard({ toolCall, update, result, subagentModel, session
                       done: workflowSummary.done,
                       total: workflowSummary.total,
                     })}
+              </span>
+            )}
+            {workflowAgentCells.length > 0 && (
+              // 逐 agent 状态方块条:卡片紧凑场景截断到 40 格,总览细节进面板。
+              <span className="mt-1 block">
+                <WorkflowAgentStrip cells={workflowAgentCells} maxVisible={40} />
               </span>
             )}
           </span>

@@ -317,3 +317,22 @@ describe('buildWorkflowTreeModel', () => {
     expect(done.groups[0].agents[0].state).toBe('error');
   });
 });
+
+describe('workflowAgentVisualState(方块条视觉归一)', () => {
+  it('两套词表归一到四色;未知词与 start 归 queued(宁少染不误染)', async () => {
+    const { workflowAgentVisualState } = await import('../workflowProgressModel');
+    expect(workflowAgentVisualState('done')).toBe('done');
+    expect(workflowAgentVisualState('completed')).toBe('done');
+    expect(workflowAgentVisualState('running')).toBe('running');
+    expect(workflowAgentVisualState('progress')).toBe('running');
+    expect(workflowAgentVisualState('error')).toBe('failed');
+    expect(workflowAgentVisualState('failed')).toBe('failed');
+    expect(workflowAgentVisualState('stopped')).toBe('failed');
+    expect(workflowAgentVisualState('killed')).toBe('failed');
+    expect(workflowAgentVisualState('start')).toBe('queued');
+    expect(workflowAgentVisualState('queued')).toBe('queued');
+    expect(workflowAgentVisualState('pending')).toBe('queued');
+    expect(workflowAgentVisualState('mystery-state')).toBe('queued');
+    expect(workflowAgentVisualState(undefined)).toBe('queued');
+  });
+});

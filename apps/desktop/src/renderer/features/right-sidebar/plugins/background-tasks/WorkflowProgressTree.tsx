@@ -24,6 +24,7 @@ import { formatCompactTokens } from '@/lib/usageFormat';
 import { cn } from '@/lib/utils';
 
 import type { WorkflowTreeAgentRow, WorkflowTreeModel } from './workflowProgressModel';
+import { WorkflowAgentStrip } from './WorkflowAgentStrip';
 
 interface WorkflowProgressTreeProps {
   model: WorkflowTreeModel;
@@ -91,11 +92,20 @@ export function WorkflowProgressTree({ model }: WorkflowProgressTreeProps) {
     metaParts.push(formatDuration(aggregate.durationMs));
   }
 
+  const stripCells = model.groups.flatMap((group) =>
+    group.agents.map((row) => ({
+      ...(row.state !== undefined ? { state: row.state } : {}),
+      label: row.label,
+    })),
+  );
+
   return (
     <div className="space-y-2">
       <div className="text-12 leading-4 text-[var(--text-secondary)]">
         {metaParts.join(' · ')}
       </div>
+      {/* 逐 agent 状态方块条:详情页不截断,大编队一眼总览。 */}
+      {stripCells.length > 0 && <WorkflowAgentStrip cells={stripCells} />}
       {model.logs.length > 0 && (
         <div className="space-y-0.5">
           {model.logs.map((line, index) => (
