@@ -139,7 +139,7 @@ describe('TodaySpendChip dashboard routing', () => {
     expect(source).toContain('getCodexWindowUsages(snapshot, t, nowMs)');
     expect(source).toContain('todaySpend.codex.planCreditsLine');
     expect(source).toContain('todaySpend.codex.windowLine');
-    // Codex chip 主体 label 为距 reset 的剩余时长倒计时,
+    // chip 主体 label 统一为距 reset 的剩余时长倒计时 (Claude / Codex 同一函数),
     // tooltip 保留窗口名 + 精确 reset 时间点
     expect(source).toContain('function formatCompactTimeUntilReset(');
     expect(source).toContain('function toCodexChipWindow(');
@@ -189,9 +189,8 @@ describe('TodaySpendChip dashboard routing', () => {
     expect(source).toContain('todaySpend.claude.weeklyLabel');
     expect(source).toContain('todaySpend.claude.windowLine');
     expect(source).toContain('todaySpend.claude.resetAt');
-    expect(source).toContain('todaySpend.claude.resetInAt');
-    // 稳定窗口身份与完整 reset tooltip 的最终输出由 todaySpendChip.behavior.test.tsx
-    // 直接渲染组件验证；这里仅保留形态路由契约。
+    // chip 周限段: scoped 命中时倒计时前带模型名标注口径 (「Fable 7天 剩余 78%」)
+    expect(source).toContain('weekly.modelDisplayName ? `${weekly.modelDisplayName} ${countdown}` : countdown');
     expect(source).toContain('todaySpend.claude.sessionValueLabel');
     expect(source).toContain('todaySpend.claude.planLine');
     // 告警判定是纯数据判定, 统一收在 shared/claudeSubscriptionUsage.ts (有直接单测:
