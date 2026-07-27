@@ -695,10 +695,19 @@ export class RemoteHost {
           id: this.id,
           port: bound,
         });
+        // 与 forwardHandle.close() 相同的 5s 看门狗: 半开连接上 unforwardIn
+        // 回调可能丢失, 这里挂住会把 ensureRemoteForward 的调用方
+        // (Settings 关闭 proxy / 更新 host) 一起拖死 (worker 核验补充)。
         await new Promise<void>((resolve) => {
+          const timer = setTimeout(() => resolve(), 5_000);
+          timer.unref?.();
           try {
-            client.unforwardIn('127.0.0.1', bound, () => resolve());
+            client.unforwardIn('127.0.0.1', bound, () => {
+              clearTimeout(timer);
+              resolve();
+            });
           } catch {
+            clearTimeout(timer);
             resolve();
           }
         });
