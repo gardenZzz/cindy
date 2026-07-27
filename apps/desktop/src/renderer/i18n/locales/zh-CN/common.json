@@ -1138,8 +1138,8 @@
         "connect": "连接",
         "disconnect": "断开",
         "cancel": "取消",
-        "retry": "重试",
-        "retrying": "正在重试…"
+        "retry": "重新获取模型列表",
+        "retrying": "正在重新获取…"
       },
       "anthropic": {
         "title": "Anthropic",

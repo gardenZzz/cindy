@@ -1138,8 +1138,8 @@
         "connect": "연결",
         "disconnect": "연결 해제",
         "cancel": "취소",
-        "retry": "다시 시도",
-        "retrying": "다시 시도하는 중…"
+        "retry": "모델 목록 다시 가져오기",
+        "retrying": "다시 가져오는 중…"
       },
       "anthropic": {
         "title": "Anthropic",

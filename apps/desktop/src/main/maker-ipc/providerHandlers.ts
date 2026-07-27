@@ -47,8 +47,14 @@ const log = createLogger('maker-ipc:provider');
 const VALID_AGENTS: readonly string[] = ['claude-code', 'codex'];
 
 export interface ProviderHandlerDeps {
-  /** 当前供应商视图（含实时连接状态）；见 createDesktopProviderService。 */
-  listProviders(): Promise<ProviderView[]>;
+  /**
+   * 当前供应商视图（含实时连接状态）；见 createDesktopProviderService。
+   *
+   * `allowSideEffects` 控制是否允许顺带做本机绑定自愈与随之而来的清单拉取。这条通道同时
+   * 服务 device-link（合成 event）与可能不受信的渲染上下文，所以默认纯读，只有确认 sender
+   * 是本机主页面时才放行副作用（PR #548 review）。
+   */
+  listProviders(opts?: { allowSideEffects?: boolean }): Promise<ProviderView[]>;
   /**
    * 「模型显示/隐藏」override 快照(renderer → main 镜像,生产 = getModelVisibilityMirrorSnapshot)。
    * PROVIDER_LIST 附带回传,供 device-link 控制端(手机)按被控端用户开关过滤模型列表;
@@ -77,6 +83,12 @@ export interface ProviderHandlerDeps {
    * 刻意不依赖 Electron，好让内存 registry 直接 invoke 单测（规则 14）。
    */
   assertTrustedSender?(event: unknown): void;
+  /**
+   * sender 是否是本机主页面（生产 = isTrustedAppRendererEvent）。与 assertTrustedSender
+   * 的区别：**不抛**，只用于决定「这次读取要不要放行本机副作用」。device-link 的合成
+   * event 与不受信的子 frame 都会得到 false，于是退化为纯读。缺省视为不可信。
+   */
+  isTrustedSender?(event: unknown): boolean;
   /**
    * 通用 OAuth 登录 / 登出 / 取消（生产接 generic-oauth Runner + 目录描述符解析；
    * login 成功后由生产 deps 负责模型发现与 PROVIDER_CHANGED 广播）。
@@ -182,11 +194,16 @@ export function registerProviderHandlers(
   // 只读聚合：loadCatalog 永不抛（最差回退内置目录），故无需 throwIpcError 包裹。
   registry.handle(
     MAKER_INVOKE.PROVIDER_LIST,
-    async (): Promise<{
+    async (
+      event,
+    ): Promise<{
       providers: ProviderView[];
       modelVisibilityOverrides: Record<string, boolean>;
     }> => {
-      const providers = await deps.listProviders();
+      // 只有本机主页面能顺带触发绑定自愈与清单拉取:这条通道也服务 device-link(合成
+      // event)和可能不受信的渲染上下文,它们只该拿到只读快照(PR #548 review)。
+      const allowSideEffects = deps.isTrustedSender?.(event) === true;
+      const providers = await deps.listProviders({ allowSideEffects });
       return { providers, modelVisibilityOverrides: deps.getModelVisibilityOverrides() };
     },
   );

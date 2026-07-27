@@ -21,16 +21,27 @@ import {
   type ProviderView,
 } from '@cindy/model-providers';
 
+/**
+ * 读取连接态时是否允许附带**本机副作用**（绑定自愈、随之而来的清单拉取）。
+ *
+ * 纯读取一律安全，但自愈会写绑定文件、读凭证作用域缓存并发起带凭证的上游请求。这条
+ * 通道（`maker:provider:list`）同时服务于 device-link 与可能不受信的渲染上下文，所以副作用
+ * 只在调用方明确是「本机主页面」时才放行；其余一律降级为纯读（PR #548 review）。
+ */
+export interface ConnectionReadOptions {
+  allowSideEffects: boolean;
+}
+
 /** 内置三家供应商「是否已连接」的判定器（由 host 注入，读各自凭证存储）。 */
 export interface ProviderConnectionReaders {
   /** XD 网关：托管 api_key 是否存在。 */
-  xd: () => boolean | Promise<boolean>;
+  xd: (opts: ConnectionReadOptions) => boolean | Promise<boolean>;
   /** Anthropic：系统 Claude.ai OAuth 是否登录。 */
-  anthropic: () => boolean | Promise<boolean>;
+  anthropic: (opts: ConnectionReadOptions) => boolean | Promise<boolean>;
   /** OpenAI：Codex 是否 OAuth 登录。 */
-  openai: () => boolean | Promise<boolean>;
+  openai: (opts: ConnectionReadOptions) => boolean | Promise<boolean>;
   /** xAI：SuperGrok OAuth 是否登录(responses-bridge 直连 api.x.ai)。 */
-  xai: () => boolean | Promise<boolean>;
+  xai: (opts: ConnectionReadOptions) => boolean | Promise<boolean>;
 }
 
 export interface ProviderServiceDeps {
@@ -51,8 +62,13 @@ export interface ProviderServiceDeps {
 }
 
 export interface ProviderService {
-  /** 当前供应商视图（含实时连接状态）。 */
-  listProviders(): Promise<ProviderView[]>;
+  /**
+   * 当前供应商视图（含实时连接状态）。
+   *
+   * `allowSideEffects` 缺省为 false —— 副作用要显式请求：调用方只有在确认请求来自本机
+   * 主页面时才传 true（见 ConnectionReadOptions）。
+   */
+  listProviders(opts?: Partial<ConnectionReadOptions>): Promise<ProviderView[]>;
 }
 
 /**
@@ -60,12 +76,13 @@ export interface ProviderService {
  * 连接状态每次实时读（凭证变化要立即反映）。
  */
 export function createProviderService(deps: ProviderServiceDeps): ProviderService {
-  async function listProviders(): Promise<ProviderView[]> {
+  async function listProviders(opts?: Partial<ConnectionReadOptions>): Promise<ProviderView[]> {
+    const readOpts: ConnectionReadOptions = { allowSideEffects: opts?.allowSideEffects === true };
     const [xd, anthropic, openai, xai] = await Promise.all([
-      Promise.resolve(deps.connection.xd()),
-      Promise.resolve(deps.connection.anthropic()),
-      Promise.resolve(deps.connection.openai()),
-      Promise.resolve(deps.connection.xai()),
+      Promise.resolve(deps.connection.xd(readOpts)),
+      Promise.resolve(deps.connection.anthropic(readOpts)),
+      Promise.resolve(deps.connection.openai(readOpts)),
+      Promise.resolve(deps.connection.xai(readOpts)),
     ]);
     const catalog = deps.getCatalog();
     const connected: ConnectionState = { xd, anthropic, openai, xai };

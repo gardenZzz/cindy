@@ -1013,6 +1013,19 @@ describe('HTTP 发现失败的归因与选择性重试', () => {
     }
   });
 
+  it('200 但根不是对象(JSON null / 标量 / 数组)也归 upstream,不是 network', async () => {
+    // 直接取 .data 会抛 TypeError,落到 classifyDiscoveryError 的兜底就成了「连不上」,
+    // 让用户白查网络和 Proxy。
+    for (const payload of [null, 'oops', 42, [{ id: 'x' }]]) {
+      resetAnthropicDiscoveryForTest();
+      vi.stubGlobal('fetch', vi.fn().mockResolvedValue({ ok: true, json: async () => payload }));
+      await refreshAnthropicModelsFromHttp();
+      const failure = getAnthropicModelDiscoveryFailure();
+      expect(failure?.kind).toBe('upstream');
+      expect(failure?.detail).toContain('unexpected payload root');
+    }
+  });
+
   it('答复正常但没有可用模型归 empty', async () => {
     vi.stubGlobal(
       'fetch',
