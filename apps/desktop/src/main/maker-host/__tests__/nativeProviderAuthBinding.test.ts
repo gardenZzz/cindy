@@ -20,6 +20,7 @@ vi.mock('../../appSessionState.js', () => ({
 }));
 
 import {
+  bindNativeProviderAuth,
   claimDetectedNativeProviderAuth,
   isNativeProviderAuthBound,
   migrateLegacyNativeProviderAuthBindings,
@@ -125,6 +126,46 @@ describe('claimDetectedNativeProviderAuth', () => {
     session.dataOwnerId = 'owner-b';
     expect(isNativeProviderAuthBound('anthropic')).toBe(false);
     expect(claimDetectedNativeProviderAuth('anthropic', () => true)).toBe(false);
+  });
+
+  it('显式登出留下的撤销标记挡住自动认领(凭证删除失败也不会被绑回来)', () => {
+    // 登出会先删凭证再解绑,但删除是 best-effort 的;删失败时 slot 已空、凭证还在,
+    // 没有标记就会在下一次读连接态时被认领回来,等于悄悄撤销用户刚做的登出。
+    expect(claimDetectedNativeProviderAuth('anthropic', () => true)).toBe(true);
+    unbindNativeProviderAuth('anthropic', { revoked: true });
+
+    expect(isNativeProviderAuthBound('anthropic')).toBe(false);
+    expect(claimDetectedNativeProviderAuth('anthropic', () => true)).toBe(false);
+    expect(JSON.parse(fs.readFileSync(bindingFile, 'utf8'))).toMatchObject({
+      revoked: { anthropic: 'owner-a' },
+    });
+  });
+
+  it('撤销标记只挡当前 owner;换账号后新 owner 仍可继承', () => {
+    unbindNativeProviderAuth('anthropic', { revoked: true });
+    expect(claimDetectedNativeProviderAuth('anthropic', () => true)).toBe(false);
+
+    session.dataOwnerId = 'owner-b';
+    expect(claimDetectedNativeProviderAuth('anthropic', () => true)).toBe(true);
+  });
+
+  it('用户再次显式授权即清除撤销标记,恢复自动继承语义', () => {
+    unbindNativeProviderAuth('xai', { revoked: true });
+    expect(claimDetectedNativeProviderAuth('xai', () => true)).toBe(false);
+
+    bindNativeProviderAuth('xai');
+    expect(isNativeProviderAuthBound('xai')).toBe(true);
+    unbindNativeProviderAuth('xai');
+    // 上一次的撤销标记已随显式授权作废,这次(非显式登出)不该再挡。
+    expect(claimDetectedNativeProviderAuth('xai', () => true)).toBe(true);
+  });
+
+  it('凭证失效(非用户登出)不留标记 —— 本机重新登录后仍按设计自动继承', () => {
+    expect(claimDetectedNativeProviderAuth('anthropic', () => true)).toBe(true);
+    unbindNativeProviderAuth('anthropic'); // invalidate 路径:不传 revoked
+
+    expect(JSON.parse(fs.readFileSync(bindingFile, 'utf8'))).not.toHaveProperty('revoked');
+    expect(claimDetectedNativeProviderAuth('anthropic', () => true)).toBe(true);
   });
 
   it('treats corrupted falsy slot values as claimed-by-unknown and fails closed', () => {
