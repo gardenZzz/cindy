@@ -19,6 +19,7 @@ import {
   serializeEditorContent,
   serializeEditorSlice,
 } from '@/components/new-chat/composerContentSerialization';
+import { parseChatQuoteSegments } from '@/lib/chatQuotes';
 import { COMPOSER_QUOTE_NODE_TYPE } from '@/lib/composerQuoteDocument';
 
 const TestMentionChip = Node.create({
@@ -620,6 +621,26 @@ describe('composer live plain-list promotion', () => {
     expect(serializeEditorContent(editor).text).toBe('3、 项目');
   });
 
+  it('does not promote a multiline paragraph as one list item', () => {
+    const editor = makeEditor({
+      type: 'doc',
+      content: [
+        {
+          type: 'paragraph',
+          content: [
+            { type: 'text', text: '1. first' },
+            { type: 'hardBreak' },
+            { type: 'text', text: '2. second' },
+          ],
+        },
+      ],
+    });
+    selectDocumentEnd(editor);
+
+    expect(promoteTrailingPlainListParagraph(editor.view)).toBe(false);
+    expect(editor.state.doc.firstChild?.type.name).toBe('paragraph');
+  });
+
   it('promotes a trailing bullet-glyph row inserted outside input rules', () => {
     const editor = makeEditor({
       type: 'doc',
@@ -780,9 +801,9 @@ describe('composer structured list serialization', () => {
                 {
                   type: 'paragraph',
                   content: [
-                    { type: 'text', text: 'before ' },
+                    { type: 'text', text: 'before' },
                     { type: COMPOSER_QUOTE_NODE_TYPE, attrs: { text: 'quoted' } },
-                    { type: 'text', text: ' after' },
+                    { type: 'text', text: 'after' },
                   ],
                 },
               ],
@@ -792,9 +813,15 @@ describe('composer structured list serialization', () => {
       ],
     });
 
-    expect(serializeEditorContent(editor).text).toBe(
-      '- before > <!-- cindy-composer-quote -->\n  > quoted after',
+    const serialized = serializeEditorContent(editor).text;
+    expect(serialized).toBe(
+      '- before\n  > <!-- cindy-composer-quote -->\n  > quoted\n  after',
     );
+    expect(parseChatQuoteSegments(serialized)).toEqual([
+      { kind: 'text', text: '- before' },
+      { kind: 'quote', quote: { text: 'quoted' } },
+      { kind: 'text', text: '  after' },
+    ]);
   });
 
   it('preserves nested markers and projects atom ranges into wire offsets', () => {

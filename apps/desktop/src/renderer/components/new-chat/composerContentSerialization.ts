@@ -94,6 +94,7 @@ function serializeComposerDocument(
     let bufferPastedTextRanges: PastedTextRange[] = [];
     let bufferSlashCommandRanges: SlashCommandRange[] = [];
     let emittedInlineSegment = false;
+    let continuationAfterQuote: string | null = null;
 
     const flushText = (force = false) => {
       if (!force && !buffer) return;
@@ -136,19 +137,26 @@ function serializeComposerDocument(
         );
         if (prefix) {
           // A quote chip inside a list item is part of that item. Keeping it
-          // in the current text block preserves the list marker instead of
-          // emitting an empty item followed by a top-level quote block.
+          // in the current text block preserves the list marker. Put the
+          // encoded quote on its own continuation lines so history parsing
+          // can still recognize the private marker and source metadata.
           const continuationPrefix = ' '.repeat(prefix.length);
           const quoteLines = quoteText.split('\n');
-          buffer += quoteLines
-            .map((line, index) => (index === 0 ? line : `${continuationPrefix}${line}`))
-            .join('\n');
+          buffer += `\n${quoteLines
+            .map((line) => `${continuationPrefix}${line}`)
+            .join('\n')}`;
+          continuationAfterQuote = continuationPrefix;
         } else {
           flushText();
           blocks.push({ kind: 'quote', text: quoteText });
           emittedInlineSegment = true;
         }
         return;
+      }
+
+      if (continuationAfterQuote !== null) {
+        buffer += `\n${continuationAfterQuote}`;
+        continuationAfterQuote = null;
       }
 
       if (child.type.name === 'mentionChip') {

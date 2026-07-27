@@ -425,6 +425,12 @@ function getTrailingPlainListParagraph(view: EditorView): {
   }
 
   const paragraph = $from.parent;
+  let hasHardBreak = false;
+  paragraph.forEach((child) => {
+    if (child.type.name === 'hardBreak') hasHardBreak = true;
+  });
+  if (hasHardBreak) return null;
+
   const text = paragraph.textBetween(0, paragraph.content.size, '\uFFFC', '\uFFFC');
   const marker = plainListParagraphMarker(text);
   const first = paragraph.firstChild;
