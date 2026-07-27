@@ -60,7 +60,9 @@ function plainListParagraphMarker(text: string): PlainListParagraphMarker | null
   if (cjkOrdered) {
     return {
       kind: 'ordered',
-      prefixLength: cjkOrdered[0].length,
+      // Keep optional spacing in the item body so direct transactions and
+      // normalized documents serialize CJK markers identically.
+      prefixLength: cjkOrdered[1].length + cjkOrdered[2].length,
       attrs: { start: Number(cjkOrdered[1]), marker: '、' },
     };
   }

@@ -604,6 +604,22 @@ describe('composer live plain-list promotion', () => {
     expect(editor.state.doc.lastChild?.type.name).toBe('paragraph');
   });
 
+  it('keeps optional CJK spacing during live promotion', () => {
+    const editor = makeEditor({
+      type: 'doc',
+      content: [
+        {
+          type: 'paragraph',
+          content: [{ type: 'text', text: '3、 项目' }],
+        },
+      ],
+    });
+    selectDocumentEnd(editor);
+
+    expect(promoteTrailingPlainListParagraph(editor.view)).toBe(true);
+    expect(serializeEditorContent(editor).text).toBe('3、 项目');
+  });
+
   it('promotes a trailing bullet-glyph row inserted outside input rules', () => {
     const editor = makeEditor({
       type: 'doc',
