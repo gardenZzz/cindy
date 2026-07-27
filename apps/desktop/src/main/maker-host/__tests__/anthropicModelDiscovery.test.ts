@@ -918,9 +918,11 @@ describe('HTTP 发现失败的归因与选择性重试', () => {
     expect(getAnthropicModelDiscoveryFailure()?.kind).toBe('forbidden');
   });
 
-  it('401 归 unauthorized;5xx / 429 归 upstream;其它 4xx 归 rejected', async () => {
+  it('401 归 unauthorized;408 归 timeout;5xx / 429 归 upstream;其它 4xx 归 rejected', async () => {
     for (const [status, kind] of [
       [401, 'unauthorized'],
+      // 408 是上游 / 中间代理说「这次超时了」,与本地超时同源 —— 必须可重试。
+      [408, 'timeout'],
       [503, 'upstream'],
       [429, 'upstream'],
       [418, 'rejected'],
@@ -1184,6 +1186,38 @@ describe('HTTP 发现失败的归因与选择性重试', () => {
 
     authState.loggedIn = false;
     expect(getAnthropicModelDiscoveryFailure()).toBeNull();
+  });
+
+  it('408 走重试链(不是被 rejected 挡死)', async () => {
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(errorResponse(408))
+      .mockResolvedValue(okResponse);
+    vi.stubGlobal('fetch', fetchMock);
+
+    await refreshAnthropicModelsFromHttp();
+    await vi.advanceTimersByTimeAsync(2_000);
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(anthropicIds()).toEqual(['claude-opus-4-8']);
+  });
+
+  it('首次就失败时,登出 / 换号仍要通知 —— applyModels([]) 那条路不广播', async () => {
+    // lastApplied 本来就是空,applyModels([]) 走「清单没变」早退;不补通知的话 device-link
+    // 对端会一直留着旧的失败理由(本地窗口只是碰巧有 auth 事件兜底)。
+    vi.stubGlobal('fetch', vi.fn().mockRejectedValue(new TypeError('fetch failed')));
+    await refreshAnthropicModelsFromHttp();
+    expect(getAnthropicModelDiscoveryFailure()).not.toBeNull();
+    expect(anthropicIds()).toEqual([]);
+
+    const onFailureChanged = vi.fn();
+    setAnthropicDiscoveryFailureListener(onFailureChanged);
+    try {
+      await clearAnthropicDiscoveredModels();
+      expect(onFailureChanged).toHaveBeenCalled();
+      expect(getAnthropicModelDiscoveryFailure()).toBeNull();
+    } finally {
+      setAnthropicDiscoveryFailureListener(null);
+    }
   });
 
   it('登出 / 换号清掉失败态与待执行的重试', async () => {

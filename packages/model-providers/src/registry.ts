@@ -53,10 +53,23 @@ export interface ProviderModelDiscoveryFailure {
     | 'forbidden'
     | 'rejected'
     | 'empty';
+  /**
+   * 诊断用原文（上游响应体片段、errno、异常消息等），**只留在 Main 侧的日志与内存**。
+   * 绝不下发：见 ProviderModelDiscoveryFailureView。
+   */
   detail?: string;
   /** ISO 时间戳，用于展示「最近一次尝试」。 */
   at: string;
 }
+
+/**
+ * 跨进程 / device-link 下发的失败投影 —— 刻意剥掉 `detail`。
+ *
+ * `ProviderView` 会经 `maker:provider:list` 到达 renderer，并由 device-link 投影给配对的
+ * 控制端；而 `detail` 里可能是最多 2KB 的上游原始响应体（代理错误页、请求元数据等）。
+ * UI 只按 `kind` 渲染分类文案，没有任何理由把这些原文送出 Main。
+ */
+export type ProviderModelDiscoveryFailureView = Omit<ProviderModelDiscoveryFailure, 'detail'>;
 
 /**
  * 各供应商最近一次的清单发现失败，由 host 注入；成功即清除。
@@ -74,8 +87,21 @@ export interface ProviderView extends Provider {
   connected: boolean;
   /** Non-secret presentation metadata resolved before routing details cross device-link. */
   logoKind?: ProviderLogoKind;
-  /** 动态清单发现的最近一次失败；成功或从未失败时缺席。 */
-  modelDiscoveryFailure?: ProviderModelDiscoveryFailure;
+  /** 动态清单发现的最近一次失败（已剥掉 detail）；成功或从未失败时缺席。 */
+  modelDiscoveryFailure?: ProviderModelDiscoveryFailureView;
+}
+
+/**
+ * 失败态 → 可下发投影：显式丢弃 `detail`。
+ *
+ * 用解构而不是 `{ kind, at }` 手抄字段：将来给 failure 加新字段时，默认行为是「跟着下发」
+ * 而不是「被静默丢掉」，只有明确判定为敏感的才需要在这里追加剥离。
+ */
+function stripDiscoveryFailureDetail(
+  failure: ProviderModelDiscoveryFailure,
+): ProviderModelDiscoveryFailureView {
+  const { detail: _detail, ...view } = failure;
+  return view;
 }
 
 /** 把目录与连接状态合成 registry。 */
@@ -86,10 +112,13 @@ export function buildRegistry(
 ): ProviderView[] {
   return catalog.providers.map((p) => {
     const failure = discoveryFailures[p.id];
+    // 剥掉 detail 再下发:它可能是上游原始响应体,而这份视图会过 IPC 到 renderer、
+    // 再经 device-link 投影给配对控制端。UI 只用 kind。
+    const failureView = failure ? stripDiscoveryFailureDetail(failure) : null;
     return {
       ...p,
       connected: connected[p.id] ?? false,
-      ...(failure ? { modelDiscoveryFailure: failure } : {}),
+      ...(failureView ? { modelDiscoveryFailure: failureView } : {}),
     };
   });
 }

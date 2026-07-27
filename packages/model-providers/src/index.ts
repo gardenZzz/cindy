@@ -64,6 +64,7 @@ export type {
   ConnectionState,
   ModelDiscoveryFailureState,
   ProviderModelDiscoveryFailure,
+  ProviderModelDiscoveryFailureView,
   ProviderView,
   ResolvedRoute,
 } from './registry.js';

@@ -903,12 +903,17 @@ export function NewMakerDraftRoute() {
   const chatInitialPermissionMode = isDeviceLinkDraft
     ? (deviceLinkInitial?.permissionMode ?? chatPrefs.permissionMode)
     : chatPrefs.permissionMode;
-  // 模型被校准过时**不能**再沿用 chatPrefs.providerId:那是上一次显式选中的来源,而校准
-  // 恰恰发生在「它已经不提供这个模型 / 已断开」的时候。继续带着它建会话会产出 model 与
-  // provider 错配的一对,把首条请求路由到一个根本不服务该模型的上游(PR #548 review)。
-  // 置 null = 交回默认路由,由 main 按模型选可用来源。
+  // 显式来源只在**仍是当前生效来源**时才带进建会话。
+  //
+  // 只比对「模型有没有被校准换掉」不够:存储的来源断开 / 不再提供该模型、而另一个已连接
+  // 来源恰好提供同一个 model id 时,校准会原样保留模型 id(它确实可用),相等条件因此成立,
+  // 却把已经失效的来源一起带了下去 —— 而 effectiveSourceId 早已解析到另一个来源。送出去
+  // 就是一对 model / provider 错配,首条请求会打到不服务该模型的上游(PR #548 review)。
+  // 不一致时置 null = 交回默认路由,由 main 按模型选可用来源。
   const localProviderIdForDraft =
-    calibratedDraftModel === chatPrefs.model ? (chatPrefs.providerId ?? null) : null;
+    chatPrefs.providerId && chatPrefs.providerId === effectiveSourceId
+      ? chatPrefs.providerId
+      : null;
   const chatInitialProviderId = isDeviceLinkDraft
     ? (deviceLinkInitial?.providerId ?? null)
     : localProviderIdForDraft;
