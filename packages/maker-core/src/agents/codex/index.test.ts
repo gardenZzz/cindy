@@ -6162,11 +6162,63 @@ describe('CodexAgent turn lifecycle', () => {
     });
     expect(handle.isTurnRunning?.()).toBe(false);
 
+    // 升级时补 turn/interrupt (review: PR #715 五轮审核 P1) — daemon 侧原 turn
+    // 不得继续空转烧远端资源 / 撞下一轮 send 的新 turn。
+    await vi.waitFor(() => {
+      expect(host.request).toHaveBeenCalledWith(
+        Method.TurnInterrupt,
+        expect.objectContaining({ threadId: 'start-thread-id', turnId: 'turn-1' }),
+      );
+    });
+
     // 升级后晚到的 turnCompleted 不得重复发终态事件 (墓碑路径)。
     handlers.turnCompleted?.({
       threadId: 'start-thread-id',
       turn: { id: 'turn-1', status: 'failed', error: { message: 'x' } },
     });
+    await expect(nextEvent(iterator)).rejects.toThrow('timed out waiting for event');
+    await handle.close();
+  });
+
+  it('does NOT escalate an invalid-credential retry-loop either (auth-related, review P1)', async () => {
+    // invalid_api_key / authentication_error 这类「凭证无效」错误没有 401 字面,
+    // 但 translator 同样按 auth UX 分类 — 升级判定必须排除同一集合, 否则会被
+    // 误升级成「后端不可达」(提示用户去查网络/代理, 方向全错)。
+    const agent = new CodexAgent(createDeps());
+    const host = installFakeHost(agent);
+    const handle = await agent.startSession({
+      sessionId: 'session-auth-related-no-escalation',
+      model: 'gpt-5.4',
+      workingDir: '/repo',
+    });
+    const subscribeCalls = host.subscribeThread.mock.calls as unknown as Array<[string, ThreadEventHandlers]>;
+    const handlers = subscribeCalls[0]?.[1];
+    const iterator = handle.events()[Symbol.asyncIterator]();
+
+    handlers.turnStarted?.({
+      threadId: 'start-thread-id',
+      turn: { id: 'turn-1' },
+    });
+    const invalidKeyError = {
+      threadId: 'start-thread-id',
+      turnId: 'turn-1',
+      willRetry: true,
+      error: { message: 'authentication_error: invalid_api_key — key revoked' },
+    } as const;
+    for (let i = 0; i < 35; i += 1) {
+      handlers.error?.(invalidKeyError);
+    }
+    // auth UX 透出 (isTerminal:false), 但不升级终态、不发 interrupt。
+    const first = await nextEvent(iterator);
+    expect(first).toMatchObject({
+      type: 'error',
+      data: { isTerminal: false },
+    });
+    expect(handle.isTurnRunning?.()).toBe(true);
+    expect(host.request).not.toHaveBeenCalledWith(
+      Method.TurnInterrupt,
+      expect.anything(),
+    );
     await expect(nextEvent(iterator)).rejects.toThrow('timed out waiting for event');
     await handle.close();
   });

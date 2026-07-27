@@ -199,16 +199,22 @@ async function writeRemoteMarker(host: RemoteHost, content: string | null): Prom
  * 从 SYNC_CODEX_AUTH handler 抽出的共享实现 — daemon 启动时 in-memory 缓存
  * auth.json / env, 不支持 hot-reload; 变了只能杀, 下次探活失败自动 bootstrap。
  *
- * pattern 设计 (与 auth sync 原实现一致):
+ * pattern 设计 (与 auth sync 原实现一致, review 后收紧):
  * - 匹配 `codex app-server` 两词而非 `codex app-server daemon`: daemon 主进程
  *   的 cmdline 是 `codex app-server --remote-control --listen unix://`, 不含
  *   "daemon" 字 (只有 worker 子进程 cmdline 含 `daemon pid-update-loop`)。
  *   早期 pattern 带 daemon 只杀到 worker, 主进程活着继续用旧 auth/env。
- * - 匹配整条 cmdline 同时含 `.xdt-server` 和 `codex app-server` — 只杀我们
- *   自己装的 daemon, 不误伤用户自己装在别处的 codex app-server。一次性
- *   `codex --print` / `codex exec` 不命中。短暂探活命令
+ * - 要求 cmdline 同时含 `.xdt-server` 与 `codex-home` 两段路径 (顺序):
+ *   只杀我们 isolated CODEX_HOME 里装的 daemon 家族 (主进程 + pid-update-loop
+ *   worker + sock proxy 子进程), 不误伤 (review: PR #715 五轮审核 P1):
+ *   · 用户自己装在别处的 codex (无 .xdt-server 段);
+ *   · .xdt-server 树下非 codex-home 的进程;
+ *   · 用户手动维护的同名 codex-home standalone install (无 .xdt-server 前缀)。
+ *   一次性 `codex --print` / `codex exec` 不命中。短暂探活命令
  *   `codex app-server daemon version` 理论命中但只跑几毫秒, 即使命中也无害
- *   (desktop 探活失败会自动 bootstrap)。
+ *   (desktop 探活失败会自动 bootstrap)。同一远端账号的多台 Cindy 客户端
+ *   共享这一个 daemon singleton, 一侧 pkill 会影响另一侧的 in-flight turn —
+ *   这是 daemon 单例语义的固有边界, 不是 pattern 能解决的 (与 auth sync 相同)。
  * - `[c]odex` 字符类 trick: pkill 自己的 cmdline 字面含 `[c]odex` (带方括号),
  *   不匹配连续 5 字符 `codex`, 不会自杀。
  * - `id -un` 而非 `$USER` 取用户名 + `-u` 限定只杀当前 SSH user 的进程。
@@ -220,7 +226,7 @@ export async function killRemoteCodexDaemon(
   const killScript = `
 USER_NAME=$(id -un 2>/dev/null)
 if [ -z "$USER_NAME" ]; then echo "id -un returned empty" >&2; exit 2; fi
-pkill -u "$USER_NAME" -f '\\.xdt-server.*[c]odex app-server'
+pkill -u "$USER_NAME" -f '\\.xdt-server.*codex-home.*[c]odex app-server'
 rc=$?
 case "$rc" in
   0|1) exit 0 ;;

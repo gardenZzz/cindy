@@ -197,6 +197,24 @@ export function isAuthMissingErrorMessage(message: string, errorStatus?: number)
   return errorStatus === 401 || /\b401\b|Missing bearer/i.test(message);
 }
 
+/**
+ * auth 相关错误 (缺失 OR 无效) 的更宽判定 — translator 会把
+ * authentication_error / authentication_failed / invalid_api_key /
+ * api key not valid 这些 marker 同样推断成 errorStatus=401 走 auth UX
+ * (translateErrorNotification 的 hasAuthErrorMarker)。retry-loop 升级判定
+ * 必须排除同一集合, 否则这些真 auth 错误会被升级成「后端不可达」终态,
+ * 抢走 auth 修复路径并误导排查方向 (review: PR #715 五轮审核 P1)。
+ *
+ * 与 isAuthMissingErrorMessage 的分工: Missing 版只认「没给凭证」
+ * (401 / Missing bearer), 用于触发「同步登录态」等待式 UX; Related 版
+ * 额外认「凭证无效」类 marker, 只用于「不要按网络不可达处理」的排除判断。
+ */
+export function isAuthRelatedErrorMessage(message: string, errorStatus?: number): boolean {
+  if (isAuthMissingErrorMessage(message, errorStatus)) return true;
+  return /\bauthentication_(?:error|failed)\b|\binvalid[\s_-]*api[\s_-]*key\b|\bapi key not valid\b/i
+    .test(message);
+}
+
 /** error notification (顶层非 item.*) → AgentEvent error。 */
 export function translateErrorNotification(
   params: ErrorNotification['params'],

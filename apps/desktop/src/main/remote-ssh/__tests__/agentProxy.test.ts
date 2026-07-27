@@ -51,7 +51,9 @@ import {
 } from '../agent-proxy';
 import {
   getSshHostAgentProxy,
+  getSshHostAutoConnect,
   setSshHostAgentProxy,
+  setSshHostAutoConnect,
 } from '../ssh-host-prefs-store';
 
 interface ExecCall {
@@ -211,10 +213,22 @@ describe('ssh-host-prefs-store agentProxy', () => {
   });
 
   it('keeps autoConnect when writing agentProxy and vice versa', () => {
+    // 双向共存回归 (review: PR #715 五轮审核 P2 — 原测试只写了两次 agentProxy,
+    // 没真正交叉 autoConnect): prefs 是同一 JSON 文件里的 sibling 字段,
+    // 任一侧写入不得把另一侧冲掉。
+    setSshHostAutoConnect('h1', true);
     setSshHostAgentProxy('h1', PREF);
-    // 写 autoConnect 不应丢 agentProxy — 走公开 API 验证共存。
-    setSshHostAgentProxy('h1', PREF);
+    expect(getSshHostAutoConnect('h1')).toBe(true);
     expect(getSshHostAgentProxy('h1')).toEqual(PREF);
+    // 反向: 先写 agentProxy 再改 autoConnect, agentProxy 不丢。
+    setSshHostAutoConnect('h1', false);
+    expect(getSshHostAgentProxy('h1')).toEqual(PREF);
+    expect(getSshHostAutoConnect('h1')).toBe(false);
+    // 清 agentProxy 不影响 autoConnect。
+    setSshHostAutoConnect('h1', true);
+    setSshHostAgentProxy('h1', null);
+    expect(getSshHostAgentProxy('h1')).toBeNull();
+    expect(getSshHostAutoConnect('h1')).toBe(true);
   });
 
   it('rejects malformed prefs at write time', () => {
