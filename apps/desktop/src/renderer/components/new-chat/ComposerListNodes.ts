@@ -13,8 +13,8 @@ import { Selection, TextSelection } from '@tiptap/pm/state';
 import type { EditorView } from '@tiptap/pm/view';
 
 const BULLET_MARKER_RE = /^([-+*•])([ \t]+)$/;
-const ORDERED_MARKER_RE = /^([1-9]\d{0,7})([.)])([ \t]+)$/;
-const CJK_ORDERED_MARKER_RE = /^([1-9]\d{0,7})(、)$/;
+const ORDERED_MARKER_RE = /^([1-9]\d{0,8})([.)])([ \t]+)$/;
+const CJK_ORDERED_MARKER_RE = /^([1-9]\d{0,8})(、)$/;
 
 type BulletMarker = '-' | '+' | '*' | '•';
 type OrderedMarker = '.' | ')' | '、';
@@ -89,7 +89,7 @@ function plainListParagraphMarker(text: string): PlainListParagraphMarker | null
       attrs: { marker: bullet[1], separator: bullet[2] },
     };
   }
-  const ordered = text.match(/^([1-9]\d{0,7})([.)])([ \t]+)/);
+  const ordered = text.match(/^([1-9]\d{0,8})([.)])([ \t]+)/);
   if (ordered) {
     return {
       kind: 'ordered',
@@ -97,7 +97,7 @@ function plainListParagraphMarker(text: string): PlainListParagraphMarker | null
       attrs: { start: Number(ordered[1]), marker: ordered[2], separator: ordered[3] },
     };
   }
-  const cjkOrdered = text.match(/^([1-9]\d{0,7})(、)([ \t]*)/);
+  const cjkOrdered = text.match(/^([1-9]\d{0,8})(、)([ \t]*)/);
   if (cjkOrdered) {
     return {
       kind: 'ordered',
@@ -138,6 +138,7 @@ function hardBreakListInputRule(
       const hardBreak = paragraph.nodeAt(markerOffset - 1);
       if (hardBreak?.type.name !== 'hardBreak') return null;
       if (paragraphOffsetIsInsideFence(paragraph, markerOffset)) return null;
+      if (documentFenceStateBefore(state.doc, $markerStart.before(1))) return null;
 
       const before = paragraph.content.cut(0, markerOffset - hardBreak.nodeSize);
       const after = paragraph.content.cut(range.to - paragraphStart);
@@ -349,11 +350,21 @@ function selectedListItemDepth(view: EditorView): number | null {
 
 function selectedListItemIsEmpty(view: EditorView, depth: number): boolean {
   const item = view.state.selection.$from.node(depth);
+  const paragraph = item.firstChild;
   return (
     item.childCount === 1 &&
-    item.firstChild?.type.name === 'paragraph' &&
-    item.firstChild.content.size === 0
+    paragraph?.type.name === 'paragraph' &&
+    paragraph.content.content.every((node) => node.isText && !(node.text ?? '').trim())
   );
+}
+
+function liftEmptyStructuredListItem(view: EditorView, itemType: NodeType): boolean {
+  const { $from } = view.state.selection;
+  const paragraph = $from.parent;
+  if (paragraph.type.name === 'paragraph' && paragraph.content.size > 0) {
+    view.dispatch(view.state.tr.delete($from.start(), $from.end()));
+  }
+  return liftListItem(itemType)(view.state, view.dispatch);
 }
 
 function selectedListItemIsOnlyTaskParagraph(view: EditorView, depth: number): boolean {
@@ -438,7 +449,7 @@ export function handleStructuredListBreak(view: EditorView): boolean {
     return clearTaskPrefixAndLift(view, itemDepth, taskPrefix);
   }
   if (selectedListItemIsEmpty(view, itemDepth)) {
-    return liftListItem(itemType)(state, view.dispatch);
+    return liftEmptyStructuredListItem(view, itemType);
   }
   const split = splitListItem(itemType)(state, view.dispatch);
   if (split && taskPrefix?.caretAtOrAfterPrefix) {
@@ -455,6 +466,10 @@ export function handleStructuredListBackspace(view: EditorView): boolean {
   const { $from } = state.selection;
   const itemDepth = selectedListItemDepth(view);
   const taskPrefix = selectedTaskPrefix(view);
+  const emptyItem = itemDepth !== null && selectedListItemIsEmpty(view, itemDepth);
+  const emptyItemCaret =
+    emptyItem &&
+    ($from.parentOffset === 0 || $from.parentOffset === $from.parent.content.size);
   if (
     !itemType ||
     !state.selection.empty ||
@@ -464,12 +479,12 @@ export function handleStructuredListBackspace(view: EditorView): boolean {
         !taskPrefix.caretAtOrAfterPrefix ||
         !taskPrefix.caretAtParagraphEnd ||
         !selectedListItemIsOnlyTaskParagraph(view, itemDepth)
-      : $from.parentOffset !== 0 || !selectedListItemIsEmpty(view, itemDepth))
+      : (!emptyItemCaret && $from.parentOffset !== 0) || !emptyItem)
   ) {
     return false;
   }
   if (taskPrefix) return clearTaskPrefixAndLift(view, itemDepth, taskPrefix);
-  return liftListItem(itemType)(state, view.dispatch);
+  return liftEmptyStructuredListItem(view, itemType);
 }
 
 /**
