@@ -205,14 +205,30 @@ describe('listSessionTasks 孤儿 gating', () => {
     expect(orphanItem!.orderIndex).toBeGreaterThan(running.find((it) => it.taskId !== 'orphan-1')!.orderIndex);
   });
 
-  it('isSessionStreaming=false:孤儿是陈旧残留,不列出', () => {
+  it('isSessionStreaming=false:终态孤儿是陈旧残留,不列出', () => {
+    const doneOrphan = makeUpdate({ taskId: 'orphan-done', status: 'completed' });
     const { running, completed } = listSessionTasks({
       messages: [],
-      taskUpdates: new Map([['orphan-1', orphan]]),
+      taskUpdates: new Map([['orphan-done', doneOrphan]]),
       isSessionStreaming: false,
     });
     expect(running).toHaveLength(0);
     expect(completed).toHaveLength(0);
+  });
+
+  it('isSessionStreaming=false:running 孤儿仍列出(workflow 内部长命后台命令跨 turn 存活)', () => {
+    const liveBash = makeUpdate({
+      taskId: 'orphan-bash',
+      taskType: 'local_bash',
+      title: 'pnpm dev',
+    });
+    const { running } = listSessionTasks({
+      messages: [],
+      taskUpdates: new Map([['orphan-bash', liveBash]]),
+      isSessionStreaming: false,
+    });
+    expect(running).toHaveLength(1);
+    expect(running[0]).toMatchObject({ taskId: 'orphan-bash', kind: 'bash' });
   });
 });
 

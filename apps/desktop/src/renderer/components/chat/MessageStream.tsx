@@ -1152,13 +1152,30 @@ export function buildRenderItems(
   flushSegment();
 
   if (taskUpdates) {
+    // 父会话自己的 Bash 调用集合:local_bash 任务卡(#247 的「后台命令」卡,含
+    // 停止按钮)的**唯一**渲染来源就是本孤儿循环(Bash toolCall 走 tool_segment,
+    // 不进 agent_task 配对分支),必须按 parentToolUseId 命中保留;命不中的才是
+    // workflow / 子 agent 内部启动的后台命令 —— 只进后台任务面板,不进聊天流刷屏
+    // (对齐官方:聊天流只呈现父会话自己的调用)。
+    const parentBashToolUseIds = new Set<string>();
+    for (const m of messages) {
+      if (
+        m.role === 'tool_use' &&
+        m.toolName === 'Bash' &&
+        typeof m.toolUseId === 'string' &&
+        m.toolUseId.length > 0
+      ) {
+        parentBashToolUseIds.add(m.toolUseId);
+      }
+    }
     const seenTaskIds = new Set<string>();
     for (const update of taskUpdates.values()) {
-      // 孤儿 local_bash(只有任务事件、消息里无对应 toolCall)= workflow/子 agent
-      // 内部启动的后台命令:进后台任务面板,不进聊天流刷屏(对齐官方——聊天流只
-      // 呈现父会话自己的调用)。父会话自己的后台 Bash 有 toolCall,走上方配对卡,
-      // 不受此过滤影响。
-      if (update.taskType === 'local_bash') continue;
+      if (
+        update.taskType === 'local_bash' &&
+        !(update.parentToolUseId && parentBashToolUseIds.has(update.parentToolUseId))
+      ) {
+        continue;
+      }
       const primaryKey = update.parentToolUseId ?? update.taskId;
       if (
         seenTaskIds.has(update.taskId) ||
@@ -1233,6 +1250,8 @@ function isWorkflowTaskItem(it: RenderItem): boolean {
 function isWorkActivityItem(it: RenderItem): it is WorkChildItem {
   return (
     !isRunningAgentTask(it) &&
+    // workflow 卡三条分组路径(answered/legacy/active)统一平铺,见 isWorkflowTaskItem。
+    !isWorkflowTaskItem(it) &&
     (it.type === 'tool_segment' ||
       it.type === 'agent_task' ||
       (it.type === 'message' && it.message.role === 'thinking'))
