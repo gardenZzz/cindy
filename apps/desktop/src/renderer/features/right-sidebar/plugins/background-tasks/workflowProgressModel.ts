@@ -270,3 +270,31 @@ function backfillRowFromFile(
     row.error = match.error;
   }
 }
+
+// ── agent 状态的视觉归一(方块条 / 计数共用) ─────────────────────────────────
+
+/** 方块条四色视觉态。 */
+export type WorkflowAgentVisualState = 'done' | 'running' | 'failed' | 'queued';
+
+/**
+ * 把两套状态词表(事件流 start/progress/done/error;wf 文件 queued/running/done/
+ * failed/stopped/killed)归一成方块条四色。未知词按 queued(中性灰)处理 ——
+ * 词表无契约,宁可少染色不可误染色;'start' 对齐官方 CLI 语义(已入队未跑,灰)。
+ */
+export function workflowAgentVisualState(state: string | undefined): WorkflowAgentVisualState {
+  switch (state) {
+    case 'done':
+    case 'completed':
+      return 'done';
+    case 'running':
+    case 'progress':
+      return 'running';
+    case 'error':
+    case 'failed':
+    case 'stopped':
+    case 'killed':
+      return 'failed';
+    default:
+      return 'queued';
+  }
+}
