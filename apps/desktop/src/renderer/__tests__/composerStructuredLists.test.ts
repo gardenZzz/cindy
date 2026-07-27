@@ -311,6 +311,22 @@ describe('composer structured list input rules', () => {
     expect(editor.state.doc.firstChild?.type.name).toBe('paragraph');
     expect(editor.state.doc.firstChild?.textContent).toBe('```1. ');
   });
+
+  it('keeps ordinary list markers literal after a preceding open fence', () => {
+    const editor = makeEditor({
+      type: 'doc',
+      content: [
+        { type: 'paragraph', content: [{ type: 'text', text: '```' }] },
+        { type: 'paragraph' },
+      ],
+    });
+    selectDocumentEnd(editor);
+
+    typeThroughInputRules(editor, '1. ');
+
+    expect(editor.state.doc.lastChild?.type.name).toBe('paragraph');
+    expect(editor.state.doc.lastChild?.textContent).toBe('1. ');
+  });
 });
 
 describe('composer structured list keyboard commands', () => {
@@ -970,6 +986,44 @@ describe('composer structured list serialization', () => {
     expect(serializeEditorContent(editor).text).toBe('- first\n  second');
   });
 
+  it('indents multiline pasted-text chips inside a list item', () => {
+    const editor = makeEditor({
+      type: 'doc',
+      content: [
+        {
+          type: 'bulletList',
+          content: [
+            {
+              type: 'listItem',
+              content: [
+                {
+                  type: 'paragraph',
+                  content: [
+                    { type: 'text', text: 'prefix ' },
+                    {
+                      type: 'pastedTextChip',
+                      attrs: { text: 'first\nsecond', display: 'Pasted text (2 lines)' },
+                    },
+                  ],
+                },
+              ],
+            },
+          ],
+        },
+      ],
+    });
+
+    const serialized = serializeEditorContent(editor);
+    expect(serialized.text).toBe('- prefix first\n  second');
+    expect(serialized.pastedTextRanges).toEqual([
+      {
+        start: '- prefix '.length,
+        end: serialized.text.length,
+        display: 'Pasted text (2 lines)',
+      },
+    ]);
+  });
+
   it('keeps a dragged quote inside its list item', () => {
     const editor = makeEditor({
       type: 'doc',
@@ -1130,6 +1184,41 @@ describe('composer structured list serialization', () => {
     ]);
   });
 
+  it('reuses a hard-break continuation line for a list quote chip', () => {
+    const editor = makeEditor({
+      type: 'doc',
+      content: [
+        {
+          type: 'bulletList',
+          content: [
+            {
+              type: 'listItem',
+              content: [
+                {
+                  type: 'paragraph',
+                  content: [
+                    { type: 'text', text: 'before' },
+                    { type: 'hardBreak' },
+                    { type: COMPOSER_QUOTE_NODE_TYPE, attrs: { text: 'quoted' } },
+                  ],
+                },
+              ],
+            },
+          ],
+        },
+      ],
+    });
+
+    const serialized = serializeEditorContent(editor).text;
+    expect(serialized).toBe(
+      '- before\n  > <!-- cindy-composer-quote -->\n  > quoted',
+    );
+    expect(parseChatQuoteSegments(serialized)).toEqual([
+      { kind: 'text', text: '- before' },
+      { kind: 'quote', quote: { text: 'quoted' } },
+    ]);
+  });
+
   it('preserves indentation on an empty nested list item', () => {
     const editor = makeEditor({
       type: 'doc',
@@ -1265,6 +1354,68 @@ describe('composer structured list serialization', () => {
     );
 
     expect(serializeEditorSlice(editor, slice)).toBe('2. eco');
+  });
+
+  it('adjusts the nested ordered list that contains the copied selection start', () => {
+    const editor = makeEditor({
+      type: 'doc',
+      content: [
+        {
+          type: 'orderedList',
+          attrs: { start: 1, marker: '.' },
+          content: [
+            {
+              type: 'listItem',
+              content: [
+                { type: 'paragraph', content: [{ type: 'text', text: 'outer-first' }] },
+                {
+                  type: 'orderedList',
+                  attrs: { start: 5, marker: '.' },
+                  content: [
+                    {
+                      type: 'listItem',
+                      content: [
+                        { type: 'paragraph', content: [{ type: 'text', text: 'nested-first' }] },
+                      ],
+                    },
+                    {
+                      type: 'listItem',
+                      content: [
+                        { type: 'paragraph', content: [{ type: 'text', text: 'nested-second' }] },
+                      ],
+                    },
+                  ],
+                },
+              ],
+            },
+            {
+              type: 'listItem',
+              content: [
+                { type: 'paragraph', content: [{ type: 'text', text: 'outer-second' }] },
+              ],
+            },
+          ],
+        },
+      ],
+    });
+    let nestedSecondPosition = 0;
+    let outerSecondPosition = 0;
+    editor.state.doc.descendants((node, position) => {
+      if (node.isText && node.text === 'nested-second') nestedSecondPosition = position;
+      if (node.isText && node.text === 'outer-second') outerSecondPosition = position;
+    });
+    editor.commands.setTextSelection({
+      from: nestedSecondPosition,
+      to: outerSecondPosition + 'outer-second'.length,
+    });
+    const slice = editor.state.doc.slice(
+      editor.state.selection.from,
+      editor.state.selection.to,
+    );
+
+    const copied = serializeEditorSlice(editor, slice);
+    expect(copied).toContain('6. nested-second');
+    expect(copied).not.toContain('1. nested-second');
   });
 
   it('preserves nested markers and projects atom ranges into wire offsets', () => {

@@ -38,7 +38,7 @@ export interface SerializedComposerContent {
 type OrderedMarker = '.' | ')' | '、';
 
 const EMPTY_LIST_ITEM_MARKER_RE =
-  /(?:^|\n)[ \t]*(?:[1-9]\d{0,6}[.)][ \t]+|[1-9]\d{0,6}、[ \t]*|[-+*•][ \t]+)$/;
+  /(?:^|\n)[ \t]*(?:[1-9]\d{0,7}[.)][ \t]+|[1-9]\d{0,7}、[ \t]*|[-+*•][ \t]+)$/;
 
 const TAB_SIZE = 4;
 
@@ -56,8 +56,8 @@ function expandedIndentWidth(text: string): number {
 
 function literalListContinuationPrefix(text: string): string | null {
   const match =
-    text.match(/^([ \t]+)(?:[-+*•]|[1-9]\d{0,6}[.)])([ \t]+)/) ??
-    text.match(/^([ \t]+)[1-9]\d{0,6}、[ \t]*/);
+    text.match(/^([ \t]+)(?:[-+*•]|[1-9]\d{0,7}[.)])([ \t]+)/) ??
+    text.match(/^([ \t]+)[1-9]\d{0,7}、[ \t]*/);
   if (!match) return null;
   return ' '.repeat(expandedIndentWidth(match[0]));
 }
@@ -169,9 +169,15 @@ function serializeComposerDocument(
           const continuationPrefix =
             continuationIndent || ' '.repeat(expandedIndentWidth(prefix));
           const quoteLines = quoteText.split('\n');
-          const quoteSeparator = continuationAfterQuote === null ? '' : '\n';
-          buffer += `${quoteSeparator}\n${quoteLines
-            .map((line) => `${continuationPrefix}${line}`)
+          const hasContinuationLine =
+            continuationAfterQuote === null &&
+            buffer.endsWith(`\n${continuationPrefix}`);
+          const quoteSeparator =
+            continuationAfterQuote !== null ? '\n\n' : hasContinuationLine ? '' : '\n';
+          buffer += `${quoteSeparator}${quoteLines
+            .map((line, index) =>
+              hasContinuationLine && index === 0 ? line : `${continuationPrefix}${line}`,
+            )
             .join('\n')}`;
           continuationAfterQuote = continuationPrefix;
         } else {
@@ -266,7 +272,9 @@ function serializeComposerDocument(
       if (child.type.name === 'pastedTextChip') {
         const attrs = child.attrs as PastedTextChipAttrs;
         const start = buffer.length;
-        buffer += attrs.text;
+        buffer += continuationIndent
+          ? attrs.text.replace(/\n/g, `\n${continuationIndent}`)
+          : attrs.text;
         bufferPastedTextRanges.push({ start, end: buffer.length, display: attrs.display });
         return;
       }
@@ -466,14 +474,21 @@ export function serializeEditorSlice(editor: Editor | null, slice: Slice): strin
         ? Number(sourceList.attrs.start) + sourceIndex
         : null;
     if (copiedStart !== null) {
-      let orderedListPosition: number | null = null;
+      let firstContentPosition: number | null = null;
       replaced.descendants((node, position) => {
-        if (orderedListPosition === null && node.type.name === 'orderedList') {
-          orderedListPosition = position;
+        if (firstContentPosition === null && (node.isText || node.isAtom)) {
+          firstContentPosition = position;
           return false;
         }
-        return orderedListPosition === null;
+        return firstContentPosition === null;
       });
+      const $firstContent = replaced.resolve(firstContentPosition ?? 0);
+      let orderedListPosition: number | null = null;
+      for (let depth = $firstContent.depth; depth > 0; depth -= 1) {
+        if ($firstContent.node(depth).type.name !== 'orderedList') continue;
+        orderedListPosition = $firstContent.before(depth);
+        break;
+      }
       if (orderedListPosition !== null) {
         const node = replaced.nodeAt(orderedListPosition);
         if (node) {

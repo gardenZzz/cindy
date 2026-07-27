@@ -372,6 +372,9 @@ html:lang(ko) {
 [data-chat-input-root] .ProseMirror ol[data-marker-digits='7'] {
   --composer-list-padding: 5.2em;
 }
+[data-chat-input-root] .ProseMirror ol[data-marker-digits='8'] {
+  --composer-list-padding: 5.8em;
+}
 [data-chat-input-root] .ProseMirror ul {
   list-style-type: disc;
 }

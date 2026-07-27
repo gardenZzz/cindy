@@ -164,6 +164,25 @@ function hardBreakListInputRule(
   });
 }
 
+function fenceAwareWrappingInputRule(
+  config: Parameters<typeof wrappingInputRule>[0],
+): InputRule {
+  const rule = wrappingInputRule(config);
+  return new InputRule({
+    find: rule.find,
+    handler: (props) => {
+      const $markerStart = props.state.doc.resolve(props.range.from);
+      if (
+        $markerStart.depth === 1 &&
+        documentFenceStateBefore(props.state.doc, $markerStart.before(1))
+      ) {
+        return null;
+      }
+      return rule.handler(props);
+    },
+  });
+}
+
 const listItemConfig: NodeConfig = {
   name: 'listItem',
   group: 'block',
@@ -211,7 +230,7 @@ export const ComposerBulletList = Node.create({
   },
   addInputRules() {
     return [
-      wrappingInputRule({
+      fenceAwareWrappingInputRule({
         find: BULLET_MARKER_RE,
         type: this.type,
         joinPredicate: (match, before) =>
@@ -302,13 +321,13 @@ export const ComposerOrderedList = Node.create({
   },
   addInputRules() {
     return [
-      wrappingInputRule({
+      fenceAwareWrappingInputRule({
         find: ORDERED_MARKER_RE,
         type: this.type,
         joinPredicate: canJoinOrderedList,
         getAttributes: orderedAttrs,
       }),
-      wrappingInputRule({
+      fenceAwareWrappingInputRule({
         find: CJK_ORDERED_MARKER_RE,
         type: this.type,
         joinPredicate: canJoinOrderedList,
