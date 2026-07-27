@@ -7167,11 +7167,6 @@
       "learnButton": "이 스킬 학습하기"
     }
   },
-  "workflows": {
-    "toast": {
-      "none": "이 세션에서 실행 중인 워크플로우가 없습니다"
-    }
-  },
   "planMode": {
     "menuItem": "계획 모드",
     "indicator": {

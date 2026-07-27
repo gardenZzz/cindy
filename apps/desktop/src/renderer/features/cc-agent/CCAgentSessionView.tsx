@@ -1553,15 +1553,16 @@ export function CCAgentSessionView({
         return;
       }
       if (payload.command === 'workflows') {
-        // workflow 的主视图在右栏「后台任务」面板:从本会话任务表取最近一个
-        // local_workflow 任务,打开面板并定位到该任务详情;没有则 toast。数据/展现
+        // workflow 的主视图在右栏「后台任务」面板:有 live workflow 任务则打开面板
+        // 并定位其详情;没有(如重载后任务表已清空)也打开面板列表 —— 列表基于消息
+        // 扫描,历史 workflow 行仍可见,比 toast「暂无」更符合命令语义。数据/展现
         // 全在本地,不回 SDK(原生 /workflows 在非交互 SDK 模式下不可用)。
+        if (!sessionId) return;
         const latest = findLatestWorkflowTask(taskUpdatesRef.current);
-        if (!sessionId || !latest) {
-          toast.warning(t('workflows.toast.none'));
-          return;
-        }
-        void openBackgroundTasksTab(sessionId, { focusTaskId: latest.taskId });
+        void openBackgroundTasksTab(
+          sessionId,
+          latest ? { focusTaskId: latest.taskId } : {},
+        );
         return;
       }
       // 'issue' 命令由下方独立 effect 处理(需要 handleSend,其声明在本 effect 之后)。

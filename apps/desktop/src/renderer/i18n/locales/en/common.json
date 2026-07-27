@@ -7178,11 +7178,6 @@
       "learnButton": "Learn this skill"
     }
   },
-  "workflows": {
-    "toast": {
-      "none": "No workflow is running in this session"
-    }
-  },
   "planMode": {
     "menuItem": "Plan mode",
     "indicator": {

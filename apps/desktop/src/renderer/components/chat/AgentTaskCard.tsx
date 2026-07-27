@@ -153,9 +153,12 @@ export function AgentTaskCard({ toolCall, update, result, subagentModel, session
       .finally(() => setStopping(false));
   }, [sessionId, update?.taskId]);
 
-  // workflow 卡整卡点击 → 打开右栏后台任务面板并定位本任务;sessionId / taskId
-  // 任一缺失(历史孤儿卡)时降级 no-op,外观不变。
+  // workflow 卡整卡点击 → 打开右栏后台任务面板并定位本任务。入口模式要求
+  // sessionId 与 live taskId 都在;历史重载卡(update 为空,面板侧也无该任务的
+  // 数据)退回传统展开交互,让 description/summary(Workflow 最终结果文本)仍然
+  // 就地可读,不做「点了没反应」的假入口。
   const workflowTaskId = update?.taskId;
+  const canOpenInPanel = Boolean(sessionId) && Boolean(workflowTaskId);
   const openInPanel = useCallback(() => {
     if (!sessionId || !workflowTaskId) return;
     void openBackgroundTasksTab(sessionId, { focusTaskId: workflowTaskId });
@@ -215,9 +218,9 @@ export function AgentTaskCard({ toolCall, update, result, subagentModel, session
         <div className="flex w-full items-start gap-2">
         <button
           type="button"
-          onClick={isWorkflow ? openInPanel : toggle}
+          onClick={isWorkflow && canOpenInPanel ? openInPanel : toggle}
           className="flex min-w-0 flex-1 items-start gap-2 text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--focus-ring)]"
-          {...(isWorkflow
+          {...(isWorkflow && canOpenInPanel
             ? { 'aria-label': t('chat.agentTask.openInPanel') }
             : {
                 'aria-expanded': expanded,
@@ -278,7 +281,7 @@ export function AgentTaskCard({ toolCall, update, result, subagentModel, session
               </span>
             )}
           </span>
-          {isWorkflow ? (
+          {isWorkflow && canOpenInPanel ? (
             <PanelRight
               size={14}
               className="mt-1 shrink-0 text-[var(--text-tertiary)]"
@@ -316,8 +319,9 @@ export function AgentTaskCard({ toolCall, update, result, subagentModel, session
         )}
         </div>
 
-        {/* workflow 卡不渲染展开区:详情(逐 agent 进度树等)在后台任务面板。 */}
-        {!isWorkflow && (
+        {/* live workflow 卡不渲染展开区(详情在后台任务面板);历史 workflow 卡
+            (无 live taskId,面板无数据)保留展开区兜底展示 description/summary。 */}
+        {!(isWorkflow && canOpenInPanel) && (
           <Collapse open={expanded}>
             <div className="mt-2 border-l-2 border-[var(--agent-actions-rail)] pl-3 text-13 leading-5 text-[var(--text-secondary)]">
               {description && <p className="mb-1">{description}</p>}
