@@ -295,7 +295,11 @@ export function registerProviderHandlers(
       });
       throwIpcError('INTERNAL', 'rediscover models failed');
     }
-    return failure ? { ok: false, failure } : { ok: true };
+    // 与 buildRegistry 的投影同口径:detail 可能是上游原始响应体,不能过 IPC 边界。
+    // 这是独立于 provider 列表的第二条返回路径,必须各自剥离(PR #548 review)。
+    if (!failure) return { ok: true };
+    const { detail: _detail, ...failureView } = failure;
+    return { ok: false, failure: failureView };
   });
 
   // 通用 OAuth 登录 / 登出 / 取消。login 是查询型返回（{ok, reason}——取消/超时是正常流程

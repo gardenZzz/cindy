@@ -140,14 +140,23 @@ describe('provider:models-rediscover handler', () => {
     expect(deps.broadcastChanged).not.toHaveBeenCalled();
   });
 
-  it('回传失败归因供 renderer 渲染分类文案', async () => {
+  it('回传失败归因供 renderer 渲染分类文案,但剥掉 detail', async () => {
     const harness = new IpcHarness();
-    const failure = { kind: 'regionBlocked' as const, at: '2026-07-27T00:00:00.000Z' };
+    // detail 可能是上游原始响应体:provider 列表那条路径已经剥了,这条独立的返回路径
+    // 必须各自剥,否则等于开了第二个泄漏口。
+    const failure = {
+      kind: 'regionBlocked' as const,
+      at: '2026-07-27T00:00:00.000Z',
+      detail: 'HTTP 403: {"error":{"type":"unsupported_country_region_territory"}}',
+    };
     registerProviderHandlers(harness, makeDeps({ rediscoverModels: vi.fn(async () => failure) }));
 
-    await expect(
-      harness.invoke(MAKER_INVOKE.PROVIDER_MODELS_REDISCOVER, 'anthropic'),
-    ).resolves.toEqual({ ok: false, failure });
+    const res = (await harness.invoke(MAKER_INVOKE.PROVIDER_MODELS_REDISCOVER, 'anthropic')) as {
+      ok: boolean;
+      failure?: Record<string, unknown>;
+    };
+    expect(res).toEqual({ ok: false, failure: { kind: 'regionBlocked', at: failure.at } });
+    expect(res.failure).not.toHaveProperty('detail');
   });
 
   it('意外异常转结构化 INTERNAL,不以裸 Error 漏给 renderer', async () => {
