@@ -429,8 +429,9 @@ export function serializeEditorContent(editor: Editor): SerializedComposerConten
 
 /**
  * Serialize a selected editor fragment for plain-text clipboard consumers.
- * Replacing an empty document with the open slice lets ProseMirror rebuild
- * list context around selections that begin or end inside a list item.
+ * Replacing an empty document with the open slice lets ProseMirror retain
+ * surrounding structure; ordered-list context is rebuilt below when an
+ * inline-only slice omits it.
  */
 export function serializeEditorSlice(editor: Editor | null, slice: Slice): string {
   if (!editor) {

@@ -193,4 +193,41 @@ describe('placeGhostAtComposerStart', () => {
       content: [{ type: 'text', text: '$old later text' }],
     });
   });
+
+  it('does not replace a command that appears after an empty structured list', () => {
+    const editor = new Editor({
+      extensions: [
+        Document,
+        Paragraph,
+        Text,
+        ComposerListItem,
+        ComposerBulletList,
+        ComposerOrderedList,
+        MentionChipNode,
+      ],
+      content: {
+        type: 'doc',
+        content: [
+          {
+            type: 'bulletList',
+            content: [{ type: 'listItem', content: [{ type: 'paragraph' }] }],
+          },
+          {
+            type: 'paragraph',
+            content: [{ type: 'text', text: '$old later text' }],
+          },
+        ],
+      },
+    });
+    editors.push(editor);
+
+    expect(placeGhostAtComposerStart(editor, ghost('mivo'), [ghost('mivo'), ghost('old')])).toBe(
+      true,
+    );
+    expect(editor.getJSON().content?.[0]).toEqual({
+      type: 'paragraph',
+      content: [{ type: 'text', text: '$mivo ' }],
+    });
+    expect(editor.getJSON().content?.[1]?.type).toBe('bulletList');
+  });
 });
