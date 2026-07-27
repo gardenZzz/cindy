@@ -267,6 +267,11 @@
           "keyHint": "秘密鍵ファイルを直接読み込みます。パスフレーズは保存しないため、暗号化された鍵には非対応 — ssh-agent が使えない場合のみご使用ください。"
         },
         "identityFile": "秘密鍵ファイルのパス",
+        "agentProxy": "Agent トラフィックをローカルプロキシ経由にする",
+        "agentProxyTip": "リモートに 127.0.0.1 ポートを開き、SSH トンネルでこのマシンのプロキシに中継します。リモートの codex / Claude Code の通信がそこから出ます",
+        "agentProxyAddr": "ローカルプロキシのアドレス",
+        "agentProxyHint": "リモートの 127.0.0.1 にポートを開き、SSH トンネルでローカルプロキシ（例: Clash の 7890）に中継します。{{appName}} はプロキシを提供せず、トンネルのみを張ります。リモート Agent の HTTPS_PROXY がトンネル口を指し、ドメインはお使いのプロキシ側で解決されます。切り替え後、リモートの codex daemon が一度再起動します。",
+        "agentProxyAddrInvalid": "host:port 形式で入力してください（例: 127.0.0.1:7890）",
         "cancel": "キャンセル",
         "submit": "マシンを追加"
       },
@@ -282,6 +287,10 @@
         "statusInstalled": "インストール済み",
         "statusNotInstalled": "未インストール",
         "claudeCodeName": "Claude Code",
+        "agentProxyTitle": "Agent プロキシトンネル",
+        "agentProxyActive": "リモート 127.0.0.1:{{port}} → ローカル {{target}} · 確立済み",
+        "agentProxyPending": "トンネル確立中 → ローカル {{target}}",
+        "agentProxyError": "トンネルの確立に失敗: {{message}}",
         "button": {
           "install": "インストール",
           "reinstall": "再インストール",

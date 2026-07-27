@@ -61,6 +61,10 @@ import { resolveSessionCcDebugFile } from '../logger.js';
 import { resetProviderModelAutoRefreshCooldowns } from './provider-model-auto-refresh.js';
 import { createSshDaemonTransport } from './codex-remote-transport.js';
 import { getRemoteSshPool } from '../remote-ssh/index.js';
+import {
+  getRemoteAgentProxyEnv,
+  reconcileCodexAgentProxyEnv,
+} from '../remote-ssh/agent-proxy.js';
 import { openCcManagerSession } from './cc-manager-client.js';
 import { getRemoteClaudeBinaryPath } from '../remote-ssh/cc-manager-install.js';
 import { createReadImageHook } from './claude-hooks/read-image-hook.js';
@@ -429,6 +433,20 @@ export function getMaker(): Maker {
         if (host?.getStatus() !== 'ready') {
           throw new Error(`remote ssh host not ready: ${remoteHostId}`);
         }
+        // 「Agent 流量走本地 Proxy」: pref 开启时确保 SSH 反向隧道就绪, 把代理
+        // env 合入 startParams.env — cc-mgr daemon 按 session spawn SDK, 每次
+        // 会话都吃到当前配置, 无需像 codex daemon 那样重启。隧道 arm 失败
+        // (sshd 拒 remote forwarding 等) 直接抛错, 不静默回落直连。
+        const proxyEnv = await getRemoteAgentProxyEnv(host);
+        const startParamsWithProxy = proxyEnv
+          ? {
+              ...(startParams as Record<string, unknown>),
+              env: {
+                ...((startParams as { env?: Record<string, string> }).env ?? {}),
+                ...proxyEnv,
+              },
+            }
+          : startParams;
         // SDK can't self-locate its native CLI binary on remote (bundled-into-cc-mgr
         // optional-dep resolver is frozen to desktop build platform). Probe + cache
         // the path here and pass it down; cc-manager-client merges it into the SDK
@@ -437,7 +455,7 @@ export function getMaker(): Maker {
         const { remoteQuery, dispose, detach } = await openCcManagerSession({
           host,
           sessionId,
-          startParams: startParams as unknown as Parameters<typeof openCcManagerSession>[0]['startParams'],
+          startParams: startParamsWithProxy as unknown as Parameters<typeof openCcManagerSession>[0]['startParams'],
           claudeBinaryPath,
           onApprovalRequest: onApprovalRequest as Parameters<typeof openCcManagerSession>[0]['onApprovalRequest'],
         });
@@ -618,6 +636,12 @@ export function getMaker(): Maker {
         return createSshDaemonTransport({
           remoteHost,
           logger: desktopMakerLogger,
+          // 「Agent 流量走本地 Proxy」: pref 开启时先建 SSH 反向隧道 + 对账
+          // codex daemon 的 env marker (漂移 → 重写 + 重启 daemon), 然后才让
+          // transport 探活/拉起 daemon。pref 关闭时 reconcile 是幂等 no-op。
+          beforeDaemonProbe: async () => {
+            await reconcileCodexAgentProxyEnv(remoteHost);
+          },
         });
       },
     });
