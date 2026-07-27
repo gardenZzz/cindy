@@ -1393,6 +1393,21 @@ describe('composer structured list serialization', () => {
     expect(serializeEditorContent(editor).text).toBe('2. ');
   });
 
+  it('preserves the trailing separator for a generated nine-digit marker', () => {
+    const editor = makeEditor({
+      type: 'doc',
+      content: [
+        {
+          type: 'orderedList',
+          attrs: { start: 99999999, marker: '.' },
+          content: [{ type: 'listItem', content: [{ type: 'paragraph' }] }],
+        },
+      ],
+    });
+
+    expect(serializeEditorContent(editor).text).toBe('99999999. ');
+  });
+
   it('keeps partial inline boundaries when copying one ordered-list item', () => {
     const editor = makeEditor({
       type: 'doc',
