@@ -71,6 +71,7 @@ import {
   getAgentProxyTunnelState,
   initAgentProxy,
   killRemoteCodexDaemon,
+  markAgentProxyTunnelInactive,
   reconcileCodexAgentProxyEnv,
   type AgentProxyTunnelState,
 } from './agent-proxy.js';
@@ -506,8 +507,10 @@ function normalizeAgentProxyInput(raw: unknown): SshHostAgentProxyPref | null | 
   const enabled = obj.enabled === true;
   if (!enabled) return null;
   const localHost = requireString(obj.localHost, 'agentProxy.localHost').trim();
-  // localHost 会进远端 env (HTTPS_PROXY=http://<host>:<port>) — 空白和引号
-  // 都会破坏 marker shell 片段, 直接拒。host:port 里的 port 单独给。
+  // localHost 是本机隧道转发目标 (net.connect 的目的地; 远端 env 永远指向
+  // 127.0.0.1:<隧道口>, 不含这个值)。空白/引号在这里虽无注入面, 但必然是
+  // 用户填错 — 直接拒, 免得隧道建起来却转到一个荒诞地址 (review: PR #715
+  // copilot R3 注释修正)。
   if (!localHost || /\s/.test(localHost) || localHost.includes("'") || localHost.includes('"')) {
     throwIpcError('INVALID_PARAMS', 'agentProxy.localHost must be a plain host (no whitespace/quotes), e.g. 127.0.0.1');
   }
@@ -560,6 +563,11 @@ export function registerRemoteSshIpc(): void {
     if (snap.status === 'ready') {
       const host = getPool().get(snap.config.id);
       if (host) void applyAgentProxyForHost(host);
+    } else {
+      // 断连 / 重连中: 隧道已 disarm, 状态标非活跃, detail 面板不显示
+      // 过期的「已建立」(review: PR #715 copilot R3)。reconnect ready 时
+      // 上面的 apply 会重建并重新标活跃。
+      markAgentProxyTunnelInactive(snap.config.id);
     }
   });
   // agent-proxy 内部状态 (隧道成败 / 端口) 变化 → 推一版最新 snapshot,

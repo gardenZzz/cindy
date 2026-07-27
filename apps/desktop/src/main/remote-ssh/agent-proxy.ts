@@ -53,6 +53,19 @@ export function clearAgentProxyTunnelState(hostId: string): void {
   tunnelStates.delete(hostId);
 }
 
+/**
+ * 断连时把隧道标记为非活跃 (review: PR #715 copilot R3): 状态只在内存,
+ * 断连后 forward 已 disarm, UI 不应继续显示「已建立」。愿望仍在 —
+ * reconnect ready 时 applyAgentProxyForHost 会重建并重新标活跃。
+ * 仅在确实有 active 记录时动作 (避免无意义 broadcast 刷屏)。
+ */
+export function markAgentProxyTunnelInactive(hostId: string): void {
+  const cur = tunnelStates.get(hostId);
+  if (!cur?.active) return;
+  tunnelStates.set(hostId, { active: false });
+  emitState(hostId);
+}
+
 // broadcast 由 index.ts 注入 (避免循环依赖): 隧道状态变化后推一版
 // status snapshot 给 renderer, HostSnapshotWithPrefs 会带上最新 tunnel state。
 let broadcaster: ((hostId: string) => void) | null = null;

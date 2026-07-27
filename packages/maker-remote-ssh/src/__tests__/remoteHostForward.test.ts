@@ -382,6 +382,24 @@ describe('RemoteHost remote forwarding', () => {
     expect(host.listRemoteForwards()[0]?.armed).toBe(true);
   });
 
+  it('clears the forward listener client on disconnect; a new client re-attaches (review R3)', async () => {
+    // forwardListenerClient 不清会让 RemoteHost 长期持有死 client (抑制 GC +
+    // 多次重连后旧 client listener 堆积); 断连后必须置空, 新连接 arm 时重挂。
+    const client1 = new FakeClient();
+    const host = makeReadyHost(client1);
+    await host.ensureRemoteForward({ localHost: '127.0.0.1', localPort: 7890 });
+    expect(client1.listenerCount('tcp connection')).toBe(1);
+
+    (host as unknown as { markForwardsDisarmed(): void }).markForwardsDisarmed();
+    expect((host as unknown as { forwardListenerClient: unknown }).forwardListenerClient).toBeNull();
+
+    const client2 = new FakeClient();
+    (host as unknown as { client: unknown }).client = client2;
+    await (host as unknown as { rearmForwards(): Promise<void> }).rearmForwards();
+    expect(client2.listenerCount('tcp connection')).toBe(1);
+    expect((host as unknown as { forwardListenerClient: unknown }).forwardListenerClient).toBe(client2);
+  });
+
   it('keeps the wish when re-arm fails, without throwing (logged only)', async () => {
     const client1 = new FakeClient();
     const host = makeReadyHost(client1);
