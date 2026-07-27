@@ -129,7 +129,7 @@ import {
   pastedProjectChipAttrs,
 } from './pastePipeline';
 import { upgradePastedPathsToChips, type PendingPathRange } from './pathPaste';
-import { docContainsAtomChip } from './composerDocState';
+import { composerDocIsEmpty } from './composerDocState';
 import {
   isComposerBlankPointerTarget,
   isInteractiveFocusedElement,
@@ -640,26 +640,7 @@ function hasFocusMovedToInteractiveElement(focusAnchor: Element | null, editor: 
  */
 function isEditorEmpty(editor: Editor | null): boolean {
   if (!editor) return true;
-  const doc = editor.state.doc;
-  if (doc.childCount === 0) return true;
-  let hasContent = false;
-  doc.descendants((node) => {
-    if (hasContent) return false;
-    if (
-      node.type.name === 'mentionChip' ||
-      node.type.name === 'pastedTextChip' ||
-      node.type.name === COMPOSER_QUOTE_NODE_TYPE
-    ) {
-      hasContent = true;
-      return false;
-    }
-    if (node.isText && (node.text ?? '').trim().length > 0) {
-      hasContent = true;
-      return false;
-    }
-    return true;
-  });
-  return !hasContent;
+  return composerDocIsEmpty(editor.state.doc);
 }
 
 /**
@@ -1563,15 +1544,16 @@ export function ChatInput({
               replacement.unshift(state.schema.nodes.paragraph.create());
             }
             const fragment = Fragment.from(replacement);
+            const pasteIntoTrailingEmptyLine = paragraphEndsDocument && paragraphIsEmptyLine;
             const tr =
-              paragraphEndsDocument && paragraphIsEmptyLine
+              pasteIntoTrailingEmptyLine
                 ? state.tr.replaceWith(
                     paragraphPosition,
                     paragraphPosition + $from.parent.nodeSize,
                     fragment,
                   )
                 : state.tr.replaceSelection(new Slice(fragment, 0, 0));
-            tr.setSelection(TextSelection.atEnd(tr.doc));
+            if (pasteIntoTrailingEmptyLine) tr.setSelection(TextSelection.atEnd(tr.doc));
             view.dispatch(tr.scrollIntoView());
             return true;
           }
@@ -1735,8 +1717,8 @@ export function ChatInput({
           // 浏览中途新增/修改任意 chip 后 eq 失配,仍不介入。
           const isUnmodifiedHydratedHistory =
             idx >= 0 && hydratedHistoryDocumentRef.current?.eq(editorInstance) === true;
-          if (docContainsAtomChip(editorInstance) && !isUnmodifiedHydratedHistory) return false;
-          const isEmpty = editorInstance.textContent.trim().length === 0;
+          if (!isUnmodifiedHydratedHistory && !composerDocIsEmpty(editorInstance)) return false;
+          const isEmpty = composerDocIsEmpty(editorInstance);
           const replaceWithHistoryEntry = (entry: ComposerHistoryEntry) => {
             const historyDocument = view.state.schema.nodeFromJSON(
               composerHistoryEntryToDocument(entry),
