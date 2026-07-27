@@ -1246,6 +1246,52 @@ describe('HTTP 发现失败的归因与选择性重试', () => {
     }
   });
 
+  it('快照被退化守卫拒绝 = 上游已经答了,过期的失败理由必须一起清掉', async () => {
+    // 有旧清单 + 上一轮记了 network:此刻上游其实已经能连上,只是这次回来的快照太短被守卫
+    // 挡下、旧清单原样留用 —— 用户手里明明有模型可选,UI 却还挂着「连不上」;而这条早退路径
+    // 既不记新失败也不排重试,过期理由会一直挂到下次成功发现(PR #548 review)。
+    const model = (id: string) => ({ id, display_name: id, type: 'model' });
+    const wide = {
+      ok: true,
+      json: async () => ({
+        data: ['claude-opus-4-8', 'claude-sonnet-4-8', 'claude-haiku-4-8', 'claude-opus-4-7'].map(model),
+        has_more: false,
+      }),
+    };
+    const shrunk = {
+      ok: true,
+      json: async () => ({ data: [model('claude-opus-4-8')], has_more: false }),
+    };
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(wide)
+      .mockRejectedValueOnce(new TypeError('fetch failed'))
+      .mockResolvedValue(shrunk);
+    vi.stubGlobal('fetch', fetchMock);
+
+    await refreshAnthropicModelsFromHttp();
+    expect(anthropicIds()).toHaveLength(4);
+
+    await refreshAnthropicModelsFromHttp();
+    expect(getAnthropicModelDiscoveryFailure()?.kind).toBe('network');
+
+    const onFailureChanged = vi.fn();
+    setAnthropicDiscoveryFailureListener(onFailureChanged);
+    try {
+      // network 排的重试到点 —— 这次上游答了,但快照退化被拒。
+      await vi.advanceTimersByTimeAsync(2_000);
+      expect(anthropicIds()).toHaveLength(4); // 旧清单保住
+      expect(getAnthropicModelDiscoveryFailure()).toBeNull();
+      expect(onFailureChanged).toHaveBeenCalled();
+    } finally {
+      setAnthropicDiscoveryFailureListener(null);
+    }
+    // 失败态已清 = 重试链也停了,不再按退避空转打网络。
+    const callsSoFar = fetchMock.mock.calls.length;
+    await vi.advanceTimersByTimeAsync(600_000);
+    expect(fetchMock).toHaveBeenCalledTimes(callsSoFar);
+  });
+
   it('登出 / 换号清掉失败态与待执行的重试', async () => {
     const fetchMock = vi.fn().mockRejectedValue(new TypeError('fetch failed'));
     vi.stubGlobal('fetch', fetchMock);

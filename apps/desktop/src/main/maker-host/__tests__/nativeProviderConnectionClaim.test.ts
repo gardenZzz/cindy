@@ -19,6 +19,8 @@ const h = vi.hoisted(() => ({
   grokCredentialPresent: true,
   refreshAnthropicModels: vi.fn(),
   loadAnthropicDiskCache: vi.fn(async () => {}),
+  codexLoginWithSideEffects: vi.fn(async () => false),
+  codexLoginReadOnly: vi.fn(() => false),
   anthropicDiscoveryFailure: null as {
     kind: string;
     at: string;
@@ -60,9 +62,15 @@ vi.mock('../model-discovery/anthropic.js', () => ({
   getAnthropicModelDiscoveryFailure: () => h.anthropicDiscoveryFailure,
 }));
 
+// hasCodexOAuthLogin 在真实实现里会经 getAccessToken 触发 reconcile(建硬链 + 写绑定);
+// ReadOnly 变体是它的纯读同侪。这里用计数区分两条路径分别被谁调用。
 vi.mock('../auth-adapters.js', () => ({
   readClaudeApiKey: () => null,
-  desktopCodexAuthAdapter: { hasCodexOAuthLogin: () => false, hasCodexOAuthLoginUnbound: () => false },
+  desktopCodexAuthAdapter: {
+    hasCodexOAuthLogin: h.codexLoginWithSideEffects,
+    hasCodexOAuthLoginReadOnly: h.codexLoginReadOnly,
+    hasCodexOAuthLoginUnbound: () => false,
+  },
 }));
 
 vi.mock('../../authManager.js', () => ({ getAuthState: () => ({ mode: 'local' as const, user: null }) }));
@@ -100,6 +108,8 @@ beforeEach(() => {
   h.anthropicDiscoveryFailure = null;
   h.refreshAnthropicModels.mockClear();
   h.loadAnthropicDiskCache.mockClear();
+  h.codexLoginWithSideEffects.mockClear();
+  h.codexLoginReadOnly.mockClear();
 });
 
 afterEach(() => {
@@ -142,6 +152,18 @@ describe('native provider connection claim on read', () => {
     // 本机主页面读一次即恢复自愈。
     expect((await connectedMap(true)).anthropic).toBe(true);
     expect(h.refreshAnthropicModels).toHaveBeenCalledTimes(1);
+  });
+
+  it('openai 同样按 sender 分流:不受信只读,不触发 reconcile 的硬链与绑定写入', async () => {
+    // hasCodexOAuthLogin 会经 getAccessToken 走 reconcileWithSystemCodex —— 建凭证硬链 +
+    // 为首个 owner 补写绑定。判据不是「有没有发上游请求」,而是「不受信 sender 能不能引发
+    // 特权状态变更」(PR #548 review)。
+    await connectedMap(false);
+    expect(h.codexLoginReadOnly).toHaveBeenCalled();
+    expect(h.codexLoginWithSideEffects).not.toHaveBeenCalled();
+
+    await connectedMap(true);
+    expect(h.codexLoginWithSideEffects).toHaveBeenCalled();
   });
 
   it('凭证不在本机时既不认领也不误报已连接', async () => {

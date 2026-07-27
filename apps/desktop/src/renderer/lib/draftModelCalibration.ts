@@ -14,7 +14,6 @@
 import {
   connectedProvidersForAgent,
   type AgentKind,
-  type CatalogModel,
   type ProviderView,
 } from '@cindy/model-providers';
 

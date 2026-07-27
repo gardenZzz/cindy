@@ -360,9 +360,14 @@ export function getDesktopProviderService(): ProviderService {
         });
         return hasClaudeAiOAuth();
       },
-      // openai 的自愈挂在 adapter 的 reconcile 收口里(#294 既有形态,不经这里的开关):
-      // 它只做本机凭证文件的硬链协调 + 绑定写入,不发起任何带凭证的上游请求。
-      openai: () => desktopCodexAuthAdapter.hasCodexOAuthLogin(),
+      // openai 的自愈挂在 adapter 的 reconcile 收口里(#294 既有形态),这里同样要受开关约束:
+      // hasCodexOAuthLogin() 经 getAccessToken 触发 reconcileWithSystemCodex,它会把本机 CLI
+      // 凭证硬链进 codex-home 并为首个 owner 补写绑定 —— 判据不是「有没有发上游请求」,而是
+      // 「不受信 sender 能不能引发特权状态变更」,建硬链和写绑定都在其内(PR #548 review)。
+      openai: ({ allowSideEffects }) =>
+        allowSideEffects
+          ? desktopCodexAuthAdapter.hasCodexOAuthLogin()
+          : desktopCodexAuthAdapter.hasCodexOAuthLoginReadOnly(),
       xai: ({ allowSideEffects }) => {
         if (allowSideEffects) claimNativeProviderAuthOnRead('xai', hasGrokOAuthLoginUnbound);
         return hasGrokOAuthLogin();

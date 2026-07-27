@@ -81,6 +81,8 @@ export interface ProviderHandlerDeps {
    * sender 归属校验（生产 = security/trustedAppRenderer 的 assertTrustedAppRendererEvent，
    * 不通过时抛 PERMISSION_DENIED）。经 deps 注入而非直接 import：本文件的 handler body
    * 刻意不依赖 Electron，好让内存 registry 直接 invoke 单测（规则 14）。
+   *
+   * 类型上可选、语义上必需：未注入时 rediscover 直接拒绝，而不是放行。
    */
   assertTrustedSender?(event: unknown): void;
   /**
@@ -297,7 +299,14 @@ export function registerProviderHandlers(
     // sender 归属校验:这条通道会用订阅凭证发起真实上游请求并重启退避,不该被子 frame /
     // WebView 触发。经 deps 注入(生产 = assertTrustedAppRendererEvent),既保住本文件
     // 「不依赖 Electron、可用内存 registry 直测」的设计,又不让新通道继承既有缺口。
-    deps.assertTrustedSender?.(event);
+    //
+    // 守卫缺席按拒绝处理:可选依赖用 `?.()` 调用时,漏接线会静默退化成「无守卫」,而这种
+    // 退化没有任何编译期或运行期信号。宁可在接线回归时把功能打死,也不要让它悄悄敞开
+    // (PR #548 review)。
+    if (!deps.assertTrustedSender) {
+      throwIpcError('PERMISSION_DENIED', 'sender trust guard unavailable');
+    }
+    deps.assertTrustedSender(event);
     const providerId = requireProviderId(input);
     let failure: ProviderModelDiscoveryFailure | null;
     try {
