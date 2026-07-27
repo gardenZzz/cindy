@@ -613,6 +613,30 @@ describe('composer structured list serialization', () => {
     expect(serializeEditorContent(editor).text).toBe('10. parent\n    - child');
   });
 
+  it('preserves the optional space after CJK ordered markers', () => {
+    const editor = makeEditor({
+      type: 'doc',
+      content: [
+        {
+          type: 'orderedList',
+          attrs: { start: 2, marker: '、' },
+          content: [
+            {
+              type: 'listItem',
+              content: [{ type: 'paragraph', content: [{ type: 'text', text: '项目' }] }],
+            },
+            {
+              type: 'listItem',
+              content: [{ type: 'paragraph', content: [{ type: 'text', text: ' 项目' }] }],
+            },
+          ],
+        },
+      ],
+    });
+
+    expect(serializeEditorContent(editor).text).toBe('2、项目\n3、 项目');
+  });
+
   it('preserves nested markers and projects atom ranges into wire offsets', () => {
     const href = 'cindy://session/session-a?message=message-a';
     const editor = makeEditor({

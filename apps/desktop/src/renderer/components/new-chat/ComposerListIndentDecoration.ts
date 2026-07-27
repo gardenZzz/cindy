@@ -50,10 +50,6 @@ type ListDecorationPluginState = {
 
 type CompositionMeta = 'suspend' | 'resume';
 
-interface ComposerListIndentOptions {
-  structuredLists: boolean;
-}
-
 const PLUGIN_STATE_KEY = new PluginKey<ListDecorationPluginState>(
   'composerListIndentDecorationState',
 );
@@ -65,9 +61,6 @@ const CJK_PUNCTUATION_RE = /[\u3000-\u303f\uff00-\uffef]/;
 // 普通句子里偶然出现长 token 时，交给 overflow-wrap:anywhere，保留空格
 // 的自然断词行为，避免把整句变成逐字断行。
 const LONG_ALPHANUMERIC_BODY_RE = /^\s*[A-Za-z0-9]{12,}\s*$/;
-const PROMOTABLE_TOP_LEVEL_LIST_RE =
-  /^(?:[-+*•][ \t]+|\d{1,6}[.)][ \t]+|\d{1,6}、[ \t]*)/;
-
 interface ListIndentValues {
   ch: number;
   em: number;
@@ -156,7 +149,6 @@ export function buildListIndentDecorations(
   doc: PMNode,
   slashCommandMatches: ReadonlyArray<Pick<SlashCommandMatch, 'from' | 'to'>> = [],
   voiceReplacementRange: VoiceInputReplacementRange | null = null,
-  structuredLists = false,
 ): DecorationSet {
   const decorations: Decoration[] = [];
 
@@ -209,16 +201,7 @@ export function buildListIndentDecorations(
     flushLine(); // 段落最后一行
 
     const compatibilityMatch = (line: (typeof lines)[number]) => {
-      const match = matchListPrefix(line.text);
-      if (
-        match &&
-        structuredLists &&
-        !line.hasInlineAtom &&
-        PROMOTABLE_TOP_LEVEL_LIST_RE.test(line.text)
-      ) {
-        return null;
-      }
-      return match;
+      return matchListPrefix(line.text);
     };
     const lineMatches = lines.map((line) => ({
       line,
@@ -418,18 +401,11 @@ export function buildListIndentDecorations(
   return DecorationSet.create(doc, decorations);
 }
 
-export const ComposerListIndentDecoration = Extension.create<ComposerListIndentOptions>({
+export const ComposerListIndentDecoration = Extension.create({
   name: 'composerListIndentDecoration',
-
-  addOptions() {
-    return {
-      structuredLists: false,
-    };
-  },
 
   addProseMirrorPlugins() {
     let resumeTimer: ReturnType<typeof setTimeout> | null = null;
-    const structuredLists = this.options.structuredLists;
 
     return [
       new Plugin<ListDecorationPluginState>({
@@ -442,7 +418,6 @@ export const ComposerListIndentDecoration = Extension.create<ComposerListIndentO
                 state.doc,
                 findSlashCommandMatches(state.doc, roster),
                 null,
-                structuredLists,
               ),
               suspendedForComposition: false,
             };
@@ -475,7 +450,6 @@ export const ComposerListIndentDecoration = Extension.create<ComposerListIndentO
                 tr.doc,
                 findSlashCommandMatches(tr.doc, roster),
                 voiceReplacement.range,
-                structuredLists,
               ),
               suspendedForComposition: false,
             };
