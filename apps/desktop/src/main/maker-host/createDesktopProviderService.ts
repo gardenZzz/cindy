@@ -296,8 +296,31 @@ function claimNativeProviderAuthOnRead(
     if (!claimDetectedNativeProviderAuth(provider, hasCredential)) return;
     log.info('native provider credential auto-bound to current owner', { provider });
     onClaimed?.();
+    // 认领成功 = 这家供应商刚从「未连接」翻成「已连接」,但只有触发这次读取的那个调用方
+    // 拿到了新快照。其它窗口会一直留着 connected:false;配对的手机 / 控制端更是只认
+    // maker:provider:changed 这一条推送来失效缓存,不广播就永远停在旧快照
+    // (PR #548 review)。显式登录 / 登出路径本来就会广播,自愈这条同样得补上。
+    notifyNativeProviderClaimed();
   } catch (err) {
     log.warn('native provider auth binding claim failed', { provider, error: String(err) });
+  }
+}
+
+let nativeProviderClaimListener: (() => void) | null = null;
+
+/**
+ * 注册「绑定自愈成功」的收口（desktop host 装配时接 PROVIDER_CHANGED 广播；传 null 解绑）。
+ * 监听器不可抛——广播失败不该反过来把这次认领算作失败。
+ */
+export function setNativeProviderClaimListener(listener: (() => void) | null): void {
+  nativeProviderClaimListener = listener;
+}
+
+function notifyNativeProviderClaimed(): void {
+  try {
+    nativeProviderClaimListener?.();
+  } catch (err) {
+    log.warn('native provider claim broadcast failed', { error: String(err) });
   }
 }
 

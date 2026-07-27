@@ -58,7 +58,7 @@ import {
   getCindyModelEffortBaseline,
   setAnthropicDiscoveredModels,
 } from '../active-catalog.js';
-import { hasClaudeAiOAuth } from '../claude-credentials-store.js';
+import { hasClaudeAiOAuth, readClaudeAiOAuth } from '../claude-credentials-store.js';
 import { getValidClaudeAiOAuth } from '../claude-oauth-refresh.js';
 
 const log = createLogger('model-discovery:anthropic');
@@ -982,19 +982,6 @@ export function refreshAnthropicModelsFromHttp(options?: {
           refreshError = err;
           return null;
         });
-        // 刷新链路自己出故障(token 端点超时 / 5xx / 拿不到刷新锁)不等于「授权被拒」。归
-        // unauthorized 会取消全部重试、并叫用户去断开重连,可 refresh token 很可能完全有效,
-        // 过一会儿再刷就成了 —— 那期间用户白白守着一份空清单(PR #548 review)。
-        if (refreshError !== null) {
-          noteDiscoveryFailure(
-            gen,
-            'upstream',
-            `401 then forced token refresh failed: ${
-              refreshError instanceof Error ? refreshError.message : String(refreshError)
-            }`,
-          );
-          return;
-        }
         if (
           refreshed?.accessToken &&
           refreshed.accessToken !== oauth.accessToken &&
@@ -1008,6 +995,31 @@ export function refreshAnthropicModelsFromHttp(options?: {
             afterForcedRefresh: true,
           });
           return;
+        }
+        // 走到这里 = 没换到新 token,但原因有两种,归因不同:
+        //
+        //   · 刷新**交出了** token,只是和旧的那枚一样 —— 刷新链路本身是通的,服务端认为
+        //     当前 token 就是最新的,而它确实被 401 了。这是真的授权问题。
+        //   · 刷新**一枚都没交出**(返回 null 或抛错)—— 是这一步自己没成:token 端点超时 /
+        //     5xx / 没抢到刷新锁。归 unauthorized 会取消全部重试、还叫用户去断开重连,可
+        //     refresh token 很可能完全有效,过一会儿再刷就成了(PR #548 review)。
+        //
+        // 第二种还要再确认凭证现状才算数:真的授权失效时,invalid_grant 收尾已经把凭证清了
+        // (setClaudeOAuthInvalidGrantHandler → invalidate),或者它本来就没有 refresh token
+        // 可用 —— 那两种同样是 unauthorized。凭证还在、也还能刷,才是暂时性故障。
+        if (refreshed == null) {
+          const credential = readClaudeAiOAuth();
+          const stillRefreshable = typeof credential?.refreshToken === 'string' && credential.refreshToken.length > 0;
+          if (refreshError !== null || stillRefreshable) {
+            noteDiscoveryFailure(
+              gen,
+              'upstream',
+              `401 then forced token refresh yielded nothing${
+                refreshError instanceof Error ? `: ${refreshError.message}` : ' (transient)'
+              }`,
+            );
+            return;
+          }
         }
       }
       noteDiscoveryFailure(gen, kind, detail);

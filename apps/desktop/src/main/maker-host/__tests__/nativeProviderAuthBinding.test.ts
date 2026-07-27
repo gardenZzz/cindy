@@ -232,6 +232,20 @@ describe('claimDetectedNativeProviderAuth', () => {
     expect(isNativeProviderAuthBound('anthropic')).toBe(true);
   });
 
+  it('整份读不出来时,显式授权也不写出一份「只有我」的干净文件', () => {
+    // legacyClaimOwner 与各家 owner 一起没了,无可保留;但就这么写一份干净文件,等于让其余
+    // provider 的残留凭证在文件恢复可读后立刻可被认领(PR #548 review)。
+    fs.mkdirSync(userDataDir, { recursive: true });
+    fs.writeFileSync(bindingFile, '{ not json at all');
+
+    bindNativeProviderAuth('xai');
+    const after = JSON.parse(fs.readFileSync(bindingFile, 'utf8'));
+    expect(after.xai).toBe('owner-a');
+    expect(after.revoked).toMatchObject({ anthropic: 'owner-a', openai: 'owner-a' });
+    expect(claimDetectedNativeProviderAuth('anthropic', () => true)).toBe(false);
+    expect(claimDetectedNativeProviderAuth('openai', () => true)).toBe(false);
+  });
+
   it('修 revoked 时保住别人的归属,并对其余 provider 保守抑制', () => {
     // 直接重写成「只有本次授权的这家」会抹掉 openai 的 owner-b,那份残留凭证下一次就会被
     // 认领给 owner-a —— 用一次修复换来一个新的越权口子(PR #548 review)。

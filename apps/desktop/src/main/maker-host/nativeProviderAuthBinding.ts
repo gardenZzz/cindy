@@ -115,23 +115,24 @@ export function bindNativeProviderAuth(provider: NativeProviderId): void {
     writeBindings({ ...bindings, [provider]: owner });
     return;
   }
-  if (read.reason === 'badRevoked') {
-    // 只有 revoked 坏掉:各 provider 的归属仍然可信,必须原样保留 —— 直接重写成「只有本次
-    // 授权的这一家」会抹掉别人的 owner,那份凭证下一次就会被自动认领给当前账号,等于用一次
-    // 修复换来一个新的越权口子(PR #548 review)。
-    //
-    // 坏掉的 revoked 无法得知谁被撤销过,不能简单丢弃(丢弃 = 给所有残留凭证放行)。保守重建:
-    // 除本次显式授权的这家外,其余 native provider 一律按「撤销过」对待,自动继承就此关闭,
-    // 用户对它们各自显式授权即可恢复。
-    const rebuilt: Partial<Record<NativeProviderId, string>> = {};
-    for (const other of NATIVE_PROVIDER_IDS) {
-      if (other !== provider) rebuilt[other] = owner;
-    }
-    writeBindings({ ...read.bindings, revoked: rebuilt, [provider]: owner });
-    return;
+  // 归属信息有损:用户正在显式授权,不写等于让他连不上,所以必须写;但写法要保守。
+  //
+  //   · badRevoked —— 各 provider 的归属仍然可信,原样保留。直接重写成「只有本次授权的这
+  //     一家」会抹掉别人的 owner,那份凭证下一次就被自动认领给当前账号,等于用一次修复换
+  //     来一个新的越权口子。
+  //   · unreadable —— 连 legacyClaimOwner 带各家 owner 一起没了,无可保留;同样不能就这么
+  //     写一份「只有我」的干净文件,那会让其余 provider 的残留凭证在文件恢复可读后立刻可被
+  //     认领(PR #548 review)。
+  //
+  // 两种情形共用同一条保守收尾:凡是归属无从确认的 provider,一律按「撤销过」对待,自动继承
+  // 就此关闭 —— 无从得知谁被撤销过时,丢弃标记等于给所有残留凭证放行。用户对它们各自显式
+  // 授权即可恢复。
+  const salvaged = read.reason === 'badRevoked' ? read.bindings : {};
+  const suppressed: Partial<Record<NativeProviderId, string>> = {};
+  for (const other of NATIVE_PROVIDER_IDS) {
+    if (other !== provider) suppressed[other] = owner;
   }
-  // 整份都读不出来:没有可保留的归属,只能重写。用户此刻正显式授权,不写等于连不上。
-  writeBindings({ [provider]: owner });
+  writeBindings({ ...salvaged, revoked: suppressed, [provider]: owner });
 }
 
 /**

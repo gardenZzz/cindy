@@ -84,7 +84,10 @@ vi.mock('../../secrets/providerSecretStore.js', () => ({
   readCustomProviderKey: () => null,
 }));
 
-import { getDesktopProviderService } from '../createDesktopProviderService.js';
+import {
+  getDesktopProviderService,
+  setNativeProviderClaimListener,
+} from '../createDesktopProviderService.js';
 import { isNativeProviderAuthBound } from '../nativeProviderAuthBinding.js';
 
 function isBoundToCurrentOwner(provider: 'anthropic' | 'xai'): boolean {
@@ -137,6 +140,37 @@ describe('native provider connection claim on read', () => {
   it('认领本机 xai 凭证(清单不走动态发现,不触发拉取)', async () => {
     expect((await connectedMap()).xai).toBe(true);
     expect(isNativeProviderAuthBound('xai')).toBe(true);
+  });
+
+  it('认领成功要广播:其它窗口与 device-link 对端只认这条推送来失效快照', async () => {
+    // xai 的自愈没有清单拉取顺带广播那条路,不显式通知就只有触发这次读取的调用方看到
+    // 「已连接」,配对的手机会一直留着 connected:false 的缓存(PR #548 review)。
+    const onClaimed = vi.fn();
+    setNativeProviderClaimListener(onClaimed);
+    try {
+      h.claudeCredentialPresent = false; // 只让 xai 认领,避免与 anthropic 混淆计数
+      await connectedMap();
+      expect(isNativeProviderAuthBound('xai')).toBe(true);
+      expect(onClaimed).toHaveBeenCalledTimes(1);
+
+      // 已绑定后不再重复广播。
+      await connectedMap();
+      expect(onClaimed).toHaveBeenCalledTimes(1);
+    } finally {
+      setNativeProviderClaimListener(null);
+    }
+  });
+
+  it('广播收口抛错不影响认领结果', async () => {
+    setNativeProviderClaimListener(() => {
+      throw new Error('broadcast boom');
+    });
+    try {
+      await expect(connectedMap()).resolves.toMatchObject({ xai: true });
+      expect(isNativeProviderAuthBound('xai')).toBe(true);
+    } finally {
+      setNativeProviderClaimListener(null);
+    }
   });
 
   it('不受信 sender(含 device-link 合成 event)只读,不触发认领与清单拉取', async () => {

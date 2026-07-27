@@ -68,6 +68,7 @@ import { clearChatgptBridgeCredentialCache } from './anthropic-responses-bridge-
 import {
   getDesktopSelectableCatalog,
   refreshDiscoveredCodexModels,
+  setNativeProviderClaimListener,
 } from './createDesktopProviderService.js';
 import {
   clearAnthropicDiscoveredModels,
@@ -175,6 +176,23 @@ setAnthropicDiscoveryFailureListener(() => {
     refreshSelectableModelsAndBroadcast({});
   } catch (error) {
     desktopMakerLogger.warn('anthropic discovery failure broadcast failed', {
+      error: error instanceof Error ? error.message : String(error),
+    });
+  }
+});
+
+/**
+ * 本机凭证绑定自愈成功 → 广播 PROVIDER_CHANGED。
+ *
+ * 连接态刚从 false 翻成 true，但只有触发那次读取的调用方拿到了新快照。其它窗口留在
+ * 「未连接」，配对的手机 / 控制端更是只认这条推送来失效缓存（PR #548 review）。
+ * anthropic 那条链路碰巧能在清单变化时顺带广播，xAI 则完全没有出口 —— 统一在这里补。
+ */
+setNativeProviderClaimListener(() => {
+  try {
+    refreshSelectableModelsAndBroadcast({});
+  } catch (error) {
+    desktopMakerLogger.warn('native provider claim broadcast failed', {
       error: error instanceof Error ? error.message : String(error),
     });
   }

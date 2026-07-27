@@ -28,8 +28,14 @@ vi.mock('electron', () => ({
 }));
 
 const authState = vi.hoisted(() => ({ loggedIn: true }));
+// refreshToken 决定「401 后没换到新 token」是暂时故障还是真的无从刷新（见归因分流）。
+const credentialsMock = vi.hoisted(() => ({ refreshToken: 'refresh-token' as string | null }));
 vi.mock('../claude-credentials-store.js', () => ({
   hasClaudeAiOAuth: () => authState.loggedIn,
+  readClaudeAiOAuth: () =>
+    authState.loggedIn
+      ? { accessToken: 'test-token', refreshToken: credentialsMock.refreshToken }
+      : null,
 }));
 const oauthRefreshMock = vi.hoisted(() => ({
   getValidClaudeAiOAuth: vi.fn(async () => null as unknown),
@@ -851,6 +857,7 @@ describe('HTTP 发现失败的归因与选择性重试', () => {
     resetAnthropicDiscoveryForTest();
     setAnthropicDiscoveredModels([]);
     authState.loggedIn = true;
+    credentialsMock.refreshToken = 'refresh-token';
     oauthRefreshMock.getValidClaudeAiOAuth.mockReset();
     oauthRefreshMock.getValidClaudeAiOAuth.mockResolvedValue({ accessToken: 'test-token' });
     vi.useFakeTimers();
@@ -1070,11 +1077,37 @@ describe('HTTP 发现失败的归因与选择性重试', () => {
     await refreshAnthropicModelsFromHttp();
     const failure = getAnthropicModelDiscoveryFailure();
     expect(failure?.kind).toBe('upstream');
-    expect(failure?.detail).toContain('token refresh failed');
+    expect(failure?.detail).toContain('yielded nothing');
 
     await vi.advanceTimersByTimeAsync(2_000);
     expect(anthropicIds()).toEqual(['claude-opus-4-8']);
     expect(getAnthropicModelDiscoveryFailure()).toBeNull();
+  });
+
+  it('强制刷新「返回 null」同样按 upstream 处理 —— 凭证还在且还能刷', async () => {
+    // getValidClaudeAiOAuth 对超时 / 5xx / 抢不到锁是**返回 null**,不 reject。只认异常
+    // 就会让这些最常见的暂时性失败仍旧落到 unauthorized(PR #548 review)。
+    const fetchMock = vi.fn().mockResolvedValue(errorResponse(401));
+    vi.stubGlobal('fetch', fetchMock);
+    oauthRefreshMock.getValidClaudeAiOAuth
+      .mockResolvedValueOnce({ accessToken: 'test-token' })
+      .mockResolvedValue(null); // 强制刷新没拿到新 token,也没抛
+
+    await refreshAnthropicModelsFromHttp();
+    expect(getAnthropicModelDiscoveryFailure()?.kind).toBe('upstream');
+  });
+
+  it('凭证已被判定失效(没有 refresh token)时仍归 unauthorized', async () => {
+    // 与上一条相反的一侧:真的无从刷新,就该停下来告诉用户重新连接,而不是空转重试。
+    credentialsMock.refreshToken = null;
+    const fetchMock = vi.fn().mockResolvedValue(errorResponse(401));
+    vi.stubGlobal('fetch', fetchMock);
+    oauthRefreshMock.getValidClaudeAiOAuth
+      .mockResolvedValueOnce({ accessToken: 'test-token' })
+      .mockResolvedValue(null);
+
+    await refreshAnthropicModelsFromHttp();
+    expect(getAnthropicModelDiscoveryFailure()?.kind).toBe('unauthorized');
   });
 
   it('暂时性失败(连不上)自动重试,成功即生效并清失败态', async () => {
