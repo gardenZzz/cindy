@@ -2457,6 +2457,7 @@
       "perm": {
         "grantsTitle": "After installing it will have:",
         "toolsGroup": "Registered Tools",
+        "toolsDiffGroup": "Registered Tool Changes",
         "itemCount": "{{count}} total",
         "cindyImageGenerate": "Image generation (delegated to Cindy)",
         "cindyImageEdit": "Image editing (delegated to Cindy, its own images only)",

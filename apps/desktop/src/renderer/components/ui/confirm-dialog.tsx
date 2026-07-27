@@ -2,6 +2,7 @@ import { useEffect, useRef, useState, type ReactNode } from 'react';
 import * as AlertDialog from '@radix-ui/react-alert-dialog';
 import { useTranslation } from 'react-i18next';
 
+import { flashScrollbar } from '@/lib/scrollbarAutoHide';
 import { cn } from '@/lib/utils';
 import { Spinner } from '@/components/ui/spinner';
 
@@ -15,6 +16,10 @@ export interface ConfirmDialogProps {
   /**
    * 富内容区(如装意识的逐项权限清单):渲染在 description 之后、复选框之前。
    * 与 description 独立 —— Radix Description 是 <p>,块级列表不能塞进去。
+   *
+   * 高度与滚动由本组件统一持有(max-h-[85vh] + 内部滚动区),caller 不必也不该
+   * 再给 content 套一层自己的限高滚动容器 —— 两层限高会让"到底了没有"取决于
+   * 内外层谁先触底,行为不好解释,滚动条提示也会落在错误的那一层。
    */
   content?: ReactNode;
   /**
@@ -90,6 +95,24 @@ export function ConfirmDialog({
     if (open) setDontShowAgain(checkboxDefaultChecked);
   }, [open, checkboxDefaultChecked]);
   const confirmBtnRef = useRef<HTMLButtonElement>(null);
+  const scrollRef = useRef<HTMLDivElement>(null);
+  // 滚动条 thumb 默认透明(globals.css),不滚不 hover 就看不见"下面还有内容"。
+  // 授权确认场景里这不是观感问题:权限清单被折在视口下面而用户不知道,等于
+  // 在信息不全的情况下点了同意。所以弹窗一出现就主动闪一下滚动条(不可滚则
+  // no-op),内容变高(展开简介/工具组)后再闪一次。
+  const revealScrollbar = () => {
+    requestAnimationFrame(() => {
+      if (scrollRef.current) flashScrollbar(scrollRef.current);
+    });
+  };
+  useEffect(() => {
+    if (!open) return;
+    // Radix 开场动画期间 layout 还在变,下一帧再量 scrollHeight 才准。
+    const raf = requestAnimationFrame(() => {
+      if (scrollRef.current) flashScrollbar(scrollRef.current);
+    });
+    return () => cancelAnimationFrame(raf);
+  }, [open]);
   return (
     <AlertDialog.Root open={open} onOpenChange={onOpenChange}>
       <AlertDialog.Portal>
@@ -137,6 +160,10 @@ export function ConfirmDialog({
             // 固定、中间内容纵向滚动,避免整个弹窗被撑出屏幕后无法滚动到被裁掉的内容
             // (典型:插件更新确认框的权限变更清单)。
             <div
+              ref={scrollRef}
+              // 内容里的折叠区(如权限清单的工具组)展开后高度会变,capture 阶段
+              // 收一次点击、下一帧重新判定是否可滚,让滚动条跟着新高度再闪一下。
+              onClickCapture={revealScrollbar}
               className={cn(
                 'min-h-0 flex-1 overflow-y-auto overscroll-contain',
                 // 保持旧间距:有 description 时紧跟标题 mt-2;仅富内容(无正文)

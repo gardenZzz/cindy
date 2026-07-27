@@ -2456,6 +2456,7 @@
       "perm": {
         "grantsTitle": "설치 후 갖게 되는 권한:",
         "toolsGroup": "등록 도구",
+        "toolsDiffGroup": "등록 도구 변경",
         "itemCount": "{{count}}개",
         "cindyImageGenerate": "이미지 생성(Cindy에게 대행 요청)",
         "cindyImageEdit": "이미지 편집(Cindy에게 대행 요청, 자신이 생성한 이미지만)",
