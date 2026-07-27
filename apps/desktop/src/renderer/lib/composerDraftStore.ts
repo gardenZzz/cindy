@@ -141,6 +141,7 @@ function tiptapDocHasContent(node: JSONContent | null | undefined): boolean {
     node.type === 'pastedTextChip' ||
     node.type === COMPOSER_QUOTE_NODE_TYPE
   ) return true;
+  if (node.type === 'bulletList' || node.type === 'orderedList') return true;
   if (typeof node.text === 'string' && node.text.trim().length > 0) return true;
   if (Array.isArray(node.content)) {
     return node.content.some(tiptapDocHasContent);

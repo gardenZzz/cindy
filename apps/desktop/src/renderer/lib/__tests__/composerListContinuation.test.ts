@@ -44,8 +44,9 @@ describe('computeListContinuation', () => {
   });
 
   describe('无序列表', () => {
-    it('`- ` / `* ` / `• ` 原样接续', () => {
+    it('`- ` / `+ ` / `* ` / `• ` 原样接续', () => {
       expect(computeListContinuation('- item')).toEqual({ action: 'continue', insert: '- ' });
+      expect(computeListContinuation('+ item')).toEqual({ action: 'continue', insert: '+ ' });
       expect(computeListContinuation('* item')).toEqual({ action: 'continue', insert: '* ' });
       expect(computeListContinuation('• item')).toEqual({ action: 'continue', insert: '• ' });
     });

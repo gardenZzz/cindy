@@ -21,8 +21,8 @@ export interface ListPrefixMatch {
 
 // 顺序敏感:checkbox 必须先于 bullet 匹配(`- [ ] ` 也满足 bullet 的模式)。
 // checkbox 允许行在 `]` 处截止(`(\s+|$)`),这样 "- [ ]" 也能识别成空项退出。
-const CHECKBOX_RE = /^(\s*)([-*])(\s+)\[[ xX]\](\s+|$)/;
-const BULLET_RE = /^(\s*)([-*•])(\s+)/;
+const CHECKBOX_RE = /^(\s*)([-+*])(\s+)\[[ xX]\](\s+|$)/;
+const BULLET_RE = /^(\s*)([-+*•])(\s+)/;
 const ORDERED_RE = /^(\s*)(\d{1,6})([.)])(\s+)/;
 // 中文顿号序号(`1、`)不要求后随空格,符合中文输入习惯。
 const ORDERED_CJK_RE = /^(\s*)(\d{1,6})(、)(\s*)/;

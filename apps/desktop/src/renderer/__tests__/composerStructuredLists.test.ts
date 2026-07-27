@@ -782,6 +782,36 @@ describe('composer structured list serialization', () => {
     expect(serializeEditorSlice(editor, slice)).toBe('1. first\n2. second');
   });
 
+  it('keeps the original ordinal when copying from the middle of an ordered list', () => {
+    const editor = makeEditor({
+      type: 'doc',
+      content: [
+        {
+          type: 'orderedList',
+          attrs: { start: 1, marker: '.' },
+          content: [
+            {
+              type: 'listItem',
+              content: [{ type: 'paragraph', content: [{ type: 'text', text: 'first' }] }],
+            },
+            {
+              type: 'listItem',
+              content: [{ type: 'paragraph', content: [{ type: 'text', text: 'second' }] }],
+            },
+          ],
+        },
+      ],
+    });
+    let secondTextPosition = 0;
+    editor.state.doc.descendants((node, position) => {
+      if (node.isText && node.text === 'second') secondTextPosition = position;
+    });
+    editor.commands.setTextSelection(secondTextPosition + 1);
+    const slice = editor.state.doc.slice(secondTextPosition, editor.state.doc.content.size);
+
+    expect(serializeEditorSlice(editor, slice)).toBe('2. second');
+  });
+
   it('preserves non-default bullet markers and spacing when sending', () => {
     const editor = makeEditor({
       type: 'doc',
@@ -822,6 +852,37 @@ describe('composer structured list serialization', () => {
     expect(serializeEditorContent(editor).text).toBe('1.\titem');
   });
 
+  it('expands tab separators when indenting nested list content', () => {
+    const editor = makeEditor({
+      type: 'doc',
+      content: [
+        {
+          type: 'bulletList',
+          attrs: { marker: '-', separator: '\t' },
+          content: [
+            {
+              type: 'listItem',
+              content: [
+                { type: 'paragraph', content: [{ type: 'text', text: 'parent' }] },
+                {
+                  type: 'bulletList',
+                  content: [
+                    {
+                      type: 'listItem',
+                      content: [{ type: 'paragraph', content: [{ type: 'text', text: 'child' }] }],
+                    },
+                  ],
+                },
+              ],
+            },
+          ],
+        },
+      ],
+    });
+
+    expect(serializeEditorContent(editor).text).toBe('-\tparent\n    - child');
+  });
+
   it('keeps a dragged quote inside its list item', () => {
     const editor = makeEditor({
       type: 'doc',
@@ -856,6 +917,54 @@ describe('composer structured list serialization', () => {
       { kind: 'quote', quote: { text: 'quoted' } },
       { kind: 'text', text: '  after' },
     ]);
+  });
+
+  it('keeps a restored nested list quote under its literal list row', () => {
+    const editor = makeEditor({
+      type: 'doc',
+      content: [
+        { type: 'paragraph', content: [{ type: 'text', text: 'parent' }] },
+        { type: 'paragraph', content: [{ type: 'text', text: '  - child' }] },
+        {
+          type: 'paragraph',
+          content: [{ type: COMPOSER_QUOTE_NODE_TYPE, attrs: { text: 'quoted' } }],
+        },
+      ],
+    });
+
+    const serialized = serializeEditorContent(editor).text;
+    expect(serialized).toBe(
+      'parent\n  - child\n    > <!-- cindy-composer-quote -->\n    > quoted',
+    );
+    expect(parseChatQuoteSegments(serialized)).toEqual([
+      { kind: 'text', text: 'parent\n  - child' },
+      { kind: 'quote', quote: { text: 'quoted' } },
+    ]);
+  });
+
+  it('preserves indentation on an empty nested list item', () => {
+    const editor = makeEditor({
+      type: 'doc',
+      content: [
+        {
+          type: 'bulletList',
+          content: [
+            {
+              type: 'listItem',
+              content: [
+                { type: 'paragraph', content: [{ type: 'text', text: 'parent' }] },
+                {
+                  type: 'bulletList',
+                  content: [{ type: 'listItem', content: [{ type: 'paragraph' }] }],
+                },
+              ],
+            },
+          ],
+        },
+      ],
+    });
+
+    expect(serializeEditorContent(editor).text).toBe('- parent\n  - ');
   });
 
   it('does not duplicate restored continuation indentation after a list quote', () => {

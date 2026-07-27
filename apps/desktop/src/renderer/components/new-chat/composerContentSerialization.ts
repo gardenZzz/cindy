@@ -1,5 +1,5 @@
 import type { Editor } from '@tiptap/core';
-import { Slice, type Node as ProseMirrorNode } from '@tiptap/pm/model';
+import { Fragment, Slice, type Node as ProseMirrorNode } from '@tiptap/pm/model';
 import { EditorState } from '@tiptap/pm/state';
 import type { AgentInputReference } from '@cindy/maker-shared/agent-input-projection';
 
@@ -38,7 +38,27 @@ export interface SerializedComposerContent {
 type OrderedMarker = '.' | ')' | '、';
 
 const EMPTY_LIST_ITEM_MARKER_RE =
-  /(?:^|\n)(?:[1-9]\d{0,5}[.)][ \t]+|[1-9]\d{0,5}、[ \t]*|[-+*•][ \t]+)$/;
+  /(?:^|\n)[ \t]*(?:[1-9]\d{0,5}[.)][ \t]+|[1-9]\d{0,5}、[ \t]*|[-+*•][ \t]+)$/;
+
+const TAB_SIZE = 4;
+
+function expandedIndentWidth(text: string): number {
+  let column = 0;
+  for (const character of text) {
+    if (character === '\t') {
+      column += TAB_SIZE - (column % TAB_SIZE);
+    } else {
+      column += 1;
+    }
+  }
+  return column;
+}
+
+function literalListContinuationPrefix(text: string): string | null {
+  const match = text.match(/^([ \t]+)(?:[-+*•]|[1-9]\d{0,5}[.)、])([ \t]+)/);
+  if (!match) return null;
+  return ' '.repeat(expandedIndentWidth(match[0]));
+}
 
 function orderedListMarker(node: ProseMirrorNode): OrderedMarker {
   return node.attrs.marker === ')' || node.attrs.marker === '、' ? node.attrs.marker : '.';
@@ -143,7 +163,7 @@ function serializeComposerDocument(
           // in the current text block preserves the list marker. Put the
           // encoded quote on its own continuation lines so history parsing
           // can still recognize the private marker and source metadata.
-          const continuationPrefix = ' '.repeat(prefix.length);
+          const continuationPrefix = ' '.repeat(expandedIndentWidth(prefix));
           const quoteLines = quoteText.split('\n');
           const quoteSeparator = continuationAfterQuote === null ? '' : '\n';
           buffer += `${quoteSeparator}\n${quoteLines
@@ -281,7 +301,7 @@ function serializeComposerDocument(
       const itemMarker = isOrdered
         ? `${start + itemIndex}${marker}${separator}`
         : `${bulletListMarker(listNode)}${bulletListSeparator(listNode)}`;
-      const itemIndent = `${indent}${' '.repeat(itemMarker.length)}`;
+      const itemIndent = ' '.repeat(expandedIndentWidth(`${indent}${itemMarker}`));
       let firstParagraph = true;
 
       item.forEach((child, childOffset) => {
@@ -302,7 +322,7 @@ function serializeComposerDocument(
     });
   };
 
-  doc.forEach((node, nodeOffset) => {
+  doc.forEach((node, nodeOffset, nodeIndex) => {
     if (node.type.name === COMPOSER_QUOTE_NODE_TYPE) {
       hasQuotes = true;
       blocks.push({
@@ -312,6 +332,27 @@ function serializeComposerDocument(
       return;
     }
     if (node.type.name === 'paragraph') {
+      const onlyQuote =
+        node.childCount === 1 && node.firstChild?.type.name === COMPOSER_QUOTE_NODE_TYPE;
+      const previous = nodeIndex > 0 ? doc.child(nodeIndex - 1) : null;
+      const literalContinuation =
+        onlyQuote && previous?.type.name === 'paragraph'
+          ? literalListContinuationPrefix(previous.textContent)
+          : null;
+      if (literalContinuation) {
+        hasQuotes = true;
+        const quoteText = formatQuoteForSend(
+          composerQuoteAttrsToChatQuote(node.firstChild!.attrs as ComposerQuoteAttrs),
+        );
+        blocks.push({
+          kind: 'text',
+          text: quoteText
+            .split('\n')
+            .map((line) => `${literalContinuation}${line}`)
+            .join('\n'),
+        });
+        return;
+      }
       serializeParagraph(node, nodeOffset);
       return;
     }
@@ -348,7 +389,77 @@ export function serializeEditorSlice(editor: Editor | null, slice: Slice): strin
     const emptyDoc = editor.state.schema.topNodeType.createAndFill();
     if (!emptyDoc) throw new Error('composer schema cannot create an empty document');
     const state = EditorState.create({ schema: editor.state.schema, doc: emptyDoc });
-    const replaced = state.tr.replace(0, state.doc.content.size, slice).doc;
+    const { $from } = editor.state.selection;
+    let sourceList: ProseMirrorNode | null = null;
+    let sourceListDepth: number | null = null;
+    for (let depth = $from.depth; depth > 0; depth -= 1) {
+      const list = $from.node(depth);
+      if (list.type.name !== 'orderedList') continue;
+      sourceList = list;
+      sourceListDepth = depth;
+      break;
+    }
+    let replaced = state.tr.replace(0, state.doc.content.size, slice).doc;
+    const sourceIndex = sourceListDepth === null ? null : $from.index(sourceListDepth);
+    const firstOrderedList = (() => {
+      let found: { node: ProseMirrorNode; position: number } | null = null;
+      replaced.descendants((node, position) => {
+        if (found === null && node.type.name === 'orderedList') {
+          found = { node, position };
+          return false;
+        }
+        return found === null;
+      });
+      return found;
+    })();
+
+    // A text-only slice from inside a list item loses the enclosing list.
+    // Rebuild the selected source items so plain-text copies keep their marker.
+    if (sourceList && sourceIndex !== null && firstOrderedList === null) {
+      const endResolved = editor.state.doc.resolve(editor.state.selection.to);
+      const endIndex =
+        sourceListDepth !== null && endResolved.node(sourceListDepth) === sourceList
+          ? endResolved.index(sourceListDepth) + 1
+          : sourceIndex;
+      const items = sourceList.content.content.slice(sourceIndex, Math.max(sourceIndex + 1, endIndex));
+      if (items.length > 0) {
+        const copiedList = sourceList.copy(Fragment.from(items));
+        replaced = state.tr.replace(
+          0,
+          state.doc.content.size,
+          new Slice(Fragment.from(copiedList), 0, 0),
+        ).doc;
+      }
+    }
+
+    // A partial selection keeps the source list's attrs but may omit earlier
+    // siblings. Shift the copied ordered-list start to the selected item.
+    const copiedStart =
+      sourceList && sourceIndex !== null
+        ? Number(sourceList.attrs.start) + sourceIndex
+        : null;
+    if (copiedStart !== null) {
+      let orderedListPosition: number | null = null;
+      replaced.descendants((node, position) => {
+        if (orderedListPosition === null && node.type.name === 'orderedList') {
+          orderedListPosition = position;
+          return false;
+        }
+        return orderedListPosition === null;
+      });
+      if (orderedListPosition !== null) {
+        const node = replaced.nodeAt(orderedListPosition);
+        if (node) {
+          const replacedState = EditorState.create({ schema: editor.state.schema, doc: replaced });
+          replaced = replacedState.tr
+            .setNodeMarkup(orderedListPosition, node.type, {
+              ...node.attrs,
+              start: copiedStart,
+            })
+            .doc;
+        }
+      }
+    }
     return serializeComposerDocument(replaced, []).text;
   } catch {
     return slice.content.textBetween(0, slice.content.size, '\n');
