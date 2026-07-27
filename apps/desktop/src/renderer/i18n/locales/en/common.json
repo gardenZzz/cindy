@@ -3109,7 +3109,6 @@
       "modelWeeklyLabel": "{{model}} weekly",
       "windowSegment": "{{label}} {{remaining}} left",
       "resetAt": "resets {{at}}",
-      "resetInAt": "resets in {{countdown}} ({{at}})",
       "windowLine": "{{label}} {{remaining}} left ({{used}} used)",
       "sessionValueLabel": "Session value {{cost}}",
       "planLine": "Plan {{plan}}",

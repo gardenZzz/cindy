@@ -235,8 +235,8 @@ function formatResetAt(epochSeconds: number | null | undefined): string | null {
 
 /**
  * chip 主体用的紧凑剩余时长(距 reset 还有多久): 单级精度 + 向上取整 ——
- * 「7天」/「3小时」/「45分钟」/「41秒」。Codex 订阅用它当窗口 label,
- * Claude 订阅只在 tooltip 展示;主 chip 保留稳定窗口名。无数据 / 已过期 → null。
+ * 「7天」/「3小时」/「45分钟」/「41秒」。Codex 与 Claude 订阅两种形态统一用它当窗口
+ * label(所有限额窗口都算给用户);无数据 / 已过期 → null, 调用方回退窗口名。
  * 天级向上取整与 Codex 既有 getDaysUntilReset 口径一致(剩 6天10小时 → 7天)。
  * 最后一分钟降到秒级, 配合秒级 tick(computeCountdownTickDelayMs)逐秒走动。
  */
@@ -271,7 +271,7 @@ function toEpochMs(epochSeconds: number | null | undefined): number | null {
 }
 
 /**
- * chip 上一个限额窗口段的素材: 展示 label + 数值化剩余百分比 + 窗口身份/reset
+ * chip 上一个限额窗口段的素材: 倒计时 label + 数值化剩余百分比 + 窗口身份/reset
  * 时点(useQuotaResetRollup 检测重置并驱动 0% → 100% 滚动动画的输入)。
  * Codex 订阅与 Claude 订阅两种形态共用, 成品字符串在组件里统一格式化。
  */
@@ -534,8 +534,6 @@ interface ClaudeWindowUsage {
   label: string;
   used: string;
   remaining: string;
-  /** tooltip 用的相对 reset 倒计时;无数据 / 已过期 → null。 */
-  resetIn: string | null;
   /** tooltip 用的精确 reset 时间点;无数据 → null。 */
   resetAt: string | null;
 }
@@ -543,8 +541,6 @@ interface ClaudeWindowUsage {
 function toClaudeWindowUsage(
   label: string,
   window: ClaudeUsageWindow | null | undefined,
-  nowMs: number,
-  t: TFunction,
 ): ClaudeWindowUsage | null {
   if (!window || typeof window.utilization !== 'number' || !Number.isFinite(window.utilization)) {
     return null;
@@ -554,7 +550,6 @@ function toClaudeWindowUsage(
     label,
     used: formatPercent(usedPercent),
     remaining: formatPercent(100 - usedPercent),
-    resetIn: formatCompactTimeUntilReset(window.resetsAt, nowMs, t),
     resetAt: formatResetAt(window.resetsAt),
   };
 }
@@ -562,7 +557,7 @@ function toClaudeWindowUsage(
 /**
  * 当前会话生效的周限窗口: 命中当前模型的 weekly_scoped 条目优先 (label 带模型名,
  * 如 "Fable 周限"), 否则回退总周限 —— 两种 label 口径可区分, 绝不臆造数字。
- * modelDisplayName 仅 scoped 命中时有, 用于区分窗口身份。
+ * modelDisplayName 仅 scoped 命中时有, chip 倒计时 label 用它拼「Fable 7天」。
  */
 function resolveClaudeWeeklyWindow(
   snapshot: ClaudeSubscriptionUsageSnapshot,
@@ -584,9 +579,9 @@ function resolveClaudeWeeklyWindow(
 }
 
 /**
- * chip 段素材 (方案 B): 保留稳定窗口身份 ——
- * 「5h 剩余 45% · Fable 周限 剩余 78%」;reset 时间只放 tooltip,避免周限恰好
- * 剩 5 小时时与 5h 窗口显示成两个同名「5h」。
+ * chip 段素材 (方案 B + 倒计时 label): 窗口 label 直接用距 reset 的剩余时长 ——
+ * 「3小时 剩余 45% · Fable 7天 剩余 78%」;scoped 命中时时长前带模型名标注口径。
+ * 无 reset 数据回退窗口名 (5h / Fable 周限 / 周限), 绝不显示算不出的时间。
  * 剩余百分比留数值形态, 由组件经 useQuotaResetRollup(重置滚动动画)后再格式化。
  */
 function getClaudeChipWindows(
@@ -599,10 +594,11 @@ function getClaudeChipWindows(
   const windows: ChipWindowSegment[] = [];
   const fiveHour = snapshot.fiveHour;
   if (fiveHour && typeof fiveHour.utilization === 'number' && Number.isFinite(fiveHour.utilization)) {
+    const countdown = formatCompactTimeUntilReset(fiveHour.resetsAt, nowMs, t);
     const resetsAtMs = toEpochMs(fiveHour.resetsAt);
     windows.push({
       key: 'claude-5h',
-      label: '5h',
+      label: countdown ?? '5h',
       remainingPercent: 100 - clampPercent(fiveHour.utilization),
       resetsAtMs,
       resetPending: isResetPending(resetsAtMs, nowMs),
@@ -614,11 +610,15 @@ function getClaudeChipWindows(
     && typeof weekly.window.utilization === 'number'
     && Number.isFinite(weekly.window.utilization)
   ) {
+    const countdown = formatCompactTimeUntilReset(weekly.window.resetsAt, nowMs, t);
+    const label = countdown
+      ? (weekly.modelDisplayName ? `${weekly.modelDisplayName} ${countdown}` : countdown)
+      : weekly.label;
     const resetsAtMs = toEpochMs(weekly.window.resetsAt);
     windows.push({
       // 身份 key 区分总周限与各 scoped 周限: 切模型导致窗口切换时只重置动画基线。
       key: weekly.modelDisplayName ? `claude-weekly:${weekly.modelDisplayName}` : 'claude-weekly:total',
-      label: weekly.label,
+      label,
       remainingPercent: 100 - clampPercent(weekly.window.utilization),
       resetsAtMs,
       resetPending: isResetPending(resetsAtMs, nowMs),
@@ -638,7 +638,6 @@ function buildClaudeSubscriptionTooltipNode(
   modelId: string | null | undefined,
   sessionValueMoney: RegionalMoney | null,
   t: TFunction,
-  nowMs: number,
   usageDashboardLabel: string | null,
   latestTurnUsage: LatestTurnUsageSummary | null,
 ): React.ReactNode {
@@ -661,23 +660,16 @@ function buildClaudeSubscriptionTooltipNode(
   }
 
   // 窗口明细: 5h → 总周限 → 全部分模型周限 (含非当前模型, 用户能看到谁先见底)。
-  // chip 保留稳定窗口名;tooltip 同时给相对倒计时和精确 reset 时间点。
+  // tooltip 保留精确 reset 时间点 (chip 上是倒计时, 两层信息互补)。
   const windows: ClaudeWindowUsage[] = [];
-  const fiveHour = toClaudeWindowUsage('5h', snapshot.fiveHour, nowMs, t);
+  const fiveHour = toClaudeWindowUsage('5h', snapshot.fiveHour);
   if (fiveHour) windows.push(fiveHour);
-  const sevenDay = toClaudeWindowUsage(
-    t('todaySpend.claude.weeklyLabel'),
-    snapshot.sevenDay,
-    nowMs,
-    t,
-  );
+  const sevenDay = toClaudeWindowUsage(t('todaySpend.claude.weeklyLabel'), snapshot.sevenDay);
   if (sevenDay) windows.push(sevenDay);
   for (const scoped of snapshot.scoped ?? []) {
     const usage = toClaudeWindowUsage(
       t('todaySpend.claude.modelWeeklyLabel', { model: scoped.modelDisplayName }),
       scoped,
-      nowMs,
-      t,
     );
     if (usage) windows.push(usage);
   }
@@ -687,16 +679,10 @@ function buildClaudeSubscriptionTooltipNode(
       remaining: window.remaining,
       used: window.used,
     });
-    let resetLabel: string | null = null;
-    if (window.resetAt && window.resetIn) {
-      resetLabel = t('todaySpend.claude.resetInAt', {
-        countdown: window.resetIn,
-        at: window.resetAt,
-      });
-    } else if (window.resetAt) {
-      resetLabel = t('todaySpend.claude.resetAt', { at: window.resetAt });
-    }
-    lines.push(resetLabel ? `${base} · ${resetLabel}` : base);
+    lines.push(window.resetAt
+      ? `${base} · ${t('todaySpend.claude.resetAt', { at: window.resetAt })}`
+      : base,
+    );
   }
 
   // tooltip 比 chip 宽一档: allowed_warning (服务端综合全部窗口的模糊信号) 也提示 ——
@@ -1197,9 +1183,9 @@ export function TodaySpendChip({
   );
 
   React.useEffect(() => {
-    // Codex 订阅的 reset 倒计时文案与全部订阅窗口的 resetPending 判定需要随时间走动:
-    // 常态分钟级 tick 足够;任一窗口进入最后一分钟切秒级 tick,让倒计时准确归零,
-    // Claude 稳定窗口名也能及时切到「重置中」。setTimeout 链每次 tick 后重估延迟。
+    // 订阅形态 (codex-oauth / cc+chatgpt bridge / claude 订阅) 的 reset 倒计时文案
+    // 需要随时间走动: 常态分钟级 tick 足够; 任一窗口进入最后一分钟切秒级 tick,
+    // 让「59秒 → 1秒」逐秒跳动。setTimeout 链每次 tick 后按最新窗口重估下一次延迟。
     if (!usesCodexQuotaForm && !isClaudeSubscription) return undefined;
     const delay = computeCountdownTickDelayMs(chipResetsAtMsList, Date.now());
     const timer = window.setTimeout(() => {
@@ -1302,8 +1288,8 @@ export function TodaySpendChip({
       latestTurnUsage,
     );
   } else if (isClaudeSubscription) {
-    // Claude 订阅形态 (方案 B): chip 显示稳定窗口名 + 剩余% + 本会话价值;
-    // tooltip 保留相对倒计时和精确 reset 时间。
+    // Claude 订阅形态 (方案 B): chip 显示「剩余时长 剩余%」倒计时段 + 本会话价值,
+    // 倒计时由 windowLabelNowMs 驱动 (常态 60s tick, 最后一分钟逐秒); tooltip 保留精确时间。
     const chipSegments = [...windowSegments];
     if (sessionEstimatedValueMoney) {
       chipSegments.push(t('todaySpend.claude.sessionValueLabel', {
@@ -1318,7 +1304,6 @@ export function TodaySpendChip({
       modelId,
       sessionEstimatedValueMoney,
       t,
-      windowLabelNowMs,
       usageDashboardLabel,
       latestTurnUsage,
     );

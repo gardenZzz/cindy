@@ -3108,7 +3108,6 @@
       "modelWeeklyLabel": "{{model}} 週間",
       "windowSegment": "{{label}} 残り {{remaining}}",
       "resetAt": "{{at}} にリセット",
-      "resetInAt": "{{countdown}}後にリセット（{{at}}）",
       "windowLine": "{{label}} 残り {{remaining}} (使用済み {{used}})",
       "sessionValueLabel": "このセッションの価値 {{cost}}",
       "planLine": "プラン {{plan}}",
