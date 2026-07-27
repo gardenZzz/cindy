@@ -316,6 +316,60 @@ describe('buildWorkflowTreeModel', () => {
     const done = buildWorkflowTreeModel({ entries, taskStatus: 'completed' })!;
     expect(done.groups[0].agents[0].state).toBe('error');
   });
+
+  it("终态修正覆盖 'pending'(词表防御:UI 侧把 pending 当等待态,同一集合)", () => {
+    const entries: WorkflowProgressEntry[] = [
+      agentEntry(0, { agentId: 'a1', label: 'l1', state: 'pending' }),
+    ];
+    const model = buildWorkflowTreeModel({ entries, taskStatus: 'completed' })!;
+    expect(model.groups[0].agents[0].state).toBe('error');
+  });
+
+  it('终态时事件流断在非终态而文件已有终态结论 → 采纳文件 state,不误标 error', () => {
+    const entries: WorkflowProgressEntry[] = [
+      // 事件流丢了收尾帧:a1 停在 progress,a2 停在 running
+      agentEntry(0, { agentId: 'a1', label: 'alpha', phaseTitle: 'P', state: 'progress' }),
+      agentEntry(1, { agentId: 'a2', label: 'beta', phaseTitle: 'P', state: 'running' }),
+      phaseEntry(2, 'P'),
+    ];
+    const file = fileProgress({
+      status: 'completed',
+      agents: [
+        fileAgent({ label: 'alpha', phaseTitle: 'P', state: 'done', resultPreview: 'ok' }),
+        // beta 在文件里也没收口 → 仍走终态修正
+        fileAgent({ label: 'beta', phaseTitle: 'P', state: 'running' }),
+      ],
+    });
+    const model = buildWorkflowTreeModel({ entries, fileProgress: file, taskStatus: 'completed' })!;
+    const rows = model.groups[0].agents;
+    expect(rows.find((r) => r.key === 'a1')).toMatchObject({ state: 'done', resultPreview: 'ok' });
+    expect(rows.find((r) => r.key === 'a2')!.state).toBe('error');
+  });
+
+  it('entries 已有终态 state 时文件不覆盖(采纳只发生在事件流停在非终态时)', () => {
+    const entries: WorkflowProgressEntry[] = [
+      agentEntry(0, { agentId: 'a1', label: 'alpha', phaseTitle: 'P', state: 'error', error: 'boom' }),
+      phaseEntry(1, 'P'),
+    ];
+    const file = fileProgress({
+      status: 'completed',
+      agents: [fileAgent({ label: 'alpha', phaseTitle: 'P', state: 'done' })],
+    });
+    const model = buildWorkflowTreeModel({ entries, fileProgress: file, taskStatus: 'completed' })!;
+    expect(model.groups[0].agents[0]).toMatchObject({ state: 'error', error: 'boom' });
+  });
+});
+
+describe('isTerminalWorkflowFileStatus(文件快照收口判定)', () => {
+  it('终态词表命中为 true,运行中/等待/未知/缺失为 false', async () => {
+    const { isTerminalWorkflowFileStatus } = await import('../workflowProgressModel');
+    for (const s of ['completed', 'failed', 'stopped', 'killed', 'done', 'error']) {
+      expect(isTerminalWorkflowFileStatus(s)).toBe(true);
+    }
+    for (const s of ['running', 'queued', 'pending', 'mystery', undefined]) {
+      expect(isTerminalWorkflowFileStatus(s)).toBe(false);
+    }
+  });
 });
 
 describe('workflowAgentVisualState(方块条视觉归一)', () => {

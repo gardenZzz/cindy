@@ -194,13 +194,16 @@ export function listMessagesFor(
 }
 
 // 已确认不支持 maker:get-workflow-progress 的被控设备(收到过 CHANNEL_NOT_ALLOWED):
-// 进度树读取是高频轮询型 best-effort,老被控端不再空耗隧道往返,直接短路 null。
-const workflowProgressUnsupportedDevices = new Set<string>();
+// 短路一段时间不再空耗隧道往返。带 TTL 而非进程级永久 —— deviceId 跨升级稳定,
+// 被控端升级到支持版本后负缓存到期自动重探,无需重启控制端。
+const WORKFLOW_PROGRESS_UNSUPPORTED_TTL_MS = 10 * 60 * 1000;
+const workflowProgressUnsupportedUntil = new Map<string, number>();
 
 /**
  * workflow 逐 agent 进度树(只读,best-effort):记录文件真相在会话归属端 HOME,
  * 远程会话必须隧道到被控端读(控制端本机读必落空)。老被控端无此 channel →
- * CHANNEL_NOT_ALLOWED → 记入短路集;其余错误一律返回 null,调用方回退 workflow 级卡片。
+ * CHANNEL_NOT_ALLOWED → 记入带 TTL 的短路表;其余错误一律返回 null,调用方回退
+ * workflow 级卡片。
  */
 export function getWorkflowProgressFor(
   sessionId: string,
@@ -208,17 +211,39 @@ export function getWorkflowProgressFor(
 ): Promise<import('../../shared/workflow-progress').WorkflowProgress | null> {
   const deviceId = getSessionDeviceId(sessionId);
   if (!deviceId) return window.electronAPI.maker.getWorkflowProgress(sessionId, taskId);
-  if (workflowProgressUnsupportedDevices.has(deviceId)) return Promise.resolve(null);
+  const blockedUntil = workflowProgressUnsupportedUntil.get(deviceId);
+  if (blockedUntil !== undefined && blockedUntil > Date.now()) return Promise.resolve(null);
   return (
     invokeRemote(deviceId, 'maker:get-workflow-progress', [sessionId, taskId]) as Promise<
       import('../../shared/workflow-progress').WorkflowProgress | null
     >
   ).catch((err) => {
     if (extractIpcError(err)?.code === 'DEVICE_LINK_CHANNEL_NOT_ALLOWED') {
-      workflowProgressUnsupportedDevices.add(deviceId);
+      workflowProgressUnsupportedUntil.set(
+        deviceId,
+        Date.now() + WORKFLOW_PROGRESS_UNSUPPORTED_TTL_MS,
+      );
     }
     return null;
   });
+}
+
+/**
+ * 会话仍在运行的后台任务快照(只读,best-effort):后台任务面板挂载时补回
+ * 「订阅前已启动 / 重载清空 taskUpdates 后」的存量任务。远程会话任务真身在
+ * 被控端,必须隧道读(控制端 main 无该会话 handle,本机读必空);老被控端无此
+ * channel 或隧道失败一律降级空表,面板退化为事件流 + 消息扫描两源。
+ */
+export function listSessionBackgroundTasksFor(
+  sessionId: string,
+): ReturnType<typeof window.electronAPI.maker.listSessionBackgroundTasks> {
+  const deviceId = getSessionDeviceId(sessionId);
+  if (!deviceId) return window.electronAPI.maker.listSessionBackgroundTasks(sessionId);
+  return (
+    invokeRemote(deviceId, 'maker:session-background-tasks:list', [sessionId]) as ReturnType<
+      typeof window.electronAPI.maker.listSessionBackgroundTasks
+    >
+  ).catch(() => ({ tasks: [] }));
 }
 
 /**
