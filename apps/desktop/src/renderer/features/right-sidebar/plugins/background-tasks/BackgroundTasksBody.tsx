@@ -541,7 +541,16 @@ export function BackgroundTasksBody({
   }, []);
 
   if (selectedItem && selectedItem.kind === 'workflow') {
-    return <WorkflowDetail item={selectedItem} sessionId={sessionId} onBack={handleBack} />;
+    // key 强制换任务时重挂载:WorkflowDetail 内部持有 fileProgress state,原地复用
+    // 会把上一个任务的 wf 文件数据(logs/detail/聚合)残留合进新任务的树。
+    return (
+      <WorkflowDetail
+        key={selectedItem.key}
+        item={selectedItem}
+        sessionId={sessionId}
+        onBack={handleBack}
+      />
+    );
   }
 
   if (running.length === 0 && completed.length === 0) {

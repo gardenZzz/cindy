@@ -7167,11 +7167,6 @@
       "learnButton": "学习此技能"
     }
   },
-  "workflows": {
-    "toast": {
-      "none": "当前对话没有正在运行的 Workflow"
-    }
-  },
   "planMode": {
     "menuItem": "计划模式",
     "indicator": {

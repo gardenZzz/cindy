@@ -14,7 +14,7 @@
 
 import { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
-import { FileDiff, FolderTree, Globe, Terminal } from 'lucide-react';
+import { FileDiff, FolderTree, Globe, ListTodo, Terminal } from 'lucide-react';
 import type { LucideIcon } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { listGhostTabMenuMetas, useTabKindRegistryVersion } from './registry';
@@ -51,6 +51,14 @@ const MENU_ITEMS: TabKindMenuMeta[] = [
     labelKey: 'rightSidebar.tabs.kinds.review',
     icon: FileDiff,
     order: 15,
+    enabled: true,
+    singleton: true,
+  },
+  {
+    kind: 'background-tasks',
+    labelKey: 'rightSidebar.tabs.kinds.backgroundTasks',
+    icon: ListTodo,
+    order: 17,
     enabled: true,
     singleton: true,
   },

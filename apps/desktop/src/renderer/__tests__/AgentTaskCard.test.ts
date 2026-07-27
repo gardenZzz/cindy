@@ -228,25 +228,31 @@ describe('AgentTaskCard', () => {
     expect(openBackgroundTasksTabMock).toHaveBeenCalledWith('session-1', { focusTaskId: 'wf-1' });
   });
 
-  it('degrades to a no-op when sessionId or taskId is missing on a workflow card', () => {
+  it('falls back to the expand toggle when sessionId or taskId is missing on a workflow card', () => {
+    // 历史重载 workflow 卡(无 live taskId / sessionId):面板侧无该任务数据,
+    // 入口模式退回传统展开交互,description/summary 仍就地可读,不做假入口。
     openBackgroundTasksTabMock.mockClear();
     const { container } = render(
       React.createElement(AgentTaskCard, {
-        // sessionId 缺失 → 点击不跳转,外观不变。
+        // sessionId 缺失 → 不是面板入口,而是可展开卡。
         update: {
           provider: 'claude-code',
           taskId: 'wf-1',
-          status: 'running',
+          status: 'completed',
           taskType: 'local_workflow',
+          summary: 'WORKFLOW_HISTORY_SUMMARY',
         },
       }),
     );
-    const btn = headerButton(container);
-    expect(btn).not.toBeNull();
+    // 无面板入口按钮,但有展开 toggle(aria-expanded 存在)。
+    expect(headerButton(container)).toBeNull();
+    const toggleBtn = container.querySelector<HTMLButtonElement>('button[aria-expanded]');
+    expect(toggleBtn).not.toBeNull();
     act(() => {
-      btn!.click();
+      toggleBtn!.click();
     });
     expect(openBackgroundTasksTabMock).not.toHaveBeenCalled();
+    expect(container.textContent).toContain('WORKFLOW_HISTORY_SUMMARY');
   });
 
   it('renders no inline expand region for workflow cards', () => {
