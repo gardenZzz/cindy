@@ -15,7 +15,11 @@ import {
   handleStructuredListBreak,
   promoteTrailingPlainListParagraph,
 } from '@/components/new-chat/ComposerListNodes';
-import { serializeEditorContent } from '@/components/new-chat/composerContentSerialization';
+import {
+  serializeEditorContent,
+  serializeEditorSlice,
+} from '@/components/new-chat/composerContentSerialization';
+import { COMPOSER_QUOTE_NODE_TYPE } from '@/lib/composerQuoteDocument';
 
 const TestMentionChip = Node.create({
   name: 'mentionChip',
@@ -53,6 +57,24 @@ const TestPastedTextChip = Node.create({
   },
 });
 
+const TestQuote = Node.create({
+  name: COMPOSER_QUOTE_NODE_TYPE,
+  inline: true,
+  group: 'inline',
+  atom: true,
+  addAttributes() {
+    return {
+      text: { default: '' },
+      sourcePath: { default: null },
+      startLine: { default: null },
+      endLine: { default: null },
+    };
+  },
+  renderHTML({ HTMLAttributes }) {
+    return ['span', HTMLAttributes];
+  },
+});
+
 const editors: Editor[] = [];
 
 function makeEditor(content?: Record<string, unknown>): Editor {
@@ -68,6 +90,7 @@ function makeEditor(content?: Record<string, unknown>): Editor {
       HardBreak,
       TestMentionChip,
       TestPastedTextChip,
+      TestQuote,
     ],
     content: content ?? { type: 'doc', content: [{ type: 'paragraph' }] },
   });
@@ -108,7 +131,7 @@ describe('composer structured list input rules', () => {
     {
       typed: '• ',
       listType: 'bulletList',
-      attrs: {},
+      attrs: { marker: '•', separator: ' ' },
     },
     {
       typed: '1. ',
@@ -135,6 +158,23 @@ describe('composer structured list input rules', () => {
     expect(list?.attrs).toMatchObject(attrs);
     expect(list?.firstChild?.type.name).toBe('listItem');
     expect(list?.firstChild?.firstChild?.type.name).toBe('paragraph');
+  });
+
+  it('does not promote an indented marker to a top-level list', () => {
+    const editor = makeEditor();
+
+    typeThroughInputRules(editor, '  - ');
+
+    expect(editor.state.doc.firstChild?.type.name).toBe('paragraph');
+    expect(editor.state.doc.firstChild?.textContent).toBe('  - ');
+  });
+
+  it('reserves enough marker width for long ordered-list numbers', () => {
+    const editor = makeEditor();
+
+    typeThroughInputRules(editor, '123456. ');
+
+    expect(editor.view.dom.querySelector('ol')?.getAttribute('data-marker-digits')).toBe('6');
   });
 
   it.each([
@@ -171,7 +211,11 @@ describe('composer structured list input rules', () => {
         },
         {
           type: listType,
-          ...(Object.keys(attrs).length > 0 ? { attrs } : {}),
+          ...(listType === 'bulletList'
+            ? { attrs: { marker: '-', separator: ' ', ...attrs } }
+            : Object.keys(attrs).length > 0
+              ? { attrs }
+              : {}),
           content: [
             {
               type: 'listItem',
@@ -344,6 +388,7 @@ describe('composer structured list keyboard commands', () => {
     expect(editor.getJSON().content).toEqual([
       {
         type: 'bulletList',
+        attrs: { marker: '-', separator: ' ' },
         content: [
           {
             type: 'listItem',
@@ -412,6 +457,7 @@ describe('composer structured list keyboard commands', () => {
     expect(editor.getJSON().content).toEqual([
       {
         type: 'bulletList',
+        attrs: { marker: '-', separator: ' ' },
         content: [
           { type: 'listItem', content: [{ type: 'paragraph' }] },
           {
@@ -454,6 +500,7 @@ describe('composer structured list keyboard commands', () => {
     expect(editor.getJSON().content).toEqual([
       {
         type: 'bulletList',
+        attrs: { marker: '-', separator: ' ' },
         content: [
           {
             type: 'listItem',
@@ -635,6 +682,81 @@ describe('composer structured list serialization', () => {
     });
 
     expect(serializeEditorContent(editor).text).toBe('2、项目\n3、 项目');
+  });
+
+  it('keeps list markers when copying a selected structured fragment', () => {
+    const editor = makeEditor({
+      type: 'doc',
+      content: [
+        {
+          type: 'orderedList',
+          attrs: { start: 1, marker: '.' },
+          content: [
+            {
+              type: 'listItem',
+              content: [{ type: 'paragraph', content: [{ type: 'text', text: 'first' }] }],
+            },
+            {
+              type: 'listItem',
+              content: [{ type: 'paragraph', content: [{ type: 'text', text: 'second' }] }],
+            },
+          ],
+        },
+      ],
+    });
+
+    const slice = editor.state.doc.slice(0, editor.state.doc.content.size);
+    expect(serializeEditorSlice(editor, slice)).toBe('1. first\n2. second');
+  });
+
+  it('preserves non-default bullet markers and spacing when sending', () => {
+    const editor = makeEditor({
+      type: 'doc',
+      content: [
+        {
+          type: 'bulletList',
+          attrs: { marker: '+', separator: '   ' },
+          content: [
+            {
+              type: 'listItem',
+              content: [{ type: 'paragraph', content: [{ type: 'text', text: 'item' }] }],
+            },
+          ],
+        },
+      ],
+    });
+
+    expect(serializeEditorContent(editor).text).toBe('+   item');
+  });
+
+  it('keeps a dragged quote inside its list item', () => {
+    const editor = makeEditor({
+      type: 'doc',
+      content: [
+        {
+          type: 'bulletList',
+          content: [
+            {
+              type: 'listItem',
+              content: [
+                {
+                  type: 'paragraph',
+                  content: [
+                    { type: 'text', text: 'before ' },
+                    { type: COMPOSER_QUOTE_NODE_TYPE, attrs: { text: 'quoted' } },
+                    { type: 'text', text: ' after' },
+                  ],
+                },
+              ],
+            },
+          ],
+        },
+      ],
+    });
+
+    expect(serializeEditorContent(editor).text).toBe(
+      '- before > <!-- cindy-composer-quote -->\n  > quoted after',
+    );
   });
 
   it('preserves nested markers and projects atom ranges into wire offsets', () => {

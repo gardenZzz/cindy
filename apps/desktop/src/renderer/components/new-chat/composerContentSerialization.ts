@@ -1,5 +1,6 @@
 import type { Editor } from '@tiptap/core';
-import type { Node as ProseMirrorNode } from '@tiptap/pm/model';
+import { Slice, type Node as ProseMirrorNode } from '@tiptap/pm/model';
+import { EditorState } from '@tiptap/pm/state';
 import type { AgentInputReference } from '@cindy/maker-shared/agent-input-projection';
 
 import type { MentionedResource } from '@/lib/fileTypes';
@@ -40,15 +41,27 @@ function orderedListMarker(node: ProseMirrorNode): OrderedMarker {
   return node.attrs.marker === ')' || node.attrs.marker === '、' ? node.attrs.marker : '.';
 }
 
+function bulletListMarker(node: ProseMirrorNode): string {
+  const marker = node.attrs.marker;
+  return marker === '+' || marker === '*' || marker === '•' ? marker : '-';
+}
+
+function bulletListSeparator(node: ProseMirrorNode): string {
+  return typeof node.attrs.separator === 'string' && /^[ \t]+$/.test(node.attrs.separator)
+    ? node.attrs.separator
+    : ' ';
+}
+
 /**
  * Convert the composer's structured document into the Markdown wire format.
  *
  * List markers are editor structure rather than paragraph text, so their
  * serialized width is included when projecting inline reference ranges.
  */
-export function serializeEditorContent(editor: Editor): SerializedComposerContent {
-  const doc = editor.state.doc;
-  const decoratedSlashMatches = getDecoratedSlashCommandMatches(editor);
+function serializeComposerDocument(
+  doc: ProseMirrorNode,
+  decoratedSlashMatches: readonly SlashCommandMatch[],
+): SerializedComposerContent {
   const blocks: ComposerSerializedBlock[] = [];
   const mentions: MentionedResource[] = [];
   const seenMentions = new Set<string>();
@@ -110,15 +123,24 @@ export function serializeEditorContent(editor: Editor): SerializedComposerConten
 
     paragraph.forEach((child, childOffset) => {
       if (child.type.name === COMPOSER_QUOTE_NODE_TYPE) {
-        flushText();
         hasQuotes = true;
-        blocks.push({
-          kind: 'quote',
-          text: formatQuoteForSend(
-            composerQuoteAttrsToChatQuote(child.attrs as ComposerQuoteAttrs),
-          ),
-        });
-        emittedInlineSegment = true;
+        const quoteText = formatQuoteForSend(
+          composerQuoteAttrsToChatQuote(child.attrs as ComposerQuoteAttrs),
+        );
+        if (prefix) {
+          // A quote chip inside a list item is part of that item. Keeping it
+          // in the current text block preserves the list marker instead of
+          // emitting an empty item followed by a top-level quote block.
+          const continuationPrefix = ' '.repeat(prefix.length);
+          const quoteLines = quoteText.split('\n');
+          buffer += quoteLines
+            .map((line, index) => (index === 0 ? line : `${continuationPrefix}${line}`))
+            .join('\n');
+        } else {
+          flushText();
+          blocks.push({ kind: 'quote', text: quoteText });
+          emittedInlineSegment = true;
+        }
         return;
       }
 
@@ -236,7 +258,7 @@ export function serializeEditorContent(editor: Editor): SerializedComposerConten
       const itemPosition = listPosition + 1 + itemOffset;
       const itemMarker = isOrdered
         ? `${start + itemIndex}${marker}${marker === '、' ? '' : ' '}`
-        : '- ';
+        : `${bulletListMarker(listNode)}${bulletListSeparator(listNode)}`;
       const itemIndent = `${indent}${' '.repeat(itemMarker.length)}`;
       let firstParagraph = true;
 
@@ -281,4 +303,29 @@ export function serializeEditorContent(editor: Editor): SerializedComposerConten
     mentions,
     hasQuotes,
   };
+}
+
+export function serializeEditorContent(editor: Editor): SerializedComposerContent {
+  return serializeComposerDocument(editor.state.doc, getDecoratedSlashCommandMatches(editor));
+}
+
+/**
+ * Serialize a selected editor fragment for plain-text clipboard consumers.
+ * Replacing an empty document with the open slice lets ProseMirror rebuild
+ * list context around selections that begin or end inside a list item.
+ */
+export function serializeEditorSlice(editor: Editor | null, slice: Slice): string {
+  if (!editor) {
+    return slice.content.textBetween(0, slice.content.size, '\n');
+  }
+
+  try {
+    const emptyDoc = editor.state.schema.topNodeType.createAndFill();
+    if (!emptyDoc) throw new Error('composer schema cannot create an empty document');
+    const state = EditorState.create({ schema: editor.state.schema, doc: emptyDoc });
+    const replaced = state.tr.replace(0, state.doc.content.size, slice).doc;
+    return serializeComposerDocument(replaced, []).text;
+  } catch {
+    return slice.content.textBetween(0, slice.content.size, '\n');
+  }
 }

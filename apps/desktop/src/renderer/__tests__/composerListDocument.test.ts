@@ -151,6 +151,58 @@ describe('composer list document normalization', () => {
     });
   });
 
+  it('preserves accepted unordered marker syntax and spacing', () => {
+    expect(plainTextToComposerDocument('+   item\n• next')).toEqual({
+      type: 'doc',
+      content: [
+        {
+          type: 'bulletList',
+          attrs: { marker: '+', separator: '   ' },
+          content: [
+            {
+              type: 'listItem',
+              content: [{ type: 'paragraph', content: [{ type: 'text', text: 'item' }] }],
+            },
+          ],
+        },
+        {
+          type: 'bulletList',
+          attrs: { marker: '•', separator: ' ' },
+          content: [
+            {
+              type: 'listItem',
+              content: [{ type: 'paragraph', content: [{ type: 'text', text: 'next' }] }],
+            },
+          ],
+        },
+      ],
+    });
+  });
+
+  it('does not promote marker-shaped lines inside fenced code', () => {
+    expect(
+      plainTextToComposerDocument('before\n```js\n1. literal\n```\n2. real'),
+    ).toEqual({
+      type: 'doc',
+      content: [
+        { type: 'paragraph', content: [{ type: 'text', text: 'before' }] },
+        { type: 'paragraph', content: [{ type: 'text', text: '```js' }] },
+        { type: 'paragraph', content: [{ type: 'text', text: '1. literal' }] },
+        { type: 'paragraph', content: [{ type: 'text', text: '```' }] },
+        {
+          type: 'orderedList',
+          attrs: { start: 2, marker: '.' },
+          content: [
+            {
+              type: 'listItem',
+              content: [{ type: 'paragraph', content: [{ type: 'text', text: 'real' }] }],
+            },
+          ],
+        },
+      ],
+    });
+  });
+
   it('leaves existing structured content unchanged', () => {
     const document = {
       type: 'doc' as const,
