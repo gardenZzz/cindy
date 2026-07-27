@@ -234,7 +234,9 @@ export function serializeEditorContent(editor: Editor): SerializedComposerConten
     listNode.forEach((item, itemOffset, itemIndex) => {
       if (item.type.name !== 'listItem') return;
       const itemPosition = listPosition + 1 + itemOffset;
-      const itemMarker = isOrdered ? `${start + itemIndex}${marker} ` : '- ';
+      const itemMarker = isOrdered
+        ? `${start + itemIndex}${marker}${marker === '、' ? '' : ' '}`
+        : '- ';
       const itemIndent = `${indent}${' '.repeat(itemMarker.length)}`;
       let firstParagraph = true;
 

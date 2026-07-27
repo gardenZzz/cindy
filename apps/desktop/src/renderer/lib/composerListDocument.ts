@@ -82,7 +82,11 @@ function parseListMarker(text: string): ListMarker | null {
     if (marker !== '、' && ordered[3].length === 0) return null;
     return {
       kind: 'ordered',
-      prefixLength: ordered[0].length,
+      // CJK ordered markers are valid with or without a following space.
+      // Keep that space in the item body so serialization preserves the
+      // user's original form without adding another list attribute.
+      prefixLength:
+        marker === '、' ? ordered[1].length + marker.length : ordered[0].length,
       marker,
       start: Number(ordered[1]),
     };

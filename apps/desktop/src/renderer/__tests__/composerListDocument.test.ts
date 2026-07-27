@@ -129,6 +129,28 @@ describe('composer list document normalization', () => {
     });
   });
 
+  it('keeps optional spaces after CJK ordered markers in item text', () => {
+    expect(plainTextToComposerDocument('2、项目\n3、 项目')).toEqual({
+      type: 'doc',
+      content: [
+        {
+          type: 'orderedList',
+          attrs: { start: 2, marker: '、' },
+          content: [
+            {
+              type: 'listItem',
+              content: [{ type: 'paragraph', content: [{ type: 'text', text: '项目' }] }],
+            },
+            {
+              type: 'listItem',
+              content: [{ type: 'paragraph', content: [{ type: 'text', text: ' 项目' }] }],
+            },
+          ],
+        },
+      ],
+    });
+  });
+
   it('leaves existing structured content unchanged', () => {
     const document = {
       type: 'doc' as const,

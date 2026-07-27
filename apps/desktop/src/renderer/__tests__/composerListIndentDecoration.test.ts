@@ -48,7 +48,7 @@ const TestAtom = TiptapNode.create({
   },
 });
 
-function makeEditor(lines: string[], structuredLists = false): Editor {
+function makeEditor(lines: string[]): Editor {
   const content: Array<Record<string, unknown>> = [];
   lines.forEach((line, i) => {
     if (i > 0) content.push({ type: 'hardBreak' });
@@ -62,7 +62,7 @@ function makeEditor(lines: string[], structuredLists = false): Editor {
       Text,
       HardBreak,
       TestAtom,
-      ComposerListIndentDecoration.configure({ structuredLists }),
+      ComposerListIndentDecoration,
     ],
     content: { type: 'doc', content: [{ type: 'paragraph', content }] },
   });
@@ -82,9 +82,9 @@ afterEach(() => {
 });
 
 describe('buildListIndentDecorations', () => {
-  it('leaves promotable top-level rows to structured-list normalization', () => {
-    const ed = makeEditor(['1. one', '  - nested', '> quote'], true);
-    expect(indentSpans(ed)).toEqual(['  - nested', '> quote']);
+  it('keeps fallback decoration for rows that have not been promoted yet', () => {
+    const ed = makeEditor(['1. one', '  - nested', '> quote']);
+    expect(indentSpans(ed)).toEqual(['1. one', '  - nested', '> quote']);
   });
 
   it('builds paired hanging-indent variables without embedding user text', () => {
@@ -921,7 +921,7 @@ describe('wiring contract', () => {
       "import { ComposerListIndentDecoration } from './ComposerListIndentDecoration';",
     );
     expect(src).toMatch(
-      /CjkPunctDecoration,\s*\n\s*ComposerListIndentDecoration\.configure\(\{ structuredLists: true \}\),/,
+      /CjkPunctDecoration,\s*\n\s*ComposerListIndentDecoration,/,
     );
   });
 

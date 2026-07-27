@@ -1379,7 +1379,7 @@ export function ChatInput({
         enabled: window.electronAPI.platform === 'win32',
       }),
       CjkPunctDecoration,
-      ComposerListIndentDecoration.configure({ structuredLists: true }),
+      ComposerListIndentDecoration,
       VoiceInputDraftDecoration,
       MentionDragCaretDecoration,
       GhostCommandDecoration,
@@ -2716,8 +2716,11 @@ export function ChatInput({
       setBrowserComments(draft.browserComments ?? []);
       // 同值外部写入不做全量 setContent,避免把用户停在中段的光标弹到末尾、
       // 打断 IME 组合。appendQuoteToDraft 会改变正文文档,自然走下方 setContent。
+      const normalizedDraftText = draft.text
+        ? normalizeComposerDocumentJSON(draft.text)
+        : null;
       const textUnchanged =
-        JSON.stringify(draft.text ?? null) ===
+        JSON.stringify(normalizedDraftText) ===
         JSON.stringify(editor.isEmpty ? null : editor.getJSON());
       if (textUnchanged) {
         if (!editor.isFocused) editor.commands.focus();
@@ -2725,8 +2728,8 @@ export function ChatInput({
       }
       isRestoringRef.current = true;
       try {
-        if (draft.text) {
-          editor.commands.setContent(normalizeComposerDocumentJSON(draft.text));
+        if (normalizedDraftText) {
+          editor.commands.setContent(normalizedDraftText);
           editor.commands.focus('end');
         } else {
           editor.commands.clearContent();
