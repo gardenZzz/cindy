@@ -3241,6 +3241,7 @@
         "browser": "浏览器",
         "terminal": "终端",
         "review": "审查",
+        "backgroundTasks": "后台任务",
         "collaboration": "协同",
         "unknown": "未知标签页",
         "ghostPanel": "插件面板"
@@ -3625,6 +3626,16 @@
       "touchCountAria_other": "已修改 {{count}} 次",
       "expandAllAria": "展开所有文件",
       "collapseAllAria": "收起所有文件"
+    },
+    "backgroundTasks": {
+      "running": "运行中",
+      "completed": "已完成",
+      "empty": "本对话暂无后台任务",
+      "stop": "停止",
+      "back": "返回",
+      "progressSummary": "{{done}}/{{total}} Agent",
+      "tokens": "{{value}} tokens",
+      "noProgress": "暂无进度详情"
     }
   },
   "update": {
@@ -4881,13 +4892,19 @@
     "workflowTree": {
       "agentsCount": "{{count}} 个 Agent",
       "attempt": "第 {{count}} 次尝试",
+      "endedEarly": "未完成即结束",
       "state": {
         "queued": "排队中",
+        "pending": "排队中",
+        "start": "启动中",
         "running": "运行中",
+        "progress": "运行中",
         "done": "完成",
         "completed": "完成",
         "failed": "失败",
-        "stopped": "已停止"
+        "error": "失败",
+        "stopped": "已停止",
+        "killed": "已终止"
       }
     },
     "credentialSwitchWait": {
@@ -7264,7 +7281,6 @@
         "cancelFailed": "取消订阅失败，请稍后重试。"
       },
       "topupCard": {
-
         "action": "购买点数"
       }
     },

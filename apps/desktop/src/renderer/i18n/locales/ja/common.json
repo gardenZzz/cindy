@@ -3241,6 +3241,7 @@
         "browser": "ブラウザ",
         "terminal": "ターミナル",
         "review": "レビュー",
+        "backgroundTasks": "バックグラウンドタスク",
         "collaboration": "コラボ",
         "unknown": "不明なタブ",
         "ghostPanel": "プラグインパネル"
@@ -3625,6 +3626,16 @@
       "touchCountAria_other": "{{count}} 回編集",
       "expandAllAria": "すべてのファイルを展開",
       "collapseAllAria": "すべてのファイルを折りたたむ"
+    },
+    "backgroundTasks": {
+      "running": "実行中",
+      "completed": "完了",
+      "empty": "このセッションにバックグラウンドタスクはまだありません",
+      "stop": "停止",
+      "back": "戻る",
+      "progressSummary": "{{done}}/{{total}} Agent",
+      "tokens": "{{value}} tokens",
+      "noProgress": "進行状況の詳細はまだありません"
     }
   },
   "update": {
@@ -4881,13 +4892,19 @@
     "workflowTree": {
       "agentsCount": "{{count}} 個のエージェント",
       "attempt": "{{count}} 回目",
+      "endedEarly": "完了前に終了",
       "state": {
         "queued": "待機中",
+        "pending": "待機中",
+        "start": "開始中",
         "running": "実行中",
+        "progress": "実行中",
         "done": "完了",
         "completed": "完了",
         "failed": "失敗",
-        "stopped": "停止"
+        "error": "失敗",
+        "stopped": "停止",
+        "killed": "強制終了"
       }
     },
     "credentialSwitchWait": {
