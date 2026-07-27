@@ -1033,6 +1033,41 @@ describe('HTTP 发现失败的归因与选择性重试', () => {
     }
   });
 
+  it('has_more=true 但没有可用游标归 upstream,不把半截清单当完整清单', async () => {
+    // 静默收尾会把「只翻了一页的前缀」当成完整清单交出去,而它完全可能小到刚好落进 shrink
+    // 守卫的放行区间 —— 真清单被截断替换、失败态被清、也不排重试(PR #548 review)。
+    const model = (id: string) => ({ id, display_name: id, type: 'model' });
+    for (const bad of [{ has_more: true }, { has_more: true, last_id: 42 }, { has_more: true, last_id: '' }]) {
+      resetAnthropicDiscoveryForTest();
+      setAnthropicDiscoveredModels([]);
+      vi.stubGlobal(
+        'fetch',
+        vi.fn().mockResolvedValue({
+          ok: true,
+          json: async () => ({ data: [model('claude-opus-4-8')], ...bad }),
+        }),
+      );
+      await refreshAnthropicModelsFromHttp();
+      expect(getAnthropicModelDiscoveryFailure()?.kind).toBe('upstream');
+      // 半截结果一律不生效。
+      expect(anthropicIds()).toEqual([]);
+    }
+  });
+
+  it('连接态由调用方给出时不再重读凭证库(macOS 上那是一次同步 Keychain 子进程)', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockRejectedValue(new TypeError('fetch failed')));
+    await refreshAnthropicModelsFromHttp();
+
+    // 显式传 false = 调用方已知未连接:不暴露失败态,且不去问凭证库。
+    authState.loggedIn = true;
+    expect(getAnthropicModelDiscoveryFailure(false)).toBeNull();
+    // 显式传 true 同理:即便凭证库此刻说未登录,也按调用方给的连接态走。
+    authState.loggedIn = false;
+    expect(getAnthropicModelDiscoveryFailure(true)?.kind).toBe('network');
+    // 不传时保持原有的自查语义。
+    expect(getAnthropicModelDiscoveryFailure()).toBeNull();
+  });
+
   it('答复正常但没有可用模型归 empty', async () => {
     vi.stubGlobal(
       'fetch',

@@ -400,8 +400,11 @@ export function getDesktopProviderService(): ProviderService {
     genericOAuthConnected: (providerId) => hasGenericOAuthLogin(providerId),
     // 动态清单发现的失败归因：目前只有 anthropic 是「清单唯一来源是动态发现」的供应商，
     // 拉不到就是零模型 —— UI 要据此讲明失败理由，而不是一直说「正在发现」。
-    modelDiscoveryFailure: (providerId) =>
-      providerId === 'anthropic' ? getAnthropicModelDiscoveryFailure() : null,
+    //
+    // 连接态直接沿用本次快照已经算好的那个：它内部要读凭证库，macOS 上每读一次就是一个
+    // 同步的 `security` 子进程，同一次 listProviders 不该为此阻塞主线程两回（PR #548 review）。
+    modelDiscoveryFailure: (providerId, connected) =>
+      providerId === 'anthropic' ? getAnthropicModelDiscoveryFailure(connected) : null,
   });
   return singleton;
 }

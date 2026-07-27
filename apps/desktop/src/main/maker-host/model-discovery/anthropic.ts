@@ -884,9 +884,17 @@ function notifyFailureChanged(): void {
  *
  * 未登录时一律返回 null:没有授权就谈不上「发现失败」,那种状态下 UI 该讲的是「去连接」,
  * 而不是把上一个账号留下的失败理由摆给新用户看。
+ *
+ * `knownConnected` 让调用方交出同一次快照里**已经算好**的连接态。macOS 上 hasClaudeAiOAuth()
+ * 会同步 `execFileSync('security', ...)` 读一次 Keychain —— listProviders 先在 connection 回调
+ * 里读过一遍,这里再读一遍就是白白让 Electron 主线程多阻塞一个子进程,而供应商列表还会随
+ * PROVIDER_CHANGED 反复重取(PR #548 review)。
  */
-export function getAnthropicModelDiscoveryFailure(): ProviderModelDiscoveryFailure | null {
-  if (!hasClaudeAiOAuth()) return null;
+export function getAnthropicModelDiscoveryFailure(
+  knownConnected?: boolean,
+): ProviderModelDiscoveryFailure | null {
+  const connected = knownConnected ?? hasClaudeAiOAuth();
+  if (!connected) return null;
   return lastFailure;
 }
 
@@ -961,10 +969,22 @@ export function refreshAnthropicModelsFromHttp(options?: {
           );
         }
         entries.push(...body.data);
-        url =
-          body.has_more && typeof body.last_id === 'string'
-            ? `${upstream.replace(/\/+$/, '')}/v1/models?limit=1000&after_id=${encodeURIComponent(body.last_id)}`
-            : null;
+        // has_more=true 却没给可用游标 —— 静默收尾会把「只翻了一页的前缀」当成完整清单交出去,
+        // 而它完全可能小到刚好落进 shrink 守卫的放行区间,于是真清单被截断替换、失败态被清、
+        // 也不排重试,用户从此少一半模型且毫无提示(PR #548 review)。这是响应本身不完整,归
+        // upstream 让它重试。
+        if (body.has_more === true) {
+          if (typeof body.last_id !== 'string' || body.last_id.length === 0) {
+            throw new DiscoveryResponseError(
+              `has_more=true without a usable last_id cursor (got ${
+                body.last_id === undefined ? 'missing' : typeof body.last_id
+              })`,
+            );
+          }
+          url = `${upstream.replace(/\/+$/, '')}/v1/models?limit=1000&after_id=${encodeURIComponent(body.last_id)}`;
+        } else {
+          url = null;
+        }
       }
     } catch (err) {
       // 失败不清列表:现值(含磁盘缓存)是上次成功的真数据;SDK 通道随后仍会精化。

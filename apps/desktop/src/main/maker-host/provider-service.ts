@@ -57,8 +57,14 @@ export interface ProviderServiceDeps {
   /**
    * 动态清单发现的最近一次失败（生产 = anthropic 的 getAnthropicModelDiscoveryFailure）。
    * 只有「清单唯一来源是动态发现」的供应商需要，缺席 = 该供应商没有这种失败态。
+   *
+   * `connected` 是本次快照刚算出的连接态，直接传下去供实现复用：这些判定往往要读凭证库
+   * （macOS 上是一次同步的 Keychain 子进程），同一次 listProviders 里不该读第二遍。
    */
-  modelDiscoveryFailure?: (providerId: string) => ProviderModelDiscoveryFailure | null;
+  modelDiscoveryFailure?: (
+    providerId: string,
+    connected: boolean,
+  ) => ProviderModelDiscoveryFailure | null;
 }
 
 export interface ProviderService {
@@ -113,7 +119,7 @@ export function createProviderService(deps: ProviderServiceDeps): ProviderServic
     const discoveryFailures: ModelDiscoveryFailureState = {};
     if (deps.modelDiscoveryFailure) {
       for (const p of catalog.providers) {
-        const failure = deps.modelDiscoveryFailure(p.id);
+        const failure = deps.modelDiscoveryFailure(p.id, connected[p.id] === true);
         if (failure) discoveryFailures[p.id] = failure;
       }
     }
