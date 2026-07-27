@@ -843,7 +843,9 @@ export class RemoteHost {
       const now = Date.now();
       if (now - rec.lastLocalErrorAt > 30_000) {
         rec.lastLocalErrorAt = now;
-        const suppressed = rec.localErrorCount - rec.lastLocalErrorLoggedCount;
+        // 距上次日志被吞掉的条数, 不含本次 (localErrorCount 已含本次, -1 扣除;
+        // 否则首条日志就会误报 suppressed=1, review: PR #715 greptile R4)。
+        const suppressed = rec.localErrorCount - rec.lastLocalErrorLoggedCount - 1;
         rec.lastLocalErrorLoggedCount = rec.localErrorCount;
         this.log.warn('ssh remote forward: local target unreachable', {
           id: this.id,

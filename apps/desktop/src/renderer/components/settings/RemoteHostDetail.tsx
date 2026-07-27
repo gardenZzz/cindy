@@ -284,6 +284,11 @@ function AgentProxyTunnelCard({ hostId }: { hostId: string }) {
     icon = <AlertCircle size={14} />;
     text = t('settings.remote.detail.agentProxyError', { message: tunnel.lastError });
     isError = true;
+  } else if (snap?.status !== 'ready') {
+    // 主机断连时隧道已 disarm 且没有在途的建立动作 — 不能渲染
+    // 「建立中」spinner (误导, review: PR #715 greptile R4)。
+    icon = <AlertCircle size={14} />;
+    text = t('settings.remote.detail.agentProxyWaiting', { target: localTarget });
   } else {
     icon = <Spinner size={12} />;
     text = t('settings.remote.detail.agentProxyPending', { target: localTarget });

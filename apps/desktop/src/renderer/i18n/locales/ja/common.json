@@ -290,6 +290,7 @@
         "agentProxyTitle": "Agent プロキシトンネル",
         "agentProxyActive": "リモート 127.0.0.1:{{port}} → ローカル {{target}} · 確立済み",
         "agentProxyPending": "トンネル確立中 → ローカル {{target}}",
+        "agentProxyWaiting": "ホスト未接続 — 再接続後に自動確立 → ローカル {{target}}",
         "agentProxyError": "トンネルの確立に失敗: {{message}}",
         "button": {
           "install": "インストール",

@@ -290,6 +290,7 @@
         "agentProxyTitle": "Agent 프록시 터널",
         "agentProxyActive": "원격 127.0.0.1:{{port}} → 로컬 {{target}} · 설정됨",
         "agentProxyPending": "터널 설정 중 → 로컬 {{target}}",
+        "agentProxyWaiting": "호스트 미연결 — 재연결 후 자동 설정 → 로컬 {{target}}",
         "agentProxyError": "터널 설정 실패: {{message}}",
         "button": {
           "install": "설치",
