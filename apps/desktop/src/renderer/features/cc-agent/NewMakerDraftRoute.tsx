@@ -554,15 +554,34 @@ export function NewMakerDraftRoute() {
    */
   // 可见性 override 变更要重算校准候选(与 ModelSelector 同一份订阅源)。
   const modelVisibilityVersion = useModelVisibilityVersion();
-  const calibrationProviders = useMemo(
-    () =>
-      filterChatBridgedCodexProviders(
-        localProviders,
-        capabilityAgentKind,
-        !!effectiveRemoteHostId,
-      ),
-    [localProviders, capabilityAgentKind, effectiveRemoteHostId],
-  );
+  const calibrationProviders = useMemo(() => {
+    const base = filterChatBridgedCodexProviders(
+      localProviders,
+      capabilityAgentKind,
+      !!effectiveRemoteHostId,
+    );
+    // 逐模型过滤要落在**候选本身**，而不是只落在「挑哪个模型」那一步：来源解析
+    // (effectiveSourceIdForModel) 吃的是同一份候选，若这里不剔除，被隐藏的条目仍会让它
+    // 选中那个来源 —— 于是 providerId 落 null、main 解析到同一个被用户排除的默认来源，
+    // effort / fast 也从错误的条目推导(PR #548 review)。
+    return base
+      .map((p) => {
+        const models = p.models[capabilityAgentKind] ?? [];
+        const kept = models.filter(
+          (m) =>
+            isModelEnabled(capabilityAgentKind, p.id, m) &&
+            !(effectiveRemoteHostId && isSubscriptionDirectModel(m.id)),
+        );
+        if (kept.length === models.length) return p;
+        return { ...p, models: { ...p.models, [capabilityAgentKind]: kept } };
+      })
+      .filter((p) => (p.models[capabilityAgentKind] ?? []).length > 0);
+  }, [
+    localProviders,
+    capabilityAgentKind,
+    effectiveRemoteHostId,
+    modelVisibilityVersion,
+  ]);
   const calibratedDraftModel = useMemo(() => {
     if (isDeviceLinkDraft) return chatPrefs.model;
     return calibrateDraftModel({
@@ -571,13 +590,6 @@ export function NewMakerDraftRoute() {
       model: chatPrefs.model,
       chosenByUser: draft.modelChosenByVendor[draft.vendor] === true,
       providersLoading: localProvidersLoading,
-      excludeModel: (m: CatalogModel, providerId: string) => {
-        // 用户在设置里隐藏 / 默认收起的模型不该被选成默认 —— 那会让草稿以一个选择器里
-        // 根本看不到的模型启动,和他自己的可见性设置直接冲突(与 ModelSelector 同口径)。
-        if (!isModelEnabled(capabilityAgentKind, providerId, m)) return true;
-        // SSH 远程:订阅直连的 bridge 只挂本地 compat-proxy,远端选中必失败。
-        return !!effectiveRemoteHostId && isSubscriptionDirectModel(m.id);
-      },
     });
   }, [
     isDeviceLinkDraft,
@@ -587,8 +599,6 @@ export function NewMakerDraftRoute() {
     draft.modelChosenByVendor,
     draft.vendor,
     localProvidersLoading,
-    effectiveRemoteHostId,
-    modelVisibilityVersion,
   ]);
 
   const effectiveSourceId = useMemo<string | null>(() => {

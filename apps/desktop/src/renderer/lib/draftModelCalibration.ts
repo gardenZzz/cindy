@@ -28,23 +28,29 @@ export function pickConnectedModelForAgent(
   providers: readonly ProviderView[],
   agent: AgentKind,
   preferredModelId: string,
-  excludeModel?: (model: CatalogModel, providerId: string) => boolean,
 ): string | null {
   const connected = connectedProvidersForAgent([...providers], agent);
   if (connected.length === 0) return null;
-  const usable = (provider: ProviderView): CatalogModel[] =>
-    (provider.models[agent] ?? []).filter((m) => !excludeModel?.(m, provider.id));
   for (const provider of connected) {
-    if (usable(provider).some((m) => m.id === preferredModelId)) return preferredModelId;
+    if ((provider.models[agent] ?? []).some((m) => m.id === preferredModelId)) {
+      return preferredModelId;
+    }
   }
   for (const provider of connected) {
-    const first = usable(provider)[0];
+    const first = (provider.models[agent] ?? [])[0];
     if (first) return first.id;
   }
   return null;
 }
 
 export interface DraftModelCalibrationInput {
+  /**
+   * 候选来源。调用方必须**预先过滤好**：既剔除不可路由的来源（SSH 下仅本地可桥接的
+   * Codex 供应商），也剔除各来源里不该被选中的模型条目（用户隐藏 / 默认收起、SSH 下的
+   * 订阅直连）。过滤放在候选上而不是这里，是因为同一份候选还要喂给来源解析
+   * （`effectiveSourceIdForModel`）——只在挑模型时过滤，会让来源解析仍看见被剔除的条目，
+   * 从而选中一个用户已经排除掉该模型的来源。
+   */
   providers: readonly ProviderView[];
   agent: AgentKind;
   /** 草稿当前的模型（种子默认或用户选择）。 */
@@ -53,15 +59,6 @@ export interface DraftModelCalibrationInput {
   chosenByUser: boolean;
   /** 供应商清单是否仍在加载：加载期不校准，避免首帧把默认模型闪成别的。 */
   providersLoading: boolean;
-  /**
-   * 逐模型排除（与选择器的可见性口径同源）。两类必须在这里判，供应商级过滤盖不住——
-   * 同一个供应商可能既有可路由 / 可见的模型，又有该排除的模型：
-   *   - **用户隐藏或默认收起的模型**：`ModelSelector` 用 `isModelEnabled` 过滤，校准若扫
-   *     原始清单，会选中一个选择器里根本看不到的模型，与用户的可见性设置直接冲突；
-   *   - **订阅直连模型**（`chatgpt/` / `xai/`，仅 SSH 远程草稿）：bridge 只挂在本地
-   *     compat-proxy，远程模式不经它，选中必失败。
-   */
-  excludeModel?: (model: CatalogModel, providerId: string) => boolean;
 }
 
 /** 返回草稿应当展示 / 发送的模型 id（不可校准时原样返回，绝不返回空）。 */
@@ -71,8 +68,7 @@ export function calibrateDraftModel({
   model,
   chosenByUser,
   providersLoading,
-  excludeModel,
 }: DraftModelCalibrationInput): string {
   if (chosenByUser || providersLoading) return model;
-  return pickConnectedModelForAgent(providers, agent, model, excludeModel) ?? model;
+  return pickConnectedModelForAgent(providers, agent, model) ?? model;
 }

@@ -391,7 +391,9 @@ export class DesktopClaudeAuthAdapter implements AuthAdapter {
       // disconnect = 先失效刷新器再清凭证(唯一正确入口,见 claude-oauth-refresh 文档)
       // —— 否则「已断开」状态下在途刷新回写会让凭证复活。
       disconnectClaudeAiOAuth();
-      unbindNativeProviderAuth('anthropic');
+      // 用户显式登出:留撤销标记。凭证删除是 best-effort(文件删除吞错),残留凭证不该在
+      // 下一次读连接态时被自动认领回来(PR #548 review)。
+      unbindNativeProviderAuth('anthropic', { revoked: true });
       return;
     }
     // 经统一 store 移除本机 XD 网关 key。store.remove 把"文件本不存在"视为成功
@@ -1202,7 +1204,8 @@ export class DesktopCodexAuthAdapter implements AuthAdapter {
     // 降低 Windows 文件锁概率；删失败仍由 disconnect marker + 内存快照清空保证 fail-closed，
     // 下次登录前会再次清理并在锁未释放时拒绝继续。
     await removeDesktopCodexModelsCache(this.codexHome);
-    unbindNativeProviderAuth('openai');
+    // 用户显式登出:除既有的 disconnect marker 外,再留一道跨 provider 统一的撤销标记。
+    unbindNativeProviderAuth('openai', { revoked: true });
   }
 
   async getAuthEnv(options?: AuthAdapterOptions): Promise<Record<string, string>> {

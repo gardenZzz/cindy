@@ -152,64 +152,64 @@ describe('calibrateDraftModel', () => {
     ).toBe('gpt-5.5');
   });
 
-  it('SSH 还要逐模型排除订阅直连 —— 供应商级过滤盖不住同一供应商里的混合清单', () => {
-    // 同一个已连接供应商里既有订阅直连模型(远端 bridge 不可达)又有可路由模型:
-    // 只做供应商级过滤会选中前者,必须按模型 id 再判一道。
-    const mixed = provider('xd', true, {
-      'claude-code': [model('chatgpt/gpt-5.5'), model('claude-sonnet-5')],
-    });
+  it('候选须由调用方逐模型预过滤 —— 供应商级过滤盖不住同一供应商里的混合清单', () => {
+    // 同一个已连接供应商里既有订阅直连模型(远端 bridge 不可达)又有可路由模型。
+    // 过滤放在候选构造上而不是这里:同一份候选还要喂给来源解析,只在挑模型时过滤会让
+    // 来源解析仍看见被剔除的条目,从而选中一个用户已排除掉该模型的来源。
+    const models = [model('chatgpt/gpt-5.5'), model('claude-sonnet-5')];
     const input = {
-      providers: [mixed],
       agent: 'claude-code' as const,
       model: 'claude-opus-4-8',
       chosenByUser: false,
       providersLoading: false,
     };
 
-    // 本地草稿:不排除,取清单里的第一个。
-    expect(calibrateDraftModel(input)).toBe('chatgpt/gpt-5.5');
-
-    // SSH 草稿:排除订阅直连后落到真正可路由的模型。
+    // 本地草稿:候选未剔除,取清单里的第一个。
     expect(
       calibrateDraftModel({
         ...input,
-        excludeModel: (m) => m.id.startsWith('chatgpt/') || m.id.startsWith('xai/'),
+        providers: [provider('xd', true, { 'claude-code': models })],
+      }),
+    ).toBe('chatgpt/gpt-5.5');
+
+    // SSH 草稿:候选已剔除订阅直连,落到真正可路由的模型。
+    expect(
+      calibrateDraftModel({
+        ...input,
+        providers: [
+          provider('xd', true, {
+            'claude-code': models.filter((m) => !m.id.startsWith('chatgpt/')),
+          }),
+        ],
       }),
     ).toBe('claude-sonnet-5');
   });
 
-  it('用户隐藏 / 默认收起的模型不会被选成默认(与选择器可见性同口径)', () => {
-    // 校准若扫原始清单,会选中一个选择器里根本看不到的模型,与用户的可见性设置冲突。
-    const p = provider('xd', true, {
-      'claude-code': [model('claude-haiku-4-5'), model('claude-sonnet-5')],
-    });
-    const hidden = new Set(['xd:claude-haiku-4-5']);
-
+  it('候选里剔掉用户隐藏的条目后就不会被选成默认(与选择器可见性同口径)', () => {
+    const visibleOnly = [model('claude-sonnet-5')];
     expect(
       calibrateDraftModel({
-        providers: [p],
+        providers: [provider('xd', true, { 'claude-code': visibleOnly })],
         agent: 'claude-code',
         model: 'claude-opus-4-8',
         chosenByUser: false,
         providersLoading: false,
-        excludeModel: (m, providerId) => hidden.has(`${providerId}:${m.id}`),
       }),
     ).toBe('claude-sonnet-5');
   });
 
-  it('excludeModel 拿得到 providerId —— 可见性 override 是按 (agent, 来源, 模型) 记的', () => {
-    const seen: Array<[string, string]> = [];
-    calibrateDraftModel({
-      providers: [provider('xd', true, { 'claude-code': [model('claude-sonnet-5')] })],
-      agent: 'claude-code',
-      model: 'claude-opus-4-8',
-      chosenByUser: false,
-      providersLoading: false,
-      excludeModel: (m, providerId) => {
-        seen.push([providerId, m.id]);
-        return false;
-      },
-    });
-    expect(seen).toContainEqual(['xd', 'claude-sonnet-5']);
+  it('某来源的模型被剔光后整条来源不再是候选,不会被解析成生效来源', () => {
+    // 调用方会把「过滤后零模型」的来源整条丢掉;这里断言即便传进来也不会被选中。
+    const emptied = provider('xd', true, { 'claude-code': [] });
+    const usable = provider('anthropic', true, { 'claude-code': [model('claude-sonnet-5')] });
+    expect(
+      calibrateDraftModel({
+        providers: [emptied, usable],
+        agent: 'claude-code',
+        model: 'claude-opus-4-8',
+        chosenByUser: false,
+        providersLoading: false,
+      }),
+    ).toBe('claude-sonnet-5');
   });
 });

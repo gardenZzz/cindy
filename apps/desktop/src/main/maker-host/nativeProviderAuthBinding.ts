@@ -7,6 +7,17 @@ import { getActiveAppSession, isAppSessionBoundaryPending } from '../appSessionS
 type NativeProviderId = 'anthropic' | 'openai' | 'xai';
 type BindingFile = Partial<Record<NativeProviderId, string>> & {
   legacyClaimOwner?: string;
+  /**
+   * 用户**显式登出**过的 provider（值 = 当时的 owner）。
+   *
+   * 登出会先删凭证再解绑，但删除是 best-effort 的（Anthropic 的文件删除吞 ENOENT 之外的
+   * 错误、`logoutGrok` 忽略 secret store 的失败返回）。删除失败时 slot 已空、凭证却还在，
+   * 自动认领会立刻把它绑回来——等于悄悄撤销用户刚做的登出。有这个标记就一律不认领，
+   * 直到用户再次显式授权（bind 时清除）。
+   *
+   * 按 owner 记：换账号后新 owner 不受上一个账号登出意图的影响。
+   */
+  revoked?: Partial<Record<NativeProviderId, string>>;
 };
 
 function bindingPath(): string {
@@ -44,14 +55,33 @@ export function isNativeProviderAuthBound(provider: NativeProviderId): boolean {
 export function bindNativeProviderAuth(provider: NativeProviderId): void {
   const owner = getActiveAppSession().dataOwnerId;
   if (!owner) throw new Error('cannot bind native provider auth without an active data owner');
-  writeBindings({ ...readBindings(), [provider]: owner });
+  const bindings = readBindings();
+  // 显式授权 = 用户重新表达了「我要连它」，撤销标记就此作废。
+  if (bindings.revoked && provider in bindings.revoked) {
+    const revoked = { ...bindings.revoked };
+    delete revoked[provider];
+    bindings.revoked = revoked;
+  }
+  writeBindings({ ...bindings, [provider]: owner });
 }
 
-/** Remove the current owner binding after logout/invalidation. */
-export function unbindNativeProviderAuth(provider: NativeProviderId): void {
+/**
+ * Remove the current owner binding after logout/invalidation.
+ *
+ * `revoked: true` 只用于**用户显式登出**：它会留下一个持久标记，挡住后续的自动认领。
+ * 服务端作废凭证（401 invalidate）不传——那不是用户意图，凭证也已被清掉，用户之后在本机
+ * CLI 重新登录时仍应享有设计内的自动继承。
+ */
+export function unbindNativeProviderAuth(
+  provider: NativeProviderId,
+  opts?: { revoked?: boolean },
+): void {
   const bindings = readBindings();
-  if (!(provider in bindings)) return;
+  const owner = getActiveAppSession().dataOwnerId;
+  const marking = opts?.revoked === true && !!owner;
+  if (!(provider in bindings) && !marking) return;
   delete bindings[provider];
+  if (marking) bindings.revoked = { ...(bindings.revoked ?? {}), [provider]: owner as string };
   writeBindings(bindings);
 }
 
@@ -110,6 +140,9 @@ export function claimDetectedNativeProviderAuth(
   // unbindNativeProviderAuth's `in` pattern).
   if (provider in bindings) return false;
   if ('legacyClaimOwner' in bindings && bindings.legacyClaimOwner !== owner) return false;
+  // 当前 owner 显式登出过就绝不自动认领:凭证删除是 best-effort 的,残留凭证不该让
+  // 「我已经登出了」在下一次读连接态时被悄悄撤销(PR #548 review)。
+  if (bindings.revoked?.[provider] === owner) return false;
   if (!hasCredential()) return false;
   writeBindings({ ...bindings, [provider]: owner });
   return true;
