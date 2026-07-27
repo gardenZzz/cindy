@@ -5559,7 +5559,7 @@ export function registerMakerIpc(maker: Maker, options: RegisterMakerIpcOptions 
     getWorkerDefaults: getWorkerDefaultsFromNewMaker,
     getAvailableModels: (agent) => maker.getCapabilities(agent).availableModels,
     getProviderRoutingContext: async () => {
-      const views = await getDesktopProviderService().listProviders();
+      const views = await getDesktopProviderService().listProviders({ allowSideEffects: true });
       return {
         availability: {
           'claude-code': connectedProvidersForAgent(views, 'claude-code').map((provider) => ({

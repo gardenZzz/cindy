@@ -65,8 +65,15 @@ export interface ProviderService {
   /**
    * 当前供应商视图（含实时连接状态）。
    *
-   * `allowSideEffects` 缺省为 false —— 副作用要显式请求：调用方只有在确认请求来自本机
-   * 主页面时才传 true（见 ConnectionReadOptions）。
+   * `allowSideEffects` 缺省为 false —— 副作用要显式请求，默认值必须是安全的那一侧：漏传
+   * 只会少做一次自愈，传反了则是把特权变更敞给不受信的调用方。
+   *
+   * 判据不是「调用得频不频繁」，而是**这次读取由谁驱动**：
+   *   · 主进程自己的业务逻辑（IM、scheduler、hook-control、title、Orca 路由…）跑在本机
+   *     owner 的授权下，自愈只会把本机凭证绑给当前 owner —— 显式传 true，否则这些入口会
+   *     重新出现「凭证在场却从未认领 / 清单从不刷新」（PR #548 review）。
+   *   · 跨进程边界进来的（renderer IPC、device-link 合成 event）按 sender 可信度决定，
+   *     见 providerHandlers 的 isTrustedSender。
    */
   listProviders(opts?: Partial<ConnectionReadOptions>): Promise<ProviderView[]>;
 }

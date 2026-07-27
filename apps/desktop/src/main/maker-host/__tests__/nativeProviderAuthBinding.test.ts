@@ -213,6 +213,25 @@ describe('claimDetectedNativeProviderAuth', () => {
     expect(isNativeProviderAuthBound('anthropic')).toBe(false);
   });
 
+  it('revoked 字段被改坏时按不可读处理,而不是抛穿', () => {
+    // `provider in bindings.revoked` 的右操作数是原始值时直接抛 TypeError —— 一个手工
+    // 改坏的字段会让认领、迁移、登出全炸在这里(PR #548 review)。
+    fs.mkdirSync(userDataDir, { recursive: true });
+    for (const bad of ['{"revoked":"anthropic"}', '{"revoked":1}', '{"revoked":["anthropic"]}']) {
+      fs.writeFileSync(bindingFile, bad);
+      expect(() => claimDetectedNativeProviderAuth('anthropic', () => true)).not.toThrow();
+      expect(claimDetectedNativeProviderAuth('anthropic', () => true)).toBe(false);
+      expect(() => unbindNativeProviderAuth('anthropic', { revoked: true })).not.toThrow();
+      expect(() => migrateLegacyNativeProviderAuthBindings('owner-a', { anthropic: true })).not.toThrow();
+      expect(fs.readFileSync(bindingFile, 'utf8')).toBe(bad); // 一律不改写
+    }
+
+    // 用户再次显式授权仍能把文件修回来 —— 否则坏字段会把这个 provider 永久锁死。
+    fs.writeFileSync(bindingFile, '{"revoked":"anthropic"}');
+    expect(() => bindNativeProviderAuth('anthropic')).not.toThrow();
+    expect(isNativeProviderAuthBound('anthropic')).toBe(true);
+  });
+
   it('文件确实不存在 = 合法首次状态,照常认领', () => {
     // 与「读失败」必须分开:ENOENT 是全新安装的正常形态,挡掉它等于把自动继承整条废掉。
     expect(fs.existsSync(bindingFile)).toBe(false);
