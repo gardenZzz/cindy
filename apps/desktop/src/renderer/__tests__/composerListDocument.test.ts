@@ -135,7 +135,7 @@ describe('composer list document normalization', () => {
       content: [
         {
           type: 'orderedList',
-          attrs: { start: 2, marker: '、' },
+          attrs: { start: 2, marker: '、', separator: '' },
           content: [
             {
               type: 'listItem',
@@ -172,6 +172,34 @@ describe('composer list document normalization', () => {
             {
               type: 'listItem',
               content: [{ type: 'paragraph', content: [{ type: 'text', text: 'next' }] }],
+            },
+          ],
+        },
+      ],
+    });
+  });
+
+  it('preserves non-default ordered marker spacing', () => {
+    expect(plainTextToComposerDocument('1.   item\n2.\tsecond')).toEqual({
+      type: 'doc',
+      content: [
+        {
+          type: 'orderedList',
+          attrs: { start: 1, marker: '.', separator: '   ' },
+          content: [
+            {
+              type: 'listItem',
+              content: [{ type: 'paragraph', content: [{ type: 'text', text: 'item' }] }],
+            },
+          ],
+        },
+        {
+          type: 'orderedList',
+          attrs: { start: 2, marker: '.', separator: '\t' },
+          content: [
+            {
+              type: 'listItem',
+              content: [{ type: 'paragraph', content: [{ type: 'text', text: 'second' }] }],
             },
           ],
         },

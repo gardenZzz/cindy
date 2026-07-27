@@ -213,9 +213,11 @@ describe('composer structured list input rules', () => {
           type: listType,
           ...(listType === 'bulletList'
             ? { attrs: { marker: '-', separator: ' ', ...attrs } }
-            : Object.keys(attrs).length > 0
-              ? { attrs }
-              : {}),
+            : listType === 'orderedList'
+              ? { attrs: { separator: ' ', ...attrs } }
+              : Object.keys(attrs).length > 0
+                ? { attrs }
+                : {}),
           content: [
             {
               type: 'listItem',
@@ -291,7 +293,7 @@ describe('composer structured list keyboard commands', () => {
     expect(editor.getJSON().content).toEqual([
       {
         type: 'orderedList',
-        attrs: { start: 1, marker: '.' },
+        attrs: { start: 1, marker: '.', separator: ' ' },
         content: [
           {
             type: 'listItem',
@@ -727,6 +729,26 @@ describe('composer structured list serialization', () => {
     });
 
     expect(serializeEditorContent(editor).text).toBe('+   item');
+  });
+
+  it('preserves non-default ordered marker spacing when sending', () => {
+    const editor = makeEditor({
+      type: 'doc',
+      content: [
+        {
+          type: 'orderedList',
+          attrs: { start: 1, marker: '.', separator: '\t' },
+          content: [
+            {
+              type: 'listItem',
+              content: [{ type: 'paragraph', content: [{ type: 'text', text: 'item' }] }],
+            },
+          ],
+        },
+      ],
+    });
+
+    expect(serializeEditorContent(editor).text).toBe('1.\titem');
   });
 
   it('keeps a dragged quote inside its list item', () => {

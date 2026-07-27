@@ -90,7 +90,7 @@ function parseListMarker(text: string): ListMarker | null {
       prefixLength:
         marker === '、' ? ordered[1].length + marker.length : ordered[0].length,
       marker,
-      separator: ordered[3],
+      separator: marker === '、' ? '' : ordered[3],
       start: Number(ordered[1]),
     };
   }
@@ -131,7 +131,9 @@ function listFromLines(
   });
   const attrs =
     marker.kind === 'ordered'
-      ? { start: marker.start ?? 1, marker: marker.marker }
+      ? marker.separator === ' ' && marker.marker !== '、'
+        ? { start: marker.start ?? 1, marker: marker.marker }
+        : { start: marker.start ?? 1, marker: marker.marker, separator: marker.separator }
       : marker.marker === '-' && marker.separator === ' '
         ? undefined
         : { marker: marker.marker, separator: marker.separator };
@@ -262,6 +264,8 @@ function canMergeLists(left: JSONContent, right: JSONContent): boolean {
   const rightStart = Number(right.attrs?.start);
   return (
     left.attrs?.marker === right.attrs?.marker &&
+    (left.attrs?.separator ?? (left.attrs?.marker === '、' ? '' : ' ')) ===
+      (right.attrs?.separator ?? (right.attrs?.marker === '、' ? '' : ' ')) &&
     Number.isInteger(leftStart) &&
     Number.isInteger(rightStart) &&
     leftStart + (left.content?.length ?? 0) === rightStart
