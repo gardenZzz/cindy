@@ -66,6 +66,9 @@ function makeDeps(over: Partial<ProviderHandlerDeps> = {}): ProviderHandlerDeps 
     testConnection: vi.fn(async () => ({ ok: true, latencyMs: 1 })),
     fetchModels: vi.fn(async () => ({ ok: true, models: [{ id: 'm1', name: 'M1' }] })),
     rediscoverModels: vi.fn(async () => null),
+    // 生产恒定接线（register.ts）。默认桩 = 已接线且信任，好让其余用例只关心自己的分支；
+    // 「漏接线」是独立用例，显式不传这个 dep。
+    assertTrustedSender: vi.fn(() => {}),
     oauthLogin: vi.fn(async () => ({ ok: true })),
     oauthLogout: vi.fn(async () => {}),
     oauthCancel: vi.fn(() => {}),
@@ -125,6 +128,19 @@ describe('provider:models-rediscover handler', () => {
       harness.invoke(MAKER_INVOKE.PROVIDER_MODELS_REDISCOVER, 'anthropic'),
     ).rejects.toThrow(/PERMISSION_DENIED/);
     // 拒绝发生在任何上游动作之前:绝不让不可信 sender 触发带凭证的请求。
+    expect(deps.rediscoverModels).not.toHaveBeenCalled();
+  });
+
+  it('守卫未接线时 fail-closed,不靠可选链静默放行', async () => {
+    // 可选依赖漏接是没有任何信号的退化:`deps.assertTrustedSender?.()` 会让这条带凭证的
+    // 通道退回无守卫状态。缺守卫即拒绝(PR #548 review)。
+    const harness = new IpcHarness();
+    const deps = makeDeps({ assertTrustedSender: undefined });
+    registerProviderHandlers(harness, deps);
+
+    await expect(
+      harness.invoke(MAKER_INVOKE.PROVIDER_MODELS_REDISCOVER, 'anthropic'),
+    ).rejects.toThrow(/PERMISSION_DENIED/);
     expect(deps.rediscoverModels).not.toHaveBeenCalled();
   });
 

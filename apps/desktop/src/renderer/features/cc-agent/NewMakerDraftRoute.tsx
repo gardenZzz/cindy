@@ -155,7 +155,7 @@ import {
   deriveModelsFromProviders,
   filterChatBridgedCodexProviders,
 } from '@/lib/providerModels';
-import { effectiveSourceIdForModel, getModel, providerOffersModel, sessionModelSupportsFastMode, connectedProvidersForAgent, type CatalogModel, type ProviderView } from '@cindy/model-providers';
+import { effectiveSourceIdForModel, getModel, providerOffersModel, sessionModelSupportsFastMode, connectedProvidersForAgent, type ProviderView } from '@cindy/model-providers';
 import { isSubscriptionDirectModel } from '../../../shared/subscriptionModels';
 import {
   resolveDeviceLinkDraftDefaults,
@@ -932,11 +932,31 @@ export function NewMakerDraftRoute() {
   // 来源恰好提供同一个 model id 时,校准会原样保留模型 id(它确实可用),相等条件因此成立,
   // 却把已经失效的来源一起带了下去 —— 而 effectiveSourceId 早已解析到另一个来源。送出去
   // 就是一对 model / provider 错配,首条请求会打到不服务该模型的上游(PR #548 review)。
-  // 不一致时置 null = 交回默认路由,由 main 按模型选可用来源。
-  const localProviderIdForDraft =
-    chatPrefs.providerId && chatPrefs.providerId === effectiveSourceId
-      ? chatPrefs.providerId
-      : null;
+  //
+  // 但「置 null = 交回默认路由」只在两边会解析到同一个来源时才成立:main 的默认解析吃的是
+  // **未过滤**的目录,被用户隐藏、被 SSH 订阅直连排除、被 chat-bridge 排除掉的来源在那边
+  // 依然是候选。此时 UI 高亮 B、main 却路由到 A,会话就从一个用户看不见的来源发出去。所以
+  // 只在默认路由确实落回 effectiveSourceId 时才省略它,不一致时显式带上(PR #548 review)。
+  const localProviderIdForDraft = useMemo<string | null>(() => {
+    if (chatPrefs.providerId && chatPrefs.providerId === effectiveSourceId) {
+      return chatPrefs.providerId;
+    }
+    if (!effectiveSourceId) return null;
+    // 用与 main 同源的解析函数 + 未过滤目录复算一次默认路由,比较的是同一口径。
+    const defaultRouted = effectiveSourceIdForModel(
+      localProviders,
+      null,
+      calibratedDraftModel,
+      capabilityAgentKind,
+    );
+    return defaultRouted === effectiveSourceId ? null : effectiveSourceId;
+  }, [
+    chatPrefs.providerId,
+    effectiveSourceId,
+    localProviders,
+    calibratedDraftModel,
+    capabilityAgentKind,
+  ]);
   const chatInitialProviderId = isDeviceLinkDraft
     ? (deviceLinkInitial?.providerId ?? null)
     : localProviderIdForDraft;

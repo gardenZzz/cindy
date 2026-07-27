@@ -849,6 +849,21 @@ function noteDiscoveryFailure(
 }
 
 /**
+ * 清掉失败态与待执行的重试 —— 用于「上游已经答了、且用户手里确有可用清单」的所有出口,
+ * 不只是清单被成功替换的那一条。
+ *
+ * 失败态**由有变无也要通知**:applyModels 只在清单真的变了时才 markChanged 广播,而
+ * 「上次失败、这次成功且清单与上次一致」正好落在它的 early return 里;快照被 shrink 守卫
+ * 拒绝时更是连 applyModels 都不会走到。不在这里通知,UI 会继续显示已经不成立的失败理由。
+ */
+function clearDiscoveryFailure(): void {
+  const hadFailure = lastFailure !== null;
+  lastFailure = null;
+  cancelHttpRetry();
+  if (hadFailure) notifyFailureChanged();
+}
+
+/**
  * 注册失败态变化的收口(desktop host 装配时接广播;传 null 解绑)。监听器不可抛 ——
  * 广播失败不该反过来打断发现流程。
  */
@@ -1000,6 +1015,10 @@ export function refreshAnthropicModelsFromHttp(options?: {
       log.warn(
         `anthropic /v1/models response looks degenerate (${lastApplied.length} -> ${mapped.length}); keeping current list (streak ${httpShrinkStreak}/${CONFIRMED_SHRINK_STREAK})`,
       );
+      // 快照被拒 ≠ 发现失败:上游确确实实答了,而且旧清单原样留用 —— 此刻供应商对用户是可用的。
+      // 若还挂着上一次的 network / timeout 理由,UI 就会对着一个有模型可选的供应商说「连不上」;
+      // 而这条早退路径既不记新失败也不排重试,那个过期理由会一直挂到下次成功发现(PR #548 review)。
+      clearDiscoveryFailure();
       return;
     }
     for (const { model, explicitContextWindow } of mapped) {
@@ -1011,14 +1030,7 @@ export function refreshAnthropicModelsFromHttp(options?: {
     log.info(`anthropic models refreshed via HTTP: ${models.length}`);
     // 拿到有效清单 = 发现已恢复,清掉失败态与待执行的重试(放在 apply 之前:apply 只负责
     // 生效,它因世代变化被 gate 掉时新世代会带着自己的触发重来)。
-    //
-    // 失败态由有变无也要通知:apply 只在**清单真的变了**时才 markChanged 广播,而「上次
-    // 失败、这次成功且清单与上次一致」正好落在它的 early return 里 —— 不在这里通知,UI 会
-    // 继续显示已经不成立的失败理由。
-    const hadFailure = lastFailure !== null;
-    lastFailure = null;
-    cancelHttpRetry();
-    if (hadFailure) notifyFailureChanged();
+    clearDiscoveryFailure();
     await applyModels(models, true, gen, explicitEffortIds, explicitFastModeIds);
   })().finally(() => {
     // 只清自己的登记:世代变化后可能已有新 flight 顶替,不能误清。

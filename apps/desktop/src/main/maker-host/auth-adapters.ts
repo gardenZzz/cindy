@@ -1244,6 +1244,25 @@ export class DesktopCodexAuthAdapter implements AuthAdapter {
     return (await this.getAccessToken()) != null;
   }
 
+  /**
+   * 纯读版连接态 —— 不触发 reconcile,因此不建硬链、不写绑定文件、不碰 invalidation marker。
+   *
+   * 给 `maker:provider:list` 里「sender 不可信」的那条降级路径用:hasCodexOAuthLogin() 会经
+   * getAccessToken 走一次 reconcileWithSystemCodex,那里既会把本机 CLI 凭证硬链进 codex-home,
+   * 又会为首个 owner 补写 openai 绑定 —— 一个本该只读的查询,不该被子 frame / WebView 或
+   * device-link 合成 event 用来触发这种特权变更(PR #548 review)。
+   *
+   * 判定只会比自愈版**更保守**:durable 登出标记、内存 invalidation、未绑定当前 owner 一律
+   * 返回 false;差别仅在于「本来会被这次 reconcile 补上的绑定」这里看不到,于是显示未连接。
+   */
+  hasCodexOAuthLoginReadOnly(): boolean {
+    if (this.oauthInvalidatedReason) return false;
+    if (!isNativeProviderAuthBound('openai')) return false;
+    const authPath = path.join(this.codexHome, 'auth.json');
+    if (shouldSuppressLocalCodexAuth(this.codexHome, authPath)) return false;
+    return this.hasCodexOAuthLoginUnbound();
+  }
+
   /** Legacy upgrade probe; only used while claiming the first verified owner. */
   hasCodexOAuthLoginUnbound(): boolean {
     try {
