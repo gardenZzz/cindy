@@ -113,8 +113,8 @@
 
   /* F3: Global disable focus outline — Chromium default :focus-visible draws
      a yellow/orange ring on buttons, options and menu items after Esc/click
-     transitions focus. Claude Desktop has no such ring; suppress it on every
-     non-input element. Inputs keep their focus hint via --*-border-focus. */
+     transitions focus. Suppress it on non-input elements while inputs keep
+     their focus hint via --*-border-focus. */
   *:focus,
   *:focus-visible {
     outline: none !important;
