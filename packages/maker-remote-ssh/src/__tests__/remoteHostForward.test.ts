@@ -10,7 +10,7 @@
  *   - 断线重连 re-arm: 愿望保留、端口变化触发 onRearmed
  */
 
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, vi } from 'vitest';
 import { EventEmitter } from 'node:events';
 import { Duplex, PassThrough } from 'node:stream';
 import net from 'node:net';
@@ -36,6 +36,8 @@ const noopLogger = {
 
 interface ForwardInCall { addr: string; port: number }
 
+type ForwardInCallback = (err: Error | undefined, port: number) => void;
+
 /** 可按端口决定成败的 fake ssh2 Client。 */
 class FakeClient extends EventEmitter {
   forwardInCalls: ForwardInCall[] = [];
@@ -44,7 +46,7 @@ class FakeClient extends EventEmitter {
   constructor(private readonly allowPort: (port: number) => boolean = () => true) {
     super();
   }
-  forwardIn(addr: string, port: number, cb: (err: Error | undefined, port: number) => void): void {
+  forwardIn(addr: string, port: number, cb: ForwardInCallback): void {
     this.forwardInCalls.push({ addr, port });
     queueMicrotask(() => {
       if (this.allowPort(port)) cb(undefined, port);
@@ -54,6 +56,24 @@ class FakeClient extends EventEmitter {
   unforwardIn(addr: string, port: number, cb: () => void): void {
     this.unforwardInCalls.push({ addr, port });
     queueMicrotask(() => cb());
+  }
+}
+
+/** forwardIn 回调完全手动驱动的 fake — 用来造在飞 / 迟到回调的竞态场景。 */
+class ManualForwardClient extends EventEmitter {
+  pending = new Map<number, ForwardInCallback>();
+  unforwardInCalls: ForwardInCall[] = [];
+  forwardIn(_addr: string, port: number, cb: ForwardInCallback): void {
+    this.pending.set(port, cb);
+  }
+  unforwardIn(addr: string, port: number, cb: () => void): void {
+    this.unforwardInCalls.push({ addr, port });
+    queueMicrotask(() => cb());
+  }
+  succeed(port: number): void {
+    const cb = this.pending.get(port);
+    this.pending.delete(port);
+    cb?.(undefined, port);
   }
 }
 
@@ -89,7 +109,13 @@ function makeFakeChannel(): FakeChannelBundle {
   return { channel, fromRemote, toRemote, closed: () => closed };
 }
 
-function makeReadyHost(client: FakeClient): RemoteHost {
+/** makeReadyHost 接受的最小 fake client 面 (FakeClient / ManualForwardClient 共用)。 */
+interface FakeSshClient extends EventEmitter {
+  forwardIn(addr: string, port: number, cb: ForwardInCallback): void;
+  unforwardIn(addr: string, port: number, cb: () => void): void;
+}
+
+function makeReadyHost(client: FakeSshClient): RemoteHost {
   const host = new RemoteHost(HOST_CONFIG, { logger: noopLogger });
   (host as unknown as { status: string }).status = 'ready';
   (host as unknown as { client: unknown }).client = client;
@@ -265,6 +291,70 @@ describe('RemoteHost remote forwarding', () => {
     expect(fwd.remotePort).toBe(DEFAULT_REMOTE_FORWARD_PORT_BASE + 1);
     expect(rearmed).toBe(DEFAULT_REMOTE_FORWARD_PORT_BASE + 1);
     expect(host.listRemoteForwards()[0]?.armed).toBe(true);
+  });
+
+  it('re-arm prefers the last bound port (no churn / no onRearmed when it is still free)', async () => {
+    // 首轮 base 被占 → 绑到 base+1; 重连后 base 已空闲, 仍应留在 base+1
+    // (远端 daemon env / marker 指向它, 端口 churn 会触发无谓的 env 重写)。
+    const client1 = new FakeClient((port) => port !== DEFAULT_REMOTE_FORWARD_PORT_BASE);
+    const host = makeReadyHost(client1);
+    let rearmed: number | null = null;
+    const fwd = await host.ensureRemoteForward({
+      localHost: '127.0.0.1',
+      localPort: 7890,
+      onRearmed: (port) => { rearmed = port; },
+    });
+    expect(fwd.remotePort).toBe(DEFAULT_REMOTE_FORWARD_PORT_BASE + 1);
+
+    (host as unknown as { markForwardsDisarmed(): void }).markForwardsDisarmed();
+    const client2 = new FakeClient(() => true); // 全部空闲
+    (host as unknown as { client: unknown }).client = client2;
+    await (host as unknown as { rearmForwards(): Promise<void> }).rearmForwards();
+
+    expect(fwd.remotePort).toBe(DEFAULT_REMOTE_FORWARD_PORT_BASE + 1);
+    expect(rearmed).toBeNull();
+    expect(client2.forwardInCalls.map((c) => c.port)).toEqual([DEFAULT_REMOTE_FORWARD_PORT_BASE + 1]);
+  });
+
+  it('unbinds a late forwardIn success that races the 10s watchdog', async () => {
+    vi.useFakeTimers();
+    try {
+      const client = new ManualForwardClient();
+      const host = makeReadyHost(client);
+      const pending = host.ensureRemoteForward({ localHost: '127.0.0.1', localPort: 7890 });
+      // 第一个候选卡在在飞状态; 看门狗 10s 后判失败, 转下一候选。
+      await vi.advanceTimersByTimeAsync(10_100);
+      expect(client.pending.has(DEFAULT_REMOTE_FORWARD_PORT_BASE + 1)).toBe(true);
+      // 迟到的成功: 必须立刻 unbind, 不能在服务端留下野监听。
+      client.succeed(DEFAULT_REMOTE_FORWARD_PORT_BASE);
+      expect(client.unforwardInCalls).toContainEqual({
+        addr: '127.0.0.1',
+        port: DEFAULT_REMOTE_FORWARD_PORT_BASE,
+      });
+      client.succeed(DEFAULT_REMOTE_FORWARD_PORT_BASE + 1);
+      const fwd = await pending;
+      expect(fwd.remotePort).toBe(DEFAULT_REMOTE_FORWARD_PORT_BASE + 1);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('unbinds the just-bound port when close() races an in-flight arm', async () => {
+    const client = new ManualForwardClient();
+    const host = makeReadyHost(client);
+    const pending = host.ensureRemoteForward({ localHost: '127.0.0.1', localPort: 7890 });
+    pending.catch(() => { /* assertion below via rejects */ });
+    // arm 在飞 (forwardIn 未回调) 时关掉 forward。
+    await host.closeAllRemoteForwards();
+    expect(host.listRemoteForwards()).toEqual([]);
+    // 迟到的绑定成功: record 已摘除, 必须 unbind 而不是留野监听。
+    client.succeed(DEFAULT_REMOTE_FORWARD_PORT_BASE);
+    await expect(pending).rejects.toThrow(/closed while arming/);
+    await flush();
+    expect(client.unforwardInCalls).toContainEqual({
+      addr: '127.0.0.1',
+      port: DEFAULT_REMOTE_FORWARD_PORT_BASE,
+    });
   });
 
   it('keeps the wish when re-arm fails, without throwing (logged only)', async () => {
