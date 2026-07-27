@@ -58,8 +58,16 @@ export interface ProviderModelDiscoveryFailure {
   at: string;
 }
 
-/** 各供应商最近一次的清单发现失败，由 host 注入；成功即清除。 */
-export type ModelDiscoveryFailureState = Record<string, ProviderModelDiscoveryFailure | null>;
+/**
+ * 各供应商最近一次的清单发现失败，由 host 注入；成功即清除。
+ *
+ * 稀疏 map：只有「清单唯一来源是动态发现」且当前确实失败了的供应商才有键，缺省是 `{}`。
+ * 因此必须是 `Partial` —— 写成全量 `Record` 会让 `state[id]` 的类型谎称不可能是
+ * `undefined`，读 `.kind` 的调用方迟早在运行时炸。
+ */
+export type ModelDiscoveryFailureState = Partial<
+  Record<string, ProviderModelDiscoveryFailure | null>
+>;
 
 /** 供应商 + 连接状态。 */
 export interface ProviderView extends Provider {
