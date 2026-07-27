@@ -1315,11 +1315,15 @@ export function ProvidersSection() {
       setRediscovering(true);
       try {
         await window.electronAPI.maker.rediscoverModels(p.id);
+        // 正常路径不 refetch:main 的发现流程会广播 PROVIDER_CHANGED,App 层监听已经触发
+        // refreshLocalCatalogSnapshot。这里再拉一次等于每点一下重试就多做一整轮目录 +
+        // capabilities 刷新,也和上面「刷新由广播驱动」的说明自相矛盾(PR #548 review)。
       } catch {
+        // IPC 本身失败 = 没有广播可等,自己补一次拉取,免得 UI 停在旧快照。
         toast.error(t('settings.providers.models.refreshFailed'));
+        refetch();
       } finally {
         setRediscovering(false);
-        refetch();
       }
     },
     [refetch, t],

@@ -752,6 +752,9 @@ function classifyDiscoveryError(err: unknown): {
     if (looksRegionBlocked(err.status, err.body)) return { kind: 'regionBlocked', detail };
     if (err.status === 401) return { kind: 'unauthorized', detail };
     if (err.status === 403) return { kind: 'forbidden', detail };
+    // 408 Request Timeout 是上游 / 中间代理说「这次超时了」—— 与本地超时同源的一过性状况,
+    // 归 timeout 走重试;落到 rejected 会让空清单的用户被迫手动重试(PR #548 review)。
+    if (err.status === 408) return { kind: 'timeout', detail };
     // 5xx / 429 是服务端侧故障,可能几秒后就好;其它 4xx 是我们这边请求本身被拒。
     if (err.status >= 500 || err.status === 429) return { kind: 'upstream', detail };
     return { kind: 'rejected', detail };
@@ -1016,6 +1019,7 @@ export async function clearAnthropicDiscoveredModels(): Promise<void> {
   authGeneration = generation;
   // 失败态与待执行的重试都属于旧世代的账:登出 / 换号后既不能把上一个账号的失败理由
   // 摆给新账号看,也不该让旧世代排的重试继续跑(回调自带世代校验,这里再显式取消)。
+  const hadFailure = lastFailure !== null;
   lastFailure = null;
   cancelHttpRetry();
   explicitWindows.clear();
@@ -1023,6 +1027,10 @@ export async function clearAnthropicDiscoveredModels(): Promise<void> {
   explicitFastModeModelIds.clear();
   resetHttpShrinkStreak();
   await applyModels([], false, generation);
+  // 首次发现就失败时 lastApplied 本来就是空,applyModels([]) 会走「清单没变」早退、不广播。
+  // 本地窗口碰巧还能靠 auth 事件刷新,但那个事件不过 device-link —— 配对的手机 / 控制端会
+  // 一直留着旧的失败理由。失败态由有变无时补一次通知,让两边都收敛(PR #548 review)。
+  if (hadFailure) notifyFailureChanged();
   await enqueueCacheMutation(async () => {
     await fsp.rm(cacheFilePath(), { force: true });
   });

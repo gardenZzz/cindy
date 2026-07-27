@@ -25,6 +25,7 @@ import {
 
 import type { LocalCliDetection } from '../../shared/localCliDetect.js';
 
+import { createLogger } from '../logger.js';
 import { throwIpcError } from '../utils/ipcValidate.js';
 import {
   createCustomProvider,
@@ -40,6 +41,8 @@ import type {
 } from '../maker-host/provider-model-fetch.js';
 import { MAKER_INVOKE } from './channels.js';
 import type { IpcHandlerRegistry } from './ipcHandlerRegistry.js';
+
+const log = createLogger('maker-ipc:provider');
 
 const VALID_AGENTS: readonly string[] = ['claude-code', 'codex'];
 
@@ -283,10 +286,14 @@ export function registerProviderHandlers(
     try {
       failure = await deps.rediscoverModels(providerId);
     } catch (err) {
-      throwIpcError(
-        'INTERNAL',
-        `rediscover models failed: ${err instanceof Error ? err.message : String(err)}`,
-      );
+      // 原文只进 Main 日志:凭证读取 / token 刷新等依赖抛出的消息可能含内部路径或上游
+      // 敏感文本,throwIpcError 只加结构化 code、不做脱敏,原样回传等于把它送给 renderer
+      // (以及 device-link 对端)。renderer 只需要知道「失败了」——分类文案走 failure.kind。
+      log.warn('rediscover models failed', {
+        providerId,
+        error: err instanceof Error ? err.message : String(err),
+      });
+      throwIpcError('INTERNAL', 'rediscover models failed');
     }
     return failure ? { ok: false, failure } : { ok: true };
   });
