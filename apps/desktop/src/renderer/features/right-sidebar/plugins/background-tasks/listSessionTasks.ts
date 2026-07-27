@@ -159,6 +159,31 @@ function deriveTitle(
   );
 }
 
+/**
+ * 从 Workflow toolCall 的 tool_result 文本里提取 CLI 后台任务 id(wf 记录文件按它
+ * 匹配)。两种形态防御兼容:CLI 即时结果文案「Workflow launched in background.
+ * Task ID: <id>」与 JSON 化结果里的 "taskId":"<id>"。**无公开契约**,提不到一律
+ * undefined —— 调用方回落现状(详情视图显示无进度占位),绝不误伤。
+ */
+function extractWorkflowTaskId(content: unknown): string | undefined {
+  let text: string;
+  if (typeof content === 'string') {
+    text = content;
+  } else if (isRecord(content) || Array.isArray(content)) {
+    try {
+      text = JSON.stringify(content);
+    } catch {
+      return undefined;
+    }
+  } else {
+    return undefined;
+  }
+  const match =
+    /"task_?id"\s*:\s*"([A-Za-z0-9_-]{4,64})"/i.exec(text) ??
+    /\bTask ID:\s*([A-Za-z0-9_-]{4,64})\b/.exec(text);
+  return match?.[1];
+}
+
 /** 与 findTaskUpdate 同口径:先 toolUseId、后 clientId 查 map。 */
 function findUpdate(
   taskUpdates: ReadonlyMap<string, AgentTaskUpdate> | undefined,
@@ -202,11 +227,17 @@ export function listSessionTasks(input: {
   const { messages, taskUpdates, isSessionStreaming } = input;
 
   // Pass 0:tool_result 的 toolUseId 查表(与 buildRenderItems Pass 0 同口径)。
+  // 同时留住结果内容引用:历史 workflow(update 已随重载清空)从结果文本里
+  // 提取 CLI 任务 id,详情视图才能按它读 wf 记录文件。
   const settledToolUseIds = new Set<string>();
+  const resultContentByToolUseId = new Map<string, unknown>();
   for (const m of messages) {
     if (m.role !== 'tool_result') continue;
     if (typeof m.toolUseId === 'string' && m.toolUseId.length > 0) {
       settledToolUseIds.add(m.toolUseId);
+      if (!resultContentByToolUseId.has(m.toolUseId)) {
+        resultContentByToolUseId.set(m.toolUseId, m.content);
+      }
     }
   }
 
@@ -229,7 +260,14 @@ export function listSessionTasks(input: {
 
     const update = findUpdate(taskUpdates, toolUseId, msg.clientId);
 
-    const aliasKeys = [toolUseId, update?.taskId, update?.parentToolUseId].filter(
+    // 历史 workflow(重载后 update 清空)兜底:从结果文本提取 CLI 任务 id,
+    // 详情视图据此仍能读 wf 记录文件(Codex review P1:历史详情恢复)。
+    const derivedTaskId =
+      isWorkflowTool && !update?.taskId && toolUseId
+        ? extractWorkflowTaskId(resultContentByToolUseId.get(toolUseId))
+        : undefined;
+
+    const aliasKeys = [toolUseId, update?.taskId, update?.parentToolUseId, derivedTaskId].filter(
       (k): k is string => typeof k === 'string' && k.length > 0,
     );
     // 同一任务已出过行(重复 toolCall / 别名撞车)→ 跳过,首行为准。
@@ -250,9 +288,10 @@ export function listSessionTasks(input: {
     const provider: SessionTaskItem['provider'] =
       update?.provider ?? (toolName.startsWith('collab:') ? 'codex' : 'claude-code');
 
+    const taskId = update?.taskId ?? derivedTaskId;
     items.push({
       key: update?.taskId ?? toolUseId ?? msg.clientId,
-      ...(update?.taskId ? { taskId: update.taskId } : {}),
+      ...(taskId ? { taskId } : {}),
       kind,
       title: deriveTitle(kind, update, toolInput),
       status,

@@ -300,6 +300,26 @@ describe('AgentTaskCard', () => {
     expect(progressLine(container)?.textContent).toBe('Test · 2/3 Agent');
   });
 
+  it("counts 'completed' agents as settled in the progress line (visual-state vocab)", () => {
+    const { container } = render(
+      React.createElement(AgentTaskCard, {
+        sessionId: 'session-1',
+        update: {
+          provider: 'claude-code',
+          taskId: 'wf-1',
+          status: 'running',
+          taskType: 'local_workflow',
+          workflowProgress: [
+            { type: 'workflow_agent', index: 0, label: 'a', state: 'completed' },
+            { type: 'workflow_agent', index: 1, label: 'b', state: 'stopped' },
+            { type: 'workflow_agent', index: 2, label: 'c', state: 'start' },
+          ],
+        },
+      }),
+    );
+    expect(progressLine(container)?.textContent).toBe('2/3 Agent');
+  });
+
   it('falls back to counts only when no running agent carries a phaseTitle', () => {
     const { container } = render(
       React.createElement(AgentTaskCard, {

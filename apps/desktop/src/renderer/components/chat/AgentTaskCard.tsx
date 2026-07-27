@@ -20,6 +20,7 @@ import type { AgentTaskUpdate, ChatMessage } from '@/hooks/useCCAgentChat';
 import { isRemoteSession } from '@/lib/makerTransport';
 import { openBackgroundTasksTab } from '@/features/right-sidebar/lib/openBackgroundTasksTab';
 import { WorkflowAgentStrip } from '@/features/right-sidebar/plugins/background-tasks/WorkflowAgentStrip';
+import { workflowAgentVisualState } from '@/features/right-sidebar/plugins/background-tasks/workflowProgressModel';
 import { cn } from '@/lib/utils';
 import { formatModelShortLabel } from '@/lib/modelShortLabel';
 
@@ -165,8 +166,8 @@ export function AgentTaskCard({ toolCall, update, result, subagentModel, session
     void openBackgroundTasksTab(sessionId, { focusTaskId: workflowTaskId });
   }, [sessionId, workflowTaskId]);
 
-  // workflow 摘要行:当前运行中 agent 的 phaseTitle + 已收口/总数。收口词表与后台
-  // 任务面板同口径(事件流 done/error;wf 文件 failed/stopped/killed)。
+  // workflow 摘要行:当前运行中 agent 的 phaseTitle + 已收口/总数。收口判定走
+  // workflowAgentVisualState 归一(与方块条 / 面板同一词表源,done 与 failed 都算收口)。
   const workflowSummary = useMemo(() => {
     if (!isWorkflow) return null;
     const entries = update?.workflowProgress;
@@ -177,19 +178,10 @@ export function AgentTaskCard({ toolCall, update, result, subagentModel, session
     for (const entry of entries) {
       if (entry.type !== 'workflow_agent') continue;
       total += 1;
-      const state = entry.state;
-      if (
-        state === 'done' ||
-        state === 'error' ||
-        state === 'failed' ||
-        state === 'stopped' ||
-        state === 'killed'
-      ) {
+      const visual = workflowAgentVisualState(entry.state);
+      if (visual === 'done' || visual === 'failed') {
         done += 1;
-      } else if (
-        (state === 'start' || state === 'progress' || state === 'running') &&
-        entry.phaseTitle
-      ) {
+      } else if (visual === 'running' && entry.phaseTitle) {
         phase = entry.phaseTitle;
       }
     }

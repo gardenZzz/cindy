@@ -122,6 +122,53 @@ describe('listSessionTasks 配对', () => {
     expect(running[0]).toMatchObject({ kind: 'agent', provider: 'codex', title: 'review it' });
   });
 
+  it('历史 workflow(无 update):从结果文本「Task ID: xxx」提取 taskId(详情读 wf 文件用)', () => {
+    const { completed } = listSessionTasks({
+      messages: [
+        toolUse('c1', 'toolu-wf', 'Workflow'),
+        toolResult(
+          'r1',
+          'toolu-wf',
+          'Workflow launched in background. Task ID: w9gvjxzk1\nSummary: 回归 review',
+        ),
+      ],
+      taskUpdates: undefined,
+      isSessionStreaming: false,
+    });
+    expect(completed).toHaveLength(1);
+    expect(completed[0]).toMatchObject({ kind: 'workflow', taskId: 'w9gvjxzk1' });
+  });
+
+  it('历史 workflow:JSON 化结果里的 "taskId" 同样可提取;提不到时 taskId 缺省不误伤', () => {
+    const { completed } = listSessionTasks({
+      messages: [
+        toolUse('c1', 'tu-json', 'Workflow'),
+        toolResult('r1', 'tu-json', '{"status":"async_launched","taskId":"abc123xyz"}'),
+        toolUse('c2', 'tu-none', 'Workflow'),
+        toolResult('r2', 'tu-none', '完成了,没有任何 id 线索。'),
+      ],
+      taskUpdates: undefined,
+      isSessionStreaming: false,
+    });
+    const byToolUseId = (id: string) => completed.find((it) => it.toolUseId === id)!;
+    expect(byToolUseId('tu-json').taskId).toBe('abc123xyz');
+    expect(byToolUseId('tu-none').taskId).toBeUndefined();
+  });
+
+  it('提取出的 taskId 进去重别名:同 taskId 的孤儿 update 不再重复出行', () => {
+    const orphan = makeUpdate({ taskId: 'w9gvjxzk1', taskType: 'local_workflow' });
+    const { running, completed } = listSessionTasks({
+      messages: [
+        toolUse('c1', 'toolu-wf', 'Workflow'),
+        toolResult('r1', 'toolu-wf', 'Workflow launched in background. Task ID: w9gvjxzk1'),
+      ],
+      // update 只按 taskId 建 key(配对查不到 → 本会走孤儿通道)
+      taskUpdates: new Map([['w9gvjxzk1', orphan]]),
+      isSessionStreaming: true,
+    });
+    expect(running.length + completed.length).toBe(1);
+  });
+
   it('Workflow toolCall → kind workflow,标题优先 update.workflowName', () => {
     const update = makeUpdate({
       taskId: 'wf-1',

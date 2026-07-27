@@ -77,6 +77,7 @@ const CORRECTABLE_AGENT_STATES: ReadonlySet<string> = new Set([
   'progress',
   'running',
   'queued',
+  'pending',
 ]);
 
 /** wf 文件顶层 status 的终态词表:命中时文件结论优先于 taskStatus。 */
@@ -88,6 +89,14 @@ const TERMINAL_FILE_STATUSES: ReadonlySet<string> = new Set([
   'done',
   'error',
 ]);
+
+/**
+ * wf 文件快照是否已收口(顶层 status 命中终态词表)。任务终态而文件仍非终态 =
+ * 终局数据尚未刷完盘,调用方(详情视图)据此安排有界重试。
+ */
+export function isTerminalWorkflowFileStatus(status: string | undefined): boolean {
+  return status !== undefined && TERMINAL_FILE_STATUSES.has(status);
+}
 
 export function buildWorkflowTreeModel(input: {
   entries?: readonly WorkflowProgressEntry[];
@@ -250,7 +259,11 @@ function rowFromFileAgent(agent: WorkflowAgentProgress, index: number): Workflow
   };
 }
 
-/** 终态补缺:按 label+phaseTitle 匹配文件 agent(撞名取首个),只填 entries 缺失的字段。 */
+/**
+ * 终态补缺:按 label+phaseTitle 匹配文件 agent(撞名取首个),只填 entries 缺失的
+ * 字段。唯一例外是 state:事件流断在非终态(节流丢了收尾帧)而文件已有终态结论时,
+ * 采纳文件终态 —— 否则后续的整树终态修正会把实际成功的 agent 误标成 error。
+ */
 function backfillRowFromFile(
   row: WorkflowTreeAgentRow,
   phaseTitle: string | undefined,
@@ -260,6 +273,14 @@ function backfillRowFromFile(
     (agent) => agent.label === row.label && agent.phaseTitle === phaseTitle,
   );
   if (!match) return;
+  if (
+    CORRECTABLE_AGENT_STATES.has(row.state) &&
+    typeof match.state === 'string' &&
+    match.state.length > 0 &&
+    !CORRECTABLE_AGENT_STATES.has(match.state)
+  ) {
+    row.state = match.state;
+  }
   if (row.resultPreview === undefined && match.resultPreview !== undefined) {
     row.resultPreview = match.resultPreview;
   }

@@ -51,14 +51,22 @@ import { cn } from '@/lib/utils';
 import { Spinner } from '@/components/ui/spinner';
 import { makerChatStore, EMPTY_TASK_UPDATES } from '@/lib/makerChatStore';
 import type { AgentTaskUpdate, ChatMessage } from '@/lib/makerChatStore';
-import { getWorkflowProgressFor, isRemoteSession } from '@/lib/makerTransport';
+import {
+  getWorkflowProgressFor,
+  isRemoteSession,
+  listSessionBackgroundTasksFor,
+} from '@/lib/makerTransport';
 import { formatCompactTokens } from '@/lib/usageFormat';
 import type { Message } from '@/lib/ccAgent.types';
 import type { WorkflowProgress } from '../../../../../shared/workflow-progress';
 import type { TabKindHostContext } from '../../types';
 import type { BackgroundTasksState } from './index';
 import { listSessionTasks, type SessionTaskItem } from './listSessionTasks';
-import { buildWorkflowTreeModel } from './workflowProgressModel';
+import {
+  buildWorkflowTreeModel,
+  isTerminalWorkflowFileStatus,
+  workflowAgentVisualState,
+} from './workflowProgressModel';
 import { WorkflowProgressTree } from './WorkflowProgressTree';
 import { requestChatTaskFocus } from './chatTaskFocusIntent';
 
@@ -176,16 +184,10 @@ function workflowAgentCounts(
   for (const entry of entries) {
     if (entry.type !== 'workflow_agent') continue;
     total += 1;
-    // 事件流词表 done/error;wf 文件词表 done/failed/stopped/killed —— 都算已收口。
-    if (
-      entry.state === 'done' ||
-      entry.state === 'error' ||
-      entry.state === 'failed' ||
-      entry.state === 'stopped' ||
-      entry.state === 'killed'
-    ) {
-      done += 1;
-    }
+    // 收口判定走 workflowAgentVisualState 归一(与方块条同一词表源,
+    // done/completed 与 error/failed/stopped/killed 全算已收口)。
+    const visual = workflowAgentVisualState(entry.state);
+    if (visual === 'done' || visual === 'failed') done += 1;
   }
   return total > 0 ? { done, total } : null;
 }
@@ -369,40 +371,35 @@ function WorkflowDetail({
   const taskId = item.update?.taskId ?? item.taskId ?? null;
   const [fileProgress, setFileProgress] = useState<WorkflowProgress | null>(null);
 
-  // 挂载拉一次 wf 文件辅源;远程会话/老被控端 getWorkflowProgressFor 内部降级 null。
+  // wf 文件辅源:挂载读一次;任务翻终态(isTerminal false→true 触发 effect 重跑)
+  // 再读一次。任务已终态而文件快照还停在运行中(终态事件先于终局落盘)时做有界
+  // 重试(至多 2 次,1.5s 间隔),文件收口即停 —— 仍不是轮询。远程会话/老被控端
+  // getWorkflowProgressFor 内部降级 null,读不到时详情树退化为事件流数据。
+  const isTerminal = item.status !== 'running';
   useEffect(() => {
     if (!sessionId || !taskId) return;
     let disposed = false;
-    void getWorkflowProgressFor(sessionId, taskId)
-      .then((progress) => {
-        if (!disposed && progress) setFileProgress(progress);
-      })
-      .catch(() => {
-        // 静默:文件辅源缺失时详情树退化为事件流数据。
-      });
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const read = (retriesLeft: number) => {
+      void getWorkflowProgressFor(sessionId, taskId)
+        .then((progress) => {
+          if (disposed) return;
+          if (progress) setFileProgress(progress);
+          const settled = isTerminalWorkflowFileStatus(progress?.status);
+          if (isTerminal && !settled && retriesLeft > 0) {
+            timer = setTimeout(() => read(retriesLeft - 1), 1500);
+          }
+        })
+        .catch(() => {
+          // 静默:文件辅源缺失时详情树退化为事件流数据。
+        });
+    };
+    read(isTerminal ? 2 : 0);
     return () => {
       disposed = true;
+      if (timer !== undefined) clearTimeout(timer);
     };
-  }, [sessionId, taskId]);
-
-  // 任务从 running 翻终态时再拉一次(终局数据落盘晚于事件);不轮询。
-  const status = item.status;
-  const prevStatusRef = useRef(status);
-  useEffect(() => {
-    const prev = prevStatusRef.current;
-    prevStatusRef.current = status;
-    if (prev !== 'running' || status === 'running') return;
-    if (!sessionId || !taskId) return;
-    let disposed = false;
-    void getWorkflowProgressFor(sessionId, taskId)
-      .then((progress) => {
-        if (!disposed && progress) setFileProgress(progress);
-      })
-      .catch(() => {});
-    return () => {
-      disposed = true;
-    };
-  }, [status, sessionId, taskId]);
+  }, [sessionId, taskId, isTerminal]);
 
   const model = useMemo(
     () =>
@@ -471,17 +468,16 @@ export function BackgroundTasksBody({
   const sessionId = ctx.sessionId || null;
   // 不可见(非激活 tab / 壳子隐藏)时暂停 store 订阅;active/shellVisible 缺省视为可见。
   const visible = (active ?? true) && (shellVisible ?? true);
-  const remoteMirror = Boolean(sessionId) && isRemoteSession(sessionId as string);
 
-  // 快照水合:挂载 / 切会话时对本机会话拉一次存量后台任务(订阅前已启动的任务
-  // 事件流看不到)。只复用 store 的公开水合函数;失败静默,实时事件流自然补上。
+  // 快照水合:挂载 / 切会话时拉一次存量后台任务(订阅前已启动 / 重载清空
+  // taskUpdates 后事件流看不到的任务)。listSessionBackgroundTasksFor 按会话来源
+  // 路由 —— 本机走本地 IPC,device-link 远程隧道到被控端(任务真身在被控端,
+  // 本机快照必空);老被控端无此 channel 时内部降级空表。失败静默,实时事件流
+  // 自然补上(与 useBackgroundBashTasks 的快照失败同口径)。
   useEffect(() => {
-    if (!sessionId || remoteMirror) return;
-    const api = window.electronAPI?.maker;
-    if (!api?.listSessionBackgroundTasks) return;
+    if (!sessionId) return;
     let disposed = false;
-    void api
-      .listSessionBackgroundTasks(sessionId)
+    void listSessionBackgroundTasksFor(sessionId)
       .then(({ tasks }) => {
         if (disposed || !Array.isArray(tasks) || tasks.length === 0) return;
         makerChatStore.seedBackgroundTaskSnapshots(sessionId, tasks);
@@ -492,7 +488,7 @@ export function BackgroundTasksBody({
     return () => {
       disposed = true;
     };
-  }, [sessionId, remoteMirror]);
+  }, [sessionId]);
 
   const inputs = useSessionTaskInputs(sessionId, !visible);
 
