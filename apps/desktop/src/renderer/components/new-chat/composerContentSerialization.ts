@@ -38,7 +38,7 @@ export interface SerializedComposerContent {
 type OrderedMarker = '.' | ')' | '、';
 
 const EMPTY_LIST_ITEM_MARKER_RE =
-  /(?:^|\n)[ \t]*(?:[1-9]\d{0,7}[.)][ \t]+|[1-9]\d{0,7}、[ \t]*|[-+*•][ \t]+)$/;
+  /(?:^|\n)[ \t]*(?:[1-9]\d{0,8}[.)][ \t]+|[1-9]\d{0,8}、[ \t]*|[-+*•][ \t]+)$/;
 
 const TAB_SIZE = 4;
 
@@ -56,8 +56,8 @@ function expandedIndentWidth(text: string): number {
 
 function literalListContinuationPrefix(text: string): string | null {
   const match =
-    text.match(/^([ \t]+)(?:[-+*•]|[1-9]\d{0,7}[.)])([ \t]+)/) ??
-    text.match(/^([ \t]+)[1-9]\d{0,7}、[ \t]*/);
+    text.match(/^([ \t]+)(?:[-+*•]|[1-9]\d{0,8}[.)])([ \t]+)/) ??
+    text.match(/^([ \t]+)[1-9]\d{0,8}、[ \t]*/);
   if (!match) return null;
   return ' '.repeat(expandedIndentWidth(match[0]));
 }
