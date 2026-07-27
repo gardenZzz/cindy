@@ -37,6 +37,9 @@ export interface SerializedComposerContent {
 
 type OrderedMarker = '.' | ')' | '、';
 
+const EMPTY_LIST_ITEM_MARKER_RE =
+  /(?:^|\n)(?:[1-9]\d{0,5}[.)][ \t]+|[1-9]\d{0,5}、[ \t]*|[-+*•][ \t]+)$/;
+
 function orderedListMarker(node: ProseMirrorNode): OrderedMarker {
   return node.attrs.marker === ')' || node.attrs.marker === '、' ? node.attrs.marker : '.';
 }
@@ -142,7 +145,8 @@ function serializeComposerDocument(
           // can still recognize the private marker and source metadata.
           const continuationPrefix = ' '.repeat(prefix.length);
           const quoteLines = quoteText.split('\n');
-          buffer += `\n${quoteLines
+          const quoteSeparator = continuationAfterQuote === null ? '' : '\n';
+          buffer += `${quoteSeparator}\n${quoteLines
             .map((line) => `${continuationPrefix}${line}`)
             .join('\n')}`;
           continuationAfterQuote = continuationPrefix;
@@ -155,7 +159,9 @@ function serializeComposerDocument(
       }
 
       if (continuationAfterQuote !== null) {
-        buffer += `\n${continuationAfterQuote}`;
+        const alreadyIndented =
+          child.isText && (child.text ?? '').startsWith(continuationAfterQuote);
+        buffer += `\n${alreadyIndented ? '' : continuationAfterQuote}`;
         continuationAfterQuote = null;
       }
 
@@ -314,8 +320,11 @@ function serializeComposerDocument(
     }
   });
 
+  const lastTextBlock = blocks.at(-1);
+  const preserveTrailingWhitespace =
+    lastTextBlock?.kind === 'text' && EMPTY_LIST_ITEM_MARKER_RE.test(lastTextBlock.text);
   return {
-    ...serializeComposerContentBlocksWithRanges(blocks),
+    ...serializeComposerContentBlocksWithRanges(blocks, { preserveTrailingWhitespace }),
     mentions,
     hasQuotes,
   };

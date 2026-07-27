@@ -1554,25 +1554,23 @@ export function ChatInput({
                 $from.parent.firstChild?.type.name === 'hardBreak')) &&
             $from.parentOffset === $from.parent.content.size;
 
-          if (
-            state.selection.empty &&
-            paragraphEndsDocument &&
-            paragraphIsEmptyLine &&
-            composerDocumentContainsList(normalizedPaste)
-          ) {
+          if (composerDocumentContainsList(normalizedPaste)) {
             event.preventDefault();
             const replacement = (normalizedPaste.content ?? []).map((node) =>
               state.schema.nodeFromJSON(node),
             );
-            if ($from.parent.content.size > 0) {
+            if (paragraphEndsDocument && paragraphIsEmptyLine && $from.parent.content.size > 0) {
               replacement.unshift(state.schema.nodes.paragraph.create());
             }
             const fragment = Fragment.from(replacement);
-            const tr = state.tr.replaceWith(
-              paragraphPosition,
-              paragraphPosition + $from.parent.nodeSize,
-              fragment,
-            );
+            const tr =
+              paragraphEndsDocument && paragraphIsEmptyLine
+                ? state.tr.replaceWith(
+                    paragraphPosition,
+                    paragraphPosition + $from.parent.nodeSize,
+                    fragment,
+                  )
+                : state.tr.replaceSelection(new Slice(fragment, 0, 0));
             tr.setSelection(TextSelection.atEnd(tr.doc));
             view.dispatch(tr.scrollIntoView());
             return true;
