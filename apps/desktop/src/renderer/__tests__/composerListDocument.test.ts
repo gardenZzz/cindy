@@ -231,6 +231,27 @@ describe('composer list document normalization', () => {
     });
   });
 
+  it('keeps multiline paragraphs intact while inside a fenced code block', () => {
+    const document = {
+      type: 'doc' as const,
+      content: [
+        { type: 'paragraph', content: [{ type: 'text', text: '```' }] },
+        {
+          type: 'paragraph',
+          content: [
+            { type: 'text', text: '1. literal' },
+            { type: 'hardBreak' },
+            { type: 'text', text: '2. literal' },
+          ],
+        },
+        { type: 'paragraph', content: [{ type: 'text', text: '```' }] },
+      ],
+    };
+
+    const normalized = normalizeComposerDocumentJSON(document);
+    expect(normalized.content?.[1]).toEqual(document.content[1]);
+  });
+
   it('leaves existing structured content unchanged', () => {
     const document = {
       type: 'doc' as const,
