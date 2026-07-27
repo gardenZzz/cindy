@@ -295,9 +295,11 @@ export function parseProxyAddrInput(input: string): { localHost: string; localPo
   if (!s) return null;
   const bracket = /^\[([^\]]+)\]:(\d+)$/.exec(s);
   if (bracket) {
+    const localHost = bracket[1]!;
     const localPort = Number(bracket[2]);
-    return bracket[1] && Number.isInteger(localPort) && localPort >= 1 && localPort <= 65535
-      ? { localHost: bracket[1]!, localPort }
+    // bracket 内的 host 同样拒空白 (与非 bracket 分支及 main 侧 IPC 校验一致)。
+    return localHost && !/\s/.test(localHost) && Number.isInteger(localPort) && localPort >= 1 && localPort <= 65535
+      ? { localHost, localPort }
       : null;
   }
   const idx = s.lastIndexOf(':');
