@@ -18,6 +18,7 @@ import {
   replaceGatewayModelPricing,
   trackGatewayModelPricingSync,
 } from '../usage/modelPricing.js';
+import { isPricedGatewayModel } from '../../shared/modelPriceQuote.js';
 import { throwIpcError } from '../utils/ipcValidate.js';
 import {
   MODEL_ACCESS_STATUS_CHANNEL,
@@ -143,7 +144,17 @@ function applyGatewayModels(models: ModelAccessGatewayModel[]): void {
   // 同一次 /models 响应先建立 provider-scoped 价格投影，再做仅影响展示元数据的
   // dev overlay。空成功响应会同时清空模型和价格；请求失败不会调用本函数，
   // 因而保留上一份完整成功快照。
-  replaceGatewayModelPricing(models);
+  const pricing = replaceGatewayModelPricing(models);
+  // 分母只算会产生报价的条目:免费/无价条目按设计不出报价,不该把健康目录
+  // 也报成覆盖不足。此时覆盖缺口只剩一种成因——币种声明与目录冲突被丢弃,
+  // 这在 #587 之前是全程静默的,这行日志让现场可判。
+  const pricedCount = models.filter(isPricedGatewayModel).length;
+  const quoteCount = Object.keys(pricing.xd ?? {}).length;
+  if (quoteCount < pricedCount) {
+    log.warn(
+      `xd gateway pricing quotes cover ${quoteCount}/${pricedCount} priced models (${models.length} total)`,
+    );
+  }
   // dev:本地目录文件(catalog/providers.json)的 cindyModelMeta 段覆盖服务端下发的
   // 元数据,改本地 json + 重启即可自测,无需发 OSS / 等服务端热加载;只覆盖同 id,
   // 清单成员资格仍以网关为准。packaged 不走此分支(语义见 devMetaOverlay.ts)。
