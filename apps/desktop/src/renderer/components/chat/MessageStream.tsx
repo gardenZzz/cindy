@@ -1154,6 +1154,11 @@ export function buildRenderItems(
   if (taskUpdates) {
     const seenTaskIds = new Set<string>();
     for (const update of taskUpdates.values()) {
+      // 孤儿 local_bash(只有任务事件、消息里无对应 toolCall)= workflow/子 agent
+      // 内部启动的后台命令:进后台任务面板,不进聊天流刷屏(对齐官方——聊天流只
+      // 呈现父会话自己的调用)。父会话自己的后台 Bash 有 toolCall,走上方配对卡,
+      // 不受此过滤影响。
+      if (update.taskType === 'local_bash') continue;
       const primaryKey = update.parentToolUseId ?? update.taskId;
       if (
         seenTaskIds.has(update.taskId) ||
@@ -1211,6 +1216,16 @@ function isRunningAgentTask(it: RenderItem): boolean {
   if (it.type !== 'agent_task') return false;
   const status = it.update?.status ?? (it.result ? 'completed' : 'running');
   return status === 'running';
+}
+
+/** workflow 卡永远平铺,完成后也不折进工作组:它是后台任务面板的常驻入口,
+ *  折叠掉等于把入口藏起来(产品拍板 2026-07-27:完成后保留痕迹、可点击进
+ *  面板详情;对齐官方——原版完成的 workflow 行留在对话里)。 */
+function isWorkflowTaskItem(it: RenderItem): boolean {
+  return (
+    it.type === 'agent_task' &&
+    (it.update?.taskType === 'local_workflow' || it.toolCall?.toolName === 'Workflow')
+  );
 }
 
 /** preview 中计为一条真实活动的 render item。assistant 进度文字
@@ -1591,7 +1606,12 @@ function groupAnsweredTurnItems(turnItems: RenderItem[]): {
 
   for (let i = 0; i < turnItems.length; i++) {
     const it = turnItems[i];
-    if (!sealedAnswers.has(i) && !isRunningAgentTask(it) && isWorkChild(it)) {
+    if (
+      !sealedAnswers.has(i) &&
+      !isRunningAgentTask(it) &&
+      !isWorkflowTaskItem(it) &&
+      isWorkChild(it)
+    ) {
       run.push(it);
     } else {
       flushRun(it);
