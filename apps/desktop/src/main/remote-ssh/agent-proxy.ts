@@ -138,6 +138,22 @@ export async function ensureAgentProxyTunnel(
 ): Promise<{ remotePort: number } | null> {
   const pref = getSshHostAgentProxy(host.id);
   if (!pref) return null;
+  // 目标被编辑过 (localHost/localPort 变了) 时, 旧目标的 forward 必须拆掉 —
+  // RemoteHost 按目标 key 登记, 不拆会残留并随重连 re-arm, 远端多暴露一个
+  // 隧道口 (review: PR #715 R5)。
+  for (const f of host.listRemoteForwards()) {
+    if (f.localHost !== pref.localHost || f.localPort !== pref.localPort) {
+      try {
+        await host.closeRemoteForward(f.localHost, f.localPort);
+      } catch (err) {
+        log.warn('close stale remote forward failed (best-effort)', {
+          hostId: host.id,
+          staleTarget: `${f.localHost}:${f.localPort}`,
+          error: String((err as Error)?.message ?? err),
+        });
+      }
+    }
+  }
   try {
     const fwd = await host.ensureRemoteForward({
       localHost: pref.localHost,

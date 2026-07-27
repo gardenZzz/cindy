@@ -4165,7 +4165,9 @@ export class CodexAgent extends BaseAgent {
         // Reset auth retry-loop dedupe key — 让下一个 turn 重新可以 emit 第一条
         // auth error。详见 translator.translateErrorNotification dedupe 逻辑。
         translatorRt.lastAuthErrorKey = null;
-        // 网络类 retry-loop 透出状态同理:新 turn 重新计数,可再透出一条。
+        // 持续重试透出状态同理 (字段名沿旧称 networkRetryNotice, 实际已对任意
+        // 持续性 willRetry 错误透出, 不限 networkish — issue #677): 新 turn
+        // 重新计数, 可再透出一条。
         translatorRt.networkRetryNotice = null;
         // retry 升级计数同样按 turn 隔离 — 新 turn 从零计。
         turnRetryTracker.reset();

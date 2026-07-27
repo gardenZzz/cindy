@@ -297,8 +297,10 @@ export function parseProxyAddrInput(input: string): { localHost: string; localPo
   if (bracket) {
     const localHost = bracket[1]!;
     const localPort = Number(bracket[2]);
-    // bracket 内的 host 同样拒空白 (与非 bracket 分支及 main 侧 IPC 校验一致)。
-    return localHost && !/\s/.test(localHost) && Number.isInteger(localPort) && localPort >= 1 && localPort <= 65535
+    // bracket 内的 host 同样拒空白与引号 (与非 bracket 分支及 main 侧
+    // IPC 校验一致, review: PR #715 R5)。
+    return localHost && !/\s/.test(localHost) && !localHost.includes("'") && !localHost.includes('"')
+        && Number.isInteger(localPort) && localPort >= 1 && localPort <= 65535
       ? { localHost, localPort }
       : null;
   }
@@ -310,7 +312,10 @@ export function parseProxyAddrInput(input: string): { localHost: string; localPo
   // 静默截断成 7890, 表单和 main 侧都会接受这个并非用户本意的端口。
   if (!/^\d+$/.test(portText)) return null;
   const localPort = Number(portText);
-  if (!localHost || /\s/.test(localHost) || !Number.isInteger(localPort)) return null;
+  // 引号校验与 main 侧 normalizeAgentProxyInput 一致 (review: PR #715 R5) —
+  // 渲染层放行、main 层拒绝的两套标准会让用户填了合法表象却被 IPC 打回。
+  if (!localHost || /\s/.test(localHost) || localHost.includes("'") || localHost.includes('"')) return null;
+  if (!Number.isInteger(localPort)) return null;
   if (localPort < 1 || localPort > 65535) return null;
   return { localHost, localPort };
 }
