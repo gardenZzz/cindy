@@ -101,7 +101,16 @@ export function unbindNativeProviderAuth(
   provider: NativeProviderId,
   opts?: { revoked?: boolean },
 ): void {
-  const bindings = readBindings();
+  // 归属读不出来时放弃写入。用户的意图是「登出这一个 provider」,不是「把其余 provider 的
+  // 归属清空」—— 而把损坏文件覆盖成一份只剩撤销标记的新文件正是后者,其余 provider 从此
+  // 无主,下一次可信读取就会把它们的残留凭证认领给当前账号(PR #548 review)。
+  //
+  // 不写也是安全的:文件读不出来时 isNativeProviderAuthBound 已经一律 false(用户看到的就是
+  // 未连接),claimDetectedNativeProviderAuth 也已在同一条件下拒绝认领 —— 撤销标记要挡的那
+  // 件事,此刻本来就发生不了。凭证删除在调用方,不受这里影响。
+  const read = readBindingsOrFail();
+  if (!read.ok) return;
+  const bindings = read.bindings;
   const owner = getActiveAppSession().dataOwnerId;
   const marking = opts?.revoked === true && !!owner;
   if (!(provider in bindings) && !marking) return;
