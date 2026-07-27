@@ -35,6 +35,7 @@ import {
   handleStructuredListBackspace,
   handleStructuredListBreak,
   hasTrailingPlainListParagraph,
+  isTrailingEmptyTopLevelParagraph,
   promoteTrailingPlainListParagraph,
 } from './ComposerListNodes';
 import { WindowsSelectionReplacement } from './WindowsSelectionReplacement';
@@ -1524,36 +1525,24 @@ export function ChatInput({
           const normalizedPaste = plainTextToComposerDocument(text);
           const { state } = view;
           const { $from } = state.selection;
-          const paragraphPosition = $from.depth === 1 ? $from.before(1) : -1;
-          const paragraphEndsDocument =
-            paragraphPosition >= 0 &&
-            paragraphPosition + $from.parent.nodeSize === state.doc.content.size;
-          const paragraphIsEmptyLine =
-            $from.parent.type.name === 'paragraph' &&
-            ($from.parent.content.size === 0 ||
-              ($from.parent.childCount === 1 &&
-                $from.parent.firstChild?.type.name === 'hardBreak')) &&
-            $from.parentOffset === $from.parent.content.size;
+          const pasteIntoTrailingEmptyLine = isTrailingEmptyTopLevelParagraph(view);
 
-          if (composerDocumentContainsList(normalizedPaste)) {
+          if (composerDocumentContainsList(normalizedPaste) && pasteIntoTrailingEmptyLine) {
             event.preventDefault();
+            const paragraphPosition = $from.before(1);
             const replacement = (normalizedPaste.content ?? []).map((node) =>
               state.schema.nodeFromJSON(node),
             );
-            if (paragraphEndsDocument && paragraphIsEmptyLine && $from.parent.content.size > 0) {
+            if ($from.parent.content.size > 0) {
               replacement.unshift(state.schema.nodes.paragraph.create());
             }
             const fragment = Fragment.from(replacement);
-            const pasteIntoTrailingEmptyLine = paragraphEndsDocument && paragraphIsEmptyLine;
-            const tr =
-              pasteIntoTrailingEmptyLine
-                ? state.tr.replaceWith(
-                    paragraphPosition,
-                    paragraphPosition + $from.parent.nodeSize,
-                    fragment,
-                  )
-                : state.tr.replaceSelection(new Slice(fragment, 0, 0));
-            if (pasteIntoTrailingEmptyLine) tr.setSelection(TextSelection.atEnd(tr.doc));
+            const tr = state.tr.replaceWith(
+              paragraphPosition,
+              paragraphPosition + $from.parent.nodeSize,
+              fragment,
+            );
+            tr.setSelection(TextSelection.atEnd(tr.doc));
             view.dispatch(tr.scrollIntoView());
             return true;
           }

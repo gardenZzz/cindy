@@ -55,7 +55,9 @@ function expandedIndentWidth(text: string): number {
 }
 
 function literalListContinuationPrefix(text: string): string | null {
-  const match = text.match(/^([ \t]+)(?:[-+*•]|[1-9]\d{0,5}[.)、])([ \t]+)/);
+  const match =
+    text.match(/^([ \t]+)(?:[-+*•]|[1-9]\d{0,5}[.)])([ \t]+)/) ??
+    text.match(/^([ \t]+)[1-9]\d{0,5}、[ \t]*/);
   if (!match) return null;
   return ' '.repeat(expandedIndentWidth(match[0]));
 }
@@ -111,6 +113,7 @@ function serializeComposerDocument(
     paragraph: ProseMirrorNode,
     paragraphPosition: number,
     prefix = '',
+    continuationIndent = '',
   ) => {
     let buffer = prefix;
     let bufferAgentReferences: AgentInputReference[] = [];
@@ -163,7 +166,8 @@ function serializeComposerDocument(
           // in the current text block preserves the list marker. Put the
           // encoded quote on its own continuation lines so history parsing
           // can still recognize the private marker and source metadata.
-          const continuationPrefix = ' '.repeat(expandedIndentWidth(prefix));
+          const continuationPrefix =
+            continuationIndent || ' '.repeat(expandedIndentWidth(prefix));
           const quoteLines = quoteText.split('\n');
           const quoteSeparator = continuationAfterQuote === null ? '' : '\n';
           buffer += `${quoteSeparator}\n${quoteLines
@@ -179,9 +183,16 @@ function serializeComposerDocument(
       }
 
       if (continuationAfterQuote !== null) {
+        const childText = child.isText ? (child.text ?? '') : '';
         const alreadyIndented =
-          child.isText && (child.text ?? '').startsWith(continuationAfterQuote);
-        buffer += `\n${alreadyIndented ? '' : continuationAfterQuote}`;
+          child.isText && childText.startsWith(continuationAfterQuote);
+        const textAfterIndent = alreadyIndented
+          ? childText.slice(continuationAfterQuote.length)
+          : childText;
+        const needsQuoteBoundary = /^>[ \t]/.test(textAfterIndent);
+        buffer += `${needsQuoteBoundary ? '\n\n' : '\n'}${
+          alreadyIndented ? '' : continuationAfterQuote
+        }`;
         continuationAfterQuote = null;
       }
 
@@ -261,7 +272,7 @@ function serializeComposerDocument(
       }
 
       if (child.type.name === 'hardBreak') {
-        buffer += '\n';
+        buffer += `\n${continuationIndent}`;
         return;
       }
 
@@ -311,6 +322,7 @@ function serializeComposerDocument(
             child,
             childPosition,
             firstParagraph ? `${indent}${itemMarker}` : itemIndent,
+            itemIndent,
           );
           firstParagraph = false;
           return;
@@ -416,14 +428,10 @@ export function serializeEditorSlice(editor: Editor | null, slice: Slice): strin
     // A text-only slice from inside a list item loses the enclosing list.
     // Rebuild the selected source items so plain-text copies keep their marker.
     if (sourceList && sourceIndex !== null && firstOrderedList === null) {
-      const endResolved = editor.state.doc.resolve(editor.state.selection.to);
-      const endIndex =
-        sourceListDepth !== null && endResolved.node(sourceListDepth) === sourceList
-          ? endResolved.index(sourceListDepth) + 1
-          : sourceIndex;
-      const items = sourceList.content.content.slice(sourceIndex, Math.max(sourceIndex + 1, endIndex));
-      if (items.length > 0) {
-        const copiedList = sourceList.copy(Fragment.from(items));
+      const itemType = editor.state.schema.nodes.listItem;
+      if (itemType?.validContent(replaced.content)) {
+        const copiedItem = itemType.create(null, replaced.content);
+        const copiedList = sourceList.copy(Fragment.from(copiedItem));
         replaced = state.tr.replace(
           0,
           state.doc.content.size,
