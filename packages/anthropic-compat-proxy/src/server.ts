@@ -813,6 +813,7 @@ function forward(
               upstreamBase: formatUpstreamBase(actualTarget),
               status,
               requestHeaders: headers,
+              outboundHeaders: actualHeaders,
               responseHeaders: flattenResponseHeaders(upstreamRes.headers),
               requestBody: body,
             }) ?? null;
@@ -862,6 +863,7 @@ function forward(
           upstreamBase: formatUpstreamBase(actualTarget),
           status,
           requestHeaders: headers,
+          outboundHeaders: actualHeaders,
           responseHeaders: flattenResponseHeaders(upstreamRes.headers),
           requestBody: body,
         }) ?? null;
