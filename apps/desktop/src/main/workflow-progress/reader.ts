@@ -57,6 +57,16 @@ function asNumber(v: unknown): number | undefined {
 }
 
 /**
+ * 防御截断:非空字符串超过 max 时截到 max-1 并追加省略号(总长仍 ≤ max)。
+ * 记录文件里的预览/摘要字段无长度契约,进 IPC 前必须收窄。
+ */
+function asTruncated(v: unknown, max: number): string | undefined {
+  const s = asString(v);
+  if (s === undefined) return undefined;
+  return s.length > max ? `${s.slice(0, max - 1)}…` : s;
+}
+
+/**
  * 把一份 wf_*.json 记录解析成 WorkflowProgress。schema 不符时尽量宽容:
  * 缺字段就省略,坏条目就跳过;顶层缺 runId 视为不可用返回 null。
  */
@@ -87,6 +97,11 @@ export function extractWorkflowProgress(record: unknown): WorkflowProgress | nul
         ...(asString(e.model) ? { model: asString(e.model) } : {}),
         ...(asString(e.phaseTitle) ? { phaseTitle: asString(e.phaseTitle) } : {}),
         ...(asNumber(e.attempt) != null ? { attempt: asNumber(e.attempt) } : {}),
+        ...(asTruncated(e.lastToolName, 200) ? { lastToolName: asTruncated(e.lastToolName, 200) } : {}),
+        ...(asTruncated(e.lastToolSummary, 160) ? { lastToolSummary: asTruncated(e.lastToolSummary, 160) } : {}),
+        ...(asTruncated(e.resultPreview, 300) ? { resultPreview: asTruncated(e.resultPreview, 300) } : {}),
+        ...(asNumber(e.durationMs) != null ? { durationMs: asNumber(e.durationMs) } : {}),
+        ...(asTruncated(e.error, 300) ? { error: asTruncated(e.error, 300) } : {}),
       });
     }
   }
@@ -101,6 +116,31 @@ export function extractWorkflowProgress(record: unknown): WorkflowProgress | nul
     });
   }
 
+  // detail 只存在于顶层 phases[](workflowProgress 的 phase 条目不带该字段),
+  // 按 title 回填;撞名取首个,查不到就不写。兜底路径的条目同样在此覆盖。
+  if (phases.length > 0 && Array.isArray(r.phases)) {
+    const detailByTitle = new Map<string, string>();
+    for (const raw of r.phases) {
+      if (!raw || typeof raw !== 'object') continue;
+      const p = raw as Record<string, unknown>;
+      const title = asString(p.title);
+      const detail = asTruncated(p.detail, 200);
+      if (title && detail && !detailByTitle.has(title)) detailByTitle.set(title, detail);
+    }
+    for (const phase of phases) {
+      const detail = detailByTitle.get(phase.title);
+      if (detail) phase.detail = detail;
+    }
+  }
+
+  // logs:脚本 log() 的叙述行。只收字符串项,保留最后 50 条、每条 ≤300。
+  const logs = Array.isArray(r.logs)
+    ? r.logs
+        .filter((l): l is string => typeof l === 'string' && l.length > 0)
+        .slice(-50)
+        .map((l) => asTruncated(l, 300)!)
+    : [];
+
   return {
     runId,
     ...(asString(r.workflowName) ? { workflowName: asString(r.workflowName) } : {}),
@@ -109,6 +149,7 @@ export function extractWorkflowProgress(record: unknown): WorkflowProgress | nul
     ...(asNumber(r.totalTokens) != null ? { totalTokens: asNumber(r.totalTokens) } : {}),
     ...(asNumber(r.totalToolCalls) != null ? { totalToolCalls: asNumber(r.totalToolCalls) } : {}),
     ...(asNumber(r.durationMs) != null ? { durationMs: asNumber(r.durationMs) } : {}),
+    ...(logs.length > 0 ? { logs } : {}),
     phases,
     agents,
   };
