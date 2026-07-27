@@ -310,21 +310,27 @@ function mapPermissionToCodex(
   }
 }
 
+function codexUserAgentAtLeast(
+  userAgent: string | undefined,
+  minimum: readonly [number, number, number],
+): boolean {
+  const match = /\/(\d+)\.(\d+)\.(\d+)(?:[-+ )]|$)/.exec(userAgent ?? '');
+  if (!match) return false;
+  const version = [Number(match[1]), Number(match[2]), Number(match[3])] as const;
+  for (let i = 0; i < minimum.length; i += 1) {
+    if (version[i]! > minimum[i]!) return true;
+    if (version[i]! < minimum[i]!) return false;
+  }
+  return true;
+}
+
 /**
  * `approvalsReviewer` is verified against the app-server bundled with Codex 0.144.6.
  * Remote hosts may keep an older standalone binary across desktop upgrades, so parse the
  * initialize userAgent and conservatively omit the field unless that verified floor is met.
  */
 function supportsCodexApprovalsReviewerProtocol(userAgent: string | undefined): boolean {
-  const match = /\/(\d+)\.(\d+)\.(\d+)(?:[-+ )]|$)/.exec(userAgent ?? '');
-  if (!match) return false;
-  const version = [Number(match[1]), Number(match[2]), Number(match[3])] as const;
-  const minimum = [0, 144, 6] as const;
-  for (let i = 0; i < minimum.length; i += 1) {
-    if (version[i]! > minimum[i]!) return true;
-    if (version[i]! < minimum[i]!) return false;
-  }
-  return true;
+  return codexUserAgentAtLeast(userAgent, [0, 144, 6]);
 }
 
 /**
@@ -335,6 +341,15 @@ function supportsCodexApprovalsReviewerProtocol(userAgent: string | undefined): 
  */
 function supportsCodexReadonlyReferenceDirs(userAgent: string | undefined): boolean {
   return supportsCodexApprovalsReviewerProtocol(userAgent);
+}
+
+/**
+ * `excludeTurns` was introduced in Codex 0.125.0 and later marked experimental.
+ * Older remote daemons can outlive desktop upgrades, so omit the unknown field
+ * and preserve their legacy full-history resume behavior.
+ */
+function supportsCodexResumeExcludeTurns(userAgent: string | undefined): boolean {
+  return codexUserAgentAtLeast(userAgent, [0, 125, 0]);
 }
 
 const READONLY_REFERENCES_PERMISSION_PROFILE = 'cindy-readonly-references';
@@ -2099,6 +2114,7 @@ export class CodexAgent extends BaseAgent {
     const approvalsReviewerSupported =
       approvalsReviewerProtocolSupported && approvalsReviewerRouteSupported;
     const readonlyReferenceDirsSupported = supportsCodexReadonlyReferenceDirs(initResp.userAgent);
+    const resumeExcludeTurnsSupported = supportsCodexResumeExcludeTurns(initResp.userAgent);
     if (mutableExtraDirs.length > 0 && !readonlyReferenceDirsSupported) {
       releaseHostBindingLeaseIfNeeded();
       throw new Error(
@@ -2376,44 +2392,6 @@ export class CodexAgent extends BaseAgent {
     let threadId: string;
     let codexProductPromptDelivery: AgentSessionHandle['codexProductPromptDelivery'];
 
-    const collaborationModeFromText = (text: string): 'plan' | 'default' | null => {
-      const match = /<collaboration_mode>\s*#\s*(Plan|Default)\s+Mode/i.exec(text);
-      if (!match) return null;
-      return match[1]?.toLowerCase() === 'plan' ? 'plan' : 'default';
-    };
-
-    const textFromResponsesItem = (value: unknown): string[] => {
-      if (!value || typeof value !== 'object') return [];
-      if (Array.isArray(value)) return value.flatMap(textFromResponsesItem);
-      const record = value as Record<string, unknown>;
-      const texts: string[] = [];
-      if (typeof record.text === 'string') texts.push(record.text);
-      if (Array.isArray(record.content)) texts.push(...record.content.flatMap(textFromResponsesItem));
-      return texts;
-    };
-
-    const threadHistoryNeedsDefaultModeMarker = (thread: unknown): boolean => {
-      if (!thread || typeof thread !== 'object') return false;
-      const turns = (thread as { turns?: unknown }).turns;
-      if (!Array.isArray(turns)) return false;
-      // Codex 0.142.5 thread/resume includes turns[].items. Only collaboration
-      // markers are authoritative here: ordinary non-Plan-Mode Codex turns can
-      // also persist native `type:'plan'` items.
-      let latestCollaborationMode: 'plan' | 'default' | null = null;
-      for (const turn of turns) {
-        if (!turn || typeof turn !== 'object') continue;
-        const items = (turn as { items?: unknown }).items;
-        if (!Array.isArray(items)) continue;
-        for (const item of items) {
-          if (!item || typeof item !== 'object') continue;
-          for (const text of textFromResponsesItem(item)) {
-            latestCollaborationMode = collaborationModeFromText(text) ?? latestCollaborationMode;
-          }
-        }
-      }
-      return latestCollaborationMode === 'plan';
-    };
-
     /**
      * 会话中途把单个设置 (serviceTier / model / effort) 立即推给 app-server,
      * 写入后续 turn 的 sticky context — 不必等下一个 turn/start 携带 (与官方
@@ -2475,6 +2453,7 @@ export class CodexAgent extends BaseAgent {
       const useProxyChannel = isCodexProxyChannelReady();
       const params: ThreadResumeParams = {
         threadId: opts.resumeSessionId,
+        ...(resumeExcludeTurnsSupported ? { excludeTurns: true } : {}),
         cwd: opts.workingDir,
         ...currentThreadWorkspaceConfig(),
         ...(threadModelProvider ? { modelProvider: threadModelProvider } : {}),
@@ -2492,6 +2471,9 @@ export class CodexAgent extends BaseAgent {
         if (Object.hasOwn(resp, 'serviceTier')) {
           mutableServiceTier = normalizeServiceTier(resp.serviceTier) ?? null;
         }
+        if (mutableModel === 'gpt-5' && resp.model) {
+          mutableModel = resp.model;
+        }
         threadId = resp.thread.id;
         if (useProxyChannel) {
           registerCodexDeveloperInstructions(threadId, developerInstructions);
@@ -2505,7 +2487,10 @@ export class CodexAgent extends BaseAgent {
         // that sticky state lives server-side, conservatively send mode:'default'
         // on future normal turns after any successful resume.
         threadTouchedPlanMode = true;
-        planModeDefaultMarkerNeeded = threadHistoryNeedsDefaultModeMarker(resp.thread);
+        // excludeTurns intentionally loads no history, so we cannot prove whether
+        // the persisted thread last used Plan Mode. Inject the official Default
+        // marker once; markCollaborationModeAccepted() suppresses repeats.
+        planModeDefaultMarkerNeeded = true;
         log.info('thread/resume ok', { threadId, model: resp.model, serviceTier: mutableServiceTier ?? null });
       } catch (e) {
         releaseHostBindingLeaseIfNeeded();
@@ -4177,16 +4162,26 @@ export class CodexAgent extends BaseAgent {
               host.subscribeThread(threadId, handlers);
               const resumeParams: ThreadResumeParams = {
                 threadId,
+                ...(resumeExcludeTurnsSupported ? { excludeTurns: true } : {}),
                 cwd: opts.workingDir,
                 ...currentThreadWorkspaceConfig(),
                 ...(mutableModel && mutableModel !== 'gpt-5' ? { model: mutableModel } : {}),
                 ...(mutableServiceTier !== undefined ? { serviceTier: mutableServiceTier } : {}),
               };
               const resumeResp = await host.request<ThreadResumeResponse>(Method.ThreadResume, resumeParams);
+              if (mutableModel === 'gpt-5' && resumeResp.model) {
+                mutableModel = resumeResp.model;
+                turnParams.effort = clampEffortForCodex(mutableModel, mutableEffort);
+                if (turnParams.collaborationMode) {
+                  turnParams.collaborationMode.settings.model = mutableModel;
+                  turnParams.collaborationMode.settings.reasoning_effort =
+                    clampEffortForCodex(mutableModel, mutableEffort);
+                }
+              }
               if (collaborationMode?.mode === 'default') {
-                planModeDefaultMarkerNeeded = threadHistoryNeedsDefaultModeMarker(resumeResp.thread);
+                planModeDefaultMarkerNeeded = true;
                 if (turnParams.collaborationMode?.mode === 'default') {
-                  turnParams.collaborationMode.settings.developer_instructions = planModeDefaultMarkerNeeded ? null : '';
+                  turnParams.collaborationMode.settings.developer_instructions = null;
                 }
               }
               log.info('thread/resume after stale daemon ok, retrying turn/start', { threadId });
