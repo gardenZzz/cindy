@@ -1550,7 +1550,7 @@ describe('CodexAgent.startSession developerInstructions', () => {
     });
 
     await waitForExpectation(() => {
-      expect(host.request).toHaveBeenCalledWith(Method.ThreadStart, expect.anything());
+      expect(host.request).toHaveBeenCalledWith(Method.ThreadStart, expect.anything(), expect.objectContaining({ timeoutMs: expect.any(Number) }));
     });
 
     const guard = await agent.beginLocalHostCredentialChange('test credential change');
@@ -1845,6 +1845,7 @@ describe('CodexAgent.startSession developerInstructions', () => {
       expect.objectContaining({
         threadId: '123e4567-e89b-12d3-a456-426614174000',
       }),
+      expect.objectContaining({ timeoutMs: expect.any(Number) }),
     );
     const resumeParams = host.request.mock.calls.find(([method]) => method === Method.ThreadResume)?.[1] as {
       developerInstructions?: string;
@@ -2291,6 +2292,7 @@ describe('CodexAgent send', () => {
       expect.objectContaining({
         effort: 'low',
       }),
+      expect.objectContaining({ timeoutMs: expect.any(Number) }),
     );
     await handle.close();
   });
@@ -2314,6 +2316,7 @@ describe('CodexAgent send', () => {
         expect.objectContaining({
           effort: 'minimal',
         }),
+        expect.objectContaining({ timeoutMs: expect.any(Number) }),
       );
       await handle.close();
     },
@@ -2336,6 +2339,7 @@ describe('CodexAgent send', () => {
       expect.objectContaining({
         effort: 'medium',
       }),
+      expect.objectContaining({ timeoutMs: expect.any(Number) }),
     );
     await handle.close();
   });
@@ -2357,6 +2361,7 @@ describe('CodexAgent send', () => {
       expect.objectContaining({
         effort: 'max',
       }),
+      expect.objectContaining({ timeoutMs: expect.any(Number) }),
     );
     await handle.close();
   });
@@ -2378,6 +2383,7 @@ describe('CodexAgent send', () => {
       expect.objectContaining({
         effort: 'ultra',
       }),
+      expect.objectContaining({ timeoutMs: expect.any(Number) }),
     );
     await handle.close();
   });
@@ -2401,6 +2407,7 @@ describe('CodexAgent send', () => {
       expect.objectContaining({
         effort: 'low',
       }),
+      expect.objectContaining({ timeoutMs: expect.any(Number) }),
     );
     await handle.close();
   });
@@ -2430,6 +2437,7 @@ describe('CodexAgent send', () => {
         expect.objectContaining({
           effort: 'minimal',
         }),
+        expect.objectContaining({ timeoutMs: expect.any(Number) }),
       );
       await handle.close();
     },
@@ -6096,6 +6104,110 @@ describe('CodexAgent rewind', () => {
 });
 
 describe('CodexAgent turn lifecycle', () => {
+  it('escalates a persistent willRetry retry-loop to a terminal error (issue #677)', async () => {
+    // 远端摸不到 Codex 后端时 daemon 无限发 willRetry=true — 升级逻辑应在阈值处
+    // 合成终态错误并复位 turn (isTurnRunning=false + Done status), 消息里带原始
+    // 末次错误与 SSH 代理隧道提示 (session 带 remoteHostId)。
+    const agent = new CodexAgent(createDeps());
+    const host = installFakeHost(agent);
+    const handle = await agent.startSession({
+      sessionId: 'session-retry-escalation',
+      model: 'gpt-5.4',
+      workingDir: '/repo',
+      remoteHostId: 'gpu-box',
+    });
+    const subscribeCalls = host.subscribeThread.mock.calls as unknown as Array<[string, ThreadEventHandlers]>;
+    const handlers = subscribeCalls[0]?.[1];
+    expect(handlers).toBeDefined();
+    const iterator = handle.events()[Symbol.asyncIterator]();
+
+    handlers.turnStarted?.({
+      threadId: 'start-thread-id',
+      turn: { id: 'turn-1' },
+    });
+    expect(handle.isTurnRunning?.()).toBe(true);
+
+    const willRetryError = {
+      threadId: 'start-thread-id',
+      turnId: 'turn-1',
+      willRetry: true,
+      error: { message: 'unexpected status 403 Forbidden, url: https://chatgpt.com/backend-api/codex/responses' },
+    } as const;
+    // 第 1 次 silent, 第 2 次透一条非终止提示, 之后静默直到升级阈值 (30 次)。
+    handlers.error?.(willRetryError);
+    handlers.error?.(willRetryError);
+    const notice = await nextEvent(iterator);
+    expect(notice).toMatchObject({
+      type: 'error',
+      data: { isTerminal: false, willRetry: true },
+    });
+    expect(handle.isTurnRunning?.()).toBe(true);
+
+    for (let i = 0; i < 28; i += 1) {
+      handlers.error?.(willRetryError);
+    }
+    // 第 30 次触发升级: 终态 error + Done status, turn 复位。
+    const terminalError = await nextEvent(iterator);
+    expect(terminalError.type).toBe('error');
+    const terminalData = terminalError.data as { message: string; isTerminal: boolean };
+    expect(terminalData.isTerminal).toBe(true);
+    expect(terminalData.message).toContain('Codex backend unreachable');
+    expect(terminalData.message).toContain('gpu-box');
+    expect(terminalData.message).toContain('403 Forbidden');
+    expect(terminalData.message).toContain('Route agent traffic via local proxy');
+    const statusEvent = await nextEvent(iterator);
+    expect(statusEvent).toMatchObject({
+      type: 'status',
+      data: { status: 'Done', isRunning: false },
+    });
+    expect(handle.isTurnRunning?.()).toBe(false);
+
+    // 升级后晚到的 turnCompleted 不得重复发终态事件 (墓碑路径)。
+    handlers.turnCompleted?.({
+      threadId: 'start-thread-id',
+      turn: { id: 'turn-1', status: 'failed', error: { message: 'x' } },
+    });
+    await expect(nextEvent(iterator)).rejects.toThrow('timed out waiting for event');
+    await handle.close();
+  });
+
+  it('does NOT escalate an auth-missing retry-loop (has its own sync-auth UX)', async () => {
+    const agent = new CodexAgent(createDeps());
+    const host = installFakeHost(agent);
+    const handle = await agent.startSession({
+      sessionId: 'session-auth-no-escalation',
+      model: 'gpt-5.4',
+      workingDir: '/repo',
+      remoteHostId: 'gpu-box',
+    });
+    const subscribeCalls = host.subscribeThread.mock.calls as unknown as Array<[string, ThreadEventHandlers]>;
+    const handlers = subscribeCalls[0]?.[1];
+    const iterator = handle.events()[Symbol.asyncIterator]();
+
+    handlers.turnStarted?.({
+      threadId: 'start-thread-id',
+      turn: { id: 'turn-1' },
+    });
+    const authError = {
+      threadId: 'start-thread-id',
+      turnId: 'turn-1',
+      willRetry: true,
+      error: { message: 'unexpected status 401 Unauthorized: Missing bearer' },
+    } as const;
+    // auth retry-loop: 第一条透出 (等待式 sync UX), 其余 dedupe; 超阈值也不升级。
+    for (let i = 0; i < 35; i += 1) {
+      handlers.error?.(authError);
+    }
+    const first = await nextEvent(iterator);
+    expect(first).toMatchObject({
+      type: 'error',
+      data: { isTerminal: false, willRetry: true },
+    });
+    expect(handle.isTurnRunning?.()).toBe(true);
+    await expect(nextEvent(iterator)).rejects.toThrow('timed out waiting for event');
+    await handle.close();
+  });
+
   it('clears running state and emits done status after terminal error notification', async () => {
     const agent = new CodexAgent(createDeps());
     const host = installFakeHost(agent);
