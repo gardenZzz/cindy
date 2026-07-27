@@ -90,7 +90,7 @@ function parseListMarker(text: string): ListMarker | null {
       prefixLength:
         marker === '、' ? ordered[1].length + marker.length : ordered[0].length,
       marker,
-      separator: marker === '、' ? ordered[3] : ordered[3],
+      separator: ordered[3],
       start: Number(ordered[1]),
     };
   }
