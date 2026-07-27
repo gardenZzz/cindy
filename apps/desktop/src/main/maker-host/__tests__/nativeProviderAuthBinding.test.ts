@@ -141,12 +141,24 @@ describe('claimDetectedNativeProviderAuth', () => {
     });
   });
 
-  it('撤销标记只挡当前 owner;换账号后新 owner 仍可继承', () => {
+  it('撤销标记跨 owner 依然有效 —— 残留凭证仍属于登出的那个账号', () => {
+    // 按 owner 比对会给下一个账号开继承别人凭证的口子:凭证在共享的系统 keychain / CLI
+    // 里,换个 owner 它还是 A 的凭证(PR #548 review)。
     unbindNativeProviderAuth('anthropic', { revoked: true });
     expect(claimDetectedNativeProviderAuth('anthropic', () => true)).toBe(false);
 
     session.dataOwnerId = 'owner-b';
-    expect(claimDetectedNativeProviderAuth('anthropic', () => true)).toBe(true);
+    expect(claimDetectedNativeProviderAuth('anthropic', () => true)).toBe(false);
+  });
+
+  it('一次性 legacy 迁移同样尊重撤销标记', () => {
+    unbindNativeProviderAuth('anthropic', { revoked: true });
+    session.dataOwnerId = 'owner-b';
+    migrateLegacyNativeProviderAuthBindings('owner-b', { anthropic: true, xai: true });
+
+    expect(isNativeProviderAuthBound('anthropic')).toBe(false);
+    // 没被撤销的 provider 不受影响。
+    expect(isNativeProviderAuthBound('xai')).toBe(true);
   });
 
   it('用户再次显式授权即清除撤销标记,恢复自动继承语义', () => {

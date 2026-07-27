@@ -8,14 +8,16 @@ type NativeProviderId = 'anthropic' | 'openai' | 'xai';
 type BindingFile = Partial<Record<NativeProviderId, string>> & {
   legacyClaimOwner?: string;
   /**
-   * 用户**显式登出**过的 provider（值 = 当时的 owner）。
+   * 被**显式登出**过、且尚未重新授权的 provider（值 = 执行登出的 owner，仅供诊断）。
    *
    * 登出会先删凭证再解绑，但删除是 best-effort 的（Anthropic 的文件删除吞 ENOENT 之外的
    * 错误、`logoutGrok` 忽略 secret store 的失败返回）。删除失败时 slot 已空、凭证却还在，
-   * 自动认领会立刻把它绑回来——等于悄悄撤销用户刚做的登出。有这个标记就一律不认领，
-   * 直到用户再次显式授权（bind 时清除）。
+   * 自动认领会立刻把它绑回来——等于悄悄撤销用户刚做的登出。
    *
-   * 按 owner 记：换账号后新 owner 不受上一个账号登出意图的影响。
+   * 判定**不比对 owner**：标记说的是「这份残留凭证已被弃用」，而凭证存在共享的系统
+   * keychain / CLI 里，换个账号它也还是登出那个账号的凭证——按 owner 比对等于给下一个
+   * 账号开了继承别人凭证的口子（PR #548 review）。解除只有一条路：用户再次显式授权
+   * （`bindNativeProviderAuth` 清除），那时凭证已由本人重新写入。
    */
   revoked?: Partial<Record<NativeProviderId, string>>;
 };
@@ -99,6 +101,9 @@ export function migrateLegacyNativeProviderAuthBindings(
 
   const next: BindingFile = { ...bindings, legacyClaimOwner: ownerId };
   for (const provider of ['anthropic', 'openai', 'xai'] as const) {
+    // 显式登出过的 provider 一律跳过:这条一次性迁移同样不能把用户弃用掉的残留凭证
+    // 认领回来(PR #548 review)。
+    if (bindings.revoked && provider in bindings.revoked) continue;
     if (available[provider] && !next[provider]) next[provider] = ownerId;
   }
   writeBindings(next);
@@ -140,9 +145,10 @@ export function claimDetectedNativeProviderAuth(
   // unbindNativeProviderAuth's `in` pattern).
   if (provider in bindings) return false;
   if ('legacyClaimOwner' in bindings && bindings.legacyClaimOwner !== owner) return false;
-  // 当前 owner 显式登出过就绝不自动认领:凭证删除是 best-effort 的,残留凭证不该让
-  // 「我已经登出了」在下一次读连接态时被悄悄撤销(PR #548 review)。
-  if (bindings.revoked?.[provider] === owner) return false;
+  // 被显式登出过就绝不自动认领,且**不比对 owner**:凭证在共享的系统 keychain / CLI 里,
+  // 换个账号它仍是登出那个账号的凭证 —— 按 owner 比对等于给下一个账号开了继承别人凭证
+  // 的口子。解除只有「用户再次显式授权」一条路(PR #548 review)。
+  if (bindings.revoked && provider in bindings.revoked) return false;
   if (!hasCredential()) return false;
   writeBindings({ ...bindings, [provider]: owner });
   return true;

@@ -921,17 +921,25 @@ export function refreshAnthropicModelsFromHttp(options?: {
         }
         // 200 但正文坏掉(破损代理 / CDN 截断)是**上游**的问题,不是链路不通 —— 单独标记,
         // 否则会归到 network,让用户白查网络和 Proxy(PR #548 review)。
-        let body: { data?: unknown[]; has_more?: boolean; last_id?: string };
+        let raw: unknown;
         try {
-          body = (await res.json()) as typeof body;
+          raw = await res.json();
         } catch (parseErr) {
           throw new DiscoveryResponseError(
             parseErr instanceof Error ? parseErr.message : String(parseErr),
           );
         }
-        // data 缺失 / 不是数组 = 拿到的根本不是 /v1/models 的形状(典型:代理生成的
-        // {"error":...} 却带 200)。静默跳过会让它一路走到「empty」——那是确定性归因、
-        // 不重试,还会让 UI 说「账号没有可用模型」,把上游故障说成用户的权限问题。
+        // 先确认根是对象:JSON `null` / 标量 / 数组都是合法 JSON,直接取 .data 要么抛
+        // TypeError(落到兜底被当成 network,让用户白查网络)、要么静默拿到 undefined。
+        if (typeof raw !== 'object' || raw === null || Array.isArray(raw)) {
+          throw new DiscoveryResponseError(
+            `unexpected payload root (${raw === null ? 'null' : Array.isArray(raw) ? 'array' : typeof raw})`,
+          );
+        }
+        // 再确认 data 是数组 = 拿到的确实是 /v1/models 的形状(典型反例:代理生成的
+        // {"error":...} 却带 200)。静默跳过会一路走到「empty」——确定性归因、不重试,
+        // 还会把上游故障说成用户的权限问题。
+        const body = raw as { data?: unknown; has_more?: unknown; last_id?: unknown };
         if (!Array.isArray(body.data)) {
           throw new DiscoveryResponseError(
             `unexpected payload shape (data=${body.data === undefined ? 'missing' : typeof body.data})`,

@@ -83,12 +83,12 @@ function isBoundToCurrentOwner(provider: 'anthropic' | 'xai'): boolean {
   return isNativeProviderAuthBound(provider);
 }
 
-async function listProviders() {
-  return getDesktopProviderService().listProviders();
+async function listProviders(allowSideEffects = true) {
+  return getDesktopProviderService().listProviders({ allowSideEffects });
 }
 
-async function connectedMap(): Promise<Record<string, boolean>> {
-  const providers = await listProviders();
+async function connectedMap(allowSideEffects = true): Promise<Record<string, boolean>> {
+  const providers = await listProviders(allowSideEffects);
   return Object.fromEntries(providers.map((p) => [p.id, p.connected]));
 }
 
@@ -127,6 +127,21 @@ describe('native provider connection claim on read', () => {
   it('认领本机 xai 凭证(清单不走动态发现,不触发拉取)', async () => {
     expect((await connectedMap()).xai).toBe(true);
     expect(isNativeProviderAuthBound('xai')).toBe(true);
+  });
+
+  it('不受信 sender(含 device-link 合成 event)只读,不触发认领与清单拉取', async () => {
+    // 这条通道也服务 device-link 与可能不受信的渲染上下文:它们只该拿到只读快照,
+    // 不该顺带写绑定文件、读凭证缓存、发起带凭证的上游请求(PR #548 review)。
+    const connected = await connectedMap(false);
+    expect(connected.anthropic).toBe(false);
+    expect(connected.xai).toBe(false);
+    expect(isNativeProviderAuthBound('anthropic')).toBe(false);
+    expect(h.refreshAnthropicModels).not.toHaveBeenCalled();
+    expect(h.loadAnthropicDiskCache).not.toHaveBeenCalled();
+
+    // 本机主页面读一次即恢复自愈。
+    expect((await connectedMap(true)).anthropic).toBe(true);
+    expect(h.refreshAnthropicModels).toHaveBeenCalledTimes(1);
   });
 
   it('凭证不在本机时既不认领也不误报已连接', async () => {

@@ -339,7 +339,11 @@ export function getDesktopProviderService(): ProviderService {
       // hasClaudeAiOAuth / hasCodexOAuthLogin / hasGrokOAuthLogin 内部都已校验绑定,
       // 所以这里不再前置 isNativeProviderAuthBound —— 前置短路是纯冗余,而且会把
       // listProviders 挡在自愈之前,正是「设置页已连接 / 聊天无来源」假报的成因(#294)。
-      anthropic: () => {
+      anthropic: ({ allowSideEffects }) => {
+        // 自愈会写绑定文件、读凭证作用域缓存并发起带凭证的上游请求。listProviders 这条通道
+        // 同时服务 device-link 与可能不受信的渲染上下文,所以副作用只在本机主页面发起时
+        // 才放行,其余降级为纯读(PR #548 review)。
+        if (!allowSideEffects) return hasClaudeAiOAuth();
         claimNativeProviderAuthOnRead('anthropic', hasClaudeAiOAuthUnbound, () => {
           // anthropic 清单的唯一来源是动态发现,而发现只在启动期与显式 OAuth 登录成功
           // 时触发。绑定是在这两个时机之后才建立的,启动期那次早被登录态 gate 掉 ——
@@ -356,9 +360,11 @@ export function getDesktopProviderService(): ProviderService {
         });
         return hasClaudeAiOAuth();
       },
+      // openai 的自愈挂在 adapter 的 reconcile 收口里(#294 既有形态,不经这里的开关):
+      // 它只做本机凭证文件的硬链协调 + 绑定写入,不发起任何带凭证的上游请求。
       openai: () => desktopCodexAuthAdapter.hasCodexOAuthLogin(),
-      xai: () => {
-        claimNativeProviderAuthOnRead('xai', hasGrokOAuthLoginUnbound);
+      xai: ({ allowSideEffects }) => {
+        if (allowSideEffects) claimNativeProviderAuthOnRead('xai', hasGrokOAuthLoginUnbound);
         return hasGrokOAuthLogin();
       },
     },

@@ -1138,8 +1138,8 @@
         "connect": "Connect",
         "disconnect": "Disconnect",
         "cancel": "Cancel",
-        "retry": "Retry",
-        "retrying": "Retrying…"
+        "retry": "Retry model discovery",
+        "retrying": "Retrying discovery…"
       },
       "anthropic": {
         "title": "Anthropic",

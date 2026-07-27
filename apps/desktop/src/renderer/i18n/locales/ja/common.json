@@ -1138,8 +1138,8 @@
         "connect": "接続",
         "disconnect": "切断",
         "cancel": "キャンセル",
-        "retry": "再試行",
-        "retrying": "再試行中…"
+        "retry": "モデル一覧を再取得",
+        "retrying": "再取得中…"
       },
       "anthropic": {
         "title": "Anthropic",
