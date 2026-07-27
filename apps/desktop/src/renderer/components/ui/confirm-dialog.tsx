@@ -105,6 +105,7 @@ export function ConfirmDialog({
         <AlertDialog.Content
           className={cn(
             'fixed left-1/2 top-1/2 z-[10000] -translate-x-1/2 -translate-y-1/2',
+            'flex max-h-[85vh] flex-col',
             'w-full select-none rounded-xl p-4',
             'bg-[var(--confirm-bg)] shadow-[var(--confirm-shadow)]',
             'data-[state=open]:animate-confirm-content-in',
@@ -127,22 +128,36 @@ export function ConfirmDialog({
           }
         >
           <AlertDialog.Title
-            className={cn('text-lg font-medium text-[var(--confirm-title)]', textClassName)}
+            className={cn('shrink-0 text-lg font-medium text-[var(--confirm-title)]', textClassName)}
           >
             {title}
           </AlertDialog.Title>
-          {description && (
-            <AlertDialog.Description
-              className={cn('mt-2 text-base text-[var(--confirm-desc)]', textClassName)}
+          {(description || content) && (
+            // 富内容 / 长正文可能超过视口高度:包一层限高滚动区,让标题与底部按钮
+            // 固定、中间内容纵向滚动,避免整个弹窗被撑出屏幕后无法滚动到被裁掉的内容
+            // (典型:插件更新确认框的权限变更清单)。
+            <div
+              className={cn(
+                'min-h-0 flex-1 overflow-y-auto overscroll-contain',
+                // 保持旧间距:有 description 时紧跟标题 mt-2;仅富内容(无正文)
+                // 时沿用原 content 的 mt-3,避免 content-only 弹窗间距变化。
+                description ? 'mt-2' : 'mt-3',
+              )}
             >
-              {description}
-            </AlertDialog.Description>
+              {description && (
+                <AlertDialog.Description
+                  className={cn('text-base text-[var(--confirm-desc)]', textClassName)}
+                >
+                  {description}
+                </AlertDialog.Description>
+              )}
+              {content && <div className={cn(description && 'mt-3')}>{content}</div>}
+            </div>
           )}
-          {content && <div className="mt-3">{content}</div>}
           {dontShowAgainLabel && (
             <label
               className={cn(
-                'mt-4 flex cursor-pointer select-none items-center gap-2 text-13',
+                'mt-4 flex shrink-0 cursor-pointer select-none items-center gap-2 text-13',
                 'text-[var(--confirm-desc)]',
               )}
             >
@@ -155,7 +170,7 @@ export function ConfirmDialog({
               {dontShowAgainLabel}
             </label>
           )}
-          <div className="mt-6 flex justify-end gap-2.5">
+          <div className="mt-6 flex shrink-0 justify-end gap-2.5">
             <AlertDialog.Action asChild>
               <button
                 ref={confirmBtnRef}
