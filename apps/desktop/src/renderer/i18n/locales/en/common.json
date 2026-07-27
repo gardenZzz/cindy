@@ -3242,6 +3242,7 @@
         "browser": "Browser",
         "terminal": "Terminal",
         "review": "Review",
+        "backgroundTasks": "Background tasks",
         "collaboration": "Team",
         "unknown": "Unknown tab",
         "ghostPanel": "Plugin panel"
@@ -3626,6 +3627,16 @@
       "touchCountAria_other": "Edited {{count}} times",
       "expandAllAria": "Expand all files",
       "collapseAllAria": "Collapse all files"
+    },
+    "backgroundTasks": {
+      "running": "Running",
+      "completed": "Completed",
+      "empty": "No background tasks in this session yet",
+      "stop": "Stop",
+      "back": "Back",
+      "progressSummary": "{{done}}/{{total}} agents",
+      "tokens": "{{value}} tokens",
+      "noProgress": "No progress details yet"
     }
   },
   "update": {
@@ -4891,13 +4902,19 @@
     "workflowTree": {
       "agentsCount": "{{count}} agents",
       "attempt": "attempt {{count}}",
+      "endedEarly": "Ended before completion",
       "state": {
         "queued": "Queued",
+        "pending": "Pending",
+        "start": "Starting",
         "running": "Running",
+        "progress": "Running",
         "done": "Done",
         "completed": "Completed",
         "failed": "Failed",
-        "stopped": "Stopped"
+        "error": "Failed",
+        "stopped": "Stopped",
+        "killed": "Killed"
       }
     },
     "credentialSwitchWait": {

@@ -1,0 +1,319 @@
+import { describe, expect, it } from 'vitest';
+
+import type { WorkflowProgressEntry } from '@cindy/maker-shared/agent-task';
+
+import type {
+  WorkflowAgentProgress,
+  WorkflowProgress,
+} from '../../../../../../shared/workflow-progress';
+import { buildWorkflowTreeModel } from '../workflowProgressModel';
+
+function phaseEntry(index: number, title: string): WorkflowProgressEntry {
+  return { type: 'workflow_phase', index, title };
+}
+
+function agentEntry(
+  index: number,
+  overrides: Partial<WorkflowProgressEntry> = {},
+): WorkflowProgressEntry {
+  return { type: 'workflow_agent', index, ...overrides };
+}
+
+function fileAgent(overrides: Partial<WorkflowAgentProgress> = {}): WorkflowAgentProgress {
+  return { label: 'a', agentId: 'file-a', state: 'done', ...overrides };
+}
+
+function fileProgress(overrides: Partial<WorkflowProgress> = {}): WorkflowProgress {
+  return {
+    runId: 'run-1',
+    status: 'running',
+    phases: [],
+    agents: [],
+    ...overrides,
+  };
+}
+
+describe('buildWorkflowTreeModel', () => {
+  it('两源都空时返回 null(undefined / 空数组 / null 各种组合)', () => {
+    expect(buildWorkflowTreeModel({ taskStatus: 'running' })).toBeNull();
+    expect(buildWorkflowTreeModel({ entries: [], fileProgress: null, taskStatus: 'running' })).toBeNull();
+    expect(buildWorkflowTreeModel({ entries: undefined, fileProgress: undefined, taskStatus: 'completed' })).toBeNull();
+  });
+
+  it('entries 在场时主结构来自 entries:phase 顺序、按 phaseTitle 归组、孤儿归末尾 null 组', () => {
+    const entries: WorkflowProgressEntry[] = [
+      phaseEntry(0, 'Research'),
+      phaseEntry(1, 'Write'),
+      agentEntry(2, {
+        agentId: 'a1',
+        label: 'search:web',
+        phaseTitle: 'Research',
+        state: 'done',
+        model: 'claude-haiku-4-5',
+        resultPreview: 'found 3 sources',
+      }),
+      agentEntry(3, {
+        agentId: 'a2',
+        label: 'writer',
+        phaseTitle: 'Write',
+        state: 'progress',
+        lastToolName: 'Write',
+        lastToolSummary: 'draft.md',
+        attempt: 2,
+      }),
+      agentEntry(4, { agentId: 'a3', label: 'stray', state: 'start' }),
+    ];
+    const model = buildWorkflowTreeModel({ entries, taskStatus: 'running' });
+    expect(model).not.toBeNull();
+    expect(model!.groups.map((g) => g.title)).toEqual(['Research', 'Write', null]);
+    expect(model!.groups[0].agents).toEqual([
+      {
+        key: 'a1',
+        label: 'search:web',
+        state: 'done',
+        model: 'claude-haiku-4-5',
+        resultPreview: 'found 3 sources',
+      },
+    ]);
+    expect(model!.groups[1].agents[0]).toMatchObject({
+      key: 'a2',
+      label: 'writer',
+      state: 'progress',
+      lastToolName: 'Write',
+      lastToolSummary: 'draft.md',
+      attempt: 2,
+    });
+    expect(model!.groups[2].agents[0]).toMatchObject({ key: 'a3', label: 'stray', state: 'start' });
+  });
+
+  it('entries 里没有 agent 的 phase 不产出分组;label 缺失回退 agentId', () => {
+    const entries: WorkflowProgressEntry[] = [
+      phaseEntry(0, 'Empty phase'),
+      phaseEntry(1, 'Busy'),
+      agentEntry(2, { agentId: 'only-id', phaseTitle: 'Busy', state: 'running' }),
+    ];
+    const model = buildWorkflowTreeModel({ entries, taskStatus: 'running' })!;
+    expect(model.groups.map((g) => g.title)).toEqual(['Busy']);
+    expect(model.groups[0].agents[0].label).toBe('only-id');
+  });
+
+  it('entries 缺失时整树退回 fileProgress,文件 state 词表原样保留', () => {
+    const file = fileProgress({
+      status: 'running',
+      phases: [
+        { index: 0, title: 'Phase A', detail: 'gather info' },
+        { index: 1, title: 'Phase B' },
+      ],
+      agents: [
+        fileAgent({ label: 'x', agentId: 'fx', phaseTitle: 'Phase A', state: 'done', durationMs: 4000, resultPreview: 'ok' }),
+        fileAgent({ label: 'y', agentId: 'fy', phaseTitle: 'Phase B', state: 'killed', error: 'boom' }),
+        fileAgent({ label: 'z', agentId: 'fz', phaseTitle: 'Unknown', state: 'queued' }),
+      ],
+    });
+    const model = buildWorkflowTreeModel({ fileProgress: file, taskStatus: 'running' })!;
+    expect(model.groups.map((g) => g.title)).toEqual(['Phase A', 'Phase B', null]);
+    expect(model.groups[0].detail).toBe('gather info');
+    expect(model.groups[0].agents[0]).toEqual({
+      key: 'fx',
+      label: 'x',
+      state: 'done',
+      durationMs: 4000,
+      resultPreview: 'ok',
+    });
+    expect(model.groups[1].agents[0]).toMatchObject({ state: 'killed', error: 'boom' });
+    expect(model.groups[2].agents[0]).toMatchObject({ label: 'z', state: 'queued' });
+  });
+
+  it('entries 在场时 logs 与 phase detail 从文件回填', () => {
+    const entries: WorkflowProgressEntry[] = [
+      phaseEntry(0, 'Research'),
+      agentEntry(1, { agentId: 'a1', label: 'search', phaseTitle: 'Research', state: 'running' }),
+    ];
+    const file = fileProgress({
+      logs: ['starting research', 'found sources'],
+      phases: [{ index: 0, title: 'Research', detail: 'parallel web search' }],
+      agents: [],
+    });
+    const model = buildWorkflowTreeModel({ entries, fileProgress: file, taskStatus: 'running' })!;
+    expect(model.logs).toEqual(['starting research', 'found sources']);
+    expect(model.groups[0].detail).toBe('parallel web search');
+    // 运行中(非终态)不做 agent 字段回填,state 保持 entries 原样
+    expect(model.groups[0].agents[0].state).toBe('running');
+  });
+
+  it('无文件时 logs 为空数组、detail 缺失', () => {
+    const entries: WorkflowProgressEntry[] = [
+      phaseEntry(0, 'P'),
+      agentEntry(1, { agentId: 'a1', label: 'w', phaseTitle: 'P', state: 'done' }),
+    ];
+    const model = buildWorkflowTreeModel({ entries, taskStatus: 'running' })!;
+    expect(model.logs).toEqual([]);
+    expect(model.groups[0].detail).toBeUndefined();
+  });
+
+  it('任务终态时按 label+phaseTitle 从文件回填 resultPreview/durationMs/error(只补缺不覆盖,撞名取首个)', () => {
+    const entries: WorkflowProgressEntry[] = [
+      phaseEntry(0, 'P'),
+      // 缺 resultPreview/durationMs → 应回填
+      agentEntry(1, { agentId: 'a1', label: 'w', phaseTitle: 'P', state: 'done' }),
+      // entries 已有 resultPreview → 不覆盖;durationMs 仍回填
+      agentEntry(2, {
+        agentId: 'a2',
+        label: 'v',
+        phaseTitle: 'P',
+        state: 'done',
+        resultPreview: 'from entries',
+      }),
+    ];
+    const file = fileProgress({
+      status: 'completed',
+      agents: [
+        // 与 a1 同 label+phaseTitle 的两条 → 取首个
+        fileAgent({ label: 'w', phaseTitle: 'P', state: 'done', resultPreview: 'first', durationMs: 1000 }),
+        fileAgent({ label: 'w', phaseTitle: 'P', state: 'done', resultPreview: 'second', durationMs: 2000 }),
+        fileAgent({ label: 'v', phaseTitle: 'P', state: 'done', resultPreview: 'from file', durationMs: 3000 }),
+        // label 相同但 phaseTitle 不同 → 不得匹配
+        fileAgent({ label: 'w', phaseTitle: 'Other', state: 'failed', error: 'wrong phase' }),
+      ],
+    });
+    const model = buildWorkflowTreeModel({ entries, fileProgress: file, taskStatus: 'completed' })!;
+    const [a1, a2] = model.groups[0].agents;
+    expect(a1.resultPreview).toBe('first');
+    expect(a1.durationMs).toBe(1000);
+    expect(a1.error).toBeUndefined();
+    expect(a2.resultPreview).toBe('from entries');
+    expect(a2.durationMs).toBe(3000);
+  });
+
+  it('任务非终态时不做文件字段回填', () => {
+    const entries: WorkflowProgressEntry[] = [
+      phaseEntry(0, 'P'),
+      agentEntry(1, { agentId: 'a1', label: 'w', phaseTitle: 'P', state: 'done' }),
+    ];
+    const file = fileProgress({
+      agents: [fileAgent({ label: 'w', phaseTitle: 'P', resultPreview: 'r', durationMs: 500 })],
+    });
+    const model = buildWorkflowTreeModel({ entries, fileProgress: file, taskStatus: 'running' })!;
+    expect(model.groups[0].agents[0].resultPreview).toBeUndefined();
+    expect(model.groups[0].agents[0].durationMs).toBeUndefined();
+  });
+
+  it('终态修正:任务终态而 agent 仍呈 start/progress/running/queued → state 改 error,error 字段留空', () => {
+    const entries: WorkflowProgressEntry[] = [
+      agentEntry(0, { agentId: 'a1', label: 'l1', state: 'start' }),
+      agentEntry(1, { agentId: 'a2', label: 'l2', state: 'progress' }),
+      agentEntry(2, { agentId: 'a3', label: 'l3', state: 'running' }),
+      agentEntry(3, { agentId: 'a4', label: 'l4', state: 'queued' }),
+      agentEntry(4, { agentId: 'a5', label: 'l5', state: 'done' }),
+      agentEntry(5, { agentId: 'a6', label: 'l6', state: 'failed', error: 'real error' }),
+    ];
+    const model = buildWorkflowTreeModel({ entries, taskStatus: 'stopped' })!;
+    const rows = model.groups[0].agents;
+    for (const key of ['a1', 'a2', 'a3', 'a4']) {
+      const row = rows.find((r) => r.key === key)!;
+      expect(row.state).toBe('error');
+      expect(row.error).toBeUndefined();
+    }
+    expect(rows.find((r) => r.key === 'a5')!.state).toBe('done');
+    expect(rows.find((r) => r.key === 'a6')).toMatchObject({ state: 'failed', error: 'real error' });
+  });
+
+  it('终态修正同样作用于 file-only 路径', () => {
+    const file = fileProgress({
+      status: 'failed',
+      agents: [
+        fileAgent({ label: 'x', agentId: 'fx', state: 'running' }),
+        fileAgent({ label: 'y', agentId: 'fy', state: 'stopped' }),
+      ],
+    });
+    const model = buildWorkflowTreeModel({ fileProgress: file, taskStatus: 'failed' })!;
+    expect(model.groups[0].agents.find((r) => r.key === 'fx')!.state).toBe('error');
+    // stopped 是终态,不修正
+    expect(model.groups[0].agents.find((r) => r.key === 'fy')!.state).toBe('stopped');
+  });
+
+  it('任务运行中不做终态修正', () => {
+    const entries: WorkflowProgressEntry[] = [
+      agentEntry(0, { agentId: 'a1', label: 'l1', state: 'progress' }),
+    ];
+    const model = buildWorkflowTreeModel({ entries, taskStatus: 'running' })!;
+    expect(model.groups[0].agents[0].state).toBe('progress');
+  });
+
+  it('aggregate:totalTokens/totalToolCalls/durationMs 文件优先,缺失回退 usage', () => {
+    const entries: WorkflowProgressEntry[] = [
+      agentEntry(0, { agentId: 'a1', label: 'l1', state: 'running' }),
+    ];
+    const usage = { totalTokens: 111, toolUses: 22, durationMs: 3333 };
+    const withFile = buildWorkflowTreeModel({
+      entries,
+      fileProgress: fileProgress({ totalTokens: 999, totalToolCalls: 88, durationMs: 7777 }),
+      taskStatus: 'running',
+      usage,
+    })!;
+    expect(withFile.aggregate).toMatchObject({ totalTokens: 999, totalToolCalls: 88, durationMs: 7777 });
+
+    const withoutFile = buildWorkflowTreeModel({ entries, taskStatus: 'running', usage })!;
+    expect(withoutFile.aggregate).toMatchObject({ totalTokens: 111, totalToolCalls: 22, durationMs: 3333 });
+
+    // 文件在场但字段缺失 → 逐字段回退 usage
+    const partialFile = buildWorkflowTreeModel({
+      entries,
+      fileProgress: fileProgress({ totalTokens: 999 }),
+      taskStatus: 'running',
+      usage,
+    })!;
+    expect(partialFile.aggregate).toMatchObject({ totalTokens: 999, totalToolCalls: 22, durationMs: 3333 });
+  });
+
+  it('aggregate.status:文件终态优先;文件非终态用 taskStatus', () => {
+    const entries: WorkflowProgressEntry[] = [
+      agentEntry(0, { agentId: 'a1', label: 'l1', state: 'done' }),
+    ];
+    // 文件已有终态结论(killed)→ 覆盖 taskStatus
+    const terminalFile = buildWorkflowTreeModel({
+      entries,
+      fileProgress: fileProgress({ status: 'killed' }),
+      taskStatus: 'stopped',
+    })!;
+    expect(terminalFile.aggregate.status).toBe('killed');
+
+    // 文件还是 running(记录滞后)→ 用 taskStatus
+    const staleFile = buildWorkflowTreeModel({
+      entries,
+      fileProgress: fileProgress({ status: 'running' }),
+      taskStatus: 'completed',
+    })!;
+    expect(staleFile.aggregate.status).toBe('completed');
+
+    // 无文件 → taskStatus
+    const noFile = buildWorkflowTreeModel({ entries, taskStatus: 'running' })!;
+    expect(noFile.aggregate.status).toBe('running');
+  });
+
+  it('aggregate.agentCount:file.agentCount 优先,缺失取 agent 行数', () => {
+    const entries: WorkflowProgressEntry[] = [
+      agentEntry(0, { agentId: 'a1', label: 'l1', state: 'running' }),
+      agentEntry(1, { agentId: 'a2', label: 'l2', state: 'running' }),
+    ];
+    const withCount = buildWorkflowTreeModel({
+      entries,
+      fileProgress: fileProgress({ agentCount: 7 }),
+      taskStatus: 'running',
+    })!;
+    expect(withCount.aggregate.agentCount).toBe(7);
+
+    const withoutCount = buildWorkflowTreeModel({ entries, taskStatus: 'running' })!;
+    expect(withoutCount.aggregate.agentCount).toBe(2);
+  });
+
+  it('entries 的 state 缺失按 queued 处理,任务终态时同样被修正为 error', () => {
+    const entries: WorkflowProgressEntry[] = [
+      agentEntry(0, { agentId: 'a1', label: 'l1' }),
+    ];
+    const running = buildWorkflowTreeModel({ entries, taskStatus: 'running' })!;
+    expect(running.groups[0].agents[0].state).toBe('queued');
+    const done = buildWorkflowTreeModel({ entries, taskStatus: 'completed' })!;
+    expect(done.groups[0].agents[0].state).toBe('error');
+  });
+});
