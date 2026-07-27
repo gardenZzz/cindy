@@ -34,7 +34,7 @@ import {
 import { patchDraft } from '@/state/newMakerDraft';
 import { ghostInstallErrorKey } from '@/cindy-brain/installErrorKey';
 import { confirmAndInstallGhost, pickAndUpdateGhost } from '@/cindy-brain/installFlow';
-import { GhostPermissionDiffView } from '@/cindy-brain/GhostPermissionList';
+import { GhostPermissionDiffView, GhostPermissionList } from '@/cindy-brain/GhostPermissionList';
 import { cn } from '@/lib/utils';
 import { Switch } from '@/components/ui/switch';
 import { getLastWorkingDir, subscribeToLastWorkingDir } from '@/state/lastWorkingDir';
@@ -42,6 +42,7 @@ import { findSplitChildByPanelKind } from '../../../shared/layoutTree';
 import {
   diffGhostPermissionItems,
   ghostPanelKind,
+  ghostPermissionItems,
   type GhostSetupStatus,
 } from '../../../shared/ghost';
 import type {
@@ -458,6 +459,7 @@ export function GhostPluginPage() {
         });
         if (!approved || !isMarketBusyLeaseActive(marketBusyLease)) return;
         const result = await window.electronAPI.pluginMarket.install(marketItem.pluginId, {
+          expectedReleaseId: next.releaseId,
           allowPermissionExpansion: diff.added.length > 0,
         });
         if (!isMarketBusyLeaseActive(marketBusyLease)) return;
@@ -693,23 +695,92 @@ export function GhostPluginPage() {
     // 旧确认回调恢复后必须先验权,不能在新会话里继续安装。
     const marketBusyLease = acquireMarketBusy(marketDetail.pluginId);
     if (!marketBusyLease) return;
+    // 详情页按钮在 update-available 态复用本入口,后端走原位更新并保留
+    // 生效状态 —— 文案必须分支,不能对更新路径承诺"装完即开"(review P1)。
+    const isUpdate = marketDetail.installState === 'update-available';
+    // 装完即开意味着"确认安装"就是运行授权,确认框里必须如实展示权限清单
+    // (与本地装入确认框同一信息量,review P1):首装展示完整清单,更新展示
+    // 与已装版本的权限 diff,并据此决定 allowPermissionExpansion(否则扩权
+    // 更新从本入口必被 main 的 PRECONDITION_FAILED 拦下)。更新详情来自 Main
+    // 的现查事实,renderer 的 ghosts 推送缓存可能短暂滞后;仅在 update 态且缓存
+    // 缺目标时,用既有 listSync 向 Main 现查一次。仍缺失说明状态已经变化,
+    // 让后端按原有校验拒绝,绝不能拿新清单和自己做 diff 吞掉新增权限。
+    let installedGhost =
+      ghosts.find((ghost) => ghost.manifest.id === marketDetail.ghostId) ?? null;
+    if (isUpdate && !installedGhost) {
+      try {
+        installedGhost =
+          window.electronAPI.ghosts
+            .listSync()
+            .ghosts.find((ghost) => ghost.manifest.id === marketDetail.ghostId) ?? null;
+      } catch {
+        // bridge 不可用/状态切换时保持 null;下面不展示伪造的空 diff,
+        // 安装调用也不放开 permission expansion,Main 会按真实状态 fail closed。
+      }
+    }
+    if (isUpdate && !installedGhost) {
+      // detail 仍说可更新、Main 的实时已装清单却没有目标:这是明确的状态
+      // 变化,不要展示伪造的空 diff 后让用户确认一次必失败的更新。
+      if (isMarketBusyLeaseActive(marketBusyLease)) {
+        toast.error(t('settings.ghosts.market.errors.stateChanged'));
+      }
+      releaseMarketBusy(marketBusyLease);
+      await refreshMarket();
+      return;
+    }
+    const diff = isUpdate
+      ? diffGhostPermissionItems(installedGhost!.manifest, marketDetail.manifest)
+      : null;
     try {
       const confirmed = await confirm({
-        title: t('settings.ghosts.market.installConfirmTitle', {
-          name: marketDetail.name,
-        }),
-        description: t('settings.ghosts.market.installConfirmDescription'),
-        confirmText: t('settings.ghosts.market.install'),
-        cancelText: t('settings.ghosts.installConfirm.cancel'),
+        title: isUpdate
+          ? t('settings.ghosts.updateConfirm.title', { name: marketDetail.name })
+          : t('settings.ghosts.market.installConfirmTitle', {
+              name: marketDetail.name,
+            }),
+        description: isUpdate
+          ? t('settings.ghosts.market.updateConfirmDescription')
+          : t('settings.ghosts.market.installConfirmDescription'),
+        content: (
+          <div
+            className="overflow-y-auto overscroll-contain pr-1"
+            style={{ maxHeight: 'min(56vh, 520px)', scrollbarGutter: 'stable' }}
+          >
+            {isUpdate ? (
+              <GhostPermissionDiffView diff={diff!} />
+            ) : (
+              <GhostPermissionList items={ghostPermissionItems(marketDetail.manifest)} />
+            )}
+          </div>
+        ),
+        maxWidth: 520,
+        confirmText: isUpdate
+          ? t('settings.ghosts.updateConfirm.confirm')
+          : t('settings.ghosts.market.install'),
+        cancelText: isUpdate
+          ? t('settings.ghosts.updateConfirm.cancel')
+          : t('settings.ghosts.installConfirm.cancel'),
         autoFocusConfirm: true,
       });
       if (!confirmed || !isMarketBusyLeaseActive(marketBusyLease)) return;
-      const result = await window.electronAPI.pluginMarket.install(marketDetail.pluginId);
+      const result = await window.electronAPI.pluginMarket.install(marketDetail.pluginId, {
+        expectedReleaseId: marketDetail.releaseId,
+        ...(isUpdate && diff!.added.length > 0
+          ? { allowPermissionExpansion: true }
+          : {}),
+      });
       if (!isMarketBusyLeaseActive(marketBusyLease)) return;
+      // 市场首装装完即开(2026-07-26 定案),toast 用"已安装";更新路径如实
+      // 用"已更新"(生效状态未被改变)。
       toast.success(
-        t('settings.ghosts.toast.installedAsleep', {
-          name: result.ghost.manifest.name,
-        }),
+        isUpdate
+          ? t('settings.ghosts.toast.updated', {
+              name: result.ghost.manifest.name,
+              version: result.ghost.manifest.version,
+            })
+          : t('settings.ghosts.toast.installed', {
+              name: result.ghost.manifest.name,
+            }),
       );
       setMarketDetail(null);
       setSelectedId(result.ghost.manifest.id);
@@ -724,6 +795,7 @@ export function GhostPluginPage() {
   }, [
     acquireMarketBusy,
     confirm,
+    ghosts,
     isMarketBusyLeaseActive,
     marketDetail,
     refreshMarket,
