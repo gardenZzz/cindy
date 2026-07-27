@@ -32,6 +32,10 @@ describe('parseProxyAddrInput', () => {
     expect(parseProxyAddrInput('[::1]:7890abc')).toBeNull();
     // bracket 内的 host 同样拒空白 (与非 bracket 分支一致)。
     expect(parseProxyAddrInput('[::1 ]:7890')).toBeNull();
+    // 引号与 main 侧 normalizeAgentProxyInput 校验一致, 两个分支都拒。
+    expect(parseProxyAddrInput("ho'st:7890")).toBeNull();
+    expect(parseProxyAddrInput('ho"st:7890')).toBeNull();
+    expect(parseProxyAddrInput("[::1']:7890")).toBeNull();
     expect(parseProxyAddrInput('host:7890 ')).toEqual({ localHost: 'host', localPort: 7890 }); // 整串 trim 后合法
   });
 });

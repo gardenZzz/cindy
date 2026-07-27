@@ -98,6 +98,11 @@ function makeFakeHost(opts: { marker?: string | null; remotePort?: number } = {}
     async closeAllRemoteForwards() {
       state.forwards = [];
     },
+    async closeRemoteForward(localHost: string, localPort: number) {
+      state.forwards = state.forwards.filter(
+        (f) => !(f.localHost === localHost && f.localPort === localPort),
+      );
+    },
     listRemoteForwards() {
       return state.forwards.map((f) => ({ ...f, armed: true }));
     },
@@ -156,6 +161,21 @@ describe('ensureAgentProxyTunnel', () => {
     const result = await ensureAgentProxyTunnel(host);
     expect(result).toEqual({ remotePort: 17893 });
     expect(state.forwards).toEqual([{ localHost: '127.0.0.1', localPort: 7890, remotePort: 17893 }]);
+  });
+
+  it('closes stale forwards whose target no longer matches the pref (review R5)', async () => {
+    // pref 目标被编辑 (7890 → 1080): 旧目标的 forward 必须拆掉, 否则残留并
+    // 随重连 re-arm, 远端多暴露一个隧道口。
+    setSshHostAgentProxy('test-host', PREF);
+    const { host, state } = makeFakeHost();
+    await ensureAgentProxyTunnel(host);
+    expect(state.forwards).toHaveLength(1);
+
+    setSshHostAgentProxy('test-host', { ...PREF, localPort: 1080 });
+    const result = await ensureAgentProxyTunnel(host);
+    expect(result).toEqual({ remotePort: 17893 });
+    // 旧 7890 已拆, 只剩新 1080。
+    expect(state.forwards).toEqual([{ localHost: '127.0.0.1', localPort: 1080, remotePort: 17893 }]);
   });
 });
 

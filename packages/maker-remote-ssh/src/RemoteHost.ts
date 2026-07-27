@@ -580,6 +580,19 @@ export class RemoteHost {
     }));
   }
 
+  /**
+   * 关闭指定本地目标的单条 forward (无该登记时 no-op)。与 closeAll 不同
+   * 不会在 ensure 语义下误触发 arm — 用于「目标变了, 先拆旧的」
+   * (review: PR #715 R5: pref 的 localHost/localPort 被编辑后, 旧目标的
+   * forward 会残留并随重连 re-arm, 远端多暴露一个隧道口)。
+   */
+  async closeRemoteForward(localHost: string, localPort: number): Promise<void> {
+    const key = `${localHost}:${localPort}`;
+    const record = this.forwards.get(key);
+    if (!record) return;
+    await this.forwardHandle(key, record).close();
+  }
+
   /** 关闭并清除所有已登记 forward (pref 关闭路径)。连接断开时是纯本地清理。 */
   async closeAllRemoteForwards(): Promise<void> {
     const keys = Array.from(this.forwards.keys());
