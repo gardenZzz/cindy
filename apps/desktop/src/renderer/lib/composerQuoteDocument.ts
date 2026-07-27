@@ -11,6 +11,7 @@ import type { JSONContent } from '@tiptap/core';
 import type { AgentInputReference } from '../../shared/agentInputQueue';
 import { parseChatQuoteSegments, type ChatQuote, type ChatQuoteSegment } from '@/lib/chatQuotes';
 import type { PastedTextRange, SlashCommandRange } from '@/lib/imageRef';
+import { normalizeComposerDocumentJSON } from './composerListDocument';
 
 export const COMPOSER_QUOTE_NODE_TYPE = 'composerQuote';
 
@@ -192,12 +193,12 @@ export function quoteSegmentsToComposerDocument(
 export function composerHistoryEntryToDocument(entry: ComposerHistoryEntry): JSONContent {
   if (entry.quotesEncoded === true) {
     const quotedDocument = quoteSegmentsToComposerDocument(parseChatQuoteSegments(entry.content));
-    if (quotedDocument) return quotedDocument;
+    if (quotedDocument) return normalizeComposerDocumentJSON(quotedDocument);
   }
-  return {
+  return normalizeComposerDocumentJSON({
     type: 'doc',
     content: [paragraph(entry.content ? [{ type: 'text', text: entry.content }] : [])],
-  };
+  });
 }
 
 /**

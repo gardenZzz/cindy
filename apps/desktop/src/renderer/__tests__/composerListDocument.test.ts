@@ -1,0 +1,108 @@
+import { describe, expect, it } from 'vitest';
+
+import {
+  normalizeComposerDocumentJSON,
+  plainTextToComposerDocument,
+} from '@/lib/composerListDocument';
+
+describe('composer list document normalization', () => {
+  it('promotes plain ordered rows into one structured list', () => {
+    expect(plainTextToComposerDocument('1. first\n2. second')).toEqual({
+      type: 'doc',
+      content: [
+        {
+          type: 'orderedList',
+          attrs: { start: 1, marker: '.' },
+          content: [
+            {
+              type: 'listItem',
+              content: [{ type: 'paragraph', content: [{ type: 'text', text: 'first' }] }],
+            },
+            {
+              type: 'listItem',
+              content: [{ type: 'paragraph', content: [{ type: 'text', text: 'second' }] }],
+            },
+          ],
+        },
+      ],
+    });
+  });
+
+  it('keeps surrounding paragraphs and task bodies intact', () => {
+    expect(plainTextToComposerDocument('intro\n- [ ] todo\n- [x] done\noutro')).toEqual({
+      type: 'doc',
+      content: [
+        { type: 'paragraph', content: [{ type: 'text', text: 'intro' }] },
+        {
+          type: 'bulletList',
+          content: [
+            {
+              type: 'listItem',
+              content: [{ type: 'paragraph', content: [{ type: 'text', text: '[ ] todo' }] }],
+            },
+            {
+              type: 'listItem',
+              content: [{ type: 'paragraph', content: [{ type: 'text', text: '[x] done' }] }],
+            },
+          ],
+        },
+        { type: 'paragraph', content: [{ type: 'text', text: 'outro' }] },
+      ],
+    });
+  });
+
+  it('does not consume indented rows as top-level lists', () => {
+    expect(plainTextToComposerDocument('1. parent\n  - child')).toEqual({
+      type: 'doc',
+      content: [
+        {
+          type: 'orderedList',
+          attrs: { start: 1, marker: '.' },
+          content: [
+            {
+              type: 'listItem',
+              content: [{ type: 'paragraph', content: [{ type: 'text', text: 'parent' }] }],
+            },
+          ],
+        },
+        { type: 'paragraph', content: [{ type: 'text', text: '  - child' }] },
+      ],
+    });
+  });
+
+  it('strips each ordered marker at its own width and ignores decimal text', () => {
+    expect(plainTextToComposerDocument('9. nine\n10. ten').content?.[0]?.content).toEqual([
+      {
+        type: 'listItem',
+        content: [{ type: 'paragraph', content: [{ type: 'text', text: 'nine' }] }],
+      },
+      {
+        type: 'listItem',
+        content: [{ type: 'paragraph', content: [{ type: 'text', text: 'ten' }] }],
+      },
+    ]);
+    expect(plainTextToComposerDocument('3.14159')).toEqual({
+      type: 'doc',
+      content: [{ type: 'paragraph', content: [{ type: 'text', text: '3.14159' }] }],
+    });
+  });
+
+  it('leaves existing structured content unchanged', () => {
+    const document = {
+      type: 'doc' as const,
+      content: [
+        {
+          type: 'orderedList',
+          attrs: { start: 3, marker: ')' },
+          content: [
+            {
+              type: 'listItem',
+              content: [{ type: 'paragraph', content: [{ type: 'text', text: 'existing' }] }],
+            },
+          ],
+        },
+      ],
+    };
+    expect(normalizeComposerDocumentJSON(document)).toEqual(document);
+  });
+});
