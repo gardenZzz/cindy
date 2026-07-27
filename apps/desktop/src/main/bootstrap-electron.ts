@@ -992,7 +992,7 @@ installWebviewHardener();
 // 调用时机远晚于此处构造),状态机本体见 right-sidebar-window/controller.ts。
 const rsbWindowController = new RsbWindowController({
   settings: { read: readRsbWindowSettings, writePatch: writeRsbWindowSettingsPatch },
-  createWindow: () => createRightSidebarWindow(),
+  createWindow: (opts) => createRightSidebarWindow(opts),
   getMainWindow: () => mainWindowRef,
   broadcastState: (state) => {
     for (const win of BrowserWindow.getAllWindows()) {
