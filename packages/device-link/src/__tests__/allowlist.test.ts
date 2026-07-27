@@ -71,6 +71,10 @@ describe('REMOTE_INVOKE_ALLOWLIST', () => {
     }
   });
 
+  it('放行 workflow 逐 agent 进度树只读(记录文件真相在被控端 HOME,控制端本机读必落空)', () => {
+    expect(REMOTE_INVOKE_ALLOWLIST.has('maker:get-workflow-progress')).toBe(true);
+  });
+
   it('放行会话级完整对等补充(fork-strip / context-usage / 窄口径 patch-meta / Magic 重命名)', () => {
     for (const ch of [
       'maker:fork-strip-encrypted',

@@ -22,6 +22,7 @@ import { getStickySessionDeviceId } from '@/features/device-link/stickySessionOr
 import type { Message, Session } from '@/lib/ccAgent.types';
 import * as messageService from '@/lib/messageService';
 import * as sessionService from '@/lib/sessionService';
+import { extractIpcError } from '@/utils/ipcError';
 
 type FullMaker = typeof window.electronAPI.maker;
 
@@ -190,6 +191,34 @@ export function listMessagesFor(
   const deviceId = getSessionDeviceId(sessionId);
   if (!deviceId) return messageService.list(sessionId, opts);
   return invokeRemote(deviceId, 'local-db:messages:list', [sessionId, opts]) as Promise<Message[]>;
+}
+
+// 已确认不支持 maker:get-workflow-progress 的被控设备(收到过 CHANNEL_NOT_ALLOWED):
+// 进度树读取是高频轮询型 best-effort,老被控端不再空耗隧道往返,直接短路 null。
+const workflowProgressUnsupportedDevices = new Set<string>();
+
+/**
+ * workflow 逐 agent 进度树(只读,best-effort):记录文件真相在会话归属端 HOME,
+ * 远程会话必须隧道到被控端读(控制端本机读必落空)。老被控端无此 channel →
+ * CHANNEL_NOT_ALLOWED → 记入短路集;其余错误一律返回 null,调用方回退 workflow 级卡片。
+ */
+export function getWorkflowProgressFor(
+  sessionId: string,
+  taskId: string,
+): Promise<import('../../shared/workflow-progress').WorkflowProgress | null> {
+  const deviceId = getSessionDeviceId(sessionId);
+  if (!deviceId) return window.electronAPI.maker.getWorkflowProgress(sessionId, taskId);
+  if (workflowProgressUnsupportedDevices.has(deviceId)) return Promise.resolve(null);
+  return (
+    invokeRemote(deviceId, 'maker:get-workflow-progress', [sessionId, taskId]) as Promise<
+      import('../../shared/workflow-progress').WorkflowProgress | null
+    >
+  ).catch((err) => {
+    if (extractIpcError(err)?.code === 'DEVICE_LINK_CHANNEL_NOT_ALLOWED') {
+      workflowProgressUnsupportedDevices.add(deviceId);
+    }
+    return null;
+  });
 }
 
 /**

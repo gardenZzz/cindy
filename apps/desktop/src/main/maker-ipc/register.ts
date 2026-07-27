@@ -3262,11 +3262,12 @@ export function registerMakerIpc(maker: Maker, options: RegisterMakerIpcOptions 
       try {
         const s = maker.listActiveSessions().find((x) => x.id === sessionId);
         if (!s) return null;
-        // 远程(device-link)会话:Claude CLI 跑在远端机器,workflow 记录写在**远端 HOME**
-        // 下的 ~/.claude/projects/...(远程 env 路径与桌面 HOME 刻意隔离)。用本地 os.homedir()
-        // 拼 workDir 会指向不存在的本地目录,永远读不到。直接返回 null → renderer 回退到
-        // workflow 级卡片(其数据走事件流、跨隧道可用)。远程逐 agent 树需经 device-link 隧道
-        // 读远端文件,列为后续增强。
+        // SSH 远程工作区会话(s.remoteHostId):Claude CLI 跑在 SSH 远端主机,workflow
+        // 记录文件写在**SSH 远端 HOME** 下 —— 用本机 os.homedir() 拼目录必落空,读远端
+        // 文件需经 remote-file-service,暂不支持 → 返回 null,renderer 回退到 workflow 级
+        // 卡片(其数据走事件流,SSH 下可用)。注意这不是 device-link:device-link 远程会话
+        // 不在本机 listActiveSessions,由控制端 renderer 的 makerTransport 隧道路由到被控端
+        // 执行本 handler(见 allowlist 的 maker:get-workflow-progress 准入)。
         if (s.remoteHostId) return null;
         const { sdkSessionId, workDir } = s;
         if (!sdkSessionId || !workDir) return null;
