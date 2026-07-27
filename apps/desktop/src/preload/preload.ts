@@ -3677,7 +3677,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
       providerId: string,
     ): Promise<{
       ok: boolean;
-      failure?: import('@cindy/model-providers').ProviderModelDiscoveryFailure;
+      failure?: import('@cindy/model-providers').ProviderModelDiscoveryFailureView;
     }> => ipcRenderer.invoke('maker:provider:models-rediscover', providerId),
     /** 自定义供应商变更广播订阅（返回 off）。 */
     onProvidersChanged: fanOutMakerProvidersChanged,

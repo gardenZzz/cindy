@@ -1000,6 +1000,19 @@ describe('HTTP 发现失败的归因与选择性重试', () => {
     expect(getAnthropicModelDiscoveryFailure()?.kind).toBe('unauthorized');
   });
 
+  it('200 但 data 不是 /v1/models 的形状归 upstream,不能一路走到 empty', async () => {
+    // 典型:代理生成的 {"error":...} 却带 200。静默跳过会落到确定性的 empty(不重试),
+    // 还会把上游故障说成「你的账号没有可用模型」。
+    for (const payload of [{ error: { message: 'proxy failure' } }, { data: 'nope' }]) {
+      resetAnthropicDiscoveryForTest();
+      vi.stubGlobal('fetch', vi.fn().mockResolvedValue({ ok: true, json: async () => payload }));
+      await refreshAnthropicModelsFromHttp();
+      const failure = getAnthropicModelDiscoveryFailure();
+      expect(failure?.kind).toBe('upstream');
+      expect(failure?.detail).toContain('unexpected payload shape');
+    }
+  });
+
   it('答复正常但没有可用模型归 empty', async () => {
     vi.stubGlobal(
       'fetch',

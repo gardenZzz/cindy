@@ -592,13 +592,26 @@ export function NewMakerDraftRoute() {
   ]);
 
   const effectiveSourceId = useMemo<string | null>(() => {
+    // 本地草稿用**过滤后**的候选解析来源:SSH 场景下同一个 model id 可能既被允许的来源
+    // 提供、又被排除掉的 openai-chat 来源提供,拿未过滤的 providers 解析会指到后者 ——
+    // 于是 providerId 落 null、main 挑到被排除的原生默认,而 ChatInput 看到的是允许的
+    // 那个来源、Send 照常放行,最后在远端失败(PR #548 review)。
+    // device-link 草稿以被控端目录为准,不参与本地过滤。
+    const source = isDeviceLinkDraft ? providers : calibrationProviders;
     return effectiveSourceIdForModel(
-      providers,
+      source,
       chatPrefs.providerId ?? null,
       calibratedDraftModel,
       capabilityAgentKind,
     );
-  }, [providers, capabilityAgentKind, chatPrefs.providerId, calibratedDraftModel]);
+  }, [
+    isDeviceLinkDraft,
+    providers,
+    calibrationProviders,
+    capabilityAgentKind,
+    chatPrefs.providerId,
+    calibratedDraftModel,
+  ]);
 
   // 首页是“下一次创建会话”的配置草稿,没有正在运行的当前模型需要保护。其它对话更新同一模型
   // 的全局预设后,即使该模型正显示在首页 trigger 上,也应立即采用新 effort / fast。真实会话仍

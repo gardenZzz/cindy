@@ -1472,6 +1472,32 @@ export function ProvidersSection() {
             ) : effectiveSelected ? (
               <>
                 {renderDetailHeader(effectiveSelected)}
+                {/* 发现失败与「有没有模型」是正交的:失败时刻意保留上次成功的清单(它是陈旧
+                    但可溯源的真数据),于是老用户清单照常显示 —— 若把提示只放进空态分支,他
+                    就完全看不到「这份清单已经不代表当前状态」,还以为供应商一切正常
+                    (DESIGN.md「Errors = what happened + what to do」)。有清单时以条带形式
+                    置于列表上方,无清单时走下面的空态居中版。 */}
+                {effectiveSelected.modelDiscoveryFailure && providerHasModels(effectiveSelected) && (
+                  <div
+                    className="flex shrink-0 flex-wrap items-center justify-between gap-3 border-t px-5 py-3 text-13"
+                    style={{ borderColor: 'var(--settings-theme-card-border)' }}
+                  >
+                    <span style={{ color: 'var(--text-tertiary)' }}>
+                      {t(
+                        `settings.providers.detail.discoveryFailed.${effectiveSelected.modelDiscoveryFailure.kind}`,
+                      )}
+                    </span>
+                    <PillButton
+                      label={t(
+                        rediscovering
+                          ? 'settings.providers.button.retrying'
+                          : 'settings.providers.button.retry',
+                      )}
+                      onClick={() => void handleRediscoverModels(effectiveSelected)}
+                      disabled={rediscovering}
+                    />
+                  </div>
+                )}
                 {providerHasModels(effectiveSelected) && (
                   <>
                     <div

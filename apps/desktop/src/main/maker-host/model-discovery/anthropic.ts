@@ -708,7 +708,10 @@ class DiscoveryHttpError extends Error {
 /** 响应体只留够判定与诊断的前缀,避免把上游的大 HTML 错误页整个搬进日志。 */
 const ERROR_BODY_SNIPPET_LIMIT = 2_000;
 
-/** HTTP 200 但正文不是可解析的 JSON:上游/中间层的问题,与链路不通要分开归因。 */
+/**
+ * HTTP 200 但正文不可用 —— 解析不了,或解析出来根本不是 /v1/models 的形状。
+ * 都是上游 / 中间层的问题,与链路不通要分开归因(且属于可重试类)。
+ */
 class DiscoveryResponseError extends Error {
   constructor(detail: string) {
     super(`malformed response body: ${detail}`);
@@ -926,7 +929,15 @@ export function refreshAnthropicModelsFromHttp(options?: {
             parseErr instanceof Error ? parseErr.message : String(parseErr),
           );
         }
-        if (Array.isArray(body.data)) entries.push(...body.data);
+        // data 缺失 / 不是数组 = 拿到的根本不是 /v1/models 的形状(典型:代理生成的
+        // {"error":...} 却带 200)。静默跳过会让它一路走到「empty」——那是确定性归因、
+        // 不重试,还会让 UI 说「账号没有可用模型」,把上游故障说成用户的权限问题。
+        if (!Array.isArray(body.data)) {
+          throw new DiscoveryResponseError(
+            `unexpected payload shape (data=${body.data === undefined ? 'missing' : typeof body.data})`,
+          );
+        }
+        entries.push(...body.data);
         url =
           body.has_more && typeof body.last_id === 'string'
             ? `${upstream.replace(/\/+$/, '')}/v1/models?limit=1000&after_id=${encodeURIComponent(body.last_id)}`
