@@ -19,12 +19,24 @@ export interface WorkflowAgentProgress {
   phaseTitle?: string;
   /** 重试次数(≥1)。 */
   attempt?: number;
+  /** 最近一次工具调用的工具名(如 "Read")。 */
+  lastToolName?: string;
+  /** 最近一次工具调用的一行摘要(如文件路径;reader 截断 ≤160)。 */
+  lastToolSummary?: string;
+  /** 完成后的结果预览(reader 截断 ≤300)。 */
+  resultPreview?: string;
+  /** 该 agent 的运行时长(毫秒)。 */
+  durationMs?: number;
+  /** 失败时的错误文本(reader 截断 ≤300)。 */
+  error?: string;
 }
 
 /** workflow 的一个阶段。 */
 export interface WorkflowPhaseProgress {
   index: number;
   title: string;
+  /** phase 说明文字(仅存在于记录顶层 phases[],按 title 回填;截断 ≤200)。 */
+  detail?: string;
 }
 
 /** 一次 workflow 运行的聚合进度树。 */
@@ -37,6 +49,8 @@ export interface WorkflowProgress {
   totalTokens?: number;
   totalToolCalls?: number;
   durationMs?: number;
+  /** 脚本 log() 的叙述行(保留最后 50 条、每条截断 ≤300;记录文件独有)。 */
+  logs?: string[];
   phases: WorkflowPhaseProgress[];
   agents: WorkflowAgentProgress[];
 }

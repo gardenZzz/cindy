@@ -10,7 +10,9 @@ import {
   readWorkflowProgressByTaskId,
 } from '../reader';
 
-// 取自 2026-07-01 实测的真实 wf_*.json 结构(裁剪)。
+// 取自实测的真实 wf_*.json 结构(裁剪;2026-07 样本含 lastTool*/resultPreview/
+// durationMs/logs/phases[].detail 等字段,promptPreview/tokens 等未透传字段保留在
+// fixture 里验证会被忽略)。
 const REAL_RECORD = {
   runId: 'wf_fe3a6ac8-543',
   taskId: 'wmowi77vg',
@@ -20,7 +22,8 @@ const REAL_RECORD = {
   totalTokens: 12345,
   totalToolCalls: 7,
   durationMs: 9045,
-  phases: [{ title: 'Search' }],
+  logs: ['共 2 条结果,验证后全部保留'],
+  phases: [{ title: 'Search', detail: '2 个并行搜索维度:AI 技术 / 财经' }],
   workflowProgress: [
     { type: 'workflow_phase', index: 1, title: 'Search' },
     {
@@ -32,7 +35,17 @@ const REAL_RECORD = {
       agentId: 'a88d563bf7405b73c',
       model: 'claude-opus-4-8[1m]',
       state: 'done',
+      startedAt: 1782941756057,
+      queuedAt: 1782941756043,
       attempt: 1,
+      lastToolName: 'StructuredOutput',
+      lastToolSummary: '核心断言全部实测确认',
+      resultPreview: '{"findings":[{"title":"AI 技术要点"}]}',
+      promptPreview: '你在搜索 AI 技术新闻…',
+      lastProgressAt: 1782941956009,
+      tokens: 55742,
+      toolCalls: 13,
+      durationMs: 1999,
     },
     {
       type: 'workflow_agent',
@@ -76,7 +89,10 @@ describe('extractWorkflowProgress', () => {
       totalToolCalls: 7,
       durationMs: 9045,
     });
-    expect(p!.phases).toEqual([{ index: 1, title: 'Search' }]);
+    expect(p!.logs).toEqual(['共 2 条结果,验证后全部保留']);
+    expect(p!.phases).toEqual([
+      { index: 1, title: 'Search', detail: '2 个并行搜索维度:AI 技术 / 财经' },
+    ]);
     expect(p!.agents).toEqual([
       {
         label: 'search:ai-tech',
@@ -85,6 +101,10 @@ describe('extractWorkflowProgress', () => {
         state: 'done',
         phaseTitle: 'Search',
         attempt: 1,
+        lastToolName: 'StructuredOutput',
+        lastToolSummary: '核心断言全部实测确认',
+        resultPreview: '{"findings":[{"title":"AI 技术要点"}]}',
+        durationMs: 1999,
       },
       {
         label: 'search:finance',
@@ -95,6 +115,86 @@ describe('extractWorkflowProgress', () => {
         attempt: 1,
       },
     ]);
+  });
+
+  it('truncates oversized agent detail fields to their caps (ellipsis included in cap)', () => {
+    const p = extractWorkflowProgress({
+      runId: 'wf_x',
+      status: 'running',
+      workflowProgress: [
+        {
+          type: 'workflow_agent',
+          agentId: 'a1',
+          state: 'failed',
+          lastToolName: 'n'.repeat(250),
+          lastToolSummary: 's'.repeat(200),
+          resultPreview: 'r'.repeat(400),
+          error: 'e'.repeat(400),
+        },
+      ],
+    });
+    const a = p!.agents[0]!;
+    expect(a.lastToolName).toBe('n'.repeat(199) + '…');
+    expect(a.lastToolName).toHaveLength(200);
+    expect(a.lastToolSummary).toBe('s'.repeat(159) + '…');
+    expect(a.lastToolSummary).toHaveLength(160);
+    expect(a.resultPreview).toBe('r'.repeat(299) + '…');
+    expect(a.resultPreview).toHaveLength(300);
+    expect(a.error).toBe('e'.repeat(299) + '…');
+    expect(a.error).toHaveLength(300);
+  });
+
+  it('backfills phase detail from top-level phases[] by title, first entry wins on duplicates', () => {
+    const p = extractWorkflowProgress({
+      runId: 'wf_x',
+      status: 'running',
+      phases: [
+        { title: 'A', detail: 'first-A' },
+        { title: 'A', detail: 'second-A' },
+        { title: 'B', detail: 'd'.repeat(260) },
+        { title: 'C' }, // 无 detail → 不回填
+      ],
+      workflowProgress: [
+        { type: 'workflow_phase', index: 1, title: 'A' },
+        { type: 'workflow_phase', index: 2, title: 'B' },
+        { type: 'workflow_phase', index: 3, title: 'C' },
+      ],
+    });
+    expect(p!.phases[0]).toEqual({ index: 1, title: 'A', detail: 'first-A' });
+    expect(p!.phases[1]!.detail).toBe('d'.repeat(199) + '…');
+    expect(p!.phases[1]!.detail).toHaveLength(200);
+    expect(p!.phases[2]).toEqual({ index: 3, title: 'C' });
+  });
+
+  it('keeps only the last 50 logs, truncates each to 300, and skips non-string items', () => {
+    const raw = Array.from({ length: 60 }, (_, i) => `log-${i}`);
+    const p = extractWorkflowProgress({
+      runId: 'wf_x',
+      status: 'running',
+      logs: [...raw, 42, null, 'x'.repeat(350)],
+      workflowProgress: [],
+    });
+    expect(p!.logs).toHaveLength(50);
+    // 非字符串项被剔除后再取末 50 条:log-11..log-59 + 超长行。
+    expect(p!.logs![0]).toBe('log-11');
+    expect(p!.logs![48]).toBe('log-59');
+    expect(p!.logs![49]).toBe('x'.repeat(299) + '…');
+    expect(p!.logs![49]).toHaveLength(300);
+  });
+
+  it('omits logs and the new optional fields when absent (old behavior unchanged)', () => {
+    const p = extractWorkflowProgress({
+      runId: 'wf_x',
+      status: 'running',
+      workflowProgress: [{ type: 'workflow_agent', agentId: 'a1', state: 'done' }],
+    });
+    expect(p).toEqual({
+      runId: 'wf_x',
+      status: 'running',
+      phases: [],
+      agents: [{ label: 'a1', agentId: 'a1', state: 'done' }],
+    });
+    expect('logs' in p!).toBe(false);
   });
 
   it('falls back to top-level phases[] when workflowProgress has no phase entries', () => {
