@@ -124,11 +124,13 @@ export function hasGrokOAuthLoginUnbound(): boolean {
 
 /** 登出:清掉本机 xAI 凭证。 */
 export function logoutGrok(): void {
+  // remove() 的失败结果这里不阻断登出(用户意图优先),但正因为凭证可能没删掉,解绑必须
+  // 带撤销标记 —— 否则下一次读连接态会把残留凭证自动认领回来(PR #548 review)。
   getProviderSecretStore().remove(SECRET_ID);
   _blobCache = null;
   // 冷却窗口跟着登录态走:重新登录后第一次被拒仍应立刻尝试自愈。
   _lastForcedRefreshAt = 0;
-  unbindNativeProviderAuth('xai');
+  unbindNativeProviderAuth('xai', { revoked: true });
 }
 
 // ── OIDC discovery(校验端点在 *.x.ai over https)────────────────────────────────
