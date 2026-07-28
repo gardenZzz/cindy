@@ -267,6 +267,11 @@
           "keyHint": "直接读私钥文件。为了不存密码，不支持加密的密钥 —— 仅在 ssh-agent 不可用时使用。"
         },
         "identityFile": "私钥文件路径",
+        "agentProxy": "Agent 流量走本地 Proxy",
+        "agentProxyTip": "在远端开一个 127.0.0.1 端口，经 SSH 隧道转回本机 Proxy，远端 codex / Claude Code 的流量由此流出",
+        "agentProxyAddr": "本地 Proxy 地址",
+        "agentProxyHint": "在远端 127.0.0.1 开端口，经 SSH 隧道转回本机 Proxy（如 Clash 的 7890）。{{appName}} 不提供 Proxy，只建隧道；远端 agent 的 HTTPS_PROXY 会指向隧道口，域名由你的 Proxy 解析。切换后远端 codex daemon 会重启一次以生效。",
+        "agentProxyAddrInvalid": "格式应为 host:port，例如 127.0.0.1:7890",
         "cancel": "取消",
         "submit": "添加机器"
       },
@@ -282,6 +287,11 @@
         "statusInstalled": "已安装",
         "statusNotInstalled": "未安装",
         "claudeCodeName": "Claude Code",
+        "agentProxyTitle": "Agent Proxy 隧道",
+        "agentProxyActive": "远端 127.0.0.1 端口 {{port}} → 本机 {{target}} · 已建立",
+        "agentProxyPending": "隧道建立中 → 本机 {{target}}",
+        "agentProxyWaiting": "主机未连接，重连后自动建立 → 本机 {{target}}",
+        "agentProxyError": "隧道建立失败：{{message}}",
         "button": {
           "install": "安装",
           "reinstall": "重新安装",
@@ -3173,6 +3183,8 @@
       "balanceAvailable": "余额可用",
       "balanceDepleted": "余额已耗尽",
       "balanceUnlimited": "余额不限",
+      "resetCreditsAvailableLine": "可用重置：{{count}} 次",
+      "resetCreditEarliestExpiryLine": "最早过期：{{at}}",
       "windowLine": "{{label}} 剩余 {{remaining}} (已用 {{used}})",
       "windowSegment": "{{label}} 剩余 {{remaining}}",
       "resetAt": "{{at}} 重置",
@@ -7384,7 +7396,6 @@
         "cancelFailed": "取消订阅失败，请稍后重试。"
       },
       "topupCard": {
-
         "action": "购买点数"
       }
     },
