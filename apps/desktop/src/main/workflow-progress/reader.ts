@@ -90,18 +90,26 @@ export function extractWorkflowProgress(record: unknown): WorkflowProgress | nul
       const agentId = asString(e.agentId);
       const state = asString(e.state);
       if (!agentId || !state) continue;
+      const model = asString(e.model);
+      const phaseTitle = asString(e.phaseTitle);
+      const attempt = asNumber(e.attempt);
+      const lastToolName = asTruncated(e.lastToolName, 200);
+      const lastToolSummary = asTruncated(e.lastToolSummary, 160);
+      const resultPreview = asTruncated(e.resultPreview, 300);
+      const durationMs = asNumber(e.durationMs);
+      const error = asTruncated(e.error, 300);
       agents.push({
         label: asString(e.label) ?? agentId,
         agentId,
         state,
-        ...(asString(e.model) ? { model: asString(e.model) } : {}),
-        ...(asString(e.phaseTitle) ? { phaseTitle: asString(e.phaseTitle) } : {}),
-        ...(asNumber(e.attempt) != null ? { attempt: asNumber(e.attempt) } : {}),
-        ...(asTruncated(e.lastToolName, 200) ? { lastToolName: asTruncated(e.lastToolName, 200) } : {}),
-        ...(asTruncated(e.lastToolSummary, 160) ? { lastToolSummary: asTruncated(e.lastToolSummary, 160) } : {}),
-        ...(asTruncated(e.resultPreview, 300) ? { resultPreview: asTruncated(e.resultPreview, 300) } : {}),
-        ...(asNumber(e.durationMs) != null ? { durationMs: asNumber(e.durationMs) } : {}),
-        ...(asTruncated(e.error, 300) ? { error: asTruncated(e.error, 300) } : {}),
+        ...(model ? { model } : {}),
+        ...(phaseTitle ? { phaseTitle } : {}),
+        ...(attempt != null ? { attempt } : {}),
+        ...(lastToolName ? { lastToolName } : {}),
+        ...(lastToolSummary ? { lastToolSummary } : {}),
+        ...(resultPreview ? { resultPreview } : {}),
+        ...(durationMs != null ? { durationMs } : {}),
+        ...(error ? { error } : {}),
       });
     }
   }
