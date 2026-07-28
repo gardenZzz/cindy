@@ -31,7 +31,6 @@ import type { AgentEvent, AgentTaskStatus, AgentTaskUpdateEventData } from '../.
 import { normalizeAccountRateLimitSnapshot } from '../../types/account-rate-limits.js';
 import type { AsyncQueue } from '../shared/async-queue.js';
 import { stripTerminalControlSequences } from '../shared/terminal-output.js';
-import { isNetworkishErrorMessage } from '../shared/network-error.js';
 import { commandExecutionDisplayInput, type CommandExecutionDisplayInput } from './command-display.js';
 import type {
   ItemCompletedNotification,
@@ -190,6 +189,38 @@ export function translateItemNotification(
   }
 }
 
+/**
+ * auth 缺失 (401/Unauthorized/Missing bearer) 判定 — daemon 怎么 retry 也不可能
+ * 自愈, 必须用户介入。收紧 pattern: 避开非 HTTP-auth 错误误伤 (eg. 工具执行报错
+ * "Unauthorized file system access" 含 Unauthorized 字面但不是 401)。要求带
+ * \b401\b 边界, 或 Missing bearer 精确短语 (OpenAI 401 message 标准措辞)。
+ *
+ * 从 translateErrorNotification 抽出成 export — codex/index.ts 的 retry 升级
+ * 逻辑要排除这一类 (auth 缺失走自己「同步登录态」的等待式 UX, 不应被升级成
+ * 终态 backend-unreachable)。
+ */
+export function isAuthMissingErrorMessage(message: string, errorStatus?: number): boolean {
+  return errorStatus === 401 || /\b401\b|Missing bearer/i.test(message);
+}
+
+/**
+ * auth 相关错误 (缺失 OR 无效) 的更宽判定 — translator 会把
+ * authentication_error / authentication_failed / invalid_api_key /
+ * api key not valid 这些 marker 同样推断成 errorStatus=401 走 auth UX
+ * (translateErrorNotification 的 hasAuthErrorMarker)。retry-loop 升级判定
+ * 必须排除同一集合, 否则这些真 auth 错误会被升级成「后端不可达」终态,
+ * 抢走 auth 修复路径并误导排查方向 (review: PR #715 五轮审核 P1)。
+ *
+ * 与 isAuthMissingErrorMessage 的分工: Missing 版只认「没给凭证」
+ * (401 / Missing bearer), 用于触发「同步登录态」等待式 UX; Related 版
+ * 额外认「凭证无效」类 marker, 只用于「不要按网络不可达处理」的排除判断。
+ */
+export function isAuthRelatedErrorMessage(message: string, errorStatus?: number): boolean {
+  if (isAuthMissingErrorMessage(message, errorStatus)) return true;
+  return /\bauthentication_(?:error|failed)\b|\binvalid[\s_-]*api[\s_-]*key\b|\bapi key not valid\b/i
+    .test(message);
+}
+
 /** error notification (顶层非 item.*) → AgentEvent error。 */
 export function translateErrorNotification(
   params: ErrorNotification['params'],
@@ -219,32 +250,30 @@ export function translateErrorNotification(
   // 透出来并标记 isTerminal=false → renderer 端 ErrorBanner 的 401 识别会触发 →
   // 显示「同步登录态」button；main 端 active-turn keepalive 继续保持,等待 daemon
   // retry 或用户修复登录态后的后续事件。
-  // 收紧 pattern: 避开非 HTTP-auth 错误误伤 (eg. 工具执行报错 "Unauthorized file
-  // system access" 含 Unauthorized 字面但不是 401)。要求带 \b401\b 边界, 或
-  // Missing bearer 精确短语 (OpenAI 401 message 标准措辞)。
-  const isAuthMissing =
-    errorStatus === 401 || /\b401\b|Missing bearer/i.test(safeMessage);
+  const isAuthMissing = isAuthMissingErrorMessage(safeMessage, errorStatus);
   if (params.willRetry && !isAuthMissing) {
     ctx.log.warn('codex error (will retry)', { message: safeMessage, threadId: params.threadId, turnId: params.turnId });
-    // 网络类错误(502/连接失败等)持续重试 = 网络可能断了,daemon 卡在 retry-loop
-    // 里 turn 无限转圈。同 turn 第 2 次时透出**一条**非终止提示(isTerminal:false,
-    // renderer 走 recoverableError → "网络异常,正在自动重试…" banner,恢复后随
-    // 正常事件自动清;不结束 turn、不落 error 行)。第 1 次不透出:单次抖动 daemon
-    // 一次重试就过,提示只会闪一下徒增噪音。
-    if (isNetworkishErrorMessage(message)) {
-      const key = `${params.threadId ?? ''}|${params.turnId ?? ''}`;
-      const notice = ctx.rt.networkRetryNotice;
-      const count = notice?.key === key ? notice.count + 1 : 1;
-      const emitted = notice?.key === key ? notice.emitted : false;
-      ctx.rt.networkRetryNotice = { key, count, emitted };
-      if (count >= 2 && !emitted) {
-        ctx.rt.networkRetryNotice = { key, count, emitted: true };
-        queue.push({
-          type: 'error',
-          data: { ...safeErrorData, isTerminal: false, willRetry: true },
-          source: 'codex',
-        });
-      }
+    // 持续重试的错误 = daemon 卡在 retry-loop 里 turn 无限转圈。同 turn 第 2 次时
+    // 透出**一条**非终止提示 (isTerminal:false, renderer 走 recoverableError →
+    // "正在自动重试…" banner, 恢复后随正常事件自动清; 不结束 turn、不落 error 行)。
+    // 第 1 次不透出: 单次抖动 daemon 一次重试就过, 提示只会闪一下徒增噪音。
+    //
+    // 不限定 networkish pattern (issue #677): 远端后端不可达的典型文案
+    // ("unexpected status 403 Forbidden" / "failed to connect to websocket:
+    // Network unreachable") 不命中 networkish, 但同样是「daemon 在空转」的信号,
+    // 用户必须看得到。终局收口由 codex/index.ts 的 TurnRetryTracker 升级负责。
+    const key = `${params.threadId ?? ''}|${params.turnId ?? ''}`;
+    const notice = ctx.rt.networkRetryNotice;
+    const count = notice?.key === key ? notice.count + 1 : 1;
+    const emitted = notice?.key === key ? notice.emitted : false;
+    ctx.rt.networkRetryNotice = { key, count, emitted };
+    if (count >= 2 && !emitted) {
+      ctx.rt.networkRetryNotice = { key, count, emitted: true };
+      queue.push({
+        type: 'error',
+        data: { ...safeErrorData, isTerminal: false, willRetry: true },
+        source: 'codex',
+      });
     }
     return;
   }

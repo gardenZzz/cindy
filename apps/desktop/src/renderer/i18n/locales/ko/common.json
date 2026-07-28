@@ -267,6 +267,11 @@
           "keyHint": "개인 키 파일을 직접 읽습니다. 암호를 저장하지 않으므로 암호화된 키는 지원되지 않습니다 — ssh-agent 를 사용할 수 없을 때만 사용하세요."
         },
         "identityFile": "개인 키 파일 경로",
+        "agentProxy": "Agent 트래픽을 로컬 프록시로 우회",
+        "agentProxyTip": "원격에 127.0.0.1 포트를 열고 SSH 터널로 이 컴퓨터의 프록시로 중계합니다. 원격 codex / Claude Code 트래픽이 그 경로로 나갑니다",
+        "agentProxyAddr": "로컬 프록시 주소",
+        "agentProxyHint": "원격 127.0.0.1에 포트를 열고 SSH 터널로 로컬 프록시(예: Clash 7890)로 중계합니다. {{appName}}은(는) 프록시를 제공하지 않고 터널만 만듭니다. 원격 Agent의 HTTPS_PROXY가 터널 포트를 가리키고, 도메인은 프록시에서 해석됩니다. 전환 후 원격 codex daemon이 한 번 재시작됩니다.",
+        "agentProxyAddrInvalid": "host:port 형식이어야 합니다(예: 127.0.0.1:7890)",
         "cancel": "취소",
         "submit": "머신 추가"
       },
@@ -282,6 +287,11 @@
         "statusInstalled": "설치됨",
         "statusNotInstalled": "설치되지 않음",
         "claudeCodeName": "Claude Code",
+        "agentProxyTitle": "Agent 프록시 터널",
+        "agentProxyActive": "원격 127.0.0.1:{{port}} → 로컬 {{target}} · 설정됨",
+        "agentProxyPending": "터널 설정 중 → 로컬 {{target}}",
+        "agentProxyWaiting": "호스트 미연결 — 재연결 후 자동 설정 → 로컬 {{target}}",
+        "agentProxyError": "터널 설정 실패: {{message}}",
         "button": {
           "install": "설치",
           "reinstall": "재설치",
@@ -3173,6 +3183,8 @@
       "balanceAvailable": "잔액 사용 가능",
       "balanceDepleted": "잔액 소진",
       "balanceUnlimited": "잔액 무제한",
+      "resetCreditsAvailableLine": "사용 가능한 재설정: {{count}}회",
+      "resetCreditEarliestExpiryLine": "가장 빠른 만료: {{at}}",
       "windowLine": "{{label}} 남음 {{remaining}} (사용 {{used}})",
       "windowSegment": "{{label}} {{remaining}} 남음",
       "resetAt": "{{at}} 재설정",
