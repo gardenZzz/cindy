@@ -106,6 +106,7 @@ export function extractWorkflowProgress(record: unknown): WorkflowProgress | nul
       if (!label || !state) continue;
       const model = asString(e.model);
       const phaseTitle = asString(e.phaseTitle);
+      const phaseIndex = asNumber(e.phaseIndex);
       const attempt = asNumber(e.attempt);
       const lastToolName = asTruncated(e.lastToolName, 200);
       const lastToolSummary = asTruncated(e.lastToolSummary, 160);
@@ -118,6 +119,7 @@ export function extractWorkflowProgress(record: unknown): WorkflowProgress | nul
         state,
         ...(model ? { model } : {}),
         ...(phaseTitle ? { phaseTitle } : {}),
+        ...(phaseIndex != null ? { phaseIndex } : {}),
         ...(attempt != null ? { attempt } : {}),
         ...(lastToolName ? { lastToolName } : {}),
         ...(lastToolSummary ? { lastToolSummary } : {}),

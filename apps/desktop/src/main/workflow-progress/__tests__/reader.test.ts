@@ -101,6 +101,7 @@ describe('extractWorkflowProgress', () => {
         model: 'claude-opus-4-8[1m]',
         state: 'done',
         phaseTitle: 'Search',
+        phaseIndex: 1,
         attempt: 1,
         lastToolName: 'StructuredOutput',
         lastToolSummary: '核心断言全部实测确认',
@@ -113,6 +114,7 @@ describe('extractWorkflowProgress', () => {
         model: 'claude-opus-4-8[1m]',
         state: 'running',
         phaseTitle: 'Search',
+        phaseIndex: 1,
         attempt: 1,
       },
     ]);
@@ -235,7 +237,7 @@ describe('extractWorkflowProgress', () => {
         { type: 'workflow_agent', label: 'verify:auth', state: 'queued', phaseIndex: 0 },
       ],
     });
-    expect(p!.agents).toEqual([{ label: 'verify:auth', state: 'queued' }]);
+    expect(p!.agents).toEqual([{ label: 'verify:auth', state: 'queued', phaseIndex: 0 }]);
   });
 
   it('returns null when runId is missing or input is not an object', () => {
