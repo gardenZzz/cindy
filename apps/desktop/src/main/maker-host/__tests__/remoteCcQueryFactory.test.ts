@@ -103,3 +103,19 @@ describe('remoteCcQueryFactory cleanup wiring', () => {
     expect(returnIdx).toBeGreaterThan(clearIdx);
   });
 });
+
+describe('remoteCcQueryFactory stale-invalidation freshness (R22 P2)', () => {
+  it('forces fresh for invalidated sessions even when nothing is injected this round', () => {
+    // collab 禁用等场景:invalidate 过的 session 重建时无 server 可注
+    // (injectedServerCount===0 且 needsFreshStart=false), 不 forceFresh 会
+    // attach 回带旧 collab URL 的 query — stale 集合必须进入 forceFresh 判定。
+    expect(source).toContain('staleInvalidatedCcSessions.has(sessionId)');
+    // invalidate 的 clearFreshMark 必须同时记 stale。
+    expect(source).toContain('staleInvalidatedCcSessions.add(sessionId)');
+    // open 成功后提交 fresh 的同时必须清掉 stale 标记。
+    const addFresh = source.indexOf('forcedFreshCcBridgeSessions.add(sessionId)');
+    const delStale = source.indexOf('staleInvalidatedCcSessions.delete(sessionId)');
+    expect(addFresh).toBeGreaterThan(-1);
+    expect(delStale).toBeGreaterThan(addFresh);
+  });
+});

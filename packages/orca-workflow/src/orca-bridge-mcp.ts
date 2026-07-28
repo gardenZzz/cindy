@@ -453,7 +453,12 @@ async function ensureSessionFromMeta(
     ...(meta.sdkSessionId ? { resumeSessionId: meta.sdkSessionId } : {}),
     // 远端 lead 在同一台 SSH 主机上重建 (host 侧 createSession 会先做
     // remote ensure); 本地 lead 无此字段。
-    ...(meta.remoteHostId ? { remoteHostId: meta.remoteHostId } : {}),
+    // 远端 lead 在同一台 SSH 主机上重建 (host 侧 createSession 会先做
+    // remote ensure); 本地 lead 无此字段。makerMemoryEnabled=false 与 IPC
+    // create/send 路径的 remote ensure 归一化对齐 (ensure 里对 createOpts
+    // 的同款 mutate) — 远端 workdir 不得注入本地 Cindy Memory 上下文
+    // (codex-connector R22 P2;preflight 用临时 opts, mutation 到不了这里)。
+    ...(meta.remoteHostId ? { remoteHostId: meta.remoteHostId, makerMemoryEnabled: false } : {}),
   });
   deps.wireSession(session);
   return session;

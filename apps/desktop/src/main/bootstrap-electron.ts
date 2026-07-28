@@ -332,7 +332,6 @@ import {
   broadcastXaiAuthStateChanged,
   refreshProviderAccessAfterAuthChange,
   restartCodexAfterAuthModeChange,
-  handleCodexEnvironmentShutdownForRemote,
   waitForInitialCustomMcpRefresh,
 } from './maker-host/index.js';
 import { createDynamicMaker } from './maker-host/dynamic-maker.js';
@@ -5577,9 +5576,6 @@ app.on('ready', async () => {
         if (codexRestarted) {
           try {
             await shutdownCodexEnvironment();
-            // 账号切换后旧 bridge 已停 — 远端 session 立刻失效 (CC detach +
-            // codex strip), 不等 lazy 重建 (codex-connector R21 P1)。
-            handleCodexEnvironmentShutdownForRemote();
           } catch (err) {
             accountSwitchLog.warn('shutdownCodexEnvironment on account switch failed', {
               error: err instanceof Error ? err.message : String(err),

@@ -73,6 +73,20 @@ export function getCodexExtraSpawnConfig(
 }
 
 /** before-quit 调一次。**先**等 codexAgent.dispose() 杀完子进程**再**调这个 (见 plan)。 */
+/**
+ * bridge 成功 shutdown 后的失效钩子 (maker-host 注入):远端 session 的 MCP
+ * URL / session id 已指向停掉的 bridge, 需要立刻失效 (CC detach + codex
+ * strip), 不能等 lazy 重建 (codex-connector R21/R22 P1)。放本模块内部而
+ * 非各调用点, 让所有 shutdown 路径 (插件开关 / custom MCP CRUD /
+ * contacts / Slack provider / 账号切换 / 未来新增) 自动覆盖。
+ * mcp-integrations 不反向依赖 maker-host, 经 setter 注入解耦。
+ */
+let shutdownHook: (() => void) | null = null;
+
+export function setCodexEnvironmentShutdownHook(fn: (() => void) | null): void {
+  shutdownHook = fn;
+}
+
 export async function shutdownCodexEnvironment(): Promise<void> {
   const cur = cached;
   if (!cur) return;
@@ -86,6 +100,14 @@ export async function shutdownCodexEnvironment(): Promise<void> {
     /* 启动本身失败的 cached promise — shutdown 无 op */
   } finally {
     if (!bridge || activeBridge === bridge) activeBridge = null;
+  }
+  // bridge 实际 shutdown 后失效远端 (URL/session id 必然指向已停实例)。
+  // cached 为空 (从未启动) 时 early return 不调 — 彼时本就不存在指向
+  // bridge 的注入, 无需失效。
+  try {
+    shutdownHook?.();
+  } catch {
+    /* 失效失败不阻断 shutdown 主流程 */
   }
 }
 
