@@ -3499,6 +3499,10 @@ export function CCAgentSessionView({
       <SessionNavigationModeProvider
         mode={navigationMode}
         sidebarTargetSessionId={sidebarTargetSessionId}
+        // 只有声明右栏在场的路由主实例(ownsRoute)才是面板宿主:右栏当前显示的
+        // 就是它的 bucket。内嵌实例(worker 面板 / 文件浏览窄 rail / Orca split)
+        // 传 undefined → 面板类入口自行降级,见 useSidebarPanelReachable。
+        sidebarPanelHostSessionId={ownsRoute ? sessionId : undefined}
       >
         <ChatDisplaySnapshotProvider value={chatDisplaySnapshot}>
           <TopRightChipStackProvider>{content}</TopRightChipStackProvider>
