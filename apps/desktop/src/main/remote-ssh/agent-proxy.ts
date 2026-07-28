@@ -129,44 +129,75 @@ export function buildAgentProxyMarkerContent(remotePort: number): string {
 
 /* ============================== 隧道管理 ============================== */
 
+export interface AgentProxyTunnelInfo {
+  remotePort: number;
+  /** 与新 pref 不匹配的旧 forward (rebind 场景), 由调用方决定拆除时机。 */
+  staleForwards: Array<{ localHost: string; localPort: number }>;
+}
+
 /**
  * pref 开启时确保隧道在跑, 返回远端端口; pref 关闭返回 null。
  * host 必须 ready (调用方保证); arm 失败抛错并记录到 tunnel state。
+ *
+ * rebind (目标被编辑) 场景**先建后拆** (codex R17 P2): 新 forward 建立
+ * 失败时旧 forward 原样保留, 存活 daemon 流量不断。closeStale !== false
+ * (默认) 建成功后立即拆旧 (R5 语义: 不拆会残留并随重连 re-arm, 远端
+ * 多暴露一个隧道口); reconcile 传 closeStale: false, 把拆旧推迟到
+ * daemon 重启成功之后 (pkill 失败时旧隧道保留兜底)。
  */
 export async function ensureAgentProxyTunnel(
   host: RemoteHost,
-): Promise<{ remotePort: number } | null> {
+  opts?: { closeStale?: boolean },
+): Promise<AgentProxyTunnelInfo | null> {
   const pref = getSshHostAgentProxy(host.id);
   if (!pref) return null;
-  // 目标被编辑过 (localHost/localPort 变了) 时, 旧目标的 forward 必须拆掉 —
-  // RemoteHost 按目标 key 登记, 不拆会残留并随重连 re-arm, 远端多暴露一个
-  // 隧道口 (review: PR #715 R5)。
-  for (const f of host.listRemoteForwards()) {
-    if (f.localHost !== pref.localHost || f.localPort !== pref.localPort) {
-      try {
-        await host.closeRemoteForward(f.localHost, f.localPort);
-      } catch (err) {
-        log.warn('close stale remote forward failed (best-effort)', {
-          hostId: host.id,
-          staleTarget: `${f.localHost}:${f.localPort}`,
-          error: String((err as Error)?.message ?? err),
-        });
-      }
-    }
-  }
   try {
     const fwd = await host.ensureRemoteForward({
       localHost: pref.localHost,
       localPort: pref.localPort,
     });
+    const staleForwards = host
+      .listRemoteForwards()
+      .filter((f) => f.localHost !== pref.localHost || f.localPort !== pref.localPort);
+    if (opts?.closeStale !== false) {
+      for (const f of staleForwards) {
+        try {
+          await host.closeRemoteForward(f.localHost, f.localPort);
+        } catch (err) {
+          log.warn('close stale remote forward failed (best-effort)', {
+            hostId: host.id,
+            staleTarget: `${f.localHost}:${f.localPort}`,
+            error: String((err as Error)?.message ?? err),
+          });
+        }
+      }
+    }
     tunnelStates.set(host.id, { active: true, remotePort: fwd.remotePort });
     emitState(host.id);
-    return { remotePort: fwd.remotePort };
+    return { remotePort: fwd.remotePort, staleForwards };
   } catch (err) {
     const msg = String((err as Error)?.message ?? err);
     tunnelStates.set(host.id, { active: false, lastError: msg });
     emitState(host.id);
     throw err;
+  }
+}
+
+/** 拆旧 forward (rebind 残留) — best-effort, 单个失败不阻塞其余。 */
+async function closeStaleForwards(
+  host: RemoteHost,
+  staleForwards: Array<{ localHost: string; localPort: number }>,
+): Promise<void> {
+  for (const f of staleForwards) {
+    try {
+      await host.closeRemoteForward(f.localHost, f.localPort);
+    } catch (err) {
+      log.warn('close stale remote forward failed (best-effort)', {
+        hostId: host.id,
+        staleTarget: `${f.localHost}:${f.localPort}`,
+        error: String((err as Error)?.message ?? err),
+      });
+    }
   }
 }
 
@@ -361,14 +392,22 @@ async function reconcileCodexAgentProxyEnvSerialized(
 ): Promise<{ markerChanged: boolean; daemonRestarted: boolean }> {
   const pref = getSshHostAgentProxy(host.id);
   let desired: string | null = null;
+  let staleForwards: Array<{ localHost: string; localPort: number }> = [];
   if (pref) {
-    const tunnel = await ensureAgentProxyTunnel(host);
+    // 拆旧推迟到 daemon 重启成功后 (codex R17 P2): pkill 失败时旧隧道保留,
+    // 存活 daemon 仍指旧端口, 流量不断; 新 forward 闲置在 pref 目标上
+    // (语义正确, 下次 reconcile 直接用)。
+    const tunnel = await ensureAgentProxyTunnel(host, { closeStale: false });
     if (!tunnel) throw new Error('agentProxy pref enabled but tunnel refused to start');
     desired = buildAgentProxyMarkerContent(tunnel.remotePort);
+    staleForwards = tunnel.staleForwards;
   }
 
   const current = await readRemoteMarker(host);
   if (current === (desired ? desired.trim() : null)) {
+    // marker 一致 (fast path): daemon env 已是新目标, rebind 残留的旧
+    // forward 可以安全拆 (R5 语义; pref 关路径由 closeAllForwards 统一拆)。
+    if (staleForwards.length > 0) await closeStaleForwards(host, staleForwards);
     return { markerChanged: false, daemonRestarted: false };
   }
 
@@ -385,6 +424,8 @@ async function reconcileCodexAgentProxyEnvSerialized(
     // 已拆隧道的 proxy env 跑到手动重启, enable 后旧 daemon 一直跑旧 env。
     // 回滚后 marker 与存活 daemon env 一致, 下次 reconcile 仍 drift →
     // 重写 + 重试 kill, 可自愈。回滚失败仅 warn: 调用方已按失败上报。
+    // 不拆任何 forward (codex R17 P2): 旧 forward 保留兜底, 存活 daemon
+    // 仍指旧端口, 流量不断。
     try {
       await writeRemoteMarker(host, current);
     } catch (rollbackErr) {
@@ -393,8 +434,11 @@ async function reconcileCodexAgentProxyEnvSerialized(
         error: rollbackErr instanceof Error ? rollbackErr.message : String(rollbackErr),
       });
     }
+    return { markerChanged: true, daemonRestarted: false };
   }
-  return { markerChanged: true, daemonRestarted: kill.ok };
+  // daemon 重启成功: 拆旧 (R5 语义, 时机后移到重启成功后, codex R17 P2)。
+  if (staleForwards.length > 0) await closeStaleForwards(host, staleForwards);
+  return { markerChanged: true, daemonRestarted: true };
 }
 
 /**

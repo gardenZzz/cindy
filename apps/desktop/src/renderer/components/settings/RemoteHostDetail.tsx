@@ -270,14 +270,22 @@ function AgentProxyTunnelCard({ hostId }: { hostId: string }) {
   }, []);
 
   const pref = snap?.agentProxy ?? null;
-  if (!pref) return null;
   const tunnel = snap?.agentProxyTunnel ?? null;
-  const localTarget = `${pref.localHost}:${pref.localPort}`;
+  // pref 已关但 disable 失败 (daemon 没死透, 错误已落 lastError) 时仍渲染
+  // 错误卡片 (codex R17 P2) — 否则 Settings 看起来像成功关闭, 存活 daemon
+  // 还握着指向已拆端口的 proxy env, 用户毫无察觉。
+  if (!pref && !tunnel?.lastError) return null;
+  const localTarget = pref ? `${pref.localHost}:${pref.localPort}` : '';
 
   let icon;
   let text: string;
   let isError = false;
-  if (snap?.status !== 'ready') {
+  if (!pref) {
+    // disable 失败分支: pref 已清, 只有 lastError 可显示。
+    icon = <AlertCircle size={14} />;
+    text = t('settings.remote.detail.agentProxyError', { message: tunnel?.lastError ?? '' });
+    isError = true;
+  } else if (snap?.status !== 'ready') {
     // 主机断连/重连中: 隧道已 disarm 或正在拆除 — 即使隧道状态快照还没翻到
     // 非活跃 (断连帧先于 mark-inactive 帧到达), 也优先显示「等待连接」,
     // 不渲染过期的「已建立」(review: PR #715 收官审查 P2)。断连时

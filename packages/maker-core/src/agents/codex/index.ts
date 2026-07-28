@@ -3894,6 +3894,20 @@ export class CodexAgent extends BaseAgent {
       for (const resolve of waiters) resolve(valid);
     };
 
+    // 放弃对账时统一释放 (codex R17 P2): close / cancel 边界直接从 send
+    // return、或 session close 时, buffered turn 的挂起请求永远等不到
+    // settle — handler 永远悬挂, dispatchServerRequest 永不返回, server
+    // 侧请求卡死。所有不走路径对账的退出点都必须调用。
+    const abandonBufferedTurns = (reason: string): void => {
+      if (bufferedOrphanTurnIds.size === 0) return;
+      log.debug('abandoning buffered turns', { reason, turnIds: [...bufferedOrphanTurnIds] });
+      for (const bufferedId of bufferedOrphanTurnIds) {
+        settleBufferedTurnReconcile(bufferedId, false);
+      }
+      bufferedOrphanTurnIds.clear();
+      bufferedTurnEventQueues.clear();
+    };
+
     // server request 入口闸 (codex R12 P1): true = 放行; false = 拒绝
     // (terminal/completed 墓碑 turn — 批了也没人消费; buffered 孤儿)。
     // buffered 归属未定 → 返回 Promise 挂起到对账再定。非 async 签名是故意的:
@@ -3908,6 +3922,13 @@ export class CodexAgent extends BaseAgent {
       // turn, interrupt 输掉竞态时操作会真实执行)。与 notification 的
       // idle 孤儿闸同款判定, 立墓碑让后续事件一并拦。
       if (isIdleOrphanTurnId(turnId)) {
+        terminalErroredTurnIds.add(turnId);
+        return false;
+      }
+      // 孤儿守卫 + 已有活跃 turn: id ≠ currentTurnId 的请求来自失败 RPC 的
+      // 孤儿 (codex R17 P1) — 替换 turn 已被接受后, 孤儿迟到的审批/输入
+      // 请求既不是 idle 也不是 buffered, 不得放行上 UI。
+      if (turnStartFailedWithoutTurnId && currentTurnId !== null && turnId !== currentTurnId) {
         terminalErroredTurnIds.add(turnId);
         return false;
       }
@@ -4790,6 +4811,7 @@ export class CodexAgent extends BaseAgent {
         }
         if (rejectClosedOrCancelledSend(sendOpts, 'after input preparation')) {
           isTurnStartPending = false;
+          abandonBufferedTurns('send cancelled after input preparation');
           flushDeferredTerminalTurnCompletionsIfIdle();
           return;
         }
@@ -4959,6 +4981,9 @@ export class CodexAgent extends BaseAgent {
           });
           markTurnConfigAccepted();
           if (rejectClosedOrCancelledSend(sendOpts, 'after turn/start')) {
+            // 本地取消边界直接 return: 挂起的 buffered 请求没有 settle 者
+            // (codex R17 P2), 统一释放。
+            abandonBufferedTurns('send cancelled after turn/start');
             return;
           }
           handleTurnStartResp(resp);
@@ -5037,6 +5062,7 @@ export class CodexAgent extends BaseAgent {
               });
               markTurnConfigAccepted();
               if (rejectClosedOrCancelledSend(sendOpts, 'after turn/start retry')) {
+                abandonBufferedTurns('send cancelled after turn/start retry');
                 return;
               }
               handleTurnStartResp(resp);
@@ -5279,6 +5305,10 @@ export class CodexAgent extends BaseAgent {
         if (closed) return;
         closed = true;
         unregisterCodexMcpContext(threadId);
+        // close 时 buffer 里可能还有等对账的挂起请求 (codex R17 P2):
+        // 统一按拒绝释放, 否则 handler 永远悬挂, dispatchServerRequest
+        // 永不返回, server 侧请求卡死。
+        abandonBufferedTurns('session closed');
         // 把挂起的 approval 强制 deny + emit interaction_dismissed (UI 关 dialog),
         // 否则 server 那边没回 response 会卡; UI 上的 PermissionPrompt 也会留尸
         try { dismissAllPending('session_closed', 'deny'); } catch (e) { log.warn('dismissAllPending threw', { error: String(e) }); }

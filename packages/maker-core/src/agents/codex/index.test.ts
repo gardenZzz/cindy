@@ -7386,6 +7386,140 @@ describe('CodexAgent turn lifecycle', () => {
     await handle.close();
   });
 
+  it('rejects a late orphan server request after the replacement turn was accepted (codex R17 P1)', async () => {
+    // 替换 turn 已被接受 (currentTurnId 非 null): 孤儿迟到的审批请求既不是
+    // idle 也不是 buffered, gate 必须直接拒 — 否则为隐藏孤儿 turn 上 UI。
+    const firstStart = deferred<unknown>();
+    const secondStart = deferred<unknown>();
+    let attempt = 0;
+    const agent = new CodexAgent(createDeps());
+    const host = installFakeHost(agent, (method) => {
+      if (method === Method.TurnStart) {
+        attempt += 1;
+        if (attempt === 1) return firstStart.promise;
+        return secondStart.promise;
+      }
+      return undefined;
+    });
+    const handle = await agent.startSession({
+      sessionId: 'session-late-orphan-request-accepted',
+      model: 'gpt-5.4',
+      workingDir: '/repo',
+    });
+    const subscribeCalls = host.subscribeThread.mock.calls as unknown as Array<[string, ThreadEventHandlers]>;
+    const handlers = subscribeCalls[0]?.[1];
+    const iterator = handle.events()[Symbol.asyncIterator]();
+    const interactionResolver = vi.fn(() => new Promise<never>(() => {}));
+    handle.setInteractionResolver(interactionResolver);
+
+    const send1 = handle.send({ type: 'user', content: 'first' });
+    for (let i = 0; i < 5; i += 1) {
+      if (host.request.mock.calls.some(([method]) => method === Method.TurnStart)) break;
+      await Promise.resolve();
+    }
+    firstStart.reject(new Error('codex app-server turn/start timed out after 60000ms'));
+    await send1;
+    expect(await nextEvent(iterator)).toMatchObject({ type: 'status', data: { isRunning: true } });
+    expect(await nextEvent(iterator)).toMatchObject({ type: 'error', data: { isTerminal: true } });
+    expect(await nextEvent(iterator)).toMatchObject({
+      type: 'status',
+      data: { status: 'Done', isRunning: false },
+    });
+
+    // send2 正常激活 turn-2 (started 缓冲 → 响应一致 → 激活)。
+    const send2 = handle.send({ type: 'user', content: 'second' });
+    for (let i = 0; i < 5; i += 1) {
+      if (host.request.mock.calls.filter(([method]) => method === Method.TurnStart).length >= 2) break;
+      await Promise.resolve();
+    }
+    expect(await nextEvent(iterator)).toMatchObject({ type: 'status', data: { isRunning: true } });
+    handlers.turnStarted?.({ threadId: 'start-thread-id', turn: { id: 'turn-2' } });
+    secondStart.resolve({ turn: { id: 'turn-2' } });
+    await send2;
+    expect(handle.getCurrentTurnId?.()).toBe('turn-2');
+
+    // 孤儿 approval 迟到 (currentTurnId=turn-2 非 null): 直接拒, UI 未被调。
+    await expect(
+      handlers.commandExecutionApproval?.({
+        threadId: 'start-thread-id',
+        turnId: 'orphan-turn',
+        itemId: 'o-item',
+        command: 'rm -rf /tmp/x',
+        cwd: '/repo',
+      }),
+    ).resolves.toEqual({ decision: 'decline' });
+    expect(interactionResolver).not.toHaveBeenCalled();
+    await handle.close();
+  });
+
+  it('settles a held server request when the send is cancelled at the after-turn/start boundary (codex R17 P2)', async () => {
+    // 挂起的 waiter 在 send 本地取消边界 (turn/start 响应到了但 session 已
+    // closed) 必须被统一释放 — 否则 handler 永远悬挂, dispatchServerRequest
+    // 永不返回。
+    const firstStart = deferred<unknown>();
+    const secondStart = deferred<unknown>();
+    let attempt = 0;
+    const agent = new CodexAgent(createDeps());
+    const host = installFakeHost(agent, (method) => {
+      if (method === Method.TurnStart) {
+        attempt += 1;
+        if (attempt === 1) return firstStart.promise;
+        return secondStart.promise;
+      }
+      return undefined;
+    });
+    const handle = await agent.startSession({
+      sessionId: 'session-held-request-cancelled',
+      model: 'gpt-5.4',
+      workingDir: '/repo',
+    });
+    const subscribeCalls = host.subscribeThread.mock.calls as unknown as Array<[string, ThreadEventHandlers]>;
+    const handlers = subscribeCalls[0]?.[1];
+    const iterator = handle.events()[Symbol.asyncIterator]();
+    const interactionResolver = vi.fn(() => new Promise<never>(() => {}));
+    handle.setInteractionResolver(interactionResolver);
+
+    const send1 = handle.send({ type: 'user', content: 'first' });
+    for (let i = 0; i < 5; i += 1) {
+      if (host.request.mock.calls.some(([method]) => method === Method.TurnStart)) break;
+      await Promise.resolve();
+    }
+    firstStart.reject(new Error('codex app-server turn/start timed out after 60000ms'));
+    await send1;
+    expect(await nextEvent(iterator)).toMatchObject({ type: 'status', data: { isRunning: true } });
+    expect(await nextEvent(iterator)).toMatchObject({ type: 'error', data: { isTerminal: true } });
+    expect(await nextEvent(iterator)).toMatchObject({
+      type: 'status',
+      data: { status: 'Done', isRunning: false },
+    });
+
+    // send2 在飞 + buffered started + 审批挂起。
+    const send2 = handle.send({ type: 'user', content: 'second' });
+    for (let i = 0; i < 5; i += 1) {
+      if (host.request.mock.calls.filter(([method]) => method === Method.TurnStart).length >= 2) break;
+      await Promise.resolve();
+    }
+    expect(await nextEvent(iterator)).toMatchObject({ type: 'status', data: { isRunning: true } });
+    handlers.turnStarted?.({ threadId: 'start-thread-id', turn: { id: 'turn-2' } });
+    const approvalPromise = handlers.commandExecutionApproval?.({
+      threadId: 'start-thread-id',
+      turnId: 'turn-2',
+      itemId: 'item-1',
+      command: 'ls',
+      cwd: '/repo',
+    });
+    await Promise.resolve();
+    expect(interactionResolver).not.toHaveBeenCalled();
+
+    // session close → turn/start 响应才到: 本地取消边界命中, 挂起请求按
+    // decline 统一释放 (不再悬挂)。
+    await handle.close();
+    secondStart.resolve({ turn: { id: 'turn-2' } });
+    await send2;
+    await expect(approvalPromise).resolves.toEqual({ decision: 'decline' });
+    expect(interactionResolver).not.toHaveBeenCalled();
+  });
+
   it('does not escalate rate-limit backoff retries to a terminal backend-unreachable error (codex R12 P2)', async () => {
     // 429 / usage-limit 的 willRetry 是 provider 退避窗口, daemon 会在窗口后
     // 自己成功 — 不得计入 retry 升级, 否则可恢复的限流被误杀成「后端不可达」。
