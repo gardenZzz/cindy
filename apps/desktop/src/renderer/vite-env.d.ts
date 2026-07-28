@@ -2171,6 +2171,13 @@ interface ElectronAPI {
     truncated?: boolean;
   }>;
 
+  /** Raw-bytes sibling of readFileForAttachment (PDF preview → pdf.js data).
+   *  Rejects with an IpcError on failure (no partial payload). */
+  readFileBytes: (params: {
+    filePath: string;
+    maxSize?: number;
+  }) => Promise<{ bytes: Uint8Array; size: number }>;
+
   // ── File header peek IPC (F-FI-8 fallback inference) ──
   /**
    * Read at most `bytes` (default 8192, hard-cap 64KB) from the head of a
