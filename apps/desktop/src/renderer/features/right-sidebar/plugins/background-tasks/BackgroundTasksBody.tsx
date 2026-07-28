@@ -572,10 +572,12 @@ export function BackgroundTasksBody({
     ReadonlyMap<string, AgentTaskUpdate['status']>
   >(() => new Map());
   const fileStatusRequestedRef = useRef<Set<string>>(new Set());
+  // deviceConnectivity 参与依赖:断连窗口内的补读全部 miss 且被记忆短路,重连
+  // 翻转时清空重来(本机恒 'local' 不触发;已成功的重读幂等,set 同值短路)。
   useEffect(() => {
     fileStatusRequestedRef.current = new Set();
     setFileStatusByTaskId(new Map());
-  }, [sessionId]);
+  }, [sessionId, deviceConnectivity]);
   useEffect(() => {
     if (!sessionId) return;
     const pending: string[] = [];

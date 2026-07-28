@@ -2369,9 +2369,15 @@ export function MessageStream({
     }
     const root = scrollRef.current;
     if (!root) return;
-    const el = root.querySelector(
+    // 精确锚点(message wrapper / 带 toolCall 的任务卡)优先;查不到时退回
+    // 聚合动作块的容器锚点(data-message-client-ids 空格分隔多 clientId)——
+    // 后台 Bash 等工具行渲染在折叠块内,没有独立的行级 DOM 锚点。
+    const el = (root.querySelector(
       `[data-message-client-id="${CSS.escape(focusMessageClientId)}"]`,
-    ) as HTMLElement | null;
+    ) ??
+      root.querySelector(
+        `[data-message-client-ids~="${CSS.escape(focusMessageClientId)}"]`,
+      )) as HTMLElement | null;
     if (!el) return;
     restoringRef.current = false;
     isNearBottomRef.current = false;
