@@ -49,6 +49,7 @@ import type { LucideIcon } from 'lucide-react';
 
 import { cn } from '@/lib/utils';
 import { Spinner } from '@/components/ui/spinner';
+import { isSidebarWindow } from '@/lib/sidebarWindow';
 import {
   getSessionDeviceId,
   useRemoteDevices,
@@ -68,6 +69,7 @@ import type { BackgroundTasksState } from './index';
 import { listSessionTasks, type SessionTaskItem } from './listSessionTasks';
 import {
   buildWorkflowTreeModel,
+  fileStatusToTaskStatus,
   isTerminalWorkflowFileStatus,
   workflowAgentVisualState,
 } from './workflowProgressModel';
@@ -156,19 +158,6 @@ function fallbackTitleKey(kind: SessionTaskItem['kind']): string {
   if (kind === 'workflow') return 'chat.agentTask.provider.workflow';
   if (kind === 'bash') return 'chat.agentTask.provider.shell';
   return 'chat.agentTask.emptyTitle';
-}
-
-/**
- * wf 文件顶层 status(done/failed/stopped/killed 等文件词表)→ 任务状态词表。
- * 未收口(running/queued)与未知词返回 null:不覆盖消息推导的状态。
- */
-function fileStatusToTaskStatus(
-  status: string | undefined,
-): AgentTaskUpdate['status'] | null {
-  if (status === 'done' || status === 'completed') return 'completed';
-  if (status === 'failed' || status === 'error') return 'failed';
-  if (status === 'stopped' || status === 'killed') return 'stopped';
-  return null;
 }
 
 /** status → 状态图标(running 由 Spinner 负责旋转)。 */
@@ -313,12 +302,17 @@ function TaskRow({
     return parts;
   }, [item, t]);
 
+  // 非 workflow 行的聊天定位:意图 emitter 是 renderer 进程内的,独立侧栏窗口里
+  // 没有聊天流也没有跨窗口中转 —— 点了必然无响应,不给假 affordance(跨窗口
+  // 转发作为后续跟进)。workflow 行(面板内详情)两种宿主都可点。
+  const clickable =
+    item.kind === 'workflow' ||
+    (Boolean(sessionId) && Boolean(item.toolCallClientId) && !isSidebarWindow());
   const handleClick = useCallback(() => {
     if (item.kind === 'workflow') {
       onOpenWorkflow(item.key);
       return;
     }
-    // 非 workflow 行:发聊天定位意图(消费端接线归后续阶段,当前无订阅者时 no-op)。
     if (sessionId && item.toolCallClientId) {
       requestChatTaskFocus(sessionId, item.toolCallClientId);
     }
@@ -328,8 +322,11 @@ function TaskRow({
     <div className="flex items-start gap-1">
       <button
         type="button"
-        onClick={handleClick}
-        className="flex min-w-0 flex-1 items-start gap-2 rounded-[8px] px-2 py-1.5 text-left transition-colors hover:bg-[var(--surface-hover)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--focus-ring)]"
+        onClick={clickable ? handleClick : undefined}
+        className={cn(
+          'flex min-w-0 flex-1 items-start gap-2 rounded-[8px] px-2 py-1.5 text-left transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--focus-ring)]',
+          clickable ? 'hover:bg-[var(--surface-hover)]' : 'cursor-default',
+        )}
       >
         <span className="mt-[1px] inline-flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-[var(--surface-chip)] text-[var(--text-secondary)]">
           <KindIcon size={12} aria-hidden="true" />
@@ -581,12 +578,18 @@ export function BackgroundTasksBody({
   useEffect(() => {
     if (!sessionId) return;
     const pending: string[] = [];
-    for (const it of completed) {
-      if (it.kind !== 'workflow' || it.update || !it.taskId) continue;
-      if (fileStatusRequestedRef.current.has(it.taskId)) continue;
+    const consider = (it: SessionTaskItem) => {
+      if (it.kind !== 'workflow' || !it.taskId) return;
+      // 有权威终态 update 的行不补读;无 update(历史推导)或 update 仍 running
+      // (device-link 断连窗口可能丢终态事件 → stale running)都读文件核实 ——
+      // 本机 live workflow 文件也在 running,映射为 null 不覆盖,只多一次读。
+      if (it.update && it.update.status !== 'running') return;
+      if (fileStatusRequestedRef.current.has(it.taskId)) return;
       fileStatusRequestedRef.current.add(it.taskId);
       pending.push(it.taskId);
-    }
+    };
+    for (const it of completed) consider(it);
+    for (const it of running) consider(it);
     if (pending.length === 0) return;
     let disposed = false;
     // 串行而非并发:每次 miss 都可能触发 main 侧跨 session 目录扫描(远程会话
@@ -598,65 +601,106 @@ export function BackgroundTasksBody({
         if (disposed) return;
         inFlightIndex = i;
         const taskId = pending[i];
+        let mapped: ReturnType<typeof fileStatusToTaskStatus> = null;
         try {
           const progress = await getWorkflowProgressFor(sessionId, taskId);
-          const mapped = fileStatusToTaskStatus(progress?.status);
-          if (!mapped || disposed) continue;
-          setFileStatusByTaskId((prev) => {
-            if (prev.get(taskId) === mapped) return prev;
-            const next = new Map(prev);
-            next.set(taskId, mapped);
-            return next;
-          });
+          mapped = fileStatusToTaskStatus(progress?.status);
         } catch {
           // 静默:与 wf 文件辅源的其余读取同口径,保持推导状态。
         }
+        // 读取一返回就推进收口 —— miss(文件缺失/未收口 → mapped=null)也是
+        // 「已请求过」,不得在 cleanup 里被退回;否则该项每次列表重算都被
+        // 重新入队,变成无限重读,违反每任务至多一次的契约。
         inFlightIndex = i + 1;
+        if (disposed) return;
+        if (!mapped) continue;
+        const status = mapped;
+        setFileStatusByTaskId((prev) => {
+          if (prev.get(taskId) === status) return prev;
+          const next = new Map(prev);
+          next.set(taskId, status);
+          return next;
+        });
       }
     })();
     return () => {
       disposed = true;
-      // 把尚未完成的(含在飞被丢结果的那个)从记忆里退回,下一轮 effect 重新
-      // 入队 —— 否则 completed 中途变化(快照水合 seed 等)会让整批剩余任务
-      // 被永久跳过,failed/stopped 的历史行一直顶着推导出的 completed。
-      // 已落地的退回也无害:重复请求幂等,set 相同值被短路。
+      // 只退回真正未完成的(在飞被丢结果的那项及其后):completed 中途变化
+      // (快照水合 seed 等)不得让剩余批次被永久跳过。已读到 null 的 miss 项
+      // 已收口,不退回。
       for (let i = inFlightIndex; i < pending.length; i++) {
         fileStatusRequestedRef.current.delete(pending[i]);
       }
     };
-  }, [sessionId, completed]);
-  const completedResolved = useMemo(() => {
-    if (fileStatusByTaskId.size === 0) return completed;
-    return completed.map((it) => {
+  }, [sessionId, completed, running, deviceConnectivity]);
+  // 文件终态应用:completed 区无 update 的行原地覆盖;running 区命中终态的
+  // workflow 行(掉线丢终态事件的 stale running)整行移入 completed 区 ——
+  // 否则列表永久转圈、详情却按文件显示 done,同屏自相矛盾。
+  const { runningResolved, completedResolved } = useMemo(() => {
+    if (fileStatusByTaskId.size === 0) {
+      return { runningResolved: running, completedResolved: completed };
+    }
+    const moved: SessionTaskItem[] = [];
+    const runningKept = running.filter((it) => {
+      if (it.kind !== 'workflow' || !it.taskId) return true;
+      const fileStatus = fileStatusByTaskId.get(it.taskId);
+      if (!fileStatus) return true;
+      moved.push({ ...it, status: fileStatus });
+      return false;
+    });
+    const completedPatched = completed.map((it) => {
       if (it.kind !== 'workflow' || it.update || !it.taskId) return it;
       const fileStatus = fileStatusByTaskId.get(it.taskId);
       return fileStatus && fileStatus !== it.status ? { ...it, status: fileStatus } : it;
     });
-  }, [completed, fileStatusByTaskId]);
+    return {
+      runningResolved: runningKept,
+      completedResolved: moved.length > 0 ? [...moved, ...completedPatched] : completedPatched,
+    };
+  }, [running, completed, fileStatusByTaskId]);
 
-  // 详情选中:存 item.key(跨状态翻转稳定);条目消失时自动回列表视图。
+  // 详情选中:存 item.key(跨状态翻转稳定);列表条目消失时若无合成兜底则回列表。
   const [selectedKey, setSelectedKey] = useState<string | null>(null);
+  // focus 未命中时的合成详情兜底(独立侧栏窗口只加载最新 50 条消息,老 workflow
+  // 的 toolCall 不在窗口内 → 列表产不出行,但 wf 文件读取只需 taskId)。key 与
+  // 真行同为 taskId:列表稍后真的出现该行时 find 顺序自动切到真行。
+  const [syntheticFocusItem, setSyntheticFocusItem] = useState<SessionTaskItem | null>(null);
   const selectedItem = useMemo(() => {
     if (!selectedKey) return null;
     return (
-      running.find((it) => it.key === selectedKey) ??
+      runningResolved.find((it) => it.key === selectedKey) ??
       completedResolved.find((it) => it.key === selectedKey) ??
-      null
+      (syntheticFocusItem?.key === selectedKey ? syntheticFocusItem : null)
     );
-  }, [selectedKey, running, completedResolved]);
+  }, [selectedKey, runningResolved, completedResolved, syntheticFocusItem]);
 
-  // focusTaskId(tab state)消费:对应 workflow 任务出现后直接进详情并清空请求
-  // (数据可能晚于挂载到达,依赖列表变化重试;消费即清,避免跨重启反复弹详情)。
+  // focusTaskId(tab state)消费:列表命中 → 进对应详情;未命中(消息窗口外的
+  // 老 workflow)→ 合成 file-only 详情兜底,点开面板不落空。消费即清,避免跨
+  // 重启反复弹详情。
   const focusTaskId = state.focusTaskId ?? null;
   useEffect(() => {
     if (!focusTaskId) return;
     const target =
-      running.find((it) => it.kind === 'workflow' && it.taskId === focusTaskId) ??
+      runningResolved.find((it) => it.kind === 'workflow' && it.taskId === focusTaskId) ??
       completedResolved.find((it) => it.kind === 'workflow' && it.taskId === focusTaskId);
-    if (!target) return;
-    setSelectedKey(target.key);
+    if (target) {
+      setSelectedKey(target.key);
+    } else {
+      setSyntheticFocusItem({
+        key: focusTaskId,
+        taskId: focusTaskId,
+        kind: 'workflow',
+        title: '',
+        // 合成行必是历史任务(点击来自已存在的卡片):completed 让 Stop 不出现,
+        // 详情树的真实终态由 wf 文件与 buildWorkflowTreeModel 裁决。
+        status: 'completed',
+        provider: 'claude-code',
+        orderIndex: -1,
+      });
+      setSelectedKey(focusTaskId);
+    }
     ctx.patchState({ focusTaskId: null });
-  }, [focusTaskId, running, completedResolved, ctx]);
+  }, [focusTaskId, runningResolved, completedResolved, ctx]);
 
   const handleOpenWorkflow = useCallback((key: string) => {
     setSelectedKey(key);
@@ -678,7 +722,7 @@ export function BackgroundTasksBody({
     );
   }
 
-  if (running.length === 0 && completedResolved.length === 0) {
+  if (runningResolved.length === 0 && completedResolved.length === 0) {
     return (
       <div className="flex min-h-0 flex-1 flex-col items-center justify-center gap-2 px-6 text-center">
         <ListTodo size={20} className="text-[var(--text-tertiary)]" aria-hidden="true" />
@@ -691,10 +735,10 @@ export function BackgroundTasksBody({
 
   return (
     <div className="min-h-0 flex-1 overflow-y-auto px-1 pb-2">
-      {running.length > 0 && (
+      {runningResolved.length > 0 && (
         <>
           <SectionHeader label={t('rightSidebar.backgroundTasks.running')} />
-          {running.map((item) => (
+          {runningResolved.map((item) => (
             <TaskRow
               key={item.key}
               item={item}

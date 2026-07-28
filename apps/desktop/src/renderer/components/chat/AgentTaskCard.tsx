@@ -1,4 +1,4 @@
-import { Fragment, useMemo, useCallback, useState } from 'react';
+import { Fragment, useEffect, useMemo, useCallback, useState } from 'react';
 import {
   AlertCircle,
   Bot,
@@ -17,11 +17,14 @@ import { useExpandedBlockMemory } from '@/hooks/useExpandedBlockMemory';
 import { Collapse } from '@/components/ui/collapse';
 import { Spinner } from '@/components/ui/spinner';
 import type { AgentTaskUpdate, ChatMessage } from '@/hooks/useCCAgentChat';
-import { isRemoteSessionSticky } from '@/lib/makerTransport';
+import { getWorkflowProgressFor, isRemoteSessionSticky } from '@/lib/makerTransport';
 import { openBackgroundTasksTab } from '@/features/right-sidebar/lib/openBackgroundTasksTab';
 import { extractWorkflowTaskId } from '@/features/right-sidebar/plugins/background-tasks/listSessionTasks';
 import { WorkflowAgentStrip } from '@/features/right-sidebar/plugins/background-tasks/WorkflowAgentStrip';
-import { workflowAgentVisualState } from '@/features/right-sidebar/plugins/background-tasks/workflowProgressModel';
+import {
+  fileStatusToTaskStatus,
+  workflowAgentVisualState,
+} from '@/features/right-sidebar/plugins/background-tasks/workflowProgressModel';
 import { cn } from '@/lib/utils';
 import { formatModelShortLabel } from '@/lib/modelShortLabel';
 
@@ -94,17 +97,50 @@ export function AgentTaskCard({ toolCall, update, result, subagentModel, session
   const { expanded, setExpanded } = useExpandedBlockMemory(blockId);
   const toggle = useCallback(() => setExpanded((v) => !v), [setExpanded]);
 
-  const status = update?.status ?? (result ? 'completed' : 'running');
-  const StatusIcon = statusIcon(status);
-  const statusIconClassName = cn(
-    'text-[var(--text-secondary)]',
-    status === 'failed' && 'text-[var(--error-fg)]',
-  );
   // workflow-card: Workflow 工具在父会话事件流里是单个 local_workflow 任务(内部子 agent
   // 不发独立 task 事件,只有 workflow 级聚合进度)。按 taskType / toolName 识别:标题优先取
   // workflowName、头像换 Workflow 图标、provider 标签显示 "Workflow"。workflow 卡不展开 ——
   // 主视图在右栏「后台任务」面板,整卡是打开面板并定位详情的入口。
   const isWorkflow = update?.taskType === 'local_workflow' || toolCall?.toolName === 'Workflow';
+  // 历史重载(update 清空)从 tool_result 文本恢复任务 id —— 与面板
+  // listSessionTasks 同一提取实现,保证 focusTaskId 两边配得上。
+  const workflowTaskId = update?.taskId ?? (isWorkflow ? extractWorkflowTaskId(result) : undefined);
+
+  // workflow 历史卡的状态真相:tool_result 只是启动回执(失败也存在),拿它断言
+  // completed 会给 failed/stopped 涂绿,与面板列表行(已做文件修正)同屏矛盾。
+  // 读一次 wf 文件终态覆盖(与面板同源);读不到(SSH 等声明过的降级边界)保持推导。
+  const [historyFileStatus, setHistoryFileStatus] = useState<
+    'completed' | 'failed' | 'stopped' | null
+  >(null);
+  useEffect(() => {
+    if (!isWorkflow || update?.status || !sessionId || !workflowTaskId) return;
+    let disposed = false;
+    try {
+      void getWorkflowProgressFor(sessionId, workflowTaskId)
+        .then((progress) => {
+          if (disposed) return;
+          const mapped = fileStatusToTaskStatus(progress?.status);
+          if (mapped) setHistoryFileStatus(mapped);
+        })
+        .catch(() => {
+          // 静默:文件辅源缺失时保持推导状态。
+        });
+    } catch {
+      // 静默:transport 不可用(极端环境)同样保持推导状态。
+    }
+    return () => {
+      disposed = true;
+    };
+  }, [isWorkflow, update?.status, sessionId, workflowTaskId]);
+
+  const status =
+    update?.status ??
+    (isWorkflow ? (historyFileStatus ?? (result ? 'completed' : 'running')) : result ? 'completed' : 'running');
+  const StatusIcon = statusIcon(status);
+  const statusIconClassName = cn(
+    'text-[var(--text-secondary)]',
+    status === 'failed' && 'text-[var(--error-fg)]',
+  );
   // bash-task-card: 后台 Bash(run_in_background)与子 Agent 共用本卡,但视觉上
   // 是「后台命令」—— 终端图标 + shell provider 标签,避免用户把跑测试的 bash
   // 误读成一个子 Agent。
@@ -157,13 +193,9 @@ export function AgentTaskCard({ toolCall, update, result, subagentModel, session
       .finally(() => setStopping(false));
   }, [sessionId, update?.taskId]);
 
-  // workflow 卡整卡点击 → 打开右栏后台任务面板并定位本任务。入口模式要求
-  // sessionId 与 taskId 都在:live 态取 update.taskId;历史重载(update 清空)从
-  // tool_result 文本恢复 —— 与面板 listSessionTasks 同一提取实现,保证 focusTaskId
-  // 两边配得上,面板详情再经 wf 文件回退恢复进度树。两者都提不到才退回传统展开
-  // 交互,让 description/summary 就地可读,不做「点了没反应」的假入口。
-  const workflowTaskId =
-    update?.taskId ?? (isWorkflow ? extractWorkflowTaskId(result) : undefined);
+  // workflow 卡整卡点击 → 打开右栏后台任务面板并定位本任务(workflowTaskId 在
+  // 组件顶部与状态修正共用同一次推导)。两者都提不到才退回传统展开交互,让
+  // description/summary 就地可读,不做「点了没反应」的假入口。
   const canOpenInPanel = Boolean(sessionId) && Boolean(workflowTaskId);
   const openInPanel = useCallback(() => {
     if (!sessionId || !workflowTaskId) return;

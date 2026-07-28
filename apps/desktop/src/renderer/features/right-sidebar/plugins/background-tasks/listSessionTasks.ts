@@ -323,7 +323,12 @@ export function listSessionTasks(input: {
     for (const k of aliasKeys) seenAliasKeys.add(k);
 
     const kind = deriveKind(toolName, update);
-    const status: AgentTaskStatus = update?.status ?? (settled ? 'completed' : 'running');
+    // 无 update 的状态推导:有结果 → completed;无结果时只有**流式中**才断言
+    // running(事件可能尚未到达)—— 非流式 + 无 update + 无结果 = 强杀/崩溃留下
+    // 的死任务(同步 Task 没有启动回执,永远不会有结果),断言 running 会让它
+    // 永久转圈且无任何收口路径,按 stopped(被中断)呈现。
+    const status: AgentTaskStatus =
+      update?.status ?? (settled ? 'completed' : isSessionStreaming ? 'running' : 'stopped');
     const provider: SessionTaskItem['provider'] =
       update?.provider ?? (toolName.startsWith('collab:') ? 'codex' : 'claude-code');
 

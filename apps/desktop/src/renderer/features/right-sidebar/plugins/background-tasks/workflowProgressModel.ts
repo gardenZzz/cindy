@@ -98,6 +98,20 @@ export function isTerminalWorkflowFileStatus(status: string | undefined): boolea
   return status !== undefined && TERMINAL_FILE_STATUSES.has(status);
 }
 
+/**
+ * wf 文件顶层 status → 任务状态词表(仅终态;running/queued 等非终态返回 null,
+ * 调用方保持现状不覆盖)。面板历史行状态修正与聊天 workflow 卡共用 ——
+ * 「启动回执存在就断言 completed」对 failed/stopped 是假绿,文件终态才是权威。
+ */
+export function fileStatusToTaskStatus(
+  status: string | undefined,
+): 'completed' | 'failed' | 'stopped' | null {
+  if (status === 'done' || status === 'completed') return 'completed';
+  if (status === 'failed' || status === 'error') return 'failed';
+  if (status === 'stopped' || status === 'killed') return 'stopped';
+  return null;
+}
+
 export function buildWorkflowTreeModel(input: {
   entries?: readonly WorkflowProgressEntry[];
   fileProgress?: WorkflowProgress | null;

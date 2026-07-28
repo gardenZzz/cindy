@@ -38,6 +38,14 @@ vi.mock('@/features/right-sidebar/lib/openBackgroundTasksTab', () => ({
   openBackgroundTasksTab: openBackgroundTasksTabMock,
 }));
 
+const { getWorkflowProgressForMock } = vi.hoisted(() => ({
+  getWorkflowProgressForMock: vi.fn().mockResolvedValue(null),
+}));
+vi.mock('@/lib/makerTransport', () => ({
+  isRemoteSessionSticky: () => false,
+  getWorkflowProgressFor: getWorkflowProgressForMock,
+}));
+
 import { AgentTaskCard } from '@/components/chat/AgentTaskCard';
 
 describe('AgentTaskCard', () => {
@@ -253,6 +261,36 @@ describe('AgentTaskCard', () => {
     });
     expect(openBackgroundTasksTabMock).not.toHaveBeenCalled();
     expect(container.textContent).toContain('WORKFLOW_HISTORY_SUMMARY');
+  });
+
+  it('corrects a restored workflow card to the file terminal status (failed not painted green)', async () => {
+    // tool_result 只是启动回执(失败也存在):历史卡不得据此断言 completed,
+    // 与面板列表行同源读 wf 文件终态修正。
+    getWorkflowProgressForMock.mockResolvedValueOnce({
+      runId: 'wf_hist1',
+      status: 'failed',
+      phases: [],
+      agents: [],
+    });
+    const { container } = render(
+      React.createElement(AgentTaskCard, {
+        sessionId: 'session-1',
+        toolCall: {
+          clientId: 'wf-hist-1',
+          role: 'tool_use',
+          content: '',
+          toolUseId: 'tu-wf-hist',
+          toolName: 'Workflow',
+          toolInput: {},
+        },
+        result: 'Workflow launched in background. Task ID: wf_hist1',
+      }),
+    );
+    await act(async () => {
+      await Promise.resolve();
+    });
+    expect(getWorkflowProgressForMock).toHaveBeenCalledWith('session-1', 'wf_hist1');
+    expect(container.textContent).toContain('chat.agentTask.status.failed');
   });
 
   it('recovers the panel-entry task id from the tool result on history reload', () => {
