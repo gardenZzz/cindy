@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from 'vitest';
 import type { MobileMakerTransport } from '@/device-link/mobileMakerTransport';
 import { unresponsiveDevicesStore } from '@/device-link/unresponsiveDevicesStore';
 import {
+  invalidateOfflineScheduleIndexFailureFor,
   invalidateTransientScheduleIndexFailures,
   loadSessionScheduleIndex,
   loadSessionScheduleIndexThrottled,
@@ -357,6 +358,49 @@ describe('loadSessionScheduleIndexThrottled (单飞 + TTL 节流)', () => {
     // 重连(rehydrate 开始)→ 瞬态负缓存失效 → 立即重拉
     invalidateTransientScheduleIndexFailures();
     await expect(loadSessionScheduleIndexThrottled('dev-n', load, { now })).resolves.toBeInstanceOf(Map);
+    expect(load).toHaveBeenCalledTimes(2);
+  });
+
+  it('DEVICE_OFFLINE 负缓存:仅该设备 presence 恢复时失效,全局重连钩子不碰(review P1)', async () => {
+    // DEVICE_OFFLINE 是逐设备状态:若挂在全局重连钩子上,B 设备的任何 rehydrate
+    // 都会反复清掉仍离线的 A 设备的 30s 负缓存,请求风暴止损失效。
+    resetScheduleIndexThrottleForTesting();
+    const load = vi.fn()
+      .mockRejectedValueOnce(Object.assign(new Error('device offline'), { code: 'DEVICE_OFFLINE' }))
+      .mockResolvedValueOnce(new Map<string, RemoteSessionScheduleInfo>());
+    const now = () => 1000;
+    await expect(loadSessionScheduleIndexThrottled('dev-o', load, { now })).rejects.toMatchObject({
+      code: 'DEVICE_OFFLINE',
+    });
+    await Promise.resolve();
+    // 全局重连钩子(NOT_CONNECTED 类专用)不清 DEVICE_OFFLINE 负缓存
+    invalidateTransientScheduleIndexFailures();
+    await expect(loadSessionScheduleIndexThrottled('dev-o', load, { now })).rejects.toMatchObject({
+      code: 'DEVICE_OFFLINE',
+    });
+    expect(load).toHaveBeenCalledTimes(1);
+    // 别的设备 presence 恢复也不清
+    invalidateOfflineScheduleIndexFailureFor('dev-other');
+    await expect(loadSessionScheduleIndexThrottled('dev-o', load, { now })).rejects.toMatchObject({
+      code: 'DEVICE_OFFLINE',
+    });
+    expect(load).toHaveBeenCalledTimes(1);
+    // 该设备 presence 恢复:立即失效、重拉
+    invalidateOfflineScheduleIndexFailureFor('dev-o');
+    await expect(loadSessionScheduleIndexThrottled('dev-o', load, { now })).resolves.toBeInstanceOf(Map);
+    expect(load).toHaveBeenCalledTimes(2);
+  });
+
+  it('DEVICE_OFFLINE 的 message-only 形态同样按离线分类(review:不只认 code)', async () => {
+    resetScheduleIndexThrottleForTesting();
+    const load = vi.fn()
+      .mockRejectedValueOnce(new Error('[DEVICE_OFFLINE] target host not online'))
+      .mockResolvedValueOnce(new Map<string, RemoteSessionScheduleInfo>());
+    const now = () => 1000;
+    await expect(loadSessionScheduleIndexThrottled('dev-m', load, { now })).rejects.toThrow('DEVICE_OFFLINE');
+    await Promise.resolve();
+    invalidateOfflineScheduleIndexFailureFor('dev-m');
+    await expect(loadSessionScheduleIndexThrottled('dev-m', load, { now })).resolves.toBeInstanceOf(Map);
     expect(load).toHaveBeenCalledTimes(2);
   });
 
