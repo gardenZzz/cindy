@@ -398,6 +398,7 @@ import {
 import { getActiveCatalog, setDiscoveredProviderModels } from '../maker-host/active-catalog.js';
 import { testProviderConnection } from '../maker-host/provider-diagnostics.js';
 import { fetchProviderModels } from '../maker-host/provider-model-fetch.js';
+import { beginProviderRouteMutation } from '../maker-host/provider-route.js';
 import {
   getAnthropicModelDiscoveryFailure,
   refreshAnthropicModelsFromHttp,
@@ -412,15 +413,24 @@ import {
   deriveModelsDiscoveryUrl,
   discoverGenericOAuthModels,
   logoutGenericOAuth,
+  removeGenericOAuthCredentialsReversibly,
   runGenericOAuthLogin,
 } from '../maker-host/generic-oauth.js';
 import {
   getCustomProvider,
   mergeDiscoveredModelsIntoConfig,
-  updateCustomProvider,
+  updateCustomProviderIfUnchanged,
 } from '../maker-host/custom-provider-store.js';
+import {
+  readCustomProviderKeyForMutation,
+  removeCustomProviderKey,
+  storeCustomProviderKey,
+} from '../secrets/providerSecretStore.js';
 import { setSessionEffort, setSessionFastMode } from '../maker-host/session-effort-store.js';
-import { getModelVisibilityMirrorSnapshot, setModelVisibilityMirror } from '../maker-host/model-visibility-mirror.js';
+import {
+  getModelVisibilityMirrorSnapshot,
+  syncModelVisibilityMirror,
+} from '../maker-host/model-visibility-mirror.js';
 import { setClaudeProxySessionIdResolver } from '../maker-host/anthropic-compat-proxy-host.js';
 import {
   clearClaudeSessionBackgroundActivity,
@@ -3466,6 +3476,7 @@ export function registerMakerIpc(maker: Maker, options: RegisterMakerIpcOptions 
     listProviders: (opts) => getDesktopProviderService().listProviders(opts),
     getModelVisibilityOverrides: () => getModelVisibilityMirrorSnapshot(),
     refreshCatalog: () => refreshCustomProvidersIntoCatalog(),
+    beginRouteMutation: (providerId) => beginProviderRouteMutation(providerId),
     broadcastChanged: () => broadcastToAllWindows(MAKER_PUSH.PROVIDER_CHANGED, {}),
     listPresets: () => getActiveCatalog().presets ?? [],
     testConnection: (input) => testProviderConnection(input),
@@ -3487,10 +3498,11 @@ export function registerMakerIpc(maker: Maker, options: RegisterMakerIpcOptions 
     scanLocalCli: () => scanLocalCliAuth(createLocalCliScanDeps()),
     // 通用 OAuth（目录 auth.oauth 描述符驱动）：login 成功后 best-effort 拉动态模型发现
     // (additions-only merge 进 active-catalog) 并广播 PROVIDER_CHANGED 让 UI 刷新连接态。
-    oauthLogin: async (providerId) => {
+    oauthLogin: async (providerId, isCurrent) => {
       const provider = getActiveCatalog().providers.find((p) => p.id === providerId);
       const oauth = provider?.auth.oauth;
       if (!provider || !oauth) throw new Error(`provider '${providerId}' has no oauth descriptor`);
+      let rollbackCredentials: (() => boolean) | undefined;
       const result = await runGenericOAuthLogin(
         { id: provider.id, name: provider.name },
         oauth,
@@ -3500,9 +3512,12 @@ export function registerMakerIpc(maker: Maker, options: RegisterMakerIpcOptions 
               providerId,
               ...progress,
             }),
+          onCredentialPersisted: (rollback) => {
+            rollbackCredentials = rollback;
+          },
         },
       );
-      if (result.ok) {
+      if (result.ok && isCurrent()) {
         // 授权成功后按 agent 自动发现模型（与内置订阅体验统一,用户不必手填模型）:
         // 发现端点 = 描述符显式声明 ?? 由该 runtime 的 baseUrl 推导（…/v1/models）。
         // 自定义供应商的发现结果 additions-only 持久化进配置（重启后仍在）;内置供应商走
@@ -3511,22 +3526,29 @@ export function registerMakerIpc(maker: Maker, options: RegisterMakerIpcOptions 
           const fetched = new Map<string, { id: string; name: string }[] | null>();
           let customChanged = false;
           for (const agent of provider.agents) {
+            if (!isCurrent()) break;
             const upstream = provider.routing[agent]?.upstream;
             const url = oauth.modelsDiscoveryUrl ?? (upstream ? deriveModelsDiscoveryUrl(upstream) : null);
             if (!url) continue;
             // 去重键含 agent:发现请求头按 wire 分派(cc 带 anthropic-version),同 URL 不同 wire 不能共用响应。
             const key = `${agent}\n${url}`;
             if (!fetched.has(key)) fetched.set(key, await discoverGenericOAuthModels(providerId, oauth, url, agent));
+            if (!isCurrent()) break;
             const models = fetched.get(key);
             if (!models || models.length === 0) continue;
             if (provider.source === 'user') {
               const cfg = await getCustomProvider(providerId);
-              const nextCfg = cfg ? mergeDiscoveredModelsIntoConfig(cfg, agent, models) : null;
-              if (nextCfg) {
-                await updateCustomProvider(providerId, nextCfg);
-                customChanged = true;
+              if (!isCurrent()) break;
+              if (cfg) {
+                const nextCfg = mergeDiscoveredModelsIntoConfig(cfg, agent, models);
+                if (nextCfg) {
+                  const applied = await updateCustomProviderIfUnchanged(providerId, cfg, nextCfg);
+                  if (!isCurrent()) break;
+                  if (applied) customChanged = true;
+                }
               }
             } else {
+              if (!isCurrent()) break;
               setDiscoveredProviderModels(
                 providerId,
                 agent,
@@ -3542,19 +3564,28 @@ export function registerMakerIpc(maker: Maker, options: RegisterMakerIpcOptions 
               );
             }
           }
-          if (customChanged) await refreshCustomProvidersIntoCatalog();
+          if (customChanged && isCurrent()) await refreshCustomProvidersIntoCatalog();
         } catch {
           /* 发现失败保持纯静态目录，不影响登录结果 */
         }
-        broadcastToAllWindows(MAKER_PUSH.PROVIDER_CHANGED, {});
+        if (isCurrent()) broadcastToAllWindows(MAKER_PUSH.PROVIDER_CHANGED, {});
       }
-      return result;
+      return {
+        ...result,
+        ...(rollbackCredentials ? { rollbackCredentials } : {}),
+      };
     },
+    readCustomProviderKeyForMutation,
+    storeCustomProviderKey,
+    removeCustomProviderKey,
     oauthLogout: async (providerId) => {
-      logoutGenericOAuth(providerId);
+      if (!logoutGenericOAuth(providerId)) {
+        throw new Error('failed to remove generic OAuth credentials');
+      }
     },
     oauthCancel: (providerId) => cancelGenericOAuthLogin(providerId),
-    clearOAuthCredentials: (providerId) => logoutGenericOAuth(providerId),
+    removeOAuthCredentials: (providerId) =>
+      removeGenericOAuthCredentialsReversibly(providerId),
   });
 
   // 自定义 MCP 服务器 CRUD —— CRUD 成功后刷新两个 agent 的 mcpProviders 数组
@@ -7217,10 +7248,13 @@ export function registerMakerIpc(maker: Maker, options: RegisterMakerIpcOptions 
   });
 
   // renderer → main 单向镜像「模型显示/隐藏」override(整张快照,fire-and-forget,不落盘)。
-  // main 缓存供 IM /model 派生模型列表时复用同一套可见性过滤,与应用内列表逐模型一致。
+  // main 缓存供 IM /model 与 device-link provider:list 复用同一套可见性过滤。值实变时
+  // 复用 PROVIDER_CHANGED 目录失效事件，让已连接控制端驱逐缓存并重拉 override 快照。
   // 容错存储(非对象 ⇒ 清空),无错误路径,故不需要 throwIpcError。
   ipcMain.handle(MAKER_INVOKE.MODEL_VISIBILITY_SYNC, async (_e, map: unknown) => {
-    setModelVisibilityMirror(map);
+    syncModelVisibilityMirror(map, () => {
+      broadcastToAllWindows(MAKER_PUSH.PROVIDER_CHANGED, {});
+    });
   });
 
   // 附加只读引用目录的运行时 closure 推送。DB 持久化由 renderer 同步调
