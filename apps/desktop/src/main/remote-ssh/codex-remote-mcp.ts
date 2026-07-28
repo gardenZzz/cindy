@@ -394,6 +394,17 @@ async function ensureRemotePort(host: RemoteHost, localBridgePort: number): Prom
 // ── per-host 串行锁与共用 forward 入口 ───────────────────────────────────────
 
 /**
+ * bootstrap 未确认完成的 host 集合 (进程内存态)。config 写入成功但
+ * bootstrap 超时/中断 (旧 daemon 还活着) 时, 下次 ensure 会看到
+ * changed=false && daemonRunning=true → 永远跳过 bootstrap, daemon 一直
+ * 持旧 env (无 token) → 远端请求 401 且不自愈 (review P2 回归)。进入
+ * bootstrap 分支前悲观标记, 全部成功后清除; 失败保留, 下次 ensure 强制
+ * 重试 bootstrap。已知边界:进程重启后标记丢失, 跨进程残留需 daemon 自行
+ * 重启或 token 轮换 (指纹漂移) 触发, 接受为该罕见组合下的限制。
+ */
+const pendingBootstrapHosts = new Set<string>();
+
+/**
  * per-host 串行链:同一 host 的 forward 端口分配 / config.toml 读写 / daemon
  * bootstrap 必须串行——并发时两个 ensure 会互相交错 arm 与 config 写入,
  * 把 config 写成已失效的端口。codex daemon ensure 与 cc per-query forward
@@ -520,7 +531,11 @@ async function doEnsureRemoteCodexMcpBridge(
     }
 
     const daemonRunning = await isDaemonRunning(host);
-    if (!daemonRunning || changed) {
+    if (!daemonRunning || changed || pendingBootstrapHosts.has(host.id)) {
+      // 悲观标记:bootstrap 任何一步失败都保留标记, 下次 ensure 强制重试 —
+      // 否则 config 已写入 (changed=false) + 旧 daemon 存活 (daemonRunning)
+      // 的组合会让 daemon 永远持旧 env, 远端请求 401 且不自愈。
+      pendingBootstrapHosts.add(host.id);
       await bootstrapDaemon(host, token);
       // 防御:bootstrap 若覆盖了 config.toml (managed_install 行为未文档化),
       // 管理段丢失时补写一次并再次 bootstrap。最多两轮,避免无限循环。
@@ -530,6 +545,7 @@ async function doEnsureRemoteCodexMcpBridge(
         await writeRemoteConfig(host, next);
         await bootstrapDaemon(host, token);
       }
+      pendingBootstrapHosts.delete(host.id);
       log.info('remote codex daemon (re)bootstrapped with MCP bridge env', {
         host: host.id,
         daemonWasRunning: daemonRunning,

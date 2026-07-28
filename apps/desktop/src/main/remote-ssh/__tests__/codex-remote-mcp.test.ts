@@ -416,6 +416,63 @@ describe('ensureRemoteCodexMcpBridge live-turn defer', () => {
   });
 });
 
+describe('ensureRemoteCodexMcpBridge bootstrap retry', () => {
+  it('retries bootstrap on next ensure after a failed bootstrap (config already written)', async () => {
+    // review P2 回归:首轮 config 写入成功但 bootstrap 超时/中断 → 下轮
+    // changed=false + daemonRunning=true, 若无 pending 标记会永远跳过
+    // bootstrap, daemon 持旧 env (无 token) 401 且不自愈。
+    let bootstrapAttempts = 0;
+    let configContent = '';
+    const host = {
+      id: 'host-bootstrap-retry',
+      exec: async (cmd: string) => {
+        if (cmd.includes('cat "$CODEX_HOME/config.toml"')) {
+          return { exitCode: 0, stdout: configContent, stderr: '' };
+        }
+        if (cmd.includes(`'version'`)) {
+          return { exitCode: 0, stdout: 'ok', stderr: '' }; // 旧 daemon 一直在跑
+        }
+        if (cmd.includes('bootstrap')) {
+          bootstrapAttempts += 1;
+          if (bootstrapAttempts === 1) {
+            return { exitCode: 1, stdout: '', stderr: 'timed out' }; // 首轮失败
+          }
+          return { exitCode: 0, stdout: 'ok', stderr: '' };
+        }
+        if (cmd.includes('base64 -d')) {
+          // 模拟真实远端:写入内容反映到后续读取。
+          const written = decodeWrittenConfig([cmd]);
+          if (written !== null) configContent = written;
+          return { exitCode: 0, stdout: 'ok', stderr: '' };
+        }
+        return { exitCode: 0, stdout: 'ok', stderr: '' };
+      },
+      ensureRemoteForward: async (spec: { localHost: string; localPort: number; preferredRemotePort?: number }) => ({
+        remotePort: spec.preferredRemotePort ?? 47921,
+        close: async () => {},
+      }),
+    } as unknown as RemoteHost;
+
+    const deps = {
+      ensureBridgeStarted: async () => ({ port: 38080, serverNames: SERVERS }),
+      hasLiveTurnOnHost: () => false,
+    };
+    const first = await ensureRemoteCodexMcpBridge(host, deps);
+    expect(first.ok).toBe(false); // bootstrap 失败折叠为 ok:false
+    expect(bootstrapAttempts).toBe(1);
+
+    const second = await ensureRemoteCodexMcpBridge(host, deps);
+    expect(second.ok).toBe(true);
+    // config 已无漂移 + daemon 在跑, 仍强制重试了 bootstrap (pending 标记)。
+    expect(bootstrapAttempts).toBe(2);
+
+    // 成功后标记清除:第三轮不再多 bootstrap。
+    const third = await ensureRemoteCodexMcpBridge(host, deps);
+    expect(third.ok).toBe(true);
+    expect(bootstrapAttempts).toBe(2);
+  });
+});
+
 describe('ensureRemoteCodexMcpBridge server whitelist', () => {
   it('writes only collab whitelist servers into the remote managed block', async () => {
     // review P1 回归:bridge 上还挂着 cindy_memory / cindy_ssh 等 in-process
