@@ -42,7 +42,7 @@ import { clearAllDeviceModelMeta, evictDeviceModelMeta } from '@/device-link/dev
 import { dispatchFileBrowserWatchEvent } from '@/device-link/fileBrowserWatch';
 import { resolveMobileInvokeTimeoutMs } from '@/device-link/invokeTimeouts';
 import { rehydrateDeviceLinkTopics } from '@/device-link/rehydrate';
-import { invalidateTransientScheduleIndexFailures } from '@/session/scheduleIndex';
+import { invalidateOfflineScheduleIndexFailureFor, invalidateTransientScheduleIndexFailures } from '@/session/scheduleIndex';
 import { isTransientRemoteError } from '@/device-link/remoteRetry';
 import { createRnWebSocket } from '@/device-link/rnWebSocket';
 import type { MobileGoalStatusPayload } from '@cindy/maker-shared/device-link-contract';
@@ -447,6 +447,11 @@ export function DeviceLinkProvider({ children }: { children: ReactNode }) {
         return;
       }
       clearPresenceWipeTimer(wipeTimers, snap.deviceId);
+      // 每个「可用」快照都清该设备的 DEVICE_OFFLINE 负缓存(review P1 ×2):
+      // 主机在手机连上 relay 之前就离线时,presence 只在变化时广播,首个在线
+      // 快照 recovered=false——只挂 recovered 会漏掉这次恢复,徽标停留到无关
+      // 触发。逐设备且幂等(map 单点查删),不影响其它设备的风暴止损。
+      invalidateOfflineScheduleIndexFailureFor(snap.deviceId);
       if (presence.recovered) void rehydrateWithClient(client);
     });
     const offFrame = client.onFrame((env) => routeFrame(env, {
