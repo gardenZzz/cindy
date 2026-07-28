@@ -35,6 +35,25 @@
  *     page_hide 由 reportPageHide 自行守闸
  *   - 重新打开 → optInTracking() 并补一次 app_start
  *
+ * 活跃口径(2026-07-28 起,交互驱动):
+ *   活跃事件(page_view #tag=app_engaged)只由用户对 Cindy 窗口的真实动作触发:
+ *   窗口获得焦点 / 窗口内按键 / 窗口内按下指针,10 分钟内存节流。TapDB 的活跃
+ *   指标按天与小时去重,事件时间戳因此落在真实使用时刻;账号口径的 setUser
+ *   (→ user_login,TapDB 账号 DAU 的唯一触发源)跟随当天首条活跃事件发出。
+ *   桌面端同类先例:Firefox active ticks(近期输入 + 聚焦才计使用)。
+ *
+ *   刻意不做的事:
+ *   - 不监听 mousemove(高频)与 wheel(高频且涉及滚动合成路径);纯滚动阅读
+ *     超过节流窗口且全程不点不敲的场景,由下一次 focus / 点击 / 按键兜住
+ *   - 不用定时器、不做跨天检测:第二天的首条事件由用户当天第一次动作自然触发,
+ *     曾经的 0 点定时续报(main 的 tapdbTimer → tapdb:daily-active 广播)已删,
+ *     它把所有过夜挂机设备的活跃压在 00:00-00:01,制造小时趋势的 0 点尖峰,
+ *     且把「进程活着」误报成「用户活跃」
+ *   - 节流状态不持久化:窗口 reload 后最多提前一条,服务端按天去重,无害
+ *
+ *   SDK 发送层已核实(vendored 1.0.0):未配置 batch 时无 BatchConsumer,每条
+ *   事件独立 AjaxTask 即发即弃(失败至多原地重试 3 次后丢弃),不存在堆积面。
+ *
  * Overlay 窗口(voice-input-overlay / voice-input-dictionary-toast)不引入此模块,
  * 避免一次浮窗弹出被算成一次 PV。
  */
@@ -76,8 +95,33 @@ let sdkAppliedAllowed: boolean | null = null;
 /** 每收到一次广播 +1;用于丢弃 IPC 往返期间已经过期的初始快照。 */
 let settingsEpoch = 0;
 let currentUserId: string | null = null;
-let lastActiveDate: string | null = null;
 let lastSetUserDate: string | null = null;
+
+// ── Engagement throttle ─────────────────────────────────────────────────────
+
+/** 交互活跃上报的节流窗口。远大于单次输入间隔,一天上限 144 条。 */
+const ENGAGED_REPORT_INTERVAL_MS = 10 * 60 * 1000;
+/**
+ * 下一次允许上报活跃的时刻(epoch ms)。仅内存:reload 丢失只会让上报提前一条,
+ * 服务端按天去重,无害。任何 tag 的上报(含 app_start)都会推进它,避免冷启动
+ * app_start 后紧跟的第一次点击立刻再发一条。
+ */
+let nextEngagedReportAt = 0;
+
+/**
+ * 交互信号统一入口(focus / keydown / pointerdown)。绝大多数调用在第一行的
+ * 数值比较后返回 —— 高频输入路径上零分配、不足 1μs,不碰输入管线。
+ * 闸检查放在节流窗口推进之前:未放行期间的交互不消耗窗口,放行后首次交互立报。
+ */
+function onEngagedSignal(): void {
+  if (Date.now() < nextEngagedReportAt) return;
+  if (!sdkInitialized || !reportingAllowed) return;
+  try {
+    reportActive('app_engaged');
+  } catch (err) {
+    log.error('engaged report failed (non-fatal)', err);
+  }
+}
 
 // ── Gate ────────────────────────────────────────────────────────────────────
 
@@ -124,18 +168,14 @@ export function initTapdb(): void {
     log.error('onAuthStateChange subscription failed (non-fatal)', err);
   }
 
-  // 跨天检测复用 main 进程 heartbeat 的 60s 节拍;renderer 只负责调用 TapDB SDK。
+  // 交互驱动的活跃信号(见文件头「活跃口径」)。capture 挂在 window 捕获阶段,
+  // 业务代码的 stopPropagation 挡不住;onEngagedSignal 自带节流与同意闸。
   try {
-    window.electronAPI.onTapdbDailyActive((payload) => {
-      try {
-        if (!sdkInitialized || !reportingAllowed) return;
-        reportActive('app_daily_active', payload.date);
-      } catch (err) {
-        log.error('daily active report failed (non-fatal)', err);
-      }
-    });
+    window.addEventListener('focus', onEngagedSignal);
+    window.addEventListener('keydown', onEngagedSignal, { capture: true });
+    window.addEventListener('pointerdown', onEngagedSignal, { capture: true });
   } catch (err) {
-    log.error('daily active subscription failed (non-fatal)', err);
+    log.error('engagement listeners failed (non-fatal)', err);
   }
 
   // page_hide 由本模块自己发,不走 SDK 的 autoTrack —— SDK 的 trackPageHideEvent
@@ -222,7 +262,6 @@ function applyReportingAllowed(next: boolean): void {
       // autoTrack.pageHide,改由 reportPageHide 自己守闸(见 initTapdb)。
       TapDBAPI.optOutTracking();
       sdkAppliedAllowed = false;
-      lastActiveDate = null;
       lastSetUserDate = null;
       log.info('reporting disabled (opt-out)');
       return;
@@ -310,14 +349,15 @@ function applySuperProperties(): void {
   });
 }
 
-function reportActive(tag: 'app_start' | 'app_daily_active', dateKey = getLocalDateKey()): void {
-  const today = dateKey;
-  if (lastActiveDate === today && tag === 'app_daily_active') return;
+function reportActive(tag: 'app_start' | 'app_engaged'): void {
+  // 先推进节流窗口再上报:即便 pvEvent 抛异常,10 分钟内也不再重试(fire-and-forget,
+  // 防止持续输入在 SDK 故障时反复触发)。app_start 同样消耗窗口,避免启动瞬间双发。
+  nextEngagedReportAt = Date.now() + ENGAGED_REPORT_INTERVAL_MS;
 
   TapDBAPI.pvEvent({ '#tag': tag });
-  lastActiveDate = today;
-  log.info(`active ${tag} ${today}`);
+  log.info(`active ${tag}`);
 
+  const today = getLocalDateKey();
   if (currentUserId !== null && lastSetUserDate !== today) {
     reportSetUser(currentUserId, tag, today);
   }
@@ -325,7 +365,7 @@ function reportActive(tag: 'app_start' | 'app_daily_active', dateKey = getLocalD
 
 function reportSetUser(
   userId: string,
-  reason: 'auth_state' | 'app_daily_active' | 'app_start',
+  reason: 'auth_state' | 'app_engaged' | 'app_start',
   dateKey = getLocalDateKey(),
 ): void {
   TapDBAPI.setUser(userId);
@@ -348,7 +388,7 @@ export const __testing = {
     sdkAppliedAllowed = null;
     settingsEpoch = 0;
     currentUserId = null;
-    lastActiveDate = null;
     lastSetUserDate = null;
+    nextEngagedReportAt = 0;
   },
 };

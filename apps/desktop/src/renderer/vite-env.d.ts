@@ -1541,7 +1541,6 @@ interface ElectronAPI {
   authConsumeAccountDeletionRestoredNotice: () => Promise<boolean>;
   onAuthStateChange: (callback: (state: AuthStateChangePayload) => void) => () => void;
   onAuthSessionExpired: (callback: (state: AuthSessionExpiredPayload) => void) => () => void;
-  onTapdbDailyActive: (callback: (payload: { date: string }) => void) => () => void;
 
   // ── 使用统计(TapDB)同意闸 ──
   getAnalyticsSettings: () => Promise<AnalyticsSettingsPayload>;
