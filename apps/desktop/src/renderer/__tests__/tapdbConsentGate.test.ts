@@ -498,7 +498,9 @@ describe('engagement-driven activity reporting', () => {
 
     expect(tapdb.pvEvent).not.toHaveBeenCalled();
 
-    vi.advanceTimersByTime(10 * 60 * 1000); // 共享窗口也过期
+    // 让位后本窗口对齐共享窗口终点(还剩 9.5 分钟),而不是自己再吃满 10 分钟 ——
+    // 共享窗口一过就能上报,交替交互不会把间隔拉到近 20 分钟。
+    vi.advanceTimersByTime(9 * 60 * 1000 + 31 * 1000);
     fireWindowEvent('keydown');
 
     expect(tapdb.pvEvent).toHaveBeenCalledWith({ '#tag': 'app_engaged' });
