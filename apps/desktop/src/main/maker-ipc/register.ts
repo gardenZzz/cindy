@@ -3261,17 +3261,37 @@ export function registerMakerIpc(maker: Maker, options: RegisterMakerIpcOptions 
       if (typeof sessionId !== 'string' || typeof taskId !== 'string' || !taskId) return null;
       try {
         const s = maker.listActiveSessions().find((x) => x.id === sessionId);
-        if (!s) return null;
-        // SSH 远程工作区会话(s.remoteHostId):Claude CLI 跑在 SSH 远端主机,workflow
-        // 记录文件写在**SSH 远端 HOME** 下 —— 用本机 os.homedir() 拼目录必落空,读远端
-        // 文件需经 remote-file-service,暂不支持 → 返回 null,renderer 回退到 workflow 级
-        // 卡片(其数据走事件流,SSH 下可用)。注意这不是 device-link:device-link 远程会话
-        // 不在本机 listActiveSessions,由控制端 renderer 的 makerTransport 隧道路由到被控端
-        // 执行本 handler(见 allowlist 的 maker:get-workflow-progress 准入)。
-        if (s.remoteHostId) return null;
-        const { sdkSessionId, workDir } = s;
-        if (!sdkSessionId || !workDir) return null;
-        const dir = deriveWorkflowsDir(os.homedir(), workDir, sdkSessionId);
+        if (s) {
+          // SSH 远程工作区会话(s.remoteHostId):Claude CLI 跑在 SSH 远端主机,workflow
+          // 记录文件写在**SSH 远端 HOME** 下 —— 用本机 os.homedir() 拼目录必落空,读远端
+          // 文件需经 remote-file-service,暂不支持 → 返回 null,renderer 回退到 workflow 级
+          // 卡片(其数据走事件流,SSH 下可用)。注意这不是 device-link:device-link 远程会话
+          // 不在本机 listActiveSessions,由控制端 renderer 的 makerTransport 隧道路由到被控端
+          // 执行本 handler(见 allowlist 的 maker:get-workflow-progress 准入)。
+          if (s.remoteHostId) return null;
+          const { sdkSessionId, workDir } = s;
+          if (!sdkSessionId || !workDir) return null;
+          const dir = deriveWorkflowsDir(os.homedir(), workDir, sdkSessionId);
+          return await readWorkflowProgressByTaskId(dir, taskId);
+        }
+        // 会话不活跃(app 重启后看历史 / 会话已被关闭释放):workflow 记录文件仍在
+        // 本机磁盘,回退持久化 session 行的 working_dir + sdk_session_id 定位目录。
+        // 边界:remote_host_id 非空(SSH)与活跃分支同理返回 null;DB 存的是**最新**
+        // sdkSessionId,resume 换代后旧 workflow 的目录对不上 → reader 找不到文件
+        // 返回 null,与活跃分支同样降级,不会误读别的会话的记录。
+        const db = getDbClient().drizzle;
+        const rows = await db
+          .select({
+            workingDir: sessions.workingDir,
+            sdkSessionId: sessions.sdkSessionId,
+            remoteHostId: sessions.remoteHostId,
+          })
+          .from(sessions)
+          .where(eq(sessions.id, sessionId))
+          .limit(1);
+        const row = rows[0];
+        if (!row || row.remoteHostId || !row.sdkSessionId || !row.workingDir) return null;
+        const dir = deriveWorkflowsDir(os.homedir(), row.workingDir, row.sdkSessionId);
         return await readWorkflowProgressByTaskId(dir, taskId);
       } catch {
         return null;

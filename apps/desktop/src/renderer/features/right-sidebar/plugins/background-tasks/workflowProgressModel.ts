@@ -163,6 +163,9 @@ function groupsFromEntries(
     }
   }
   const orphans: WorkflowTreeAgentRow[] = [];
+  // 回填索引一次性预建:条目上限 2000,逐行线性扫 file.agents 是 O(n²),大编队
+  // 打开详情会卡帧。
+  const fileAgentIndex = backfillTerminal && file ? indexFileAgents(file.agents) : null;
   let agentOrdinal = 0;
   for (const entry of entries) {
     if (entry.type !== 'workflow_agent') continue;
@@ -170,7 +173,7 @@ function groupsFromEntries(
     agentOrdinal += 1;
     // 事件流收尾帧可能缺 resultPreview/durationMs/error(节流或提前断流);任务终态时
     // 按 label+phaseTitle 从文件回填,撞名取首个;只补缺,绝不覆盖 entries 已有值。
-    if (backfillTerminal && file) backfillRowFromFile(row, entry.phaseTitle, file.agents);
+    if (fileAgentIndex) backfillRowFromFile(row, entry.phaseTitle, fileAgentIndex);
     if (entry.phaseTitle && byPhase.has(entry.phaseTitle)) {
       byPhase.get(entry.phaseTitle)!.push(row);
     } else {
@@ -259,6 +262,24 @@ function rowFromFileAgent(agent: WorkflowAgentProgress, index: number): Workflow
   };
 }
 
+/** label+phaseTitle → 文件 agent 的回填索引 key(reader 已把空串归 undefined,
+ *  '\0' 分隔不会与 label 内容撞车)。 */
+function fileAgentKey(label: string, phaseTitle: string | undefined): string {
+  return `${label}\u0000${phaseTitle ?? ''}`;
+}
+
+/** 撞名取首个,与原线性 find 的命中语义一致。 */
+function indexFileAgents(
+  fileAgents: readonly WorkflowAgentProgress[],
+): Map<string, WorkflowAgentProgress> {
+  const index = new Map<string, WorkflowAgentProgress>();
+  for (const agent of fileAgents) {
+    const key = fileAgentKey(agent.label, agent.phaseTitle);
+    if (!index.has(key)) index.set(key, agent);
+  }
+  return index;
+}
+
 /**
  * 终态补缺:按 label+phaseTitle 匹配文件 agent(撞名取首个),只填 entries 缺失的
  * 字段。唯一例外是 state:事件流断在非终态(节流丢了收尾帧)而文件已有终态结论时,
@@ -267,11 +288,9 @@ function rowFromFileAgent(agent: WorkflowAgentProgress, index: number): Workflow
 function backfillRowFromFile(
   row: WorkflowTreeAgentRow,
   phaseTitle: string | undefined,
-  fileAgents: readonly WorkflowAgentProgress[],
+  fileAgentIndex: ReadonlyMap<string, WorkflowAgentProgress>,
 ): void {
-  const match = fileAgents.find(
-    (agent) => agent.label === row.label && agent.phaseTitle === phaseTitle,
-  );
+  const match = fileAgentIndex.get(fileAgentKey(row.label, phaseTitle));
   if (!match) return;
   if (
     CORRECTABLE_AGENT_STATES.has(row.state) &&

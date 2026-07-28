@@ -19,6 +19,7 @@ import { Spinner } from '@/components/ui/spinner';
 import type { AgentTaskUpdate, ChatMessage } from '@/hooks/useCCAgentChat';
 import { isRemoteSession } from '@/lib/makerTransport';
 import { openBackgroundTasksTab } from '@/features/right-sidebar/lib/openBackgroundTasksTab';
+import { extractWorkflowTaskId } from '@/features/right-sidebar/plugins/background-tasks/listSessionTasks';
 import { WorkflowAgentStrip } from '@/features/right-sidebar/plugins/background-tasks/WorkflowAgentStrip';
 import { workflowAgentVisualState } from '@/features/right-sidebar/plugins/background-tasks/workflowProgressModel';
 import { cn } from '@/lib/utils';
@@ -156,10 +157,12 @@ export function AgentTaskCard({ toolCall, update, result, subagentModel, session
   }, [sessionId, update?.taskId]);
 
   // workflow 卡整卡点击 → 打开右栏后台任务面板并定位本任务。入口模式要求
-  // sessionId 与 live taskId 都在;历史重载卡(update 为空,面板侧也无该任务的
-  // 数据)退回传统展开交互,让 description/summary(Workflow 最终结果文本)仍然
-  // 就地可读,不做「点了没反应」的假入口。
-  const workflowTaskId = update?.taskId;
+  // sessionId 与 taskId 都在:live 态取 update.taskId;历史重载(update 清空)从
+  // tool_result 文本恢复 —— 与面板 listSessionTasks 同一提取实现,保证 focusTaskId
+  // 两边配得上,面板详情再经 wf 文件回退恢复进度树。两者都提不到才退回传统展开
+  // 交互,让 description/summary 就地可读,不做「点了没反应」的假入口。
+  const workflowTaskId =
+    update?.taskId ?? (isWorkflow ? extractWorkflowTaskId(result) : undefined);
   const canOpenInPanel = Boolean(sessionId) && Boolean(workflowTaskId);
   const openInPanel = useCallback(() => {
     if (!sessionId || !workflowTaskId) return;
