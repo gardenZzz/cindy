@@ -6956,6 +6956,15 @@ export function registerMakerIpc(maker: Maker, options: RegisterMakerIpcOptions 
     });
     const projection = inputCoordinator.clearSession(sid, clearBoundary);
     silentStopAutoResumeGuard.noteSessionReset(sid);
+    // 丢弃缓存的待注入交接 / fork 来源标记:它们是按 clear 之前的历史算出来的,
+    // DB 侧的 cleared_at 抑制拦不住已经落进 registry 内存的那一份(首发被拒后
+    // 缓存仍在),下次 send 会把旧血缘灌进用户刚显式清空的上下文。
+    //
+    // 用 invalidate(留 null 墓碑)而不是 clear(删条目):本地 /clear 的 cleared_at
+    // 由 renderer fire-and-forget 落库(main 只在 remoteInvoke 分支自己写),删条目会
+    // 让这段窗口内的 headless send 回落到尚未更新 cleared_at 的 DB 行,把旧交接重建
+    // 出来再缓存住。
+    agentHandoffPending.invalidate(sid);
     getAgentIslandService()?.notifyQueueEmptied(sid);
     // 清上下文后,active 目标失去其依据(objective 引用的内容已被抹掉)→ 一并清除目标。
     goalClearObserver?.(sid);

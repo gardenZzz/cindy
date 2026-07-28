@@ -562,7 +562,7 @@ describe('Phase 2:切回停泊引擎(resume + 增量交接)', () => {
     const boundary = vi.mocked(deps.insertBoundaryMessage).mock.calls[0][1];
     expect(boundary.resumed).toBe(true);
     // 增量 framing(归位续接),且工作状态区来自全量历史
-    expect(boundary.handoff).toContain('切回由你继续');
+    expect(boundary.handoff).toContain('now it is switching back to you');
     expect(boundary.handoff).toContain('- /repo/a.ts');
     expect(boundary.handoff).not.toContain('最早的问题');
     expect(boundary.handoff).toContain('离开期间的问题');
