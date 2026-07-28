@@ -381,6 +381,9 @@ function reportActive(tag: 'app_start' | 'app_engaged'): void {
         now - sharedLast < ENGAGED_REPORT_INTERVAL_MS &&
         getLocalDateKey(new Date(sharedLast)) === getLocalDateKey(new Date(now))
       ) {
+        // 让位时本窗口的下一次尝试对齐共享窗口终点,而不是从现在顺延满 10 分钟 ——
+        // 否则两窗口交替交互会把实际上报间隔拉长到近 20 分钟。
+        nextEngagedReportAt = sharedLast + ENGAGED_REPORT_INTERVAL_MS;
         return;
       }
       window.localStorage.setItem(ENGAGED_SHARED_LAST_REPORT_KEY, String(now));
