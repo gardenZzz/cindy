@@ -426,8 +426,8 @@ interface McpToolCallItem {
 
 type WebSearchAction =
   | { type: 'search'; query?: string | null; queries?: string[] | null }
-  | { type: 'openPage'; url?: string | null }
-  | { type: 'findInPage'; url?: string | null; pattern?: string | null }
+  | { type: 'open_page' | 'openPage'; url?: string | null }
+  | { type: 'find_in_page' | 'findInPage'; url?: string | null; pattern?: string | null }
   | { type: string; [k: string]: unknown };
 
 interface WebSearchItem {
@@ -905,8 +905,10 @@ function webSearchActionDetail(action: WebSearchAction | null | undefined): stri
       if (queries.length === 0) return '';
       return queries.length > 1 ? `${queries[0]} ...` : queries[0];
     }
+    case 'open_page':
     case 'openPage':
       return nonEmptyWebSearchText(action.url);
+    case 'find_in_page':
     case 'findInPage': {
       const url = nonEmptyWebSearchText(action.url);
       const pattern = nonEmptyWebSearchText(action.pattern);
