@@ -265,6 +265,7 @@ import {
   markAppContentWindow,
 } from './windowFocusClassifier.js';
 import { assertTrustedAppRendererEvent } from './security/trustedAppRenderer.js';
+import { readFileBytesForPreview } from './fileReadBytes.js';
 import { initHeartbeatService } from './heartbeatService';
 import { initAnalyticsSettingsService, noteAuthColdStartState } from './analyticsSettingsService';
 import { WindowManualDragController } from './windowManualDrag';
@@ -4294,6 +4295,43 @@ const registerIpcHandlers = () => {
       } catch (err) {
         return { success: false, error: err instanceof Error ? err.message : String(err), size: 0 };
       }
+    },
+  );
+
+  // Read a local file's raw bytes for in-app rendering (currently PDF preview).
+  // Same path policy + size cap as read-file-for-attachment, but returns a
+  // Uint8Array over structured clone instead of base64: pdf.js getDocument({
+  // data }) wants bytes, and skipping base64 avoids a large transient string
+  // plus a main-thread atob/charCodeAt decode loop in the renderer. No new
+  // access surface — read-file-for-attachment already exposes these same bytes
+  // (as base64) under the identical isPathAllowed policy.
+  ipcMain.handle(
+    'read-file-bytes',
+    async (
+      event: Electron.IpcMainInvokeEvent,
+      params: { filePath: string; maxSize?: number },
+    ): Promise<{ bytes: Uint8Array; size: number }> => {
+      // Reject any caller that is not the trusted main app renderer — an
+      // auxiliary window / child frame / webview bearing the shared preload
+      // must not be able to pull raw file bytes. Mirrors the shell:open-path
+      // policy (assertTrusted + isPathAllowed) for a path-taking privileged IPC.
+      assertTrustedAppRendererEvent(event);
+      // Validation + policy + regular-file + size-cap + exact-copy live in the
+      // injectable core (fileReadBytes.ts) so they are unit-tested without
+      // Electron; failures throw a sanitized IpcError that rejects the invoke().
+      // O_NOFOLLOW on the final component: the core opens the realpath'd target,
+      // whose last segment is a real file — so a legit open succeeds, but if the
+      // final component was swapped to a symlink in the realpath→open race it
+      // fails (ELOOP) instead of following into a denied file. Falls back to 0
+      // where the platform lacks the flag (Windows), matching saveChatAttachment.
+      const noFollow =
+        typeof fs.constants.O_NOFOLLOW === 'number' ? fs.constants.O_NOFOLLOW : 0;
+      return readFileBytesForPreview(params, {
+        isPathAllowed,
+        realpath: (p) => fs.promises.realpath(p),
+        stat: (p) => fs.promises.stat(p),
+        open: (p) => fs.promises.open(p, fs.constants.O_RDONLY | noFollow),
+      });
     },
   );
 

@@ -2590,6 +2590,19 @@ contextBridge.exposeInMainWorld('electronAPI', {
     truncated?: boolean;
   }> => ipcRenderer.invoke('read-file-for-attachment', params),
 
+  /**
+   * Read a local file's raw bytes (Uint8Array) under the same path policy /
+   * size cap as readFileForAttachment, gated to the trusted app renderer. For
+   * in-app renderers that want bytes directly (PDF preview → pdf.js
+   * getDocument({ data })) without a base64 round-trip. Rejects with an
+   * IpcError (PERMISSION_DENIED / INVALID_PARAMS / NOT_FOUND /
+   * PRECONDITION_FAILED / INTERNAL) on failure — no partial/fallback payload.
+   */
+  readFileBytes: (params: {
+    filePath: string;
+    maxSize?: number;
+  }): Promise<{ bytes: Uint8Array; size: number }> => ipcRenderer.invoke('read-file-bytes', params),
+
   // File header peek IPC (F-FI-8 fallback inference)
   peekFileHeader: (params: {
     filePath: string;
