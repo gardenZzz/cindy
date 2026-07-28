@@ -152,6 +152,13 @@ interface SessionState {
   sdkSessionId: string | null;
   /** Whether the consume loop is still running. */
   alive: boolean;
+  /**
+   * forceful kill 已开始 (interrupt 发出、inputQueue 已/将 end) 但 consume
+   * loop 尚未退出 — 此窗口内 alive 仍为 true, sendMessage 必须显式拒绝
+   * (Greptile P1: ended queue 的 push 静默丢, 其他连接 attach+send 会让
+   * 用户消息看似成功实则消失)。
+   */
+  killing?: boolean;
   /** Currently attached client's notify function; null when no client is attached. */
   attachedNotify: AttachedNotify | null;
   /**
@@ -393,6 +400,15 @@ export class SessionRegistry {
     if (!s.alive) {
       throw makeRegistryError('SESSION_NOT_FOUND', `session ${sessionId} is no longer alive`);
     }
+    // kill 窗口 (killing=true 且 consume loop 未退出) 必须显式拒绝:
+    // inputQueue 已 end, push 静默丢 — 看似发送成功实则消息消失
+    // (Greptile P1)。调用方应稍后重试或走 fresh start。
+    if (s.killing) {
+      throw makeRegistryError(
+        'SESSION_KILL_PENDING',
+        `session ${sessionId} is being killed (input closed) — retry shortly or start a fresh query`,
+      );
+    }
     s.inputQueue.push(message);
   }
 
@@ -474,6 +490,9 @@ export class SessionRegistry {
       this.sessions.delete(sessionId);
       return;
     }
+    // 先标 killing 再 interrupt:终止窗口从这一刻起对 sendMessage 可见
+    // (Greptile P1, 见 SessionState.killing)。
+    s.killing = true;
     try {
       await s.query.interrupt();
     } catch (err) {
