@@ -43,21 +43,17 @@ describe('isPathWithin', () => {
   });
 
   it('大小写: Windows 不敏感, 其它平台敏感(规则 15)', () => {
-    // 两个分支都要锁住 —— 只在当前平台上跑, 另一半会在重构时悄悄回归
-    const original = process.platform;
-    const setPlatform = (value: NodeJS.Platform): void => {
-      Object.defineProperty(process, 'platform', { value, configurable: true });
-    };
-    try {
-      setPlatform('win32');
-      expect(isPathWithin(BASE, path.join(BASE.toUpperCase(), 'SUB'))).toBe(true);
-      expect(isPathWithin(BASE.toUpperCase(), BASE)).toBe(true);
+    // 路径格式和 path 实现都按目标平台构造，避免宿主系统语义污染模拟分支。
+    const windowsBase = path.win32.resolve('C:\\repos\\demo');
+    expect(
+      isPathWithin(windowsBase, path.win32.join(windowsBase.toUpperCase(), 'SUB'), 'win32'),
+    ).toBe(true);
+    expect(isPathWithin(windowsBase.toUpperCase(), windowsBase, 'win32')).toBe(true);
 
-      setPlatform('linux');
-      expect(isPathWithin(BASE, path.join(BASE.toUpperCase(), 'SUB'))).toBe(false);
-      expect(isPathWithin(BASE.toUpperCase(), BASE)).toBe(false);
-    } finally {
-      setPlatform(original);
-    }
+    const posixBase = path.posix.resolve('/repos/demo');
+    expect(isPathWithin(posixBase, path.posix.join(posixBase.toUpperCase(), 'SUB'), 'linux')).toBe(
+      false,
+    );
+    expect(isPathWithin(posixBase.toUpperCase(), posixBase, 'linux')).toBe(false);
   });
 });
