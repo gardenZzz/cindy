@@ -6380,6 +6380,9 @@
       "identityGithubUser": "Submitting identity: GitHub user @{{login}} (you)",
       "identityPlatform": "Submitting identity: Cindy platform (GitHub App {{login}})",
       "envLine": "Attached automatically on submit: client {{appVersion}} · {{platform}} {{arch}} · UI language {{uiLanguage}}",
+      "regionLine": "Build region: {{region}}",
+      "regionCodeCn": "CN",
+      "regionCodeDev": "Dev",
       "submit": "Submit",
       "cancel": "Cancel"
     },
