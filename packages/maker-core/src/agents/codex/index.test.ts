@@ -6526,6 +6526,216 @@ describe('CodexAgent turn lifecycle', () => {
     await handle.close();
   });
 
+  it('replays a buffered terminal error on reconcile so the send settles instead of hanging (greptile R11 P1)', async () => {
+    // 合法 turn 的 started 先于响应到达并进缓冲, 缓冲期间 daemon 直接发了
+    // terminal error: 直接丢弃会把尸体 turn 激活成 in-flight, send 永久卡
+    // generating — 终态必须缓存, 对账确认合法后重放收口。
+    const firstStart = deferred<unknown>();
+    const secondStart = deferred<unknown>();
+    let attempt = 0;
+    const agent = new CodexAgent(createDeps());
+    const host = installFakeHost(agent, (method) => {
+      if (method === Method.TurnStart) {
+        attempt += 1;
+        if (attempt === 1) return firstStart.promise;
+        return secondStart.promise;
+      }
+      return undefined;
+    });
+    const handle = await agent.startSession({
+      sessionId: 'session-buffered-terminal-error',
+      model: 'gpt-5.4',
+      workingDir: '/repo',
+    });
+    const subscribeCalls = host.subscribeThread.mock.calls as unknown as Array<[string, ThreadEventHandlers]>;
+    const handlers = subscribeCalls[0]?.[1];
+    const iterator = handle.events()[Symbol.asyncIterator]();
+
+    // 第一次 send 失败立孤儿守卫。
+    const send1 = handle.send({ type: 'user', content: 'first' });
+    for (let i = 0; i < 5; i += 1) {
+      if (host.request.mock.calls.some(([method]) => method === Method.TurnStart)) break;
+      await Promise.resolve();
+    }
+    firstStart.reject(new Error('codex app-server turn/start timed out after 60000ms'));
+    await send1;
+    expect(await nextEvent(iterator)).toMatchObject({ type: 'status', data: { isRunning: true } });
+    expect(await nextEvent(iterator)).toMatchObject({ type: 'error', data: { isTerminal: true } });
+    expect(await nextEvent(iterator)).toMatchObject({
+      type: 'status',
+      data: { status: 'Done', isRunning: false },
+    });
+
+    // 第二次 send: 自己的 started 先到进缓冲; 缓冲期间 daemon 直接 terminal error。
+    const send2 = handle.send({ type: 'user', content: 'second' });
+    for (let i = 0; i < 5; i += 1) {
+      if (host.request.mock.calls.filter(([method]) => method === Method.TurnStart).length >= 2) break;
+      await Promise.resolve();
+    }
+    expect(await nextEvent(iterator)).toMatchObject({ type: 'status', data: { isRunning: true } });
+    handlers.turnStarted?.({ threadId: 'start-thread-id', turn: { id: 'turn-2' } });
+    handlers.error?.({
+      threadId: 'start-thread-id',
+      turnId: 'turn-2',
+      scope: 'turn',
+      willRetry: false,
+      error: { message: 'instant backend failure' },
+    });
+    // 缓冲期间终态不出事件 (缓存等响应)。
+    expect(handle.isTurnRunning?.()).toBe(false);
+
+    // 响应 id 一致 → 合法: 重放 terminal error → send 收口 (error + Done),
+    // 尸体 turn 不被激活, 也不吃 interrupt。
+    secondStart.resolve({ turn: { id: 'turn-2' } });
+    await send2;
+    expect(await nextEvent(iterator)).toMatchObject({
+      type: 'error',
+      data: { message: 'instant backend failure', isTerminal: true },
+    });
+    expect(await nextEvent(iterator)).toMatchObject({
+      type: 'status',
+      data: { status: 'Done', isRunning: false },
+    });
+    expect(handle.isTurnRunning?.()).toBe(false);
+    expect(handle.getCurrentTurnId?.()).toBeNull();
+    expect(host.request.mock.calls.some(([method]) => method === Method.TurnInterrupt)).toBe(false);
+    await handle.close();
+  });
+
+  it('replays a buffered turnCompleted on reconcile so the send settles instead of hanging (greptile R11 P1)', async () => {
+    // 合法 turn 缓冲期间 daemon 直接完成 (极快 turn / started-before-resp 后
+    // 立即 completed): completed 缓存, 对账一致后重放 — send 收 Done+done
+    // 收口, 尸体 turn 不被激活 (重放自动记墓碑挡住激活路径)。
+    const firstStart = deferred<unknown>();
+    const secondStart = deferred<unknown>();
+    let attempt = 0;
+    const agent = new CodexAgent(createDeps());
+    const host = installFakeHost(agent, (method) => {
+      if (method === Method.TurnStart) {
+        attempt += 1;
+        if (attempt === 1) return firstStart.promise;
+        return secondStart.promise;
+      }
+      return undefined;
+    });
+    const handle = await agent.startSession({
+      sessionId: 'session-buffered-completed',
+      model: 'gpt-5.4',
+      workingDir: '/repo',
+    });
+    const subscribeCalls = host.subscribeThread.mock.calls as unknown as Array<[string, ThreadEventHandlers]>;
+    const handlers = subscribeCalls[0]?.[1];
+    const iterator = handle.events()[Symbol.asyncIterator]();
+
+    const send1 = handle.send({ type: 'user', content: 'first' });
+    for (let i = 0; i < 5; i += 1) {
+      if (host.request.mock.calls.some(([method]) => method === Method.TurnStart)) break;
+      await Promise.resolve();
+    }
+    firstStart.reject(new Error('codex app-server turn/start timed out after 60000ms'));
+    await send1;
+    expect(await nextEvent(iterator)).toMatchObject({ type: 'status', data: { isRunning: true } });
+    expect(await nextEvent(iterator)).toMatchObject({ type: 'error', data: { isTerminal: true } });
+    expect(await nextEvent(iterator)).toMatchObject({
+      type: 'status',
+      data: { status: 'Done', isRunning: false },
+    });
+
+    const send2 = handle.send({ type: 'user', content: 'second' });
+    for (let i = 0; i < 5; i += 1) {
+      if (host.request.mock.calls.filter(([method]) => method === Method.TurnStart).length >= 2) break;
+      await Promise.resolve();
+    }
+    expect(await nextEvent(iterator)).toMatchObject({ type: 'status', data: { isRunning: true } });
+    handlers.turnStarted?.({ threadId: 'start-thread-id', turn: { id: 'turn-2' } });
+    handlers.turnCompleted?.({ threadId: 'start-thread-id', turn: { id: 'turn-2', status: 'completed' } });
+    expect(handle.isTurnRunning?.()).toBe(false);
+
+    secondStart.resolve({ turn: { id: 'turn-2' } });
+    await send2;
+    // 重放 completed → status Done + done 事件收口; 尸体 turn 不激活。
+    expect(await nextEvent(iterator)).toMatchObject({
+      type: 'status',
+      data: { status: 'Done', isRunning: false },
+    });
+    expect(await nextEvent(iterator)).toMatchObject({ type: 'done' });
+    expect(handle.isTurnRunning?.()).toBe(false);
+    expect(handle.getCurrentTurnId?.()).toBeNull();
+    await handle.close();
+  });
+
+  it('discards buffered terminal events once the response proves the turn an orphan (greptile R11 P1)', async () => {
+    // 缓冲期间孤儿 turn 的 terminal error + completed 都进缓存; 响应 id 不同
+    // → 缓存丢弃 + 墓碑 + interrupt; send2 不被孤儿终态收口, 响应的 turn
+    // 正常激活 (R10 隔离语义不被重放机制破坏)。
+    const firstStart = deferred<unknown>();
+    const secondStart = deferred<unknown>();
+    let attempt = 0;
+    const agent = new CodexAgent(createDeps());
+    const host = installFakeHost(agent, (method) => {
+      if (method === Method.TurnStart) {
+        attempt += 1;
+        if (attempt === 1) return firstStart.promise;
+        return secondStart.promise;
+      }
+      return undefined;
+    });
+    const handle = await agent.startSession({
+      sessionId: 'session-buffered-orphan-terminal',
+      model: 'gpt-5.4',
+      workingDir: '/repo',
+    });
+    const subscribeCalls = host.subscribeThread.mock.calls as unknown as Array<[string, ThreadEventHandlers]>;
+    const handlers = subscribeCalls[0]?.[1];
+    const iterator = handle.events()[Symbol.asyncIterator]();
+
+    const send1 = handle.send({ type: 'user', content: 'first' });
+    for (let i = 0; i < 5; i += 1) {
+      if (host.request.mock.calls.some(([method]) => method === Method.TurnStart)) break;
+      await Promise.resolve();
+    }
+    firstStart.reject(new Error('codex app-server turn/start timed out after 60000ms'));
+    await send1;
+    expect(await nextEvent(iterator)).toMatchObject({ type: 'status', data: { isRunning: true } });
+    expect(await nextEvent(iterator)).toMatchObject({ type: 'error', data: { isTerminal: true } });
+    expect(await nextEvent(iterator)).toMatchObject({
+      type: 'status',
+      data: { status: 'Done', isRunning: false },
+    });
+
+    const send2 = handle.send({ type: 'user', content: 'second' });
+    for (let i = 0; i < 5; i += 1) {
+      if (host.request.mock.calls.filter(([method]) => method === Method.TurnStart).length >= 2) break;
+      await Promise.resolve();
+    }
+    expect(await nextEvent(iterator)).toMatchObject({ type: 'status', data: { isRunning: true } });
+    handlers.turnStarted?.({ threadId: 'start-thread-id', turn: { id: 'orphan-turn' } });
+    handlers.error?.({
+      threadId: 'start-thread-id',
+      turnId: 'orphan-turn',
+      scope: 'turn',
+      willRetry: false,
+      error: { message: 'orphan failure' },
+    });
+    handlers.turnCompleted?.({ threadId: 'start-thread-id', turn: { id: 'orphan-turn', status: 'failed' } });
+    // 孤儿终态全在缓存里, 事件流无输出。
+    await expect(nextEvent(iterator)).rejects.toThrow('timed out waiting for event');
+
+    // 响应 turn-2 ≠ orphan-turn → 孤儿终态随缓存一并丢弃: 墓碑 + interrupt,
+    // turn-2 正常激活, send2 不被提前收口。
+    secondStart.resolve({ turn: { id: 'turn-2' } });
+    await send2;
+    await vi.waitFor(() => {
+      expect(host.request).toHaveBeenCalledWith(
+        Method.TurnInterrupt,
+        expect.objectContaining({ threadId: 'start-thread-id', turnId: 'orphan-turn' }),
+      );
+    });
+    expect(handle.isTurnRunning?.()).toBe(true);
+    expect(handle.getCurrentTurnId?.()).toBe('turn-2');
+    await handle.close();
+  });
+
   it('clears running state and emits done status after terminal error notification', async () => {
     const agent = new CodexAgent(createDeps());
     const host = installFakeHost(agent);

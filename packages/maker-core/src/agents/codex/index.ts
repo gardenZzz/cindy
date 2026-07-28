@@ -2097,6 +2097,16 @@ export class CodexAgent extends BaseAgent {
     // 孤儿 turn 的 item 事件不会被渲染到本次 send 下。
     const bufferedOrphanTurnIds = new Set<string>();
     type TurnCompletedParams = Parameters<NonNullable<ThreadEventHandlers['turnCompleted']>>[0];
+    type ErrorNotificationParams = Parameters<NonNullable<ThreadEventHandlers['error']>>[0];
+    // 缓冲隔离期间到达的终态事件按 turnId 暂存 (greptile R11 P1): 对账证明
+    // 合法时重放收口 send, 证明孤儿时丢弃 — 直接丢会让合法 turn 的 send
+    // 永久卡 generating (turn 已死, 响应到达后激活一具尸体); 直接处理会让
+    // 孤儿终态提前收口在飞 send。一个 turn 至多一条终态, 单槽覆盖即可。
+    const bufferedTerminalEvents = new Map<
+      string,
+      | { kind: 'completed'; params: TurnCompletedParams }
+      | { kind: 'error'; params: ErrorNotificationParams }
+    >();
     // 正常完成的 turn 也必须保留墓碑:app-server 允许 turn/completed 早于仍在
     // 后台收尾的 item 事件到达。没有这层墓碑时,currentTurnId 已清空,迟到 item
     // 会重新发出 running status,而该 turn 的 done 已消费完,会话将永久假忙。
@@ -4226,9 +4236,15 @@ export class CodexAgent extends BaseAgent {
         }
       },
       turnCompleted: (params) => {
-        // daemon 自己跑完的 buffered 孤儿 turn 无需再等对账 — 出缓冲防泄漏
-        // (codex R9 P2); completed 本体走既有 stale/墓碑路径。
-        bufferedOrphanTurnIds.delete(params.turn.id);
+        // 缓冲隔离期间收到终态: 缓存等响应按归属对账 (greptile R11 P1) — 合法
+        // 则重放收口 send, 孤儿则丢弃 + 墓碑。直接处理会让孤儿 completed
+        // 提前收口在飞 send (handleTurnCompleted 在 currentTurnId===null 下
+        // 也会收口 emit done); 直接丢弃会把尸体 turn 激活成 in-flight,
+        // send 永久卡 generating。
+        if (bufferedOrphanTurnIds.has(params.turn.id)) {
+          bufferedTerminalEvents.set(params.turn.id, { kind: 'completed', params });
+          return;
+        }
         handleTurnCompleted(params);
       },
       itemStarted: (params) => {
@@ -4338,6 +4354,16 @@ export class CodexAgent extends BaseAgent {
         log.warn('Codex Guardian warning', { threadId: params.threadId, message: params.message });
       },
       error: (params) => {
+        // 缓冲隔离期间收到终态 error: 缓存等对账 (greptile R11 P1) — 吞下会
+        // 让合法 turn 的 send 永久卡 generating (turn 已死却被激活)。
+        // willRetry 的非终态 error 不决定 turn 生死, 丢弃即可 (合法 turn
+        // 激活后 daemon 还会继续发)。
+        if (params.turnId && bufferedOrphanTurnIds.has(params.turnId)) {
+          if (params.willRetry !== true) {
+            bufferedTerminalEvents.set(params.turnId, { kind: 'error', params });
+          }
+          return;
+        }
         if (shouldIgnoreStaleTurnEvent(params.turnId)) return;
         let effectiveParams = params;
         let isTerminalError = params.willRetry !== true;
@@ -4630,6 +4656,9 @@ export class CodexAgent extends BaseAgent {
               for (const bufferedId of bufferedOrphanTurnIds) {
                 if (bufferedId === resp.turn.id) continue;
                 terminalErroredTurnIds.add(bufferedId);
+                // 孤儿缓冲期间收到的终态一并丢弃 (greptile R11 P1) — 不得
+                // 让孤儿 error/completed 收口本次 send。
+                bufferedTerminalEvents.delete(bufferedId);
                 log.warn('buffered turnStarted proven orphan by turn/start response — interrupting', {
                   turnId: bufferedId,
                   acceptedTurnId: resp.turn.id,
@@ -4652,6 +4681,20 @@ export class CodexAgent extends BaseAgent {
                 translatorRt.lastAuthErrorKey = null;
                 translatorRt.networkRetryNotice = null;
                 turnRetryTracker.reset();
+                // 缓冲期间已收到终态 (greptile R11 P1): 重放让 send 收口 —
+                // 直接丢弃会把尸体 turn 激活成 in-flight, UI 永久卡
+                // generating。重放时 isTurnStartPending 仍为 true (finally
+                // 复位在本响应处理之后): completed 自动记墓碑 +
+                // currentTurnId===null 下收口 emit done; terminal error 的
+                // targetsPendingTurn=true → 正常终端路径 (墓碑 + 错误透出 +
+                // Done 状态)。随后下方激活逻辑被墓碑挡住, 不激活尸体。
+                const terminalEvent = bufferedTerminalEvents.get(resp.turn.id);
+                bufferedTerminalEvents.delete(resp.turn.id);
+                if (terminalEvent?.kind === 'completed') {
+                  handleTurnCompleted(terminalEvent.params);
+                } else if (terminalEvent?.kind === 'error') {
+                  handlers.error?.(terminalEvent.params);
+                }
               }
             }
             // turn/start 成功 → 孤儿守卫解除 (上次失败的 RPC 若也有迟到 started,
@@ -4833,6 +4876,7 @@ export class CodexAgent extends BaseAgent {
             }
           }
           bufferedOrphanTurnIds.clear();
+          bufferedTerminalEvents.clear();
           log.error('turn/start failed', { error: String(finalErr) });
           eventQueue.push({
             type: 'error',
