@@ -604,6 +604,45 @@ export function stripRemoteCodexMcpConfig(
 }
 
 /**
+ * live send 前的轻量 MCP 漂移判定 (纯本地, 零远程 RTT):「应有状态」与
+ * appliedFingerprint 不一致 ⇒ 需要一次完整 ensure。成分:
+ *   - collab 关闭 / token 缺失:applied 存在 = 待清理;
+ *   - bridge 不在 (shutdown 后):返回 true — ensure 会触发 lazy 重建并按
+ *     collab/token 现状重注入或清理;
+ *   - bridge 在:全成分 (token|instanceId|remotePort|servers) 与 applied 比对。
+ * stripRemoteCodexMcpConfig 后 applied 被摘除 ⇒ collab 开时恒 true
+ * (codex-connector R23 P1:strip 后 idle-live 的 send 必须 send 前恢复)。
+ * servers 成分用白名单全集 — collab 开启时 provider 恒注册
+ * (keepOrcaProviderStable), 与 ensure 内 filter 结果一致。
+ */
+export function hasPendingRemoteMcpDrift(
+  hostId: string,
+  opts: {
+    collabEnabled: boolean;
+    token: string | null;
+    bridgeInstanceId: string | null;
+  },
+): boolean {
+  const applied = readPortPrefs()[hostId]?.appliedFingerprint ?? null;
+  if (!opts.collabEnabled || !opts.token) {
+    // 清理语义:applied 存在 = 待清理 (strip / 清理路径未跑过)。
+    return applied !== null;
+  }
+  if (!opts.bridgeInstanceId) {
+    return true;
+  }
+  const remotePort = readPortPrefs()[hostId]?.remotePort ?? DEFAULT_REMOTE_PORT_START;
+  const desired = createHash('sha256')
+    .update(
+      `${opts.token}|${opts.bridgeInstanceId}|${remotePort}|${[...CODEX_REMOTE_MCP_SERVER_NAMES].sort().join(',')}`,
+      'utf8',
+    )
+    .digest('hex')
+    .slice(0, 12);
+  return desired !== applied;
+}
+
+/**
  * 确保远端 codex daemon 能用上本机 MCP bridge。幂等,挂在 remote codex
  * session 的 start/resume 前置 (ensureRemoteReadyForSessionStart)。
  * 整个 ensure 在 per-host 串行锁内执行 (见 withHostSerial)。

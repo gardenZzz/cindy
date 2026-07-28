@@ -69,7 +69,7 @@ describe('remoteCcQueryFactory cleanup wiring', () => {
     const killFirst = ccManagerClientSource.indexOf('killAliveForFresh');
     expect(killFirst).toBeGreaterThan(-1);
     const existingGuard = ccManagerClientSource.indexOf(
-      'listedSession?.alive && (!killAliveForFresh || !killSettled)',
+      'listedSession?.alive && !killAliveForFresh',
     );
     expect(existingGuard).toBeGreaterThan(killFirst);
 
@@ -120,18 +120,17 @@ describe('remoteCcQueryFactory stale-invalidation freshness (R22 P2)', () => {
   });
 });
 
-describe('cc-manager-client forced-fresh kill settle (Greptile R22 P1)', () => {
-  it('degrades to attach instead of hard-failing when kill does not settle in time', () => {
-    // 固定期限的上抛会让恢复路径死锁 (重试只重复同样的 kill+超时) —
-    // 超时必须降级 attach 仍在退出中的 query, 其自然终止后的下次 send
-    // 按 dead 条目走正常 fresh start。
+describe('cc-manager-client forced-fresh kill settle (Greptile R22/R23 P1)', () => {
+  it('backs off the settle poll and never attaches to a kill-pending query (input would be silently dropped)', () => {
     const client = ccManagerClientSource;
-    // 退避轮询存在 (不再固定 150ms / 5s)。
+    // 退避轮询 (150ms→1s), 覆盖 SSH 大 RTT / SDK abort 慢。
     expect(client).toContain('pollDelayMs');
-    // 超时不再上抛固定期限错误。
-    expect(client).not.toContain('still alive 5s after kill');
-    // 降级 attach 的实现:killSettled=false 时 existing 仍取 alive 条目。
-    expect(client).toContain('killSettled = false');
-    expect(client).toContain('(!killAliveForFresh || !killSettled)');
+    // 超时必须上抛:attach 到 inputQueue 已 end 的 query 会静默吞掉用户
+    // 消息 (cc-mgr registry 注释实锤) — 降级 attach 路径不得存在。
+    expect(client).toContain('still alive 30s after kill');
+    expect(client).not.toContain('killSettled');
+    expect(client).not.toContain('still-terminating');
+    // 错误信息必须带可操作指引 (重试 / 重启远端 cc-mgr)。
+    expect(client).toContain('restart the remote');
   });
 });

@@ -87,6 +87,15 @@ export function setCodexEnvironmentShutdownHook(fn: (() => void) | null): void {
   shutdownHook = fn;
 }
 
+/**
+ * 当前活跃 bridge 的实例 id (不触发 lazy 启动;未启动 / 已 shutdown 时
+ * null)。live send 的轻量 MCP 漂移判定 (hasPendingRemoteMcpDrift) 用它
+ * 区分「bridge 不在 ⇒ 必 ensure」与「比对实例代际」。
+ */
+export function getActiveCodexBridgeInstanceId(): string | null {
+  return activeBridge?.instanceId ?? null;
+}
+
 export async function shutdownCodexEnvironment(): Promise<void> {
   const cur = cached;
   if (!cur) return;

@@ -1637,3 +1637,85 @@ describe('buildNoProviderMessage', () => {
     });
   });
 });
+
+describe('SSH remote worker model/provider compatibility gate (R23 P2)', () => {
+  const remoteLeadRow = {
+    id: 'lead-1',
+    agentKind: 'codex' as const,
+    workingDir: '/srv/repo',
+    model: 'gpt-5.5',
+    effort: 'medium',
+    permissionMode: 'default',
+    fastMode: false,
+    providerId: 'xd',
+    remoteHostId: 'remote-host-1',
+  };
+
+  it('rejects subscription-direct models for a remote lead (they require the local proxy path)', async () => {
+    const { service } = createDeps({
+      getLeadSessionRow: vi.fn(async () => remoteLeadRow),
+      getAvailableModels: vi.fn(() => [
+        { id: 'chatgpt/gpt-5.5', efforts: ['low', 'medium', 'high', 'xhigh'], defaultEffort: 'high', supportsFastMode: true },
+      ]),
+      getProviderRoutingContext: vi.fn(async () => providerRoutingContext({
+        codex: [{ id: 'chatgpt', name: 'ChatGPT Subscription', models: ['chatgpt/gpt-5.5'] }],
+      })),
+    });
+
+    await expect(
+      service.createWorker({
+        leadSessionId: 'lead-1',
+        role: 'reviewer',
+        agent: 'codex',
+        label: 'reviewer',
+        model: 'chatgpt/gpt-5.5',
+        providerId: 'chatgpt',
+      }),
+    ).resolves.toMatchObject({
+      ok: false,
+      errorCode: 'INVALID_PARAMS',
+      message: expect.stringContaining('not available for SSH remote workers'),
+    });
+  });
+
+  it('rejects chat-bridged codex providers for a remote lead (wireProtocol=openai-chat)', async () => {
+    const { service } = createDeps({
+      getLeadSessionRow: vi.fn(async () => remoteLeadRow),
+      getAvailableModels: vi.fn(() => [
+        { id: 'deepseek-v4', efforts: ['low', 'medium', 'high', 'xhigh'], defaultEffort: 'high', supportsFastMode: true },
+      ]),
+      getProviderRoutingContext: vi.fn(async () => providerRoutingContext({
+        codex: [{ id: 'deepseek', name: 'DeepSeek', models: ['deepseek-v4'], chatBridgedCodex: true }],
+      })),
+    });
+
+    await expect(
+      service.createWorker({
+        leadSessionId: 'lead-1',
+        role: 'reviewer',
+        agent: 'codex',
+        label: 'reviewer',
+        model: 'deepseek-v4',
+        providerId: 'deepseek',
+      }),
+    ).resolves.toMatchObject({
+      ok: false,
+      errorCode: 'INVALID_PARAMS',
+      message: expect.stringContaining('not available for SSH remote workers'),
+    });
+  });
+
+  it('still allows SSH-compatible models for a remote lead', async () => {
+    const { service } = createDeps({
+      getLeadSessionRow: vi.fn(async () => remoteLeadRow),
+    });
+    await expect(
+      service.createWorker({
+        leadSessionId: 'lead-1',
+        role: 'reviewer',
+        agent: 'codex',
+        label: 'reviewer',
+      }),
+    ).resolves.toMatchObject({ ok: true });
+  });
+});
