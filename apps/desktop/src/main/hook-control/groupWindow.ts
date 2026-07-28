@@ -54,7 +54,7 @@ export function groupLaneOf(
   return null;
 }
 
-/** group.message 帧入窗(幂等: 重放/重连的同一条消息 upsert 不重复)。 */
+/** group.message 帧入窗(幂等: 重放/重连的同一条消息按唯一键直接忽略)。 */
 export async function recordGroupMessage(payload: GroupMessagePayload): Promise<void> {
   const db = getDbClient().drizzle;
   const now = Date.now();
@@ -167,15 +167,19 @@ export async function buildGroupContextPrefix(payload: TaskDispatchPayload): Pro
     lines.unshift(line);
     totalChars += line.length;
   }
+  // 游标推进与"是否有可拼内容"解耦: 窗口里只剩触发消息(被剔重)时也要
+  // 前移, 否则每次派发都重扫同一批行。
+  if (maxId > cursor) {
+    contextCursors.set(cursorKey, maxId);
+    if (contextCursors.size > CURSOR_MAX_KEYS) {
+      const oldest = contextCursors.keys().next().value;
+      if (oldest !== undefined) contextCursors.delete(oldest);
+    }
+  }
   if (lines.length === 0) return '';
   if (truncated) lines.unshift('[... 更早的消息已省略 ...]');
   const header =
     cursor > 0 ? '[自你上次请求后群里新增的消息]' : '[群里最近的消息]';
-  contextCursors.set(cursorKey, maxId);
-  if (contextCursors.size > CURSOR_MAX_KEYS) {
-    const oldest = contextCursors.keys().next().value;
-    if (oldest !== undefined) contextCursors.delete(oldest);
-  }
   log.info(
     `group context assembled: chat=${lane.chatId} entries=${lines.length}${truncated ? ' (truncated)' : ''}`,
   );
