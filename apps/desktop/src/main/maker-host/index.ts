@@ -626,6 +626,9 @@ export function getMaker(): Maker {
             {
               ensureBridgeStarted: ensureCodexMcpBridgeStartedForRemote,
               ensureForward: ensureRemoteMcpForward,
+              // collab 全局禁用 (Tier 4) 时整个不注入 — bridge 名单不反映
+              // 开关 (codex-connector R20 P2, 与 codex daemon 侧同闸门)。
+              isCollabEnabled: () => pluginRegistry.isEnabled('collab'),
             },
           );
           mcpCleanup = injected.cleanup;

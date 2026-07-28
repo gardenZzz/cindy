@@ -69,6 +69,13 @@ export interface CcRemoteHttpMcpDeps {
   ensureForward: (host: RemoteHost, localBridgePort: number) => Promise<number>;
   synthesizeVendorOptions?: (sessionId: string) => Promise<Record<string, unknown>>;
   /**
+   * Collab 全局开关 (plugin registry Tier 4)。缺省视为开启。provider 层在
+   * 禁用时仍注册 cindy_orca (keepOrcaProviderStable 保工具面稳定), bridge
+   * 名单不反映开关 — 远端注入必须以本闸门为准, 禁用时整个不注入
+   * (codex-connector R20 P2, 与 codex daemon 侧同一语义)。
+   */
+  isCollabEnabled?: () => boolean;
+  /**
    * 持久 bridge token;测试注入 stub,生产默认 safeStorage 真源。
    * 可同步可异步;返回 null = token 不可用,注入降级为空 (不得下发
    * "Bearer null")。
@@ -106,7 +113,12 @@ export async function buildCcRemoteHttpMcpServers(
   const empty = { servers: {}, cleanup: () => {} };
   const started = await deps.ensureBridgeStarted();
   if (!started) return empty;
-  const names = started.serverNames.filter((n) => CC_REMOTE_HTTP_MCP_SERVER_NAMES.has(n));
+  // collab 全局禁用时 bridge 名单不反映开关 (keepOrcaProviderStable) —
+  // 远端注入以同一闸门为准, 整个不注入 (codex-connector R20 P2)。
+  const collabEnabled = deps.isCollabEnabled?.() ?? true;
+  const names = collabEnabled
+    ? started.serverNames.filter((n) => CC_REMOTE_HTTP_MCP_SERVER_NAMES.has(n))
+    : [];
   if (names.length === 0) return empty;
   const remotePort = await deps.ensureForward(args.host, started.port);
   // token 可用性必须在 register 之前确认:null 时下发出 "Bearer null" 还

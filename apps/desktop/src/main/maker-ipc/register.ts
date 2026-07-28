@@ -256,6 +256,7 @@ import {
 } from '../messagePersistBroadcaster.js';
 import { ensureCcManagerInstalledOrInstall } from '../remote-ssh/cc-manager-install.js';
 import { ensureRemoteCodexMcpBridge } from '../remote-ssh/codex-remote-mcp.js';
+import { reconcileCodexAgentProxyEnv } from '../remote-ssh/agent-proxy.js';
 import { ensureRemoteAgentInstalledOrInstall, ensureRemoteHostReady, getRemoteSshPool, isCcMgrUpgradeInFlight } from '../remote-ssh/index.js';
 import {
   recordSessionContextSnapshot,
@@ -4379,12 +4380,23 @@ export function registerMakerIpc(maker: Maker, options: RegisterMakerIpcOptions)
     if (ensureAgentKind === 'codex') {
       const host = getRemoteSshPool().get(remoteHostIdToEnsure);
       if (host?.getStatus() === 'ready') {
+        // proxy 对账必须先于 MCP bootstrap:marker 漂移时 reconcile 会 pkill
+        // daemon, 若 MCP 先 bootstrap (带 token) 再被 pkill, transport
+        // startDaemon 重启的 daemon 只有 proxy env 没有 LIZI_MCP_TOKEN —
+        // 且 desiredFp===appliedFp 让 driftUnapplied 漏判, 协同 401 持续到
+        // 下次 token/代际变化 (codex-connector R20 P1)。先 reconcile 让
+        // 最后一次启动恒为携带双方的 MCP bootstrap;marker 一致时仅 1 次
+        // cat RTT 零副作用。
+        await reconcileCodexAgentProxyEnv(host);
         await ensureRemoteCodexMcpBridge(host, {
           ensureBridgeStarted: ensureCodexMcpBridgeStartedForRemote,
           // config 漂移生效要重启 daemon, 重启会断同 host 的 live turn:
           // 有 turn 在跑时 config 照写但 bootstrap 推迟 (driftUnapplied 持久,
           // turn-done 挂钩补刀)。
           hasLiveTurnOnHost: codexRemoteHasLiveTurn,
+          // collab 全局禁用 (Tier 4) 时按清理路径剥远端受管段 — bridge
+          // 名单不反映开关 (codex-connector R20 P2)。
+          isCollabEnabled: () => getPluginRegistry().isEnabled('collab'),
         });
       }
     }
@@ -4422,6 +4434,7 @@ export function registerMakerIpc(maker: Maker, options: RegisterMakerIpcOptions)
       void ensureRemoteCodexMcpBridge(host, {
         ensureBridgeStarted: ensureCodexMcpBridgeStartedForRemote,
         hasLiveTurnOnHost: codexRemoteHasLiveTurn,
+        isCollabEnabled: () => getPluginRegistry().isEnabled('collab'),
       });
       return;
     }

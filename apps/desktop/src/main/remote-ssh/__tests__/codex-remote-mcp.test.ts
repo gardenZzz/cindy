@@ -896,3 +896,119 @@ describe('codex-connector R19 regressions', () => {
     expect(execCmds.join('\n')).not.toContain('bootstrap'); // 无清理对象不动作
   });
 });
+
+describe('codex-connector R20 regressions', () => {
+  it('cleanup path does not arm a forward, releases the stale one, and survives forward rejection (R20 P2)', async () => {
+    // 清理路径 (collab 禁用/token 失效) 剥 config + 清 env 都不经隧道:
+    // 不 arm 新 forward (forward 被拒不该阻断清理), 有旧 forward 则拆。
+    const stale = renderManagedMcpBlock({ remotePort: 47921, serverNames: SERVERS, tokenFingerprint: 'fp-old' });
+    let configContent = `model = "gpt-5.5"\n\n${stale}\n`;
+    const execCmds: string[] = [];
+    const closeCalls: Array<{ addr: string; port: number }> = [];
+    const host = {
+      id: 'host-cleanup-noforward',
+      exec: async (cmd: string, opts?: { input?: string }) => {
+        execCmds.push(cmd);
+        if (cmd.includes('cat "$CODEX_HOME/config.toml"')) {
+          return { exitCode: 0, stdout: configContent, stderr: '' };
+        }
+        if (cmd.includes('base64 -d')) {
+          const written = decodeWrittenConfig(opts?.input ? [opts.input] : []);
+          if (written !== null) configContent = written;
+        }
+        return { exitCode: 0, stdout: 'ok', stderr: '' };
+      },
+      ensureRemoteForward: async () => {
+        throw new Error('forwardIn rejected: administratively prohibited'); // arm 被拒
+      },
+      closeRemoteForward: async (addr: string, port: number) => {
+        closeCalls.push({ addr, port });
+      },
+    } as unknown as RemoteHost;
+    const deps = {
+      ensureBridgeStarted: async () => ({ port: 38080, serverNames: ['cindy_memory'], bridgeInstanceId: 'bridge-1' }),
+      hasLiveTurnOnHost: () => false,
+    };
+
+    // 先注入成功 (留下 bridgeLocalPort 记录) — 需要一个能 arm 的 fake。
+    const hostForInject = {
+      id: 'host-cleanup-noforward',
+      exec: async (cmd: string, opts?: { input?: string }) => {
+        if (cmd.includes('cat "$CODEX_HOME/config.toml"')) {
+          return { exitCode: 0, stdout: configContent, stderr: '' };
+        }
+        if (cmd.includes('base64 -d')) {
+          const written = decodeWrittenConfig(opts?.input ? [opts.input] : []);
+          if (written !== null) configContent = written;
+        }
+        return { exitCode: 0, stdout: 'ok', stderr: '' };
+      },
+      ensureRemoteForward: async (spec: { localHost: string; localPort: number; preferredRemotePort?: number }) => ({
+        remotePort: spec.preferredRemotePort ?? 47921,
+        close: async () => {},
+      }),
+    } as unknown as RemoteHost;
+    expect((await ensureRemoteCodexMcpBridge(hostForInject, {
+      ensureBridgeStarted: async () => ({ port: 38080, serverNames: SERVERS, bridgeInstanceId: 'bridge-1' }),
+      hasLiveTurnOnHost: () => false,
+    })).ok).toBe(true);
+    expect(prefsOf('host-cleanup-noforward')?.bridgeLocalPort).toBe(38080);
+
+    // collab 禁用 (serverNames 空):forward 被拒也不阻断清理, 旧 forward 被拆。
+    const result = await ensureRemoteCodexMcpBridge(host, deps);
+    expect(result.ok).toBe(true);
+    expect(execCmds.join('\n')).toContain('bootstrap'); // 清 env 完成
+    expect(configContent).not.toContain('cindy-remote-mcp'); // 受管段剥除
+    expect(closeCalls).toEqual([{ addr: '127.0.0.1', port: 38080 }]); // 旧 forward 拆除
+    expect(prefsOf('host-cleanup-noforward')?.bridgeLocalPort).toBeUndefined();
+  });
+
+  it('writes the remote config with umask 077 (R20 P2: secrets stay unreadable to other local users)', async () => {
+    const { host, execCmds } = fakeHost('host-config-umask', '');
+    const result = await ensureRemoteCodexMcpBridge(host, {
+      ensureBridgeStarted: async () => ({ port: 38080, serverNames: SERVERS, bridgeInstanceId: 'bridge-1' }),
+      hasLiveTurnOnHost: () => false,
+    });
+    expect(result.ok).toBe(true);
+    const writeCmd = execCmds.find((c) => c.includes('base64 -d'));
+    expect(writeCmd).toBeTruthy();
+    expect(writeCmd).toContain('umask 077');
+  });
+
+  it('strips the managed block and rebootstraps when collab is globally disabled (R20 P2)', async () => {
+    // provider 层为工具面稳定在 collab 禁用时仍注册 cindy_orca — bridge
+    // 名单不反映开关, 远端注入必须以全局闸门为准: 禁用即清理。
+    const stale = renderManagedMcpBlock({ remotePort: 47921, serverNames: SERVERS, tokenFingerprint: 'fp-old' });
+    let configContent = `model = "gpt-5.5"\n\n${stale}\n`;
+    const execCmds: string[] = [];
+    const host = {
+      id: 'host-collab-gate',
+      exec: async (cmd: string, opts?: { input?: string }) => {
+        execCmds.push(cmd);
+        if (cmd.includes('cat "$CODEX_HOME/config.toml"')) {
+          return { exitCode: 0, stdout: configContent, stderr: '' };
+        }
+        if (cmd.includes('base64 -d')) {
+          const written = decodeWrittenConfig(opts?.input ? [opts.input] : []);
+          if (written !== null) configContent = written;
+        }
+        return { exitCode: 0, stdout: 'ok', stderr: '' };
+      },
+      ensureRemoteForward: async (spec: { localHost: string; localPort: number; preferredRemotePort?: number }) => ({
+        remotePort: spec.preferredRemotePort ?? 47921,
+        close: async () => {},
+      }),
+      closeRemoteForward: async () => {},
+    } as unknown as RemoteHost;
+
+    const result = await ensureRemoteCodexMcpBridge(host, {
+      ensureBridgeStarted: async () => ({ port: 38080, serverNames: SERVERS, bridgeInstanceId: 'bridge-1' }),
+      hasLiveTurnOnHost: () => false,
+      isCollabEnabled: () => false, // 全局禁用
+    });
+    expect(result.ok).toBe(true);
+    expect(execCmds.join('\n')).toContain('bootstrap');
+    expect(configContent).not.toContain('cindy-remote-mcp'); // 剥段
+    expect(configContent).toContain('model = "gpt-5.5"'); // 用户配置保留
+  });
+});
