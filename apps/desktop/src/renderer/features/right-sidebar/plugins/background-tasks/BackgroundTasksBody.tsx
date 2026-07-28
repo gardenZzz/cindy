@@ -51,7 +51,7 @@ import { cn } from '@/lib/utils';
 import { Spinner } from '@/components/ui/spinner';
 import {
   getSessionDeviceId,
-  remoteProjectsStore,
+  useRemoteDevices,
 } from '@/features/device-link/remoteProjectsStore';
 import { makerChatStore, EMPTY_TASK_UPDATES } from '@/lib/makerChatStore';
 import type { AgentTaskUpdate, ChatMessage } from '@/lib/makerChatStore';
@@ -513,14 +513,18 @@ export function BackgroundTasksBody({
   // 面板已挂载时清空 taskUpdates,布尔翻 true 即自动重水合;翻回 false 的那次
   // 重跑只是多一次幂等快照(seed 仅补缺),不会循环。
   const taskUpdatesEmpty = inputs.taskUpdates.size === 0;
-  // liveDeviceId 参与依赖:面板挂载时被控设备恰好瞬断的话,隧道失败被降级成
-  // 空表且此后无人重试 —— 订阅注册表,重连(undefined → deviceId)时重水合。
-  // 本机会话恒 undefined,零开销;断连翻 undefined 的那次重跑经 sticky 路由
-  // 仍走隧道,失败降级空表,无害。
-  const liveDeviceId = useSyncExternalStore(
-    remoteProjectsStore.subscribe,
-    useCallback(() => (sessionId ? getSessionDeviceId(sessionId) : undefined), [sessionId]),
-  );
+  // deviceConnectivity 参与依赖:面板挂载时被控设备恰好瞬断的话,隧道失败被
+  // 降级成空表且此后无人重试。注意 markDeviceDisconnected 型瞬断(presence
+  // offline / relay connecting)会**保留** session→device 映射,deviceId 本身
+  // 不变 —— 必须订阅设备 connected 状态,断连→重连的翻转才是重水合的真信号。
+  // 本机会话恒 'local',零开销;断连翻转的那次重跑失败降级空表,无害。
+  const remoteDevices = useRemoteDevices();
+  const sessionDeviceId = sessionId ? getSessionDeviceId(sessionId) : undefined;
+  const deviceConnectivity = sessionDeviceId
+    ? `${sessionDeviceId}:${
+        remoteDevices.find((d) => d.deviceId === sessionDeviceId)?.connected ? '1' : '0'
+      }`
+    : 'local';
   useEffect(() => {
     if (!sessionId) return;
     let disposed = false;
@@ -535,7 +539,7 @@ export function BackgroundTasksBody({
     return () => {
       disposed = true;
     };
-  }, [sessionId, taskUpdatesEmpty, liveDeviceId]);
+  }, [sessionId, taskUpdatesEmpty, deviceConnectivity]);
 
   const { running, completed } = useMemo(
     () =>
@@ -565,26 +569,39 @@ export function BackgroundTasksBody({
   }, [sessionId]);
   useEffect(() => {
     if (!sessionId) return;
+    const pending: string[] = [];
     for (const it of completed) {
       if (it.kind !== 'workflow' || it.update || !it.taskId) continue;
-      const taskId = it.taskId;
-      if (fileStatusRequestedRef.current.has(taskId)) continue;
-      fileStatusRequestedRef.current.add(taskId);
-      void getWorkflowProgressFor(sessionId, taskId)
-        .then((progress) => {
+      if (fileStatusRequestedRef.current.has(it.taskId)) continue;
+      fileStatusRequestedRef.current.add(it.taskId);
+      pending.push(it.taskId);
+    }
+    if (pending.length === 0) return;
+    let disposed = false;
+    // 串行而非并发:每次 miss 都可能触发 main 侧跨 session 目录扫描(远程会话
+    // 则是隧道往返),多行同时 fan-out 会同时打出成倍的重复 IO;串行把它压成
+    // 温和的背景补读,per-task 记忆保证每任务至多一次。
+    void (async () => {
+      for (const taskId of pending) {
+        if (disposed) return;
+        try {
+          const progress = await getWorkflowProgressFor(sessionId, taskId);
           const mapped = fileStatusToTaskStatus(progress?.status);
-          if (!mapped) return;
+          if (!mapped || disposed) continue;
           setFileStatusByTaskId((prev) => {
             if (prev.get(taskId) === mapped) return prev;
             const next = new Map(prev);
             next.set(taskId, mapped);
             return next;
           });
-        })
-        .catch(() => {
+        } catch {
           // 静默:与 wf 文件辅源的其余读取同口径,保持推导状态。
-        });
-    }
+        }
+      }
+    })();
+    return () => {
+      disposed = true;
+    };
   }, [sessionId, completed]);
   const completedResolved = useMemo(() => {
     if (fileStatusByTaskId.size === 0) return completed;

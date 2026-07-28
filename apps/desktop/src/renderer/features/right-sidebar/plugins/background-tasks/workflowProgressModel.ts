@@ -189,8 +189,8 @@ function groupsFromEntries(
       entry.phaseTitle ??
       (typeof entry.phaseIndex === 'number' ? titleByPhaseIndex.get(entry.phaseIndex) : undefined);
     // 事件流收尾帧可能缺 resultPreview/durationMs/error(节流或提前断流);任务终态时
-    // 按 label+phaseTitle 从文件回填,撞名取首个;只补缺,绝不覆盖 entries 已有值。
-    if (fileAgentIndex) backfillRowFromFile(row, phaseTitle, fileAgentIndex);
+    // 从文件回填(agentId 精确优先、label+phaseTitle 兜底);只补缺,绝不覆盖 entries 已有值。
+    if (fileAgentIndex) backfillRowFromFile(row, entry.agentId, phaseTitle, fileAgentIndex);
     if (phaseTitle && byPhase.has(phaseTitle)) {
       byPhase.get(phaseTitle)!.push(row);
     } else {
@@ -285,16 +285,22 @@ function fileAgentKey(label: string, phaseTitle: string | undefined): string {
   return `${label}\u0000${phaseTitle ?? ''}`;
 }
 
-/** 撞名取首个,与原线性 find 的命中语义一致。 */
-function indexFileAgents(
-  fileAgents: readonly WorkflowAgentProgress[],
-): Map<string, WorkflowAgentProgress> {
-  const index = new Map<string, WorkflowAgentProgress>();
+/** 回填索引:agentId 精确匹配优先(两源 agentId 同出 CLI runtime,天然同源);
+ *  label+phaseTitle 兜底撞名取首个,与原线性 find 的命中语义一致。 */
+interface FileAgentIndex {
+  byAgentId: Map<string, WorkflowAgentProgress>;
+  byLabelPhase: Map<string, WorkflowAgentProgress>;
+}
+
+function indexFileAgents(fileAgents: readonly WorkflowAgentProgress[]): FileAgentIndex {
+  const byAgentId = new Map<string, WorkflowAgentProgress>();
+  const byLabelPhase = new Map<string, WorkflowAgentProgress>();
   for (const agent of fileAgents) {
+    if (agent.agentId && !byAgentId.has(agent.agentId)) byAgentId.set(agent.agentId, agent);
     const key = fileAgentKey(agent.label, agent.phaseTitle);
-    if (!index.has(key)) index.set(key, agent);
+    if (!byLabelPhase.has(key)) byLabelPhase.set(key, agent);
   }
-  return index;
+  return { byAgentId, byLabelPhase };
 }
 
 /**
@@ -304,10 +310,15 @@ function indexFileAgents(
  */
 function backfillRowFromFile(
   row: WorkflowTreeAgentRow,
+  agentId: string | undefined,
   phaseTitle: string | undefined,
-  fileAgentIndex: ReadonlyMap<string, WorkflowAgentProgress>,
+  fileAgentIndex: FileAgentIndex,
 ): void {
-  const match = fileAgentIndex.get(fileAgentKey(row.label, phaseTitle));
+  // agentId 命中即精确行;同 phase 撞 label 的多 agent(parallel 同 prompt 编队)
+  // 靠它区分,label 键只服务缺 agentId 的降级形态。
+  const match =
+    (agentId ? fileAgentIndex.byAgentId.get(agentId) : undefined) ??
+    fileAgentIndex.byLabelPhase.get(fileAgentKey(row.label, phaseTitle));
   if (!match) return;
   if (
     CORRECTABLE_AGENT_STATES.has(row.state) &&
