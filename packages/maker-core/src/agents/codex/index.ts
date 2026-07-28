@@ -3635,6 +3635,10 @@ export class CodexAgent extends BaseAgent {
       if (turnGate === false) return { answers: {} };
       if (turnGate instanceof Promise && !(await turnGate)) return { answers: {} };
       const requestId = String(meta.requestId);
+      // 挂起期间服务端已取消本请求 (greptile R13 P1): 直接回空响应, 不注册
+      // broker 不上 UI — 否则 UI 会等一个服务端已结束的交互, 用户提交后向
+      // 已结束请求发迟到响应。
+      if (resolvedWhileBufferedRequestIds.delete(requestId)) return { answers: {} };
       const questions = normalizeRequestUserInputQuestions(params.questions);
       if (questions.length === 0) return { answers: {} };
       const kind = classifyUserInputRequest(params);
@@ -3693,6 +3697,14 @@ export class CodexAgent extends BaseAgent {
         };
       }
       const requestId = String(meta.requestId);
+      // 挂起期间服务端已取消本请求 (greptile R13 P1): 直接回失败响应, 不注册
+      // broker 不上 UI (与 resolved 的 cancel 响应同款文案)。
+      if (resolvedWhileBufferedRequestIds.delete(requestId)) {
+        return {
+          contentItems: [{ type: 'inputText', text: 'Request was resolved before user input was submitted.' }],
+          success: false,
+        };
+      }
       const questions = normalizeDynamicAskUserQuestions(params.arguments);
       if (questions.length === 0) {
         return {
@@ -3735,6 +3747,12 @@ export class CodexAgent extends BaseAgent {
           data: { requestId, reason: 'server_request_resolved', resolvedAs: 'deny' },
           source: 'codex',
         });
+      } else if (bufferedOrphanTurnIds.size > 0) {
+        // cancel 未命中且有 buffered turn: 可能是挂起中的请求 (尚未注册到
+        // broker) 被服务端取消 (greptile R13 P1) — 记下 requestId, 对账放行
+        // 后 handler 自查回空响应, 不上 UI。requestId 是一次性的 (消费即删),
+        // 最坏泄漏 = 一条字符串, 随 session 释放。
+        resolvedWhileBufferedRequestIds.add(requestId);
       }
     }
 
@@ -3810,6 +3828,10 @@ export class CodexAgent extends BaseAgent {
     // false, 调用方返回拒绝响应。挂起窗口 = turn/start RPC 窗口 (最坏
     // 60s), 远小于 daemon 侧审批等待时长。
     const bufferedReconcileWaiters = new Map<string, Array<(valid: boolean) => void>>();
+    // 挂起期间到达的 serverRequest/resolved (greptile R13 P1): 请求还没注册
+    // 到 broker, cancel 不命中 — 记下 requestId, 对账放行后 handler 自查:
+    // 服务端已取消的请求直接回空响应, 不再上 UI 让用户向已结束的请求提交。
+    const resolvedWhileBufferedRequestIds = new Set<string>();
 
     const waitForBufferedTurnReconcile = (turnId: string): Promise<boolean> =>
       new Promise((resolve) => {

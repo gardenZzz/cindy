@@ -6872,6 +6872,83 @@ describe('CodexAgent turn lifecycle', () => {
     await handle.close();
   });
 
+  it('settles a held user-input request as empty when the server resolves it during the reconcile window (greptile R13 P1)', async () => {
+    // buffered turn 的 requestUserInput 挂起到对账; 挂起期间服务端发
+    // serverRequest/resolved 取消该请求 (broker 未注册, cancel 不命中) —
+    // 对账放行后 handler 必须直接回空响应, 不上 UI 等一个已结束的交互
+    // (否则用户提交会向已结束请求发迟到响应)。
+    const firstStart = deferred<unknown>();
+    const secondStart = deferred<unknown>();
+    let attempt = 0;
+    const agent = new CodexAgent(createDeps());
+    const host = installFakeHost(agent, (method) => {
+      if (method === Method.TurnStart) {
+        attempt += 1;
+        if (attempt === 1) return firstStart.promise;
+        return secondStart.promise;
+      }
+      return undefined;
+    });
+    const handle = await agent.startSession({
+      sessionId: 'session-buffered-resolved-input',
+      model: 'gpt-5.4',
+      workingDir: '/repo',
+    });
+    const subscribeCalls = host.subscribeThread.mock.calls as unknown as Array<[string, ThreadEventHandlers]>;
+    const handlers = subscribeCalls[0]?.[1];
+    const iterator = handle.events()[Symbol.asyncIterator]();
+    const interactionResolver = vi.fn(() => new Promise<never>(() => {}));
+    handle.setInteractionResolver(interactionResolver);
+
+    const send1 = handle.send({ type: 'user', content: 'first' });
+    for (let i = 0; i < 5; i += 1) {
+      if (host.request.mock.calls.some(([method]) => method === Method.TurnStart)) break;
+      await Promise.resolve();
+    }
+    firstStart.reject(new Error('codex app-server turn/start timed out after 60000ms'));
+    await send1;
+    expect(await nextEvent(iterator)).toMatchObject({ type: 'status', data: { isRunning: true } });
+    expect(await nextEvent(iterator)).toMatchObject({ type: 'error', data: { isTerminal: true } });
+    expect(await nextEvent(iterator)).toMatchObject({
+      type: 'status',
+      data: { status: 'Done', isRunning: false },
+    });
+
+    const send2 = handle.send({ type: 'user', content: 'second' });
+    for (let i = 0; i < 5; i += 1) {
+      if (host.request.mock.calls.filter(([method]) => method === Method.TurnStart).length >= 2) break;
+      await Promise.resolve();
+    }
+    expect(await nextEvent(iterator)).toMatchObject({ type: 'status', data: { isRunning: true } });
+    handlers.turnStarted?.({ threadId: 'start-thread-id', turn: { id: 'turn-2' } });
+    const inputPromise = handlers.requestUserInput?.(
+      {
+        threadId: 'start-thread-id',
+        turnId: 'turn-2',
+        itemId: 'item-1',
+        questions: [{
+          id: 'q1',
+          header: 'Mode',
+          question: 'Which mode should Codex use?',
+          isOther: false,
+          isSecret: false,
+          options: [{ label: 'Fast', description: 'Move quickly' }],
+        }],
+      },
+      { requestId: 'req-held' },
+    );
+    // 挂起期间服务端取消该请求 (broker 未注册 → cancel 不命中, 记入 resolved 集合)。
+    handlers.serverRequestResolved?.({ threadId: 'start-thread-id', requestId: 'req-held' });
+
+    // 对账合法 → gate 放行 → handler 发现请求已被服务端取消 → 直接空响应,
+    // 全程不上 UI。
+    secondStart.resolve({ turn: { id: 'turn-2' } });
+    await send2;
+    await expect(inputPromise).resolves.toEqual({ answers: {} });
+    expect(interactionResolver).not.toHaveBeenCalled();
+    await handle.close();
+  });
+
   it('does not escalate rate-limit backoff retries to a terminal backend-unreachable error (codex R12 P2)', async () => {
     // 429 / usage-limit 的 willRetry 是 provider 退避窗口, daemon 会在窗口后
     // 自己成功 — 不得计入 retry 升级, 否则可恢复的限流被误杀成「后端不可达」。
