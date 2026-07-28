@@ -394,7 +394,16 @@ function WorkflowDetail({
   // 再读一次。任务已终态而文件快照还停在运行中(终态事件先于终局落盘)时做有界
   // 重试(至多 2 次,1.5s 间隔),文件收口即停 —— 仍不是轮询。远程会话/老被控端
   // getWorkflowProgressFor 内部降级 null,读不到时详情树退化为事件流数据。
+  // deviceConnectivity 参与依赖(与列表水合同款):断连窗口内打开的详情读到
+  // null 后,重连翻转触发重读,不必退出重进;本机会话恒 'local'。
   const isTerminal = item.status !== 'running';
+  const remoteDevices = useRemoteDevices();
+  const detailDeviceId = sessionId ? getSessionDeviceId(sessionId) : undefined;
+  const deviceConnectivity = detailDeviceId
+    ? `${detailDeviceId}:${
+        remoteDevices.find((d) => d.deviceId === detailDeviceId)?.connected ? '1' : '0'
+      }`
+    : 'local';
   useEffect(() => {
     if (!sessionId || !taskId) return;
     let disposed = false;
@@ -418,7 +427,7 @@ function WorkflowDetail({
       disposed = true;
       if (timer !== undefined) clearTimeout(timer);
     };
-  }, [sessionId, taskId, isTerminal]);
+  }, [sessionId, taskId, isTerminal, deviceConnectivity]);
 
   const model = useMemo(
     () =>
@@ -581,9 +590,12 @@ export function BackgroundTasksBody({
     // 串行而非并发:每次 miss 都可能触发 main 侧跨 session 目录扫描(远程会话
     // 则是隧道往返),多行同时 fan-out 会同时打出成倍的重复 IO;串行把它压成
     // 温和的背景补读,per-task 记忆保证每任务至多一次。
+    let inFlightIndex = 0;
     void (async () => {
-      for (const taskId of pending) {
+      for (let i = 0; i < pending.length; i++) {
         if (disposed) return;
+        inFlightIndex = i;
+        const taskId = pending[i];
         try {
           const progress = await getWorkflowProgressFor(sessionId, taskId);
           const mapped = fileStatusToTaskStatus(progress?.status);
@@ -597,10 +609,18 @@ export function BackgroundTasksBody({
         } catch {
           // 静默:与 wf 文件辅源的其余读取同口径,保持推导状态。
         }
+        inFlightIndex = i + 1;
       }
     })();
     return () => {
       disposed = true;
+      // 把尚未完成的(含在飞被丢结果的那个)从记忆里退回,下一轮 effect 重新
+      // 入队 —— 否则 completed 中途变化(快照水合 seed 等)会让整批剩余任务
+      // 被永久跳过,failed/stopped 的历史行一直顶着推导出的 completed。
+      // 已落地的退回也无害:重复请求幂等,set 相同值被短路。
+      for (let i = inFlightIndex; i < pending.length; i++) {
+        fileStatusRequestedRef.current.delete(pending[i]);
+      }
     };
   }, [sessionId, completed]);
   const completedResolved = useMemo(() => {
