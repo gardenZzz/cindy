@@ -6736,6 +6736,185 @@ describe('CodexAgent turn lifecycle', () => {
     await handle.close();
   });
 
+  it('replays early item events of a valid buffered turn after the response accepts it (codex R12 P1)', async () => {
+    // 合法 turn 的 started 先于响应进缓冲, 缓冲期间 daemon 已开始产出
+    // (itemStarted): 事件进队列, 响应 id 一致 → 激活后按序重放 — 早期输出
+    // 不永久丢失 (只缓存终态会把 turn 的开头段丢掉)。
+    const firstStart = deferred<unknown>();
+    const secondStart = deferred<unknown>();
+    let attempt = 0;
+    const agent = new CodexAgent(createDeps());
+    const host = installFakeHost(agent, (method) => {
+      if (method === Method.TurnStart) {
+        attempt += 1;
+        if (attempt === 1) return firstStart.promise;
+        return secondStart.promise;
+      }
+      return undefined;
+    });
+    const handle = await agent.startSession({
+      sessionId: 'session-buffered-early-events',
+      model: 'gpt-5.4',
+      workingDir: '/repo',
+    });
+    const subscribeCalls = host.subscribeThread.mock.calls as unknown as Array<[string, ThreadEventHandlers]>;
+    const handlers = subscribeCalls[0]?.[1];
+    const iterator = handle.events()[Symbol.asyncIterator]();
+
+    const send1 = handle.send({ type: 'user', content: 'first' });
+    for (let i = 0; i < 5; i += 1) {
+      if (host.request.mock.calls.some(([method]) => method === Method.TurnStart)) break;
+      await Promise.resolve();
+    }
+    firstStart.reject(new Error('codex app-server turn/start timed out after 60000ms'));
+    await send1;
+    expect(await nextEvent(iterator)).toMatchObject({ type: 'status', data: { isRunning: true } });
+    expect(await nextEvent(iterator)).toMatchObject({ type: 'error', data: { isTerminal: true } });
+    expect(await nextEvent(iterator)).toMatchObject({
+      type: 'status',
+      data: { status: 'Done', isRunning: false },
+    });
+
+    const send2 = handle.send({ type: 'user', content: 'second' });
+    for (let i = 0; i < 5; i += 1) {
+      if (host.request.mock.calls.filter(([method]) => method === Method.TurnStart).length >= 2) break;
+      await Promise.resolve();
+    }
+    expect(await nextEvent(iterator)).toMatchObject({ type: 'status', data: { isRunning: true } });
+    handlers.turnStarted?.({ threadId: 'start-thread-id', turn: { id: 'turn-2' } });
+    handlers.itemStarted?.({
+      threadId: 'start-thread-id',
+      turnId: 'turn-2',
+      item: { type: 'agentMessage', id: 'early-item', text: 'early output' },
+    });
+    // 缓冲期间不进事件流 (R10 隔离语义保持)。
+    expect(handle.isTurnRunning?.()).toBe(false);
+
+    secondStart.resolve({ turn: { id: 'turn-2' } });
+    await send2;
+    // 激活后重放: 早期 item 事件出现在事件流, turn 正常在跑。
+    expect(handle.isTurnRunning?.()).toBe(true);
+    expect(handle.getCurrentTurnId?.()).toBe('turn-2');
+    expect(await nextEvent(iterator)).toMatchObject({
+      type: 'status',
+      data: { status: 'Generating...' },
+    });
+    expect(await nextEvent(iterator)).toMatchObject({
+      type: 'text',
+      data: { text: 'early output', isFinal: false },
+    });
+    await handle.close();
+  });
+
+  it('holds a buffered turn approval request and declines it once the response proves the turn an orphan (codex R12 P1)', async () => {
+    // 孤儿 turn 在对账前发审批请求: 请求挂起不上 UI; 响应证明孤儿 →
+    // 按 decline 释放 — 用户不能为隐藏 turn 批准操作。
+    const firstStart = deferred<unknown>();
+    const secondStart = deferred<unknown>();
+    let attempt = 0;
+    const agent = new CodexAgent(createDeps());
+    const host = installFakeHost(agent, (method) => {
+      if (method === Method.TurnStart) {
+        attempt += 1;
+        if (attempt === 1) return firstStart.promise;
+        return secondStart.promise;
+      }
+      return undefined;
+    });
+    const handle = await agent.startSession({
+      sessionId: 'session-buffered-approval',
+      model: 'gpt-5.4',
+      workingDir: '/repo',
+    });
+    const subscribeCalls = host.subscribeThread.mock.calls as unknown as Array<[string, ThreadEventHandlers]>;
+    const handlers = subscribeCalls[0]?.[1];
+    const iterator = handle.events()[Symbol.asyncIterator]();
+    const interactionResolver = vi.fn(() => new Promise<never>(() => {}));
+    handle.setInteractionResolver(interactionResolver);
+
+    const send1 = handle.send({ type: 'user', content: 'first' });
+    for (let i = 0; i < 5; i += 1) {
+      if (host.request.mock.calls.some(([method]) => method === Method.TurnStart)) break;
+      await Promise.resolve();
+    }
+    firstStart.reject(new Error('codex app-server turn/start timed out after 60000ms'));
+    await send1;
+    expect(await nextEvent(iterator)).toMatchObject({ type: 'status', data: { isRunning: true } });
+    expect(await nextEvent(iterator)).toMatchObject({ type: 'error', data: { isTerminal: true } });
+    expect(await nextEvent(iterator)).toMatchObject({
+      type: 'status',
+      data: { status: 'Done', isRunning: false },
+    });
+
+    const send2 = handle.send({ type: 'user', content: 'second' });
+    for (let i = 0; i < 5; i += 1) {
+      if (host.request.mock.calls.filter(([method]) => method === Method.TurnStart).length >= 2) break;
+      await Promise.resolve();
+    }
+    expect(await nextEvent(iterator)).toMatchObject({ type: 'status', data: { isRunning: true } });
+    handlers.turnStarted?.({ threadId: 'start-thread-id', turn: { id: 'orphan-turn' } });
+    const approvalPromise = handlers.commandExecutionApproval?.({
+      threadId: 'start-thread-id',
+      turnId: 'orphan-turn',
+      itemId: 'orphan-item',
+      command: 'rm -rf /tmp/x',
+      cwd: '/repo',
+    });
+    // 挂起期间不上 UI。
+    await Promise.resolve();
+    expect(interactionResolver).not.toHaveBeenCalled();
+
+    // 响应证明孤儿 → 审批按 decline 释放, UI 自始至终没被调用。
+    secondStart.resolve({ turn: { id: 'turn-2' } });
+    await send2;
+    await expect(approvalPromise).resolves.toEqual({ decision: 'decline' });
+    expect(interactionResolver).not.toHaveBeenCalled();
+    await handle.close();
+  });
+
+  it('does not escalate rate-limit backoff retries to a terminal backend-unreachable error (codex R12 P2)', async () => {
+    // 429 / usage-limit 的 willRetry 是 provider 退避窗口, daemon 会在窗口后
+    // 自己成功 — 不得计入 retry 升级, 否则可恢复的限流被误杀成「后端不可达」。
+    const agent = new CodexAgent(createDeps());
+    const host = installFakeHost(agent);
+    const handle = await agent.startSession({
+      sessionId: 'session-rate-limit-backoff',
+      model: 'gpt-5.4',
+      workingDir: '/repo',
+      remoteHostId: 'gpu-box',
+    });
+    const subscribeCalls = host.subscribeThread.mock.calls as unknown as Array<[string, ThreadEventHandlers]>;
+    const handlers = subscribeCalls[0]?.[1];
+    const iterator = handle.events()[Symbol.asyncIterator]();
+
+    handlers.turnStarted?.({
+      threadId: 'start-thread-id',
+      turn: { id: 'turn-1' },
+    });
+    expect(handle.isTurnRunning?.()).toBe(true);
+
+    // 超过升级阈值 (30 次) 的 429 willRetry — 不升级, turn 持续在跑。
+    const rateLimited = {
+      threadId: 'start-thread-id',
+      turnId: 'turn-1',
+      willRetry: true,
+      error: { message: 'unexpected status 429 Too Many Requests, url: https://chatgpt.com/backend-api/codex/responses' },
+    } as const;
+    for (let i = 0; i < 32; i += 1) {
+      handlers.error?.(rateLimited);
+    }
+    // 第 2 次仍会透出一条非终态提示 (networkRetryNotice 机制不受排除影响)。
+    const notice = await nextEvent(iterator);
+    expect(notice).toMatchObject({
+      type: 'error',
+      data: { isTerminal: false, willRetry: true },
+    });
+    // 无终态事件 — 事件流安静, turn 仍在跑。
+    await expect(nextEvent(iterator)).rejects.toThrow('timed out waiting for event');
+    expect(handle.isTurnRunning?.()).toBe(true);
+    await handle.close();
+  });
+
   it('clears running state and emits done status after terminal error notification', async () => {
     const agent = new CodexAgent(createDeps());
     const host = installFakeHost(agent);

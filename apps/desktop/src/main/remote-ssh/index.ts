@@ -856,7 +856,16 @@ export function registerRemoteSshIpc(): void {
     } else {
       // codex one-shot: wrapper 读的是 marker 文件而非直接 env — 先跑
       // reconcile (隧道 + marker 对账), 保证 quick test 与真实 daemon 链路一致。
-      await reconcileCodexAgentProxyEnv(host);
+      // markerChanged && !daemonRestarted = 旧 daemon 活着跑旧 env, marker 已
+      // 回滚 — one-shot 若继续会 source 不到新 proxy marker 而直连, 与
+      // daemon-probe 路径的 fail-closed 不一致 (codex R12 P1): 显式失败。
+      const reconciled = await reconcileCodexAgentProxyEnv(host);
+      if (reconciled.markerChanged && !reconciled.daemonRestarted) {
+        throwIpcError(
+          'INTERNAL',
+          'codex daemon survived pkill after agent-proxy env change; quick test would run with the wrong network route (retry or restart the host)',
+        );
+      }
     }
 
     const cmd = oneShotCommand(agentKind, probe.binaryPath, envBlock != null);
