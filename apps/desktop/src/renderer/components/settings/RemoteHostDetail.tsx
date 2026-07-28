@@ -781,7 +781,7 @@ function QuickTestResult({ result }: { result: RemoteAgentOneShotResult }) {
             style={{
               backgroundColor: 'var(--settings-input-bg, #faf9f5)',
               borderColor: 'var(--settings-input-border, #d7d7d4)',
-              color: 'var(--error-fg, #dc2626)',
+              color: 'var(--error-fg)',
               fontFamily: 'var(--app-font-code, var(--app-font-code-default))',
               margin: 0,
             }}
