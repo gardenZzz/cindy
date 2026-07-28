@@ -114,6 +114,7 @@ import { createPluginRegistry, resetPluginRegistry } from './plugins/index.js';
 import {
   getCodexExtraSpawnConfig,
   registerCodexMcpThreadContext,
+  setCodexEnvironmentShutdownHook,
   unregisterCodexMcpThreadContext,
 } from '../mcp-integrations/codexEnvironment.js';
 import type { CodexHttpBridge } from '../mcp-integrations/codexHttpBridge.js';
@@ -255,6 +256,13 @@ let _codexMcpProviders: McpProvider[] | null = null;
  */
 const forcedFreshCcBridgeSessions = new Set<string>();
 /**
+ * 被 invalidate 判定为「MCP 代际已过期」的远端 CC session (bridge 重建 /
+ * 端口重绑 / bridge shutdown / collab 禁用)。下次 lazy-resume 重建时无论
+ * 本次能否注入都必须 forceFresh kill 旧 query — 否则 attach 回带旧 URL
+ * 的 query (codex-connector R22 P2)。open 成功后从集合移除。
+ */
+const staleInvalidatedCcSessions = new Set<string>();
+/**
  * 本进程见过的 bridge 实例 — ensureCodexMcpBridgeStartedForRemote 据此检测
  * bridge 重建并清空 forcedFreshCcBridgeSessions (旧 bridge 的
  * mcp-session-id 随重建全部失效)。
@@ -287,7 +295,14 @@ function invalidateActiveRemoteCcQueries(opts: { hostId?: string; reason: string
     {
       listRemoteCcSessions: () =>
         (_maker?.listActiveSessions() ?? []).filter((s) => s.agentKind === 'claude-code'),
-      clearFreshMark: (sessionId) => forcedFreshCcBridgeSessions.delete(sessionId),
+      // invalidate 的语义是「该 query 的 MCP 代际已过期」— 除清 fresh 标记
+      // 外记入 stale 集合:下次重建 (lazy-resume) 无论本次是否注入 (例如
+      // collab 已禁用 → 无 server 可注) 都必须 forceFresh kill 旧 query,
+      // 否则 attach 回带旧 collab URL 的 query (codex-connector R22 P2)。
+      clearFreshMark: (sessionId) => {
+        forcedFreshCcBridgeSessions.delete(sessionId);
+        staleInvalidatedCcSessions.add(sessionId);
+      },
       log: desktopMakerLogger,
     },
     opts,
@@ -491,6 +506,10 @@ export function getMaker(): Maker {
       broadcastOrcaWorkerChanged,
       logger: desktopMakerLogger,
     });
+    // bridge shutdown 后的远端失效统一折进 shutdownCodexEnvironment 内部
+    // (codex-connector R22 P1):插件开关 / custom MCP CRUD / contacts /
+    // Slack provider / 账号切换等所有 shutdown 路径自动覆盖, 不靠逐点调用。
+    setCodexEnvironmentShutdownHook(handleCodexEnvironmentShutdownForRemote);
     // forward 端口重绑 (SSH 重连 onRearmed) 时, 该 host 上活跃远端 CC
     // query 的 mcpServers URL 还指旧端口 — fresh 失效 + detach 促重建
     // (codex-connector R19 P2)。
@@ -687,8 +706,11 @@ export function getMaker(): Maker {
         // 仍要 forceFresh, 否则 attach 到旧 query 上协同 MCP 永久 404。
         // token 失效 (mcpNeedsFreshStart) 同样强制 fresh:attach 回带旧
         // token header 的 alive query 会持续 401 (codex-connector R21 P2)。
+        // 被 invalidate 过 (staleInvalidatedCcSessions) 也一样:collab 禁用
+        // 等场景重建时无 server 可注, 不 forceFresh 会 attach 回带旧 collab
+        // URL 的 query (codex-connector R22 P2)。
         const forceFreshQuery =
-          (injectedServerCount > 0 || mcpNeedsFreshStart) &&
+          (injectedServerCount > 0 || mcpNeedsFreshStart || staleInvalidatedCcSessions.has(sessionId)) &&
           !forcedFreshCcBridgeSessions.has(sessionId);
 
         // 协同 MCP 已 mutate 进 startParams.mcpServers;这里再把 proxy env 合入
@@ -724,6 +746,7 @@ export function getMaker(): Maker {
         })();
         if (forceFreshQuery) {
           forcedFreshCcBridgeSessions.add(sessionId);
+          staleInvalidatedCcSessions.delete(sessionId);
         }
 
         // 把 ssh transport disposer 串进 remoteQuery.close — maker-core 不知道

@@ -485,6 +485,9 @@ describe('orca_worker_bridge MCP helpers', () => {
     expect(parseToolJson(result)).toMatchObject({ ok: true, lead_session_id: 'lead-1' });
     expect(createSessionCalls).toHaveLength(1);
     expect(createSessionCalls[0]).toMatchObject({ id: 'lead-1', remoteHostId: 'host-remote-1' });
+    // R22 P2:远端 rehydrate 必须带 makerMemoryEnabled=false (与 IPC create/send
+    // 的 remote ensure 归一化对齐), 不注入本地 Maker Memory 上下文。
+    expect(createSessionCalls[0]).toMatchObject({ makerMemoryEnabled: false });
   });
 
   it('runs the injected remote preflight before rehydrating an inactive remote lead', async () => {
