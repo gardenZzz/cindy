@@ -53,7 +53,7 @@ import { makerChatStore, EMPTY_TASK_UPDATES } from '@/lib/makerChatStore';
 import type { AgentTaskUpdate, ChatMessage } from '@/lib/makerChatStore';
 import {
   getWorkflowProgressFor,
-  isRemoteSession,
+  isRemoteSessionSticky,
   listSessionBackgroundTasksFor,
 } from '@/lib/makerTransport';
 import { formatCompactTokens } from '@/lib/usageFormat';
@@ -205,14 +205,16 @@ function workflowAgentCounts(
   return total > 0 ? { done, total } : null;
 }
 
-/** 停止按钮 gating(与 AgentTaskCard 同口径):running + claude-code + 有 taskId + 非远程。 */
+/** 停止按钮 gating(与 AgentTaskCard 同口径):running + claude-code + 有 taskId +
+ *  非远程。远程判定用粘滞版:relay 瞬断窗口误判本机会放出假 Stop(本地调用假成功,
+ *  任务在被控端继续跑),与水合的粘滞归属同口径。 */
 function canStopItem(item: SessionTaskItem, sessionId: string | null): boolean {
   return (
     item.status === 'running' &&
     item.provider === 'claude-code' &&
     Boolean(item.update?.taskId) &&
     Boolean(sessionId) &&
-    !(sessionId && isRemoteSession(sessionId))
+    !(sessionId && isRemoteSessionSticky(sessionId))
   );
 }
 
