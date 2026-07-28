@@ -162,7 +162,7 @@ describe('ensureAgentProxyTunnel', () => {
     setSshHostAgentProxy('test-host', PREF);
     const { host, state } = makeFakeHost();
     const result = await ensureAgentProxyTunnel(host);
-    expect(result).toEqual({ remotePort: 17893 });
+    expect(result).toEqual({ remotePort: 17893, staleForwards: [] });
     expect(state.forwards).toEqual([{ localHost: '127.0.0.1', localPort: 7890, remotePort: 17893 }]);
   });
 
@@ -176,8 +176,10 @@ describe('ensureAgentProxyTunnel', () => {
 
     setSshHostAgentProxy('test-host', { ...PREF, localPort: 1080 });
     const result = await ensureAgentProxyTunnel(host);
-    expect(result).toEqual({ remotePort: 17893 });
-    // 旧 7890 已拆, 只剩新 1080。
+    expect(result).toMatchObject({ remotePort: 17893 });
+    expect(result?.staleForwards).toHaveLength(1);
+    expect(result?.staleForwards[0]).toMatchObject({ localHost: '127.0.0.1', localPort: 7890 });
+    // 旧 7890 已拆 (默认 closeStale 立即拆), 只剩新 1080。
     expect(state.forwards).toEqual([{ localHost: '127.0.0.1', localPort: 1080, remotePort: 17893 }]);
   });
 });
@@ -285,6 +287,68 @@ describe('reconcileCodexAgentProxyEnv', () => {
     // 两次 reconcile 各发了一次 pkill: 第一次失败 (mock 拦截), 第二次重试成功。
     expect(failedPkillCount).toBe(1);
     expect(state.pkillCount).toBe(1);
+  });
+
+  it('closes the old forward only after the daemon restart succeeds during a rebind (codex R17 P2)', async () => {
+    // rebind (7890 → 1080): reconcile 先建后拆 — daemon 重启成功后才拆旧。
+    setSshHostAgentProxy('test-host', PREF);
+    const { host, state } = makeFakeHost({ marker: null });
+    // 端口递增分配, 让 rebind 后 desired marker 与旧 marker 不同 (fake 默认
+    // 恒 17893 时 marker 内容不变会走 fast path, 测不到拆旧时机)。
+    let nextPort = 17893;
+    host.ensureRemoteForward = async (spec: { localHost: string; localPort: number }) => {
+      const remotePort = nextPort;
+      nextPort += 1;
+      state.forwards.push({ ...spec, remotePort });
+      return { remotePort, close: async () => {} };
+    };
+    // 先 enable 成功 (旧目标 7890: forward + marker 都就位)。
+    await reconcileCodexAgentProxyEnv(host);
+    expect(state.forwards).toEqual([{ localHost: '127.0.0.1', localPort: 7890, remotePort: 17893 }]);
+
+    setSshHostAgentProxy('test-host', { ...PREF, localPort: 1080 });
+    const result = await reconcileCodexAgentProxyEnv(host);
+    expect(result).toEqual({ markerChanged: true, daemonRestarted: true });
+    // daemon 重启成功 → 旧 7890 已拆, 只剩新 1080。
+    expect(state.forwards).toEqual([{ localHost: '127.0.0.1', localPort: 1080, remotePort: 17894 }]);
+  });
+
+  it('keeps the old forward when the daemon survives pkill during a rebind (codex R17 P2)', async () => {
+    // rebind + pkill 失败: marker 回滚 (R10), 旧 7890 forward 保留 (存活
+    // daemon 流量不断), 新 1080 forward 闲置待下轮 reconcile 复用。
+    setSshHostAgentProxy('test-host', PREF);
+    const { host, state } = makeFakeHost({ marker: null });
+    let nextPort = 17893;
+    host.ensureRemoteForward = async (spec: { localHost: string; localPort: number }) => {
+      const remotePort = nextPort;
+      nextPort += 1;
+      state.forwards.push({ ...spec, remotePort });
+      return { remotePort, close: async () => {} };
+    };
+    await reconcileCodexAgentProxyEnv(host);
+    const oldMarker = state.marker;
+
+    setSshHostAgentProxy('test-host', { ...PREF, localPort: 1080 });
+    const baseExec = host.exec.bind(host);
+    host.exec = async (cmd: string, execOpts?: { input?: string }) => {
+      if (cmd.includes('pkill')) {
+        return {
+          stdout: '',
+          stderr: 'daemon still alive after TERM(5s)+KILL(2s)',
+          exitCode: 3,
+          signal: null,
+        };
+      }
+      return baseExec(cmd, execOpts);
+    };
+    const result = await reconcileCodexAgentProxyEnv(host);
+    expect(result).toEqual({ markerChanged: true, daemonRestarted: false });
+    // marker 回滚到旧值; 旧 7890 保留; 新 1080 闲置 (不拆任何 forward)。
+    expect(state.marker).toBe(oldMarker);
+    expect(state.forwards).toEqual([
+      { localHost: '127.0.0.1', localPort: 7890, remotePort: 17893 },
+      { localHost: '127.0.0.1', localPort: 1080, remotePort: 17894 },
+    ]);
   });
 });
 
