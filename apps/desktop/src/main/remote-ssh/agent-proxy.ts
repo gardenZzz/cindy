@@ -332,6 +332,31 @@ exit 3
 export async function reconcileCodexAgentProxyEnv(
   host: RemoteHost,
 ): Promise<{ markerChanged: boolean; daemonRestarted: boolean }> {
+  // per-host 串行链 (codex R9 P2): 并发 reconcile (两个 transport 的
+  // beforeDaemonProbe 与 ready-hook 同时触发) 时, 若第一个还在等
+  // killRemoteCodexDaemon 而第二个走 marker-match fast path, 第二个会直接去
+  // probe 旧 daemon — attach 到 stale-env daemon, 或握手途中被 pkill。
+  // 所有调用按 host 排队, 后来者等前一个写完 marker + 杀完 daemon 再走自己
+  // 的对账 (那时 fast path 才真的代表「环境已一致」)。
+  const prev = reconcileChains.get(host.id) ?? Promise.resolve();
+  const run = prev.then(() => reconcileCodexAgentProxyEnvSerialized(host));
+  // 链上只存 settled 版 (前一个失败不堵后一个); 调用方拿自己的 run 结果。
+  const tracked = run.then(
+    () => undefined,
+    () => undefined,
+  );
+  reconcileChains.set(host.id, tracked);
+  void tracked.then(() => {
+    if (reconcileChains.get(host.id) === tracked) reconcileChains.delete(host.id);
+  });
+  return run;
+}
+
+const reconcileChains = new Map<string, Promise<void>>();
+
+async function reconcileCodexAgentProxyEnvSerialized(
+  host: RemoteHost,
+): Promise<{ markerChanged: boolean; daemonRestarted: boolean }> {
   const pref = getSshHostAgentProxy(host.id);
   let desired: string | null = null;
   if (pref) {
@@ -365,7 +390,16 @@ export async function applyAgentProxyForHost(host: RemoteHost): Promise<void> {
   try {
     if (!pref) {
       await closeAllForwards(host);
-      await reconcileCodexAgentProxyEnv(host);
+      const reconciled = await reconcileCodexAgentProxyEnv(host);
+      // 隧道已拆但旧 daemon 没死透 = 它还握着指向已关闭端口的 proxy env,
+      // 后续 codex turn 全部 proxy-connect 失败, 而 marker/隧道状态已清、
+      // UI 显示 proxy 已关 (codex R9 P2) — 按 apply 失败上报, 让用户在
+      // 卡片上看到错误而不是一个说谎的「已关闭」。
+      if (reconciled.markerChanged && !reconciled.daemonRestarted) {
+        throw new Error(
+          'codex daemon survived pkill after proxy disable; it still holds the old proxy env (retry disable or restart the host)',
+        );
+      }
       tunnelStates.delete(host.id);
       emitState(host.id);
       return;

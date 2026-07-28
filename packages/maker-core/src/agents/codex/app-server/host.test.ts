@@ -118,4 +118,25 @@ describe('AppServerHost.request startup timeout', () => {
 
     await host.shutdown();
   });
+
+  it('treats timeoutMs as an overall deadline across startup + request (copilot R9)', async () => {
+    // timeoutMs 不是「startup 一次 + request 再一次」的双重施加: startup 用掉
+    // 的预算要从 request 里扣, 最坏等待仍是 1× timeoutMs — 否则 60s 关键 RPC
+    // 在冷启动路径上最坏拖到 ~120s, UI 长时间卡 generating。
+    // DelayedTransport(40): startup ~40ms, 预算 50ms → request 只剩 ~10ms。
+    // 1× 语义 ~50ms 超时; 2× 语义要 ~90ms (40 + 50) 才超时。
+    const host = new AppServerHost({
+      createTransport: () => new DelayedTransport(40),
+      logger,
+      clientInfo: { name: 'cindy-test', version: '0.0.0' },
+    });
+
+    const startedAt = Date.now();
+    await expect(host.request('turn/start', {}, { timeoutMs: 50 })).rejects.toThrow(
+      /timed out after \d+ms|consumed the entire/,
+    );
+    expect(Date.now() - startedAt).toBeLessThan(70);
+
+    await host.shutdown();
+  });
 });

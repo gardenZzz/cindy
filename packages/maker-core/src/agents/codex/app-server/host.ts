@@ -497,8 +497,12 @@ export class AppServerHost {
     // 冷启动 / transport 重建时 ensureStarted 本身也可能永不返回 (远端 daemon
     // bootstrap 挂死 / SSH 通道无响应) — 调用方显式给 timeoutMs 时同样给它
     // 上界, 否则「关键 RPC 加超时」在启动路径上形同虚设 (greptile R6 P1)。
+    // timeoutMs 是 startup + request 的整体 deadline (copilot R9): startup 用掉
+    // 的预算从 request 里扣, 否则最坏等 2× timeoutMs, 与「关键 RPC 60s 上界」
+    // 的意图冲突, UI 仍可能长时间卡 generating。
     const started = this.ensureStarted();
     if (opts?.timeoutMs != null) {
+      const deadline = Date.now() + opts.timeoutMs;
       let timer: NodeJS.Timeout | null = null;
       try {
         await Promise.race([
@@ -518,9 +522,14 @@ export class AppServerHost {
       } finally {
         if (timer) clearTimeout(timer);
       }
-    } else {
-      await started;
+      const remaining = deadline - Date.now();
+      if (remaining <= 0) {
+        throw new Error(`app-server startup (for ${method}) consumed the entire ${opts.timeoutMs}ms timeout budget`);
+      }
+      if (!this.client) throw new Error('AppServerHost: client missing after ensureStarted (unreachable)');
+      return this.client.request<R>(method, params, { ...opts, timeoutMs: remaining });
     }
+    await started;
     if (!this.client) throw new Error('AppServerHost: client missing after ensureStarted (unreachable)');
     return this.client.request<R>(method, params, opts);
   }
