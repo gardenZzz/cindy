@@ -1431,6 +1431,22 @@ function workGroupClientId(run: WorkChildItem[]): string {
   return workChildClientId(firstActivity ?? run[0]);
 }
 
+/** 工作组内全部可定位 clientId(嵌套组递归),供组容器的回退锚点使用。 */
+function collectWorkGroupClientIds(children: readonly RenderItem[]): string[] {
+  const ids: string[] = [];
+  for (const child of children) {
+    if (child.type === 'message') ids.push(child.message.clientId);
+    else if (child.type === 'tool_segment') {
+      for (const toolCall of child.toolCalls) ids.push(toolCall.clientId);
+    } else if (child.type === 'agent_task' && child.toolCall) {
+      ids.push(child.toolCall.clientId);
+    } else if (child.type === 'work_group') {
+      ids.push(...collectWorkGroupClientIds(child.children));
+    }
+  }
+  return ids;
+}
+
 function renderItemContainsClientId(item: RenderItem, clientId: string): boolean {
   if (item.type === 'fork_origin') return false;
   if (item.type === 'message') return item.message.clientId === clientId;
@@ -3495,16 +3511,26 @@ export function MessageStream({
                       };
                       const childItems = item.children.map(toWorkGroupChild);
                       return (
-                        <WorkGroupBlock
+                        // data-message-client-ids:组折叠时子卡片/聚合块整体 unmount,
+                        // 精确锚点消失 —— 后台任务面板「点行跳聊天」经 ~= 回退查询
+                        // 落到组容器(与 AgentActionsBlock 的容器锚点同一约定)。
+                        <div
                           key={item.key}
-                          // 单层前缀约定 `work:<clientId>` — item.key 形如 `work-<cid>`,
-                          // 去掉 `work-` 后拼 `<role>:<id>`,与 agent: / thinking: 同构。
-                          blockId={`work:${item.key.slice('work-'.length)}`}
-                          durationMs={item.durationMs}
-                          isStreaming={item.isStreaming}
-                          startedAtMs={item.startedAtMs}
-                          childItems={childItems}
-                        />
+                          className="scroll-mt-20"
+                          data-message-client-ids={collectWorkGroupClientIds(item.children).join(
+                            ' ',
+                          )}
+                        >
+                          <WorkGroupBlock
+                            // 单层前缀约定 `work:<clientId>` — item.key 形如 `work-<cid>`,
+                            // 去掉 `work-` 后拼 `<role>:<id>`,与 agent: / thinking: 同构。
+                            blockId={`work:${item.key.slice('work-'.length)}`}
+                            durationMs={item.durationMs}
+                            isStreaming={item.isStreaming}
+                            startedAtMs={item.startedAtMs}
+                            childItems={childItems}
+                          />
+                        </div>
                       );
                     }
 
