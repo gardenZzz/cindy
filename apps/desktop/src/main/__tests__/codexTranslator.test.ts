@@ -268,7 +268,7 @@ describe('webSearch', () => {
     });
   });
 
-  it('多查询、打开页面和页内查找都生成可读摘要', () => {
+  it('兼容 app-server snake_case 与历史 camelCase action 并生成可读摘要', () => {
     feedItem('started', {
       type: 'webSearch',
       id: 'ws-many',
@@ -279,13 +279,13 @@ describe('webSearch', () => {
       type: 'webSearch',
       id: 'ws-open',
       query: '',
-      action: { type: 'openPage', url: 'https://example.com/page' },
+      action: { type: 'open_page', url: 'https://example.com/page' },
     });
     feedItem('started', {
       type: 'webSearch',
       id: 'ws-find',
       query: '',
-      action: { type: 'findInPage', url: 'https://example.com/page', pattern: 'needle' },
+      action: { type: 'find_in_page', url: 'https://example.com/page', pattern: 'needle' },
     });
     feedItem('started', {
       type: 'webSearch',
@@ -348,7 +348,7 @@ describe('webSearch', () => {
       type: 'webSearch',
       id: 'ws-final-action',
       query: '',
-      action: { type: 'openPage', url: 'https://example.com/final' },
+      action: { type: 'open_page', url: 'https://example.com/final' },
     });
 
     expect(coll.events.map((event) => event.type)).toEqual([
@@ -371,7 +371,7 @@ describe('webSearch', () => {
         toolName: 'web_search',
         input: {
           query: 'https://example.com/final',
-          action: { type: 'openPage', url: 'https://example.com/final' },
+          action: { type: 'open_page', url: 'https://example.com/final' },
         },
       },
     ]);
