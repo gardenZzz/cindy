@@ -3,19 +3,20 @@
  *  trustedAppRenderer.test; here we exercise every validation / policy /
  *  symlink / size-cap / sanitized-error path of the injectable core. */
 
-import type { Stats } from 'node:fs';
-
 import { describe, expect, it, vi } from 'vitest';
 
 import {
   readFileBytesForPreview,
   READ_FILE_BYTES_CAP,
   type FileHandleLike,
+  type FileIdentityStat,
   type ReadFileBytesDeps,
 } from '../fileReadBytes';
 
-function statStub(size: number, isFile = true, ino = 1, dev = 1): Stats {
-  return { size, isFile: () => isFile, ino, dev } as unknown as Stats;
+/** dev/ino/size are bigint, matching the `{ bigint: true }` stats production
+ *  injects — a 0 inode means "identity unavailable" and must fail closed. */
+function statStub(size: number, isFile = true, ino = 1, dev = 1): FileIdentityStat {
+  return { size: BigInt(size), isFile: () => isFile, ino: BigInt(ino), dev: BigInt(dev) };
 }
 
 /** Fake FileHandle whose fstat size can differ from the readable bytes, so we
@@ -121,6 +122,24 @@ describe('readFileBytesForPreview', () => {
           deps({
             stat: async () => statStub(4, true, 1, 1),
             open: async () => fakeHandle({ statSize: 4, data: Buffer.from([1, 2, 3, 4]), ino: 999 }),
+          }),
+        ),
+      ),
+    ).toBe('PRECONDITION_FAILED');
+  });
+
+  it('fails closed when the inode identity is unavailable (ino reported as 0)', async () => {
+    // Some Windows / network filesystems report ino 0. Both sides then read 0,
+    // so an equality check would pass and the swap guard would silently be a
+    // no-op exactly where it is needed. Must reject instead.
+    expect(
+      await codeOf(
+        readFileBytesForPreview(
+          { filePath: ABS },
+          deps({
+            stat: async () => statStub(4, true, 0, 1),
+            open: async () =>
+              fakeHandle({ statSize: 4, data: Buffer.from([1, 2, 3, 4]), ino: 0 }),
           }),
         ),
       ),
