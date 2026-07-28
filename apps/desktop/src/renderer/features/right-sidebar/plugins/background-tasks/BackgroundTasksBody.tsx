@@ -482,7 +482,6 @@ export function BackgroundTasksBody({
   const taskUpdatesEmpty = inputs.taskUpdates.size === 0;
   useEffect(() => {
     if (!sessionId) return;
-    void taskUpdatesEmpty;
     let disposed = false;
     void listSessionBackgroundTasksFor(sessionId)
       .then(({ tasks }) => {

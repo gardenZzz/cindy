@@ -262,12 +262,26 @@ export function listSessionTasks(input: {
 
     const update = findUpdate(taskUpdates, toolUseId, msg.clientId);
 
+    // tool_result 存在性与内容定位:toolUseId 查表命中为主路径;adjacency 兜底只认
+    // 自身不带 toolUseId 的紧邻结果行(旧数据形态)—— 带 toolUseId 的结果行
+    // 归属已由查表裁决,不得把别的工具的结果算到本行头上。
+    let settled = toolUseId !== undefined && settledToolUseIds.has(toolUseId);
+    let resultContent: unknown = settled && toolUseId
+      ? resultContentByToolUseId.get(toolUseId)
+      : undefined;
+    for (let j = i + 1; !settled && j < messages.length && messages[j].role === 'tool_result'; j++) {
+      const resultToolUseId = messages[j].toolUseId;
+      if (typeof resultToolUseId !== 'string' || resultToolUseId.length === 0) {
+        settled = true;
+        resultContent = messages[j].content;
+      }
+    }
+
     // 历史 workflow(重载后 update 清空)兜底:从结果文本提取 CLI 任务 id,
-    // 详情视图据此仍能读 wf 记录文件(Codex review P1:历史详情恢复)。
+    // 详情视图据此仍能读 wf 记录文件。adjacency 命中的无 toolUseId 旧形态同样
+    // 参与提取 —— settled 判定支持的形态,taskId 恢复必须同口径支持。
     const derivedTaskId =
-      isWorkflowTool && !update?.taskId && toolUseId
-        ? extractWorkflowTaskId(resultContentByToolUseId.get(toolUseId))
-        : undefined;
+      isWorkflowTool && !update?.taskId ? extractWorkflowTaskId(resultContent) : undefined;
 
     const aliasKeys = [toolUseId, update?.taskId, update?.parentToolUseId, derivedTaskId].filter(
       (k): k is string => typeof k === 'string' && k.length > 0,
@@ -275,15 +289,6 @@ export function listSessionTasks(input: {
     // 同一任务已出过行(重复 toolCall / 别名撞车)→ 跳过,首行为准。
     if (aliasKeys.some((k) => seenAliasKeys.has(k))) continue;
     for (const k of aliasKeys) seenAliasKeys.add(k);
-
-    // tool_result 存在性:toolUseId 查表命中为主路径;adjacency 兜底只认
-    // 自身不带 toolUseId 的紧邻结果行(旧数据形态)—— 带 toolUseId 的结果行
-    // 归属已由查表裁决,不得把别的工具的结果算到本行头上。
-    let settled = toolUseId !== undefined && settledToolUseIds.has(toolUseId);
-    for (let j = i + 1; !settled && j < messages.length && messages[j].role === 'tool_result'; j++) {
-      const resultToolUseId = messages[j].toolUseId;
-      if (typeof resultToolUseId !== 'string' || resultToolUseId.length === 0) settled = true;
-    }
 
     const kind = deriveKind(toolName, update);
     const status: AgentTaskStatus = update?.status ?? (settled ? 'completed' : 'running');
