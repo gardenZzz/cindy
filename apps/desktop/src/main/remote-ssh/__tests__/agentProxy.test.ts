@@ -216,6 +216,36 @@ describe('reconcileCodexAgentProxyEnv', () => {
     expect(result).toEqual({ markerChanged: false, daemonRestarted: false });
     expect(state.pkillCount).toBe(0);
   });
+
+  it('fails closed when the marker write fails: throws and does not kill the daemon (codex R7 P1)', async () => {
+    // exec 对非零退出码 resolve 不 throw — 写失败必须显式挡, 否则 reconcile
+    // 继续 pkill, daemon 起来没 marker 直连, fail-closed 破。
+    setSshHostAgentProxy('test-host', PREF);
+    const { host, state } = makeFakeHost({ marker: null });
+    const baseExec = host.exec.bind(host);
+    host.exec = async (cmd: string, execOpts?: { input?: string }) => {
+      if (cmd.includes('cat > "') && cmd.includes('agent-proxy.env')) {
+        return { stdout: '', stderr: 'Permission denied', exitCode: 1, signal: null };
+      }
+      return baseExec(cmd, execOpts);
+    };
+    await expect(reconcileCodexAgentProxyEnv(host)).rejects.toThrow(/write agent-proxy marker failed/);
+    expect(state.pkillCount).toBe(0);
+  });
+
+  it('fails closed when the marker delete fails: throws and does not kill the daemon (codex R7 P1)', async () => {
+    setSshHostAgentProxy('test-host', null);
+    const { host, state } = makeFakeHost({ marker: "export HTTPS_PROXY='http://127.0.0.1:17893'" });
+    const baseExec = host.exec.bind(host);
+    host.exec = async (cmd: string, execOpts?: { input?: string }) => {
+      if (cmd.includes('rm -f "') && cmd.includes('agent-proxy.env')) {
+        return { stdout: '', stderr: 'Read-only file system', exitCode: 1, signal: null };
+      }
+      return baseExec(cmd, execOpts);
+    };
+    await expect(reconcileCodexAgentProxyEnv(host)).rejects.toThrow(/delete agent-proxy marker failed/);
+    expect(state.pkillCount).toBe(0);
+  });
 });
 
 describe('killRemoteCodexDaemon', () => {

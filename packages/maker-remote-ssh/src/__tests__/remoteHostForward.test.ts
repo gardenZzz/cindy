@@ -185,6 +185,14 @@ describe('RemoteHost remote forwarding', () => {
     await expect(
       host.ensureRemoteForward({ localHost: '127.0.0.1', localPort: 0 }),
     ).rejects.toThrow(/localPort/);
+    // preferredRemotePort 同样入口校验: 0 会静默变成远端 ephemeral 绑端口语义
+    // (review: PR #715 copilot R7)。
+    await expect(
+      host.ensureRemoteForward({ localHost: '127.0.0.1', localPort: 7890, preferredRemotePort: 0 }),
+    ).rejects.toThrow(/preferredRemotePort/);
+    await expect(
+      host.ensureRemoteForward({ localHost: '127.0.0.1', localPort: 7890, preferredRemotePort: 70000 }),
+    ).rejects.toThrow(/preferredRemotePort/);
   });
 
   it('is idempotent for the same local target (no duplicate forwardIn)', async () => {

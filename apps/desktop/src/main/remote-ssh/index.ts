@@ -559,15 +559,20 @@ export function registerRemoteSshIpc(): void {
   // 所有路径 (手动 connect / autoConnect / 断线重连) 的统一点, 失败只落
   // tunnel state 不阻断连接, session 路径会显式重试。
   getPool().onAnyStatus((snap) => {
-    broadcastStatus(snap);
     if (snap.status === 'ready') {
+      broadcastStatus(snap);
       const host = getPool().get(snap.config.id);
       if (host) void applyAgentProxyForHost(host);
     } else {
       // 断连 / 重连中: 隧道已 disarm, 状态标非活跃, detail 面板不显示
       // 过期的「已建立」(review: PR #715 copilot R3)。reconnect ready 时
       // 上面的 apply 会重建并重新标活跃。
+      // 先标非活跃再广播 (mark 自带一次 emitState 推送): 事件流里不出现
+      // status≠ready 但 tunnel.active=true 的 stale 帧, renderer 不会
+      // 闪一帧「已建立」再翻「等待连接」(review: PR #715 收官审查 P2)。
       markAgentProxyTunnelInactive(snap.config.id);
+      const host = getPool().get(snap.config.id);
+      broadcastStatus(host ? host.snapshot() : snap);
     }
   });
   // agent-proxy 内部状态 (隧道成败 / 端口) 变化 → 推一版最新 snapshot,

@@ -526,6 +526,16 @@ export class RemoteHost {
     if (!Number.isInteger(spec.localPort) || spec.localPort < 1 || spec.localPort > 65535) {
       throw new Error(`ensureRemoteForward: invalid localPort ${spec.localPort}`);
     }
+    // preferredRemotePort 同样入口校验 (review: PR #715 copilot R7): 0 会静默
+    // 变成「远端绑 ephemeral 端口」语义, 越界值则晚到 arm 才失败, 都难排查。
+    if (
+      spec.preferredRemotePort !== undefined &&
+      (!Number.isInteger(spec.preferredRemotePort) ||
+        spec.preferredRemotePort < 1 ||
+        spec.preferredRemotePort > 65535)
+    ) {
+      throw new Error(`ensureRemoteForward: invalid preferredRemotePort ${spec.preferredRemotePort}`);
+    }
     const key = forwardKey(spec);
     const existing = this.forwards.get(key);
     if (existing) {
