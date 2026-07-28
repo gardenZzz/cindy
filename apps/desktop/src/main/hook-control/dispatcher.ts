@@ -259,6 +259,7 @@ const NOTICE_SESSION_GONE = 'ℹ️ 原对话现在读不到（可能已被归�
 const TITLE_SNIPPET_MAX = 24;
 /** Server-controlled source metadata is persisted and rendered, so keep it bounded locally too. */
 const SOURCE_USER_TEXT_MAX = 20_000;
+const SOURCE_TRIGGER_MESSAGE_ID_MAX = 64;
 const SOURCE_CHANNEL_NAME_MAX = 160;
 const SOURCE_TEAM_ID_MAX = 128;
 const SOURCE_TEAM_NAME_MAX = 160;
@@ -297,6 +298,14 @@ export function normalizeTaskSource(source: TaskSource): TaskSource {
     ...(threadContext !== undefined ? { threadContext } : {}),
     ...(source.userText !== undefined
       ? { userText: source.userText.slice(0, SOURCE_USER_TEXT_MAX) }
+      : {}),
+    ...(source.triggerMessageId !== undefined
+      ? {
+          triggerMessageId:
+            source.triggerMessageId === null
+              ? null
+              : source.triggerMessageId.slice(0, SOURCE_TRIGGER_MESSAGE_ID_MAX),
+        }
       : {}),
   };
 }

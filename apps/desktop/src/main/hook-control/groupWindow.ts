@@ -56,6 +56,7 @@ export function groupLaneOf(
 
 /** group.message 帧入窗(幂等: 重放/重连的同一条消息按唯一键直接忽略)。 */
 export async function recordGroupMessage(payload: GroupMessagePayload): Promise<void> {
+  await sweepExpiredRows();
   const db = getDbClient().drizzle;
   const now = Date.now();
   const threadId = payload.threadId ?? '';
@@ -100,6 +101,22 @@ export async function recordGroupMessage(payload: GroupMessagePayload): Promise<
 }
 
 /**
+ * 全局 TTL 清扫: 不活跃群(不再有新消息触发按键 GC)的过期行也要清理。
+ * 每次入窗/拼装时最多每 6 小时全表扫一次(sent_at 无全局索引, 行量有
+ * 每键 500 上限, 全表量级可控)。
+ */
+let lastGlobalSweepAt = 0;
+const GLOBAL_SWEEP_INTERVAL_MS = 6 * 60 * 60 * 1000;
+
+async function sweepExpiredRows(): Promise<void> {
+  const now = Date.now();
+  if (now - lastGlobalSweepAt < GLOBAL_SWEEP_INTERVAL_MS) return;
+  lastGlobalSweepAt = now;
+  const db = getDbClient().drizzle;
+  await db.delete(hookGroupMessages).where(lt(hookGroupMessages.sentAt, now - WINDOW_TTL_MS));
+}
+
+/**
  * 每 lane 的增量游标(上次拼装到的窗口行 id)。内存态: 重启后首次派发会
  * 重新包含整个窗口(一次性冗余, 可接受), 之后恢复增量语义。
  */
@@ -118,6 +135,7 @@ function cursorKeyOf(externalKey: string): string {
 export async function buildGroupContextPrefix(payload: TaskDispatchPayload): Promise<string> {
   const lane = groupLaneOf(payload.externalKey);
   if (lane === null) return '';
+  await sweepExpiredRows();
   const db = getDbClient().drizzle;
   const cursorKey = cursorKeyOf(payload.externalKey);
   const cursor = contextCursors.get(cursorKey) ?? 0;
@@ -194,4 +212,5 @@ export async function buildGroupContextPrefix(payload: TaskDispatchPayload): Pro
 /** 测试与登出清理: 重置内存游标(窗口行随 DB 生命周期)。 */
 export function resetGroupContextCursors(): void {
   contextCursors.clear();
+  lastGlobalSweepAt = 0;
 }

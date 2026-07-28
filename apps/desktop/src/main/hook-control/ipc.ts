@@ -67,7 +67,7 @@ import {
 import { createHookTransport } from './transport.js';
 import { registerSlackToolBridge, unregisterSlackToolBridge } from './slackToolBridge.js';
 import { createHookBindingStore } from './bindings.js';
-import { buildGroupContextPrefix } from './groupWindow.js';
+import { buildGroupContextPrefix, resetGroupContextCursors } from './groupWindow.js';
 import { createHookDispatcher } from './dispatcher.js';
 import { createMakerHookSessionRunner } from './session-runner.js';
 import { resolveHookInteraction } from './interactions.js';
@@ -801,6 +801,7 @@ export async function stopHookControlAccount(): Promise<void> {
 /** Stop and discard all state tied to the current data owner; IPC stays registered. */
 export function resetHookControlOwnerBoundary(): void {
   unregisterSlackToolBridge();
+  resetGroupContextCursors();
   manager?.dispose();
   manager = null;
   store = null;
