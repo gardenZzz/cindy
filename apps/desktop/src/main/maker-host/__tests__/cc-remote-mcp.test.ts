@@ -49,6 +49,28 @@ describe('buildCcRemoteHttpMcpServers', () => {
     expect(() => cleanup()).not.toThrow();
   });
 
+  it('returns empty when collab is globally disabled even though the bridge still lists cindy_orca (R20 P2)', async () => {
+    // provider 层为工具面稳定在禁用时仍注册 cindy_orca — bridge 名单不
+    // 反映开关, 远端 cc 注入以同一全局闸门为准: 禁用即整个不注入。
+    const { bridge, registered } = fakeBridge();
+    const { servers, cleanup } = await buildCcRemoteHttpMcpServers(
+      { host: HOST, sessionId: 's1', workingDir: '/remote/repo' },
+      {
+        ensureBridgeStarted: async () => ({
+          port: 38080,
+          serverNames: ['cindy_orca', 'orca_worker_bridge'],
+          bridge,
+        }),
+        ensureForward: vi.fn(async () => 47921),
+        getBridgeToken: async () => 'persistent-test-token',
+        isCollabEnabled: () => false,
+      },
+    );
+    expect(servers).toEqual({});
+    expect(registered.size).toBe(0); // 不注册任何 session ctx
+    expect(() => cleanup()).not.toThrow();
+  });
+
   it('injects only whitelisted servers with the persistent token and ?session= routing', async () => {
     const { bridge, registered } = fakeBridge();
     const { servers } = await buildCcRemoteHttpMcpServers(

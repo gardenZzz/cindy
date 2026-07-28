@@ -359,8 +359,11 @@ function writeConfigCmd(): string {
   // (其他 MCP server 的 bearer / provider token), argv 在远端 `ps` / audit
   // log 可见 — 与 bootstrap token 的 "secrets only live in stdin" 同约束
   // (review: PR #778 codex-connector R17 P1)。
+  // umask 077:同一份 secret 内容也不得被远端其他本地用户读到 — 默认 022
+  // 下 tmp / config 与新建 $CODEX_HOME 都是世界可读的 (codex-connector
+  // R20 P2;与 ssh-keys.ts 的 0o700 私钥目录同语义)。
   return `bash -c ${shellQuoteSh(
-    `${codexHomePrefix(DEFAULT_INSTALL_ROOT)}; mkdir -p "$CODEX_HOME" && ` +
+    `umask 077; ${codexHomePrefix(DEFAULT_INSTALL_ROOT)}; mkdir -p "$CODEX_HOME" && ` +
       `base64 -d > "$CODEX_HOME/config.toml.tmp" && ` +
       `mv "$CODEX_HOME/config.toml.tmp" "$CODEX_HOME/config.toml"`,
   )}`;
@@ -490,6 +493,32 @@ export function setRemoteMcpForwardRearmedHook(fn: (hostId: string, remotePort: 
   rearmedHook = fn;
 }
 
+/**
+ * 清理路径 (serverNames 空) 拆除本 host 的 MCP forward 并摘除
+ * bridgeLocalPort 记录:collab 禁用 / token 失效后远端不再需要到本机
+ * bridge 的隧道, 残留 forward 是无谓的远端端口占用 (R20 P2 同源)。
+ * close 失败不阻断清理 (记录照摘, 服务端残留随连接死亡消失)。
+ */
+async function releaseRemoteMcpForwardIfAny(host: RemoteHost): Promise<void> {
+  const stale = readPortPrefs()[host.id]?.bridgeLocalPort;
+  if (stale === undefined) return;
+  try {
+    await host.closeRemoteForward('127.0.0.1', stale);
+    log.info('remote MCP forward released on cleanup path', { host: host.id, staleLocalPort: stale });
+  } catch (err) {
+    log.warn('release remote MCP forward failed (continuing cleanup)', {
+      host: host.id,
+      staleLocalPort: stale,
+      error: err instanceof Error ? err.message : String(err),
+    });
+  }
+  const current = readPortPrefs()[host.id];
+  if (!current?.bridgeLocalPort) return;
+  const next = { ...readPortPrefs() };
+  delete next[host.id].bridgeLocalPort;
+  writePortPrefs(next);
+}
+
 // ── per-host 串行锁与共用 forward 入口 ───────────────────────────────────────
 
 /**
@@ -548,6 +577,13 @@ export function ensureRemoteCodexMcpBridge(
      * 漂移并重试), 降级为远端无 MCP。未注入时按无 live turn 处理。
      */
     hasLiveTurnOnHost?: (hostId: string) => boolean;
+    /**
+     * Collab 全局开关 (plugin registry Tier 4, 不依赖 workingDir)。缺省视为
+     * 开启。provider 层为工具面稳定在禁用时仍注册 cindy_orca
+     * (keepOrcaProviderStable), bridge 名单不反映开关 — 远端注入必须以本
+     * 闸门为准: 禁用时按清理路径剥受管段 (codex-connector R20 P2)。
+     */
+    isCollabEnabled?: () => boolean;
   },
 ): Promise<EnsureRemoteCodexMcpResult> {
   return withHostSerial(host.id, () => doEnsureRemoteCodexMcpBridge(host, deps));
@@ -558,6 +594,13 @@ async function doEnsureRemoteCodexMcpBridge(
   deps: {
     ensureBridgeStarted: () => Promise<RemoteMcpBridgeEndpoint | null>;
     hasLiveTurnOnHost?: (hostId: string) => boolean;
+    /**
+     * Collab 全局开关 (plugin registry Tier 4, 不依赖 workingDir)。缺省视为
+     * 开启。provider 层为工具面稳定在禁用时仍注册 cindy_orca
+     * (keepOrcaProviderStable), bridge 名单不反映开关 — 远端注入必须以本
+     * 闸门为准: 禁用时按清理路径剥受管段 (codex-connector R20 P2)。
+     */
+    isCollabEnabled?: () => boolean;
   },
 ): Promise<EnsureRemoteCodexMcpResult> {
   try {
@@ -571,7 +614,14 @@ async function doEnsureRemoteCodexMcpBridge(
     // session 获得本机 MCP 能力, 越出协同边界 (与 cc 侧白名单同语义)。
     const filteredNames = bridge.serverNames.filter((n) => CODEX_REMOTE_MCP_SERVER_NAMES.has(n));
     const token = getRemoteMcpBridgeToken();
-    let serverNames = filteredNames;
+    const collabEnabled = deps.isCollabEnabled?.() ?? true;
+    let serverNames = collabEnabled ? filteredNames : [];
+    if (!collabEnabled && filteredNames.length > 0) {
+      // collab 全局禁用:bridge 名单不反映开关 (keepOrcaProviderStable) —
+      // 按清理路径剥受管段, 远端从「工具可见但调用必败」降级为不暴露
+      // (codex-connector R20 P2)。
+      log.info('collab globally disabled — cleaning remote managed block', { host: host.id });
+    }
     if (serverNames.length > 0 && !token) {
       // token 不可用但本 host 之前注入过 (appliedFingerprint 在):旧 config
       // 与 daemon env 会让远端继续暴露 cindy_orca / orca_worker_bridge 而
@@ -593,7 +643,15 @@ async function doEnsureRemoteCodexMcpBridge(
     // 指纹, bootstrap 传空 token — daemon 不再持有有效 token 正是清理目标。
     const effectiveToken = token ?? '';
 
-    const remotePort = await ensureRemotePort(host, bridge.port);
+    // 只有确实要下发 server 时才 arm forward:清理路径 (serverNames 空)
+    // 剥 config / 清 env 都不经隧道 — forward 被拒或扫描窗口耗尽不该
+    // 阻断清理, 否则旧受管段与 daemon env 残留成「持续暴露死 MCP」
+    // (codex-connector R20 P2)。清理路径下 MCP forward 本身也是清理对象:
+    // 有 bridgeLocalPort 记录就拆掉。
+    const remotePort = serverNames.length > 0 ? await ensureRemotePort(host, bridge.port) : 0;
+    if (serverNames.length === 0) {
+      await releaseRemoteMcpForwardIfAny(host);
+    }
 
     // token 与 bridge 代际一起进指纹:token 轮换 (账号切换) 与 bridge 重建
     // (旧 mcp-session-id 全失效, codex-connector P2) 都构成 config 漂移,
