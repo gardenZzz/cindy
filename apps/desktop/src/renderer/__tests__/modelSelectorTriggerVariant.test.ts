@@ -29,6 +29,7 @@ vi.mock('react-i18next', async (importOriginal) => ({
         'settings.providers.anthropic.title': 'Anthropic',
         'newChat.modelSelector.trigger.placeholder': '选择模型',
         'newChat.modelSelector.pricing.free': '限时免费',
+        'newChat.modelSelector.source.disconnected': '已断开',
       };
       if (key === 'newChat.modelSelector.priceTip') {
         return `Input ${options?.input} · Output ${options?.output} per 1M tokens`;
@@ -364,6 +365,64 @@ describe('ModelSelector trigger variants', () => {
     expect(modelListMaxHeightForRows(7)).toBe(264);
     expect(modelListMaxHeightForRows(8)).toBe(300);
     expect(modelListMaxHeightForRows(100)).toBe(300);
+  });
+
+  it('bounds the default-session trigger in narrow and ultra-narrow composers', () => {
+    const props = {
+      modelId: 'claude-opus-4-8',
+      effort: 'xhigh' as Effort,
+      onModelChange: vi.fn(),
+      onEffortChange: vi.fn(),
+      vendorKey: 'cc' as const,
+      compactToolbar: true,
+    };
+    const view = render(React.createElement(ModelSelector, props));
+
+    let trigger = screen.getByRole('button', {
+      name: /Current: Opus 4\.8, effort: 超高/,
+    });
+    expect(trigger.className).toContain('w-[148px]');
+    expect(trigger.className).toContain('min-w-[72px]');
+    expect(within(trigger).getByText('Opus 4.8').className).toContain('truncate');
+    expect(trigger.textContent).not.toContain('超高');
+
+    view.rerender(
+      React.createElement(ModelSelector, {
+        ...props,
+        ultraCompactToolbar: true,
+      }),
+    );
+    trigger = screen.getByRole('button', {
+      name: /Current: Opus 4\.8, effort: 超高/,
+    });
+    expect(trigger.className).toContain('w-[64px]');
+    expect(trigger.className).toContain('min-w-[64px]');
+    expect(within(trigger).getByText('Opus 4.8').className).toContain('hidden');
+    // 可及名仍保留完整模型 + effort，视觉仅收起文字，不丢选择能力。
+    expect(trigger.getAttribute('aria-label')).toContain('Opus 4.8');
+    expect(trigger.getAttribute('aria-label')).toContain('超高');
+  });
+
+  it('keeps the disconnected status in the compact trigger title', () => {
+    render(
+      React.createElement(ModelSelector, {
+        modelId: 'claude-opus-4-8',
+        effort: 'xhigh' as Effort,
+        onModelChange: vi.fn(),
+        onEffortChange: vi.fn(),
+        vendorKey: 'cc',
+        compactToolbar: true,
+        currentProviderId: 'anthropic',
+        sourceDisconnected: true,
+      }),
+    );
+
+    const trigger = screen.getByRole('button', {
+      name: /已断开: Opus 4\.8/,
+    });
+    expect(trigger.getAttribute('title')).toBe('已断开: Opus 4.8');
+    // compact 隐藏冗余状态文案，但 Unplug 错误图标与悬停 title 仍保留。
+    expect(trigger.textContent).not.toContain('已断开');
   });
 
   it('shows the intent model and its default source after registering an agent switch', () => {
