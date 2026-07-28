@@ -152,6 +152,15 @@ export function isRemoteSession(sessionId: string): boolean {
 }
 
 /**
+ * 粘滞版远程判定:曾解析到 deviceId 的会话在 relay 瞬时重连清空注册表的窗口内
+ * 仍视为远程。用于「误判本机会产生副作用」的 gating(如 Stop 按钮 —— 瞬断窗口
+ * 误判本机会放出按钮,点击走本地 stopAgentTask 假成功,任务在被控端继续跑)。
+ */
+export function isRemoteSessionSticky(sessionId: string): boolean {
+  return getStickySessionDeviceId(sessionId) !== undefined;
+}
+
+/**
  * 重命名输入框 Magic 按钮:按会话最新对话重生成标题。
  * 远程会话隧道到被控端执行——对话素材与 provider 凭证的数据真相都在被控端;
  * 老被控端无此 channel 时 invoke 以 CHANNEL_NOT_ALLOWED 拒绝,调用方按生成失败提示。

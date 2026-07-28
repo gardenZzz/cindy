@@ -17,7 +17,7 @@ import { useExpandedBlockMemory } from '@/hooks/useExpandedBlockMemory';
 import { Collapse } from '@/components/ui/collapse';
 import { Spinner } from '@/components/ui/spinner';
 import type { AgentTaskUpdate, ChatMessage } from '@/hooks/useCCAgentChat';
-import { isRemoteSession } from '@/lib/makerTransport';
+import { isRemoteSessionSticky } from '@/lib/makerTransport';
 import { openBackgroundTasksTab } from '@/features/right-sidebar/lib/openBackgroundTasksTab';
 import { extractWorkflowTaskId } from '@/features/right-sidebar/plugins/background-tasks/listSessionTasks';
 import { WorkflowAgentStrip } from '@/features/right-sidebar/plugins/background-tasks/WorkflowAgentStrip';
@@ -142,8 +142,9 @@ export function AgentTaskCard({ toolCall, update, result, subagentModel, session
     Boolean(sessionId) &&
     Boolean(update?.taskId) &&
     update?.provider === 'claude-code' &&
-    // device-link 镜像会话:session 活在被控端,本地 stopAgentTask 会假成功 —— 不给按钮。
-    !(sessionId && isRemoteSession(sessionId));
+    // device-link 镜像会话:session 活在被控端,本地 stopAgentTask 会假成功 —— 不给
+    // 按钮。粘滞判定:relay 瞬断清空注册表的窗口内不误判为本机(与面板同口径)。
+    !(sessionId && isRemoteSessionSticky(sessionId));
   const handleStop = useCallback(() => {
     const api = window.electronAPI?.maker;
     if (!sessionId || !update?.taskId || !api?.stopAgentTask) return;
