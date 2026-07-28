@@ -392,6 +392,26 @@ export async function openCcManagerSession(opts: {
         { sessionId: opts.sessionId },
         { timeoutMs: RPC_REQUEST_TIMEOUT_MS },
       );
+      // registry.kill 对 alive session 是异步终止 (interrupt + inputQueue
+      // .end, consume loop 退出后才从注册表移除, 见 maker-cc-manager
+      // session-registry.ts) — kill 响应返回时 session 往往仍 alive,
+      // 立即 start 同样撞 SESSION_ALREADY_EXISTS (greptile P1)。轮询
+      // list 直到不再 alive;超时也上抛, 走同一"重试可恢复"路径。
+      const killWaitDeadline = Date.now() + 5_000;
+      for (;;) {
+        const after = await client.request<SessionListResult>(METHODS.SESSION_LIST, {}, {
+          timeoutMs: RPC_REQUEST_TIMEOUT_MS,
+        });
+        const stillAlive =
+          after.sessions.find((s) => s.sessionId === opts.sessionId)?.alive === true;
+        if (!stillAlive) break;
+        if (Date.now() > killWaitDeadline) {
+          throw new Error(
+            `cc-mgr: session ${opts.sessionId} still alive 5s after kill (forced fresh)`,
+          );
+        }
+        await new Promise((r) => setTimeout(r, 150));
+      }
       log.info('cc-mgr: alive session killed for forced fresh start (bridge MCP re-inject)', {
         hostId: opts.host.id,
         sessionId: opts.sessionId,
