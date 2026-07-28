@@ -17,7 +17,8 @@ import { useTranslation } from 'react-i18next';
 import type { AgentInputReference } from '@cindy/maker-shared/agent-input-projection';
 import { requiresFullAccessConfirmation } from '@cindy/maker-shared/permission-mode';
 import { ImageLightbox } from '@/components/chat/ImageLightbox';
-import { TextLightbox } from '@/components/chat/TextLightbox';
+import { formatBytes, TextLightbox } from '@/components/chat/TextLightbox';
+import { AttachmentTypeThumb } from './AttachmentTypeThumb';
 import { useEditor, EditorContent } from '@tiptap/react';
 import Document from '@tiptap/extension-document';
 import Paragraph from '@tiptap/extension-paragraph';
@@ -5920,11 +5921,29 @@ function ThumbnailItem({
     setTextLightboxOpen(true);
   }, [file]);
 
+  // 图片缩略图恒为 56×56 方块;其余附件走横向文件卡,宽度随文件名自适应
+  // (上限 220px)。判定条件必须与下面渲染分支一致——缓存写失败、既无 url 也无
+  // base64 的图片同样落到文件卡分支。
+  const isImageThumb = file.category === 'image' && Boolean(file.url || file.base64);
+  // 副行是「类型 · 大小」;无扩展名(Makefile 之类)或 size 缺失时按存在的部分给。
+  // file.size 是拖入那一刻的快照:文件在托盘期间被改写后,发出去的是新内容,卡片
+  // 却还报旧字节数。缩略图复核时 main 会把当前 stat 大小一并带回,这里优先用它。
+  const extLabel = file.ext.replace('.', '').toUpperCase();
+  const [liveByteSize, setLiveByteSize] = useState<number | null>(null);
+  const shownSize = liveByteSize ?? file.size;
+  // 复核回来的 0 是**真实的当前大小**(文件被清空了),要照实显示 0 B;只有拿不到
+  // 复核值、且快照本身就是 0/缺失时才省掉大小段。
+  const hasSize =
+    Number.isFinite(shownSize) && (liveByteSize !== null ? shownSize >= 0 : shownSize > 0);
+  const metaLine = [extLabel || null, hasSize ? formatBytes(shownSize) : null]
+    .filter(Boolean)
+    .join(' · ');
+
   return (
     <div
       ref={thumbRef}
       className="group relative shrink-0"
-      style={{ width: 56, height: 56 }}
+      style={isImageThumb ? { width: 56, height: 56 } : { height: 56, maxWidth: 220 }}
       onPointerEnter={() => setIsHovered(true)}
       onPointerLeave={() => setIsHovered(false)}
     >
@@ -5955,12 +5974,31 @@ function ThumbnailItem({
             ) : null}
           </span>
         ) : (
+          // 文件卡(2026-07-27):图标块 + 文件名 + 「类型 · 大小」。此前是一个只印
+          // 扩展名的 56×56 方块,并排两份 PDF 根本认不出谁是谁——文件名必须直接
+          // 可见,不能只挂在 hover tooltip 上。
           <div
-            className="flex h-full w-full items-center justify-center rounded-lg"
-            style={{ backgroundColor: 'var(--file-chip-bg)' }}
+            className="flex h-full w-full items-center gap-2 rounded-xl px-2"
+            style={{ backgroundColor: 'var(--surface-chip)' }}
           >
-            <span className="text-sm font-medium uppercase text-white">
-              {file.ext.replace('.', '')}
+            <span
+              // 缩略区比卡片底再抬一层:--file-chip-bg 与 --surface-chip 在 Light
+              // 下只差一档灰(#D8D9DB / #e5e5e5),实机上根本看不出块。内容由
+              // AttachmentTypeThumb 决定:优先系统缩略图,拿不到回落自绘类型图标。
+              className="flex h-10 w-10 shrink-0 items-center justify-center overflow-hidden rounded-lg"
+              style={{ backgroundColor: 'var(--surface-elevated)' }}
+            >
+              <AttachmentTypeThumb file={file} onByteSize={setLiveByteSize} />
+            </span>
+            <span className="flex min-w-0 flex-col gap-0.5">
+              <span className="truncate text-xs" style={{ color: 'var(--text-primary)' }}>
+                {file.name}
+              </span>
+              {metaLine ? (
+                <span className="truncate text-[11px]" style={{ color: 'var(--text-secondary)' }}>
+                  {metaLine}
+                </span>
+              ) : null}
             </span>
           </div>
         )}
