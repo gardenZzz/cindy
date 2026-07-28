@@ -3732,6 +3732,12 @@ export class CodexAgent extends BaseAgent {
       if (!turnId) return false;
       if (completedTurnIds.has(turnId)) return true;
       if (terminalErroredTurnIds.has(turnId)) return true;
+      // 缓冲隔离中的歧义 turn (codex R9 P2): id 只拦 turnStarted 不够 —
+      // 缓冲期间 currentTurnId 为 null, 孤儿 turn 的 item/usage/error 会穿透
+      // stale guard 被按当前 pending turn 处理 (旧输出显示在新消息下 / 用量
+      // 计错 turn / 孤儿 error 终结合法新 turn, greptile R10 P1)。其事件一律
+      // 忽略; 若响应证明合法 (id 一致)  buffer 已清空, 后续事件正常。
+      if (bufferedOrphanTurnIds.has(turnId)) return true;
       return currentTurnId !== null && turnId !== currentTurnId;
     };
 

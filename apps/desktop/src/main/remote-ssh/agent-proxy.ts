@@ -326,8 +326,10 @@ exit 3
  *      远端被别的客户端动过)。
  *   2. pref 变更 / host ready 的 applyAgentProxyForHost — 即时生效。
  *
- * marker 一致时零副作用 (1 次 cat RTT)。pkill 失败不抛错 — marker 已写,
- * 下次 daemon 自然重启时也会生效, 这里只降级为 warn。
+ * marker 一致时零副作用 (1 次 cat RTT)。pkill 失败不抛错 — marker 回滚到
+ * 原值 (与存活 daemon 的 env 保持一致, 否则下次 reconcile 命中 fast path
+ * 永不重试 kill, codex R10 P1/P2), 调用方按 markerChanged && !daemonRestarted
+ * 组合上报失败。
  */
 export async function reconcileCodexAgentProxyEnv(
   host: RemoteHost,
@@ -376,6 +378,22 @@ async function reconcileCodexAgentProxyEnvSerialized(
   });
   await writeRemoteMarker(host, desired);
   const kill = await killRemoteCodexDaemon(host);
+  if (!kill.ok) {
+    // daemon 没死透 → marker 回滚到原值 (codex R10 P1/P2): 存活 daemon 的
+    // env 仍来自原 marker; 若让 marker 停在新值, 下次 reconcile 命中
+    // marker-match fast path 永不重试 kill — disable 后旧 daemon 握着指向
+    // 已拆隧道的 proxy env 跑到手动重启, enable 后旧 daemon 一直跑旧 env。
+    // 回滚后 marker 与存活 daemon env 一致, 下次 reconcile 仍 drift →
+    // 重写 + 重试 kill, 可自愈。回滚失败仅 warn: 调用方已按失败上报。
+    try {
+      await writeRemoteMarker(host, current);
+    } catch (rollbackErr) {
+      log.warn('agent-proxy marker rollback after pkill failure failed', {
+        hostId: host.id,
+        error: rollbackErr instanceof Error ? rollbackErr.message : String(rollbackErr),
+      });
+    }
+  }
   return { markerChanged: true, daemonRestarted: kill.ok };
 }
 
@@ -405,7 +423,15 @@ export async function applyAgentProxyForHost(host: RemoteHost): Promise<void> {
       return;
     }
     await ensureAgentProxyTunnel(host);
-    await reconcileCodexAgentProxyEnv(host);
+    const reconciled = await reconcileCodexAgentProxyEnv(host);
+    // 隧道建好但旧 daemon 没死透 = 它还跑着旧 env (无 proxy / 旧端口), 不得
+    // 按成功落 active 状态 (codex R10 P1) — 与 disable 分支同款按失败上报,
+    // 让卡片显示错误而不是说谎的「已开启」。
+    if (reconciled.markerChanged && !reconciled.daemonRestarted) {
+      throw new Error(
+        'codex daemon survived pkill after proxy enable/rebind; it still runs with the previous env (retry or restart the host)',
+      );
+    }
   } catch (err) {
     const msg = String((err as Error)?.message ?? err);
     log.warn('apply agent-proxy failed (will retry on next session)', { hostId: host.id, error: msg });
