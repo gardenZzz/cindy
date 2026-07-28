@@ -65,7 +65,7 @@ import type {
 import type { ProviderBindingCacheEntry, SlackHookStore } from './store.js';
 import type { HookDispatcher } from './dispatcher.js';
 import { buildQueryResponse, type AgentModelSource } from './queryResponder.js';
-import { recordGroupMessage } from './groupWindow.js';
+import { recordGroupMessage, sweepGroupWindowExpired } from './groupWindow.js';
 import { parseTelegramConnectUrl } from './telegramDeepLink.js';
 import type { HookTransport, HookTransportOpts, HookTransportStatus } from './transport.js';
 
@@ -724,6 +724,10 @@ export function createHookControlManager(deps: HookControlManagerDeps): HookCont
   function activateCurrentAccount(): void {
     if (accountActive || disposed) return;
     accountActive = true;
+    // 群窗口 TTL 兜底清扫: 流量路径的清扫只在有群消息/派发时触发, 这里保证
+    // 群不再活跃(或通道停用)后过期行也在每次账号激活时清掉。纳入
+    // pendingAccountOps: 登出/切号等待清扫落库完成再销毁 DB client。
+    trackAccountOp(sweepGroupWindowExpired());
     dispatcher?.activateAccount();
     multiBindings = store.get().bindingsCache.map((entry) => ({ ...entry, displaced: false }));
     for (const lane of lanes) lane.binding = lane.config.restoreCachedBinding();
