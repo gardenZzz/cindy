@@ -84,7 +84,8 @@ describe('remoteCcQueryFactory cleanup wiring', () => {
     expect(ensureFn).toBeGreaterThan(-1);
     const clearIdx = source.indexOf('forcedFreshCcBridgeSessions.clear()', ensureFn);
     expect(clearIdx).toBeGreaterThan(ensureFn);
-    const returnIdx = source.indexOf('return { port: cfg.bridge.port', ensureFn);
+    // return 是多行对象字面量:匹配其中 port 行的位置。
+    const returnIdx = source.indexOf('port: cfg.bridge.port', clearIdx);
     expect(returnIdx).toBeGreaterThan(clearIdx);
   });
 });
