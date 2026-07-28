@@ -1759,7 +1759,8 @@ export function CCAgentSessionView({
     session?.workspaceKind === 'project' &&
     !!session?.workingDir;
   const collabPolicy = useCollabProjectPolicy(session?.workingDir, collabPolicyEligible, {
-    // 远端会话的 workingDir 是远端路径, 不查本机项目插件配置 (main 已放行)。
+    // 远端会话的 workingDir 是远端路径, 跳过项目级查询; 用户级/全局级 collab
+    // 开关仍生效 (与 main 侧 remote 分支同口径)。
     skipQuery: !!session?.remoteHostId,
   });
   const allowCollabToggle = !orcaMode && collabPolicyEligible;

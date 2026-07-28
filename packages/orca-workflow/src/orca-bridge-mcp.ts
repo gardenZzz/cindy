@@ -20,6 +20,12 @@ export interface OrcaPersistedSession {
   fastMode?: boolean;
   sdkSessionId?: string;
   title?: string;
+  /**
+   * SSH 远端 session 的 host id。rehydrate (ensureSessionFromMeta) 必须把它
+   * 带回 createSession — 缺失时远端 lead 会以远端 workingDir 在本机重建
+   * (workdir check 失败或建出错误的本地 session)。
+   */
+  remoteHostId?: string | null;
 }
 
 export interface OrcaWorkerLink {
@@ -419,6 +425,9 @@ async function ensureSessionFromMeta(
     title: meta.title,
     ...(vendorOptions ? { vendorOptions } : {}),
     ...(meta.sdkSessionId ? { resumeSessionId: meta.sdkSessionId } : {}),
+    // 远端 lead 在同一台 SSH 主机上重建 (host 侧 createSession 会先做
+    // remote ensure); 本地 lead 无此字段。
+    ...(meta.remoteHostId ? { remoteHostId: meta.remoteHostId } : {}),
   });
   deps.wireSession(session);
   return session;
