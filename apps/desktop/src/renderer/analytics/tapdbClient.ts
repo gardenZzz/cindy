@@ -167,11 +167,12 @@ export function initTapdb(): void {
           TapDBAPI.logout();
           log.info('logout');
           lastSetUserDate = null;
-        } else {
-          const today = getLocalDateKey();
-          if (nextUserId !== previousUserId || lastSetUserDate !== today) {
-            reportSetUser(nextUserId, 'auth_state', today);
-          }
+        } else if (nextUserId !== previousUserId) {
+          // 仅在身份真正变化时绑定。auth:state-change 也会由**定时 token 刷新**
+          // 广播 —— 若这里按「跨天」补 setUser,挂机过夜的机器会在无人交互时
+          // 凭空产生当日账号活跃,正是本次「活跃改交互驱动」要消灭的假 DAU;
+          // 跨天重绑由交互路径(reportActive)负责,只在真实交互时发生。
+          reportSetUser(nextUserId, 'auth_state');
         }
       } catch (err) {
         log.error('auth state binding failed (non-fatal)', err);

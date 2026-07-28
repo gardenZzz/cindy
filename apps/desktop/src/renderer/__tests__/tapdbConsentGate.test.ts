@@ -470,6 +470,19 @@ describe('engagement-driven activity reporting', () => {
     expect(tapdb.setUser).toHaveBeenCalledTimes(2);
   });
 
+  it('a token-refresh auth broadcast on a new day does not emit setUser (no interaction)', async () => {
+    // auth:state-change 也由定时 token 刷新广播:挂机过夜的机器不得凭空产生
+    // 当日账号活跃 —— 跨天重绑只走交互路径(reportActive)。
+    await initAllowed();
+    authListener?.({ isAuthenticated: true, user: { id: 'user-1' } });
+    expect(tapdb.setUser).toHaveBeenCalledTimes(1);
+
+    vi.setSystemTime(new Date(2026, 6, 29, 3, 0, 0));
+    authListener?.({ isAuthenticated: true, user: { id: 'user-1' } });
+
+    expect(tapdb.setUser).toHaveBeenCalledTimes(1);
+  });
+
   it('a window opened before midnight does not swallow the next day’s first interaction', async () => {
     // 23:55 上报后窗口本该到 00:05 —— 但已换日,00:03 的交互必须放行并补当日 setUser,
     // 否则「只在次日凌晨窗口内用了一下」的用户从第二天的活跃里整个消失。
