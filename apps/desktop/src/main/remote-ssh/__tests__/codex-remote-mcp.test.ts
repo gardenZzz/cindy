@@ -22,6 +22,42 @@ vi.mock('../../mcp-integrations/remoteMcpBridgeToken.js', () => ({
 
 const SERVERS = ['cindy_orca', 'orca_worker_bridge'];
 
+/** 走完整 ensure 流程的 fake host:读 config 返回给定内容, 其余命令一律成功。 */
+function fakeHost(hostId: string, configContent: string) {
+  const execCmds: string[] = [];
+  const host = {
+    id: hostId,
+    exec: async (cmd: string) => {
+      execCmds.push(cmd);
+      if (cmd.includes('cat "$CODEX_HOME/config.toml"')) {
+        return { exitCode: 0, stdout: configContent, stderr: '' };
+      }
+      // daemon version 探活 / write / bootstrap 一律成功。
+      return { exitCode: 0, stdout: 'ok', stderr: '' };
+    },
+    ensureRemoteForward: async (spec: { localHost: string; localPort: number; preferredRemotePort?: number }) => ({
+      remotePort: spec.preferredRemotePort ?? 47921,
+      close: async () => {},
+    }),
+  } as unknown as RemoteHost;
+  return { host, execCmds };
+}
+
+/**
+ * 从 write 命令里解出写入的 config 内容。依赖 writeConfigCmd 的
+ * `printf '%s' '<base64>'` 形态 (base64 无单引号):取命令里最长的类
+ * base64 token 解码。
+ */
+function decodeWrittenConfig(execCmds: string[]): string | null {
+  for (const cmd of execCmds) {
+    if (!cmd.includes('base64 -d')) continue;
+    const tokens = cmd.match(/[A-Za-z0-9+/=]{80,}/g) ?? [];
+    const b64 = tokens.sort((a, b) => b.length - a.length)[0];
+    if (b64) return Buffer.from(b64, 'base64').toString('utf-8');
+  }
+  return null;
+}
+
 describe('renderManagedMcpBlock', () => {
   it('renders one mcp_servers table per server with bridge url and bearer env var', () => {
     const block = renderManagedMcpBlock({ remotePort: 47921, serverNames: SERVERS, tokenFingerprint: 'fp-test' });
@@ -313,26 +349,6 @@ describe('ensureRemoteCodexMcpBridge per-host serialization', () => {
 });
 
 describe('ensureRemoteCodexMcpBridge live-turn defer', () => {
-  function fakeHost(hostId: string, configContent: string) {
-    const execCmds: string[] = [];
-    const host = {
-      id: hostId,
-      exec: async (cmd: string) => {
-        execCmds.push(cmd);
-        if (cmd.includes('cat "$CODEX_HOME/config.toml"')) {
-          return { exitCode: 0, stdout: configContent, stderr: '' };
-        }
-        // daemon version 探活 / write / bootstrap 一律成功。
-        return { exitCode: 0, stdout: 'ok', stderr: '' };
-      },
-      ensureRemoteForward: async (spec: { localHost: string; localPort: number; preferredRemotePort?: number }) => ({
-        remotePort: spec.preferredRemotePort ?? 47921,
-        close: async () => {},
-      }),
-    } as unknown as RemoteHost;
-    return { host, execCmds };
-  }
-
   const bridgeDeps = {
     ensureBridgeStarted: async () => ({ port: 38080, serverNames: SERVERS }),
   };
@@ -362,6 +378,9 @@ describe('ensureRemoteCodexMcpBridge live-turn defer', () => {
     const joined = execCmds.join('\n');
     expect(joined).toContain('base64 -d');
     expect(joined).toContain('bootstrap');
+    // 原子写 (review P1 回归):decode 到 tmp 后 mv 就位, 不直接截断 config.toml。
+    expect(joined).toContain('config.toml.tmp');
+    expect(joined).toContain('mv ');
   });
 
   it('passes the bridge token to daemon bootstrap via stdin, never argv', async () => {
@@ -394,5 +413,42 @@ describe('ensureRemoteCodexMcpBridge live-turn defer', () => {
     expect(execCmds.join('\n')).not.toContain('test-persistent-token');
     // bootstrap 的 stdin 是 KEY=value + 空行终止。
     expect(inputs).toContain('LIZI_MCP_TOKEN=test-persistent-token\n\n');
+  });
+});
+
+describe('ensureRemoteCodexMcpBridge server whitelist', () => {
+  it('writes only collab whitelist servers into the remote managed block', async () => {
+    // review P1 回归:bridge 上还挂着 cindy_memory / cindy_ssh 等 in-process
+    // provider — 全量写进远端 daemon config 会让远端 session 获得本机 MCP
+    // 能力, 越出协同边界。远端只注入 cindy_orca / orca_worker_bridge。
+    const { host, execCmds } = fakeHost('host-whitelist', '');
+    const result = await ensureRemoteCodexMcpBridge(host, {
+      ensureBridgeStarted: async () => ({
+        port: 38080,
+        serverNames: ['cindy_orca', 'cindy_memory', 'orca_worker_bridge', 'cindy_ssh'],
+      }),
+      hasLiveTurnOnHost: () => false,
+    });
+    expect(result.ok).toBe(true);
+    const written = decodeWrittenConfig(execCmds);
+    expect(written).not.toBeNull();
+    expect(written).toContain('[mcp_servers.cindy_orca]');
+    expect(written).toContain('[mcp_servers.orca_worker_bridge]');
+    expect(written).not.toContain('cindy_memory');
+    expect(written).not.toContain('cindy_ssh');
+  });
+
+  it('is a no-op success when the bridge exposes no whitelist server', async () => {
+    // collab plugin 禁用 → bridge 上没有 cindy_orca:不写 config, 不重启
+    // daemon, 按"远端无 MCP"放行。
+    const { host, execCmds } = fakeHost('host-no-whitelist', '');
+    const result = await ensureRemoteCodexMcpBridge(host, {
+      ensureBridgeStarted: async () => ({ port: 38080, serverNames: ['cindy_memory'] }),
+      hasLiveTurnOnHost: () => false,
+    });
+    expect(result.ok).toBe(true);
+    const joined = execCmds.join('\n');
+    expect(joined).not.toContain('base64 -d');
+    expect(joined).not.toContain('bootstrap');
   });
 });

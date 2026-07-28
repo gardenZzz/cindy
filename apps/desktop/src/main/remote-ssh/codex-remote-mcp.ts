@@ -38,6 +38,14 @@ import { getRemoteMcpBridgeToken } from '../mcp-integrations/remoteMcpBridgeToke
 const log = createLogger('codex-remote-mcp');
 
 const TOKEN_ENV = 'LIZI_MCP_TOKEN';
+/**
+ * 远端允许经 remote-forward 暴露的 server 白名单 — 与 cc 侧
+ * CC_REMOTE_HTTP_MCP_SERVER_NAMES (maker-host/cc-remote-mcp.ts) 同意同值:
+ * 只放协同必需的 cindy_orca / orca_worker_bridge;bridge 上的其余
+ * in-process server (cindy_memory / cindy_ssh 等) 不注入远端 daemon
+ * config, 维持"远端不可用"现状, 收窄影响面。两侧改动必须同步。
+ */
+const CODEX_REMOTE_MCP_SERVER_NAMES = new Set(['cindy_orca', 'orca_worker_bridge']);
 const MANAGED_BEGIN = '# >>> cindy-remote-mcp (managed, do not edit) >>>';
 const MANAGED_END = '# <<< cindy-remote-mcp <<<';
 /**
@@ -292,9 +300,13 @@ function readConfigCmd(): string {
 }
 
 function writeConfigCmd(contentBase64: string): string {
+  // 原子写:先 decode 到 tmp 再 mv 就位。直接 `> config.toml` 时, decode
+  // 失败或 SSH 中断会把用户配置截断成空/半截 — 这里编辑的是真实远端
+  // config.toml, 错误路径不得破坏现有内容 (tmp 残留无害, 下次覆盖)。
   return `bash -c ${shellQuoteSh(
     `${codexHomePrefix(DEFAULT_INSTALL_ROOT)}; mkdir -p "$CODEX_HOME" && ` +
-      `printf '%s' ${shellQuoteSh(contentBase64)} | base64 -d > "$CODEX_HOME/config.toml"`,
+      `printf '%s' ${shellQuoteSh(contentBase64)} | base64 -d > "$CODEX_HOME/config.toml.tmp" && ` +
+      `mv "$CODEX_HOME/config.toml.tmp" "$CODEX_HOME/config.toml"`,
   )}`;
 }
 
@@ -455,7 +467,11 @@ async function doEnsureRemoteCodexMcpBridge(
       log.warn('remote MCP injection skipped: http bridge unavailable', { host: host.id });
       return { ok: false, reason: 'bridge-unavailable' };
     }
-    if (bridge.serverNames.length === 0) {
+    // 只注入协同白名单 server:bridge 上还挂着其他 in-process provider
+    // (cindy_memory / cindy_ssh 等), 全量写进远端 daemon config 会让远端
+    // session 获得本机 MCP 能力, 越出协同边界 (与 cc 侧白名单同语义)。
+    const serverNames = bridge.serverNames.filter((n) => CODEX_REMOTE_MCP_SERVER_NAMES.has(n));
+    if (serverNames.length === 0) {
       // collab plugin 被禁用等场景:cindy_orca 不在 bridge 上,没有可注入的
       // server。视为成功 (无需注入),daemon config 也不写管理段。
       return { ok: true };
@@ -474,11 +490,11 @@ async function doEnsureRemoteCodexMcpBridge(
     const existing = await readRemoteConfig(host);
     const block = renderManagedMcpBlock({
       remotePort,
-      serverNames: bridge.serverNames,
+      serverNames,
       tokenFingerprint,
     });
     const { next, changed, strippedUserServers } = mergeManagedMcpBlock(existing, block, {
-      serverNames: bridge.serverNames,
+      serverNames,
     });
     if (strippedUserServers.length > 0) {
       log.warn('user-defined mcp_servers blocks taken over by managed block', {
@@ -499,7 +515,7 @@ async function doEnsureRemoteCodexMcpBridge(
       log.info('remote codex config.toml mcp_servers updated', {
         host: host.id,
         remotePort,
-        servers: bridge.serverNames,
+        servers: serverNames,
       });
     }
 

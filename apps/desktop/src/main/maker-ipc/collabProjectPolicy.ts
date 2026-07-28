@@ -19,7 +19,7 @@ export interface CollabProjectPolicyContext {
  */
 export function assertCollabProjectEnabled(
   context: CollabProjectPolicyContext,
-  isPluginEnabled: (pluginId: 'collab', workingDir: string) => boolean,
+  isPluginEnabled: (pluginId: 'collab', workingDir?: string) => boolean,
 ): void {
   const workingDir = typeof context.workingDir === 'string' ? context.workingDir.trim() : null;
   if (
@@ -37,9 +37,17 @@ export function assertCollabProjectEnabled(
   // (.cindy/plugins.json) 没有意义 —— 命中同路径的本机目录会误判, 查不到又
   // 会误拒。远端项目级 collab 配置暂无对应机制; 协同边界由 "session 已在
   // 远端建立" + bridge 注入白名单 (cindy_orca / orca_worker_bridge) 兜底。
+  // 但用户级/全局级 collab 开关 (registry Tier 4, 不依赖 workingDir) 对远端
+  // 同样有效 — 用户全局禁用 Collab 时远端会话一样拒绝, 与本地行为一致。
   // TODO(follow-up): 远端项目级 collab 开关 (远端 fs 的 .cindy/plugins.json
   // 或 per-host 设置) 有需求时再做。
   if (context.remoteHostId) {
+    if (!isPluginEnabled('collab')) {
+      throwIpcError(
+        'PRECONDITION_FAILED',
+        'collaboration is disabled for this project',
+      );
+    }
     return;
   }
 
