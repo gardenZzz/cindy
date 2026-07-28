@@ -17,6 +17,7 @@
 import { randomUUID } from 'node:crypto';
 
 import {
+  HOOK_FEATURE_GROUP_RELAY,
   HOOK_FEATURE_MULTI_TEAM,
   HOOK_FEATURE_PROVIDER_BIND,
   HOOK_FEATURE_PROVIDER_PREFS,
@@ -64,6 +65,7 @@ import type {
 import type { ProviderBindingCacheEntry, SlackHookStore } from './store.js';
 import type { HookDispatcher } from './dispatcher.js';
 import { buildQueryResponse, type AgentModelSource } from './queryResponder.js';
+import { recordGroupMessage } from './groupWindow.js';
 import { parseTelegramConnectUrl } from './telegramDeepLink.js';
 import type { HookTransport, HookTransportOpts, HookTransportStatus } from './transport.js';
 
@@ -551,6 +553,7 @@ export function createHookControlManager(deps: HookControlManagerDeps): HookCont
       HOOK_FEATURE_PROVIDER_BIND,
       HOOK_FEATURE_PROVIDER_PREFS,
       HOOK_FEATURE_SESSION_PICKER,
+      HOOK_FEATURE_GROUP_RELAY,
     ],
     isEnabled: () => store.get().telegramEnabled,
     setEnabled: (enabled) => {
@@ -2041,6 +2044,14 @@ export function createHookControlManager(deps: HookControlManagerDeps): HookCont
           sessionId: null,
           queuePosition: null,
         }),
+      );
+      return;
+    }
+    if (msg.type === 'group.message') {
+      // 群消息实时中继入本地窗口(group-relay-v1)。fire-and-forget:
+      // 失败只记日志, 窗口是上下文增强, 不影响任务链路。内容不写日志。
+      void recordGroupMessage(msg.payload).catch((err) =>
+        log.warn(`group window record failed: ${String(err)}`),
       );
       return;
     }

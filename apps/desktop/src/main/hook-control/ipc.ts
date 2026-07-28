@@ -67,6 +67,7 @@ import {
 import { createHookTransport } from './transport.js';
 import { registerSlackToolBridge, unregisterSlackToolBridge } from './slackToolBridge.js';
 import { createHookBindingStore } from './bindings.js';
+import { buildGroupContextPrefix } from './groupWindow.js';
 import { createHookDispatcher } from './dispatcher.js';
 import { createMakerHookSessionRunner } from './session-runner.js';
 import { resolveHookInteraction } from './interactions.js';
@@ -267,6 +268,7 @@ function ensureInstances(): { store: SlackHookStore; manager: HookControlManager
         log,
       }),
       runner: createMakerHookSessionRunner({ log }),
+      buildContextPrefix: buildGroupContextPrefix,
       // 新建 hook 会话默认预建独立 worktree(并发隔离); deps 组装与
       // maker-ipc/register.ts 的 use_worktree 分支同款。失败由 dispatcher
       // 回退共享目录。

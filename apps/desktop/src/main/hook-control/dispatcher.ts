@@ -157,6 +157,13 @@ export interface HookDispatcherDeps {
    */
   prepareWorktree?: (workingDir: string) => Promise<PrepareWorktreeResult>;
   /**
+   * 可选: 为派发组装本地群上下文前缀(group-relay-v1 窗口, 生产为
+   * groupWindow.buildGroupContextPrefix)。只影响发给 agent 的 prompt,
+   * 不影响会话标题与 UI 渲染(二者用 source.userText / 原始 prompt);
+   * 失败或空串 = 无前缀, 绝不因上下文拒单。
+   */
+  buildContextPrefix?: (payload: TaskDispatchPayload) => Promise<string>;
+  /**
    * 可选: 内置「对话」伪目录(chat 保留别名)的解析面。rootDir 在每次
    * dispatch 时解析当前 data owner 的 app 托管目录根，allocateDir 为新会话
    * 分配独立子目录。
@@ -349,6 +356,7 @@ export function createHookDispatcher(deps: HookDispatcherDeps): HookDispatcher {
     bindings,
     runner,
     prepareWorktree,
+    buildContextPrefix,
     dialogue,
     abortSession,
     archiveSessionRow,
@@ -943,6 +951,14 @@ export function createHookDispatcher(deps: HookDispatcherDeps): HookDispatcher {
     // 同 key 串行化(见 keyChains 注释) —— 定位+入队作为一个原子段执行
     serializeByKey(`${connectionId} ${payload.externalKey}`, async () => {
       try {
+        let contextPrefix = '';
+        if (buildContextPrefix) {
+          try {
+            contextPrefix = await buildContextPrefix(dispatchPayload);
+          } catch (error) {
+            log.warn(`group context prefix failed, dispatching without it: ${String(error)}`);
+          }
+        }
         const resolved = await resolveTarget(
           connectionId,
           config,
@@ -963,7 +979,11 @@ export function createHookDispatcher(deps: HookDispatcherDeps): HookDispatcher {
           connectionId,
           requestId: payload.requestId,
           externalKey: payload.externalKey,
-          run: { ...resolved.run, ...(source ? { source } : {}) },
+          run: {
+            ...resolved.run,
+            ...(contextPrefix ? { prompt: `${contextPrefix}${resolved.run.prompt}` } : {}),
+            ...(source ? { source } : {}),
+          },
           accountGeneration: admittedGeneration,
           ...(resolved.notice ? { notice: resolved.notice } : {}),
           ...(resolved.cleanupWorktree ? { cleanupWorktree: resolved.cleanupWorktree } : {}),
