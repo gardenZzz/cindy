@@ -2096,6 +2096,19 @@ interface ElectronAPI {
   }) => Promise<{ base64: string; mimeType: string }>;
 
   /**
+   * 附件卡缩略图:本机文件走系统缩略图服务(macOS QuickLook / Windows Shell)。
+   * 路径越界 / 不是文件 / stat 失败 → 整体回 null;文件在但出不了图(系统不支持、
+   * 超时、排不上并发名额)→ `dataUrl` 为 null,调用方回落自绘文件图标。
+   * `byteSize` 是复核那一刻的当前大小,用来刷新卡片上「类型 · 大小」的快照值。
+   */
+  getFileThumbnail: (params: {
+    path: string;
+    size: number;
+    /** 显式复核:跳过正缓存重新生成(负缓存仍尊重)。焦点复核时传 true。 */
+    revalidate?: boolean;
+  }) => Promise<{ dataUrl: string | null; byteSize: number } | null>;
+
+  /**
    * markdown-monorepo-resolve: smart relative-path resolver. Tries direct
    * `cwd/href` first, then BFS the workspace for files whose absolute path
    * ends with `/<href>`. Returns 'none' on bad input or no matches so the

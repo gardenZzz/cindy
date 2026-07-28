@@ -798,6 +798,33 @@ registerColor('file-remove-bg', {
   light: '#525252',
   dark: '#737373',
 }, 'Mid Gray');
+// 附件卡自绘文件图标的类型角标(§10 theme-invariant 例外族):颜色跟「这份文件是
+// 什么」绑定,不随明暗翻转,两模式同值。取值都按白字 ≥4.5:1 选过(pdf 5.96 /
+// doc 6.56 / sheet 5.05 / slide 5.24 / code 7.09),角标文字恒用 file-badge-fg。
+registerColor('file-badge-pdf', {
+  light: '#B23A26',
+  dark: '#B23A26',
+}, '文件类型角标 — PDF(theme-invariant;× file-badge-fg = 5.96:1)');
+registerColor('file-badge-doc', {
+  light: '#2C5CA8',
+  dark: '#2C5CA8',
+}, '文件类型角标 — 文档(theme-invariant;× file-badge-fg = 6.56:1)');
+registerColor('file-badge-sheet', {
+  light: '#2E7D4F',
+  dark: '#2E7D4F',
+}, '文件类型角标 — 表格(theme-invariant;× file-badge-fg = 5.05:1)');
+registerColor('file-badge-slide', {
+  light: '#A25A12',
+  dark: '#A25A12',
+}, '文件类型角标 — 幻灯片(theme-invariant;× file-badge-fg = 5.24:1)');
+registerColor('file-badge-code', {
+  light: '#5B49A8',
+  dark: '#5B49A8',
+}, '文件类型角标 — 代码(theme-invariant;× file-badge-fg = 7.09:1)');
+registerColor('file-badge-fg', {
+  light: '#FFFFFF',
+  dark: '#FFFFFF',
+}, '文件类型角标前景 — 恒白(不能借 accent-pure-cta-fg:那个会在 Dark 翻成黑)');
 registerColor('chat-input-chip-bg', {
   light: 'var(--surface-chip)',
   dark: 'var(--surface-chip)',
