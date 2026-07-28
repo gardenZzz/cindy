@@ -73,9 +73,9 @@ export interface EnsureRemoteCodexMcpResult {
   reason?: string;
 }
 
-// ── per-host 固定 remotePort 持久化 ─────────────────────────────────────────
+// ── per-host 固定 remotePort 与已生效指纹持久化 ─────────────────────────────
 
-type PortPrefs = Record<string, { remotePort: number }>;
+type PortPrefs = Record<string, { remotePort: number; appliedFingerprint?: string }>;
 
 function portPrefsPath(): string {
   return path.join(app.getPath('userData'), 'remote-mcp-forwards.json');
@@ -95,6 +95,10 @@ function readPortPrefs(): PortPrefs {
           const port = (v as { remotePort?: unknown })?.remotePort;
           if (typeof port === 'number' && Number.isInteger(port) && port > 0 && port < 65536) {
             out[hostId] = { remotePort: port };
+            const fp = (v as { appliedFingerprint?: unknown })?.appliedFingerprint;
+            if (typeof fp === 'string' && fp.length > 0) {
+              out[hostId].appliedFingerprint = fp;
+            }
           }
         }
       }
@@ -110,8 +114,7 @@ function readPortPrefs(): PortPrefs {
   return portPrefsCache;
 }
 
-function writeHostRemotePort(hostId: string, remotePort: number): void {
-  const next = { ...readPortPrefs(), [hostId]: { remotePort } };
+function writePortPrefs(next: PortPrefs): void {
   const file = portPrefsPath();
   const tmp = `${file}.tmp`;
   // userData 在真实 app 里由 electron 保证存在; 测试 stub 只拼路径不建
@@ -123,18 +126,39 @@ function writeHostRemotePort(hostId: string, remotePort: number): void {
   portPrefsCache = next;
 }
 
+function writeHostRemotePort(hostId: string, remotePort: number): void {
+  writePortPrefs({ ...readPortPrefs(), [hostId]: { ...readPortPrefs()[hostId], remotePort } });
+}
+
+/**
+ * bootstrap 确认成功后落「已生效指纹」。这是 daemon env 与 config 一致性
+ * 的唯一持久事实:config 已写入 (changed=false) 但 bootstrap 失败/中断 +
+ * app 重启的组合下,进程内 pending 标记会丢,而本记录不会 — 下次 ensure
+ * 比较「应有指纹 ≠ 已生效指纹」仍会强制 bootstrap,daemon 不会永远持旧
+ * env 401 (Greptile P1: 重启丢失令牌更新状态)。
+ */
+function writeHostAppliedFingerprint(hostId: string, fingerprint: string): void {
+  const current = readPortPrefs()[hostId];
+  if (!current) return; // 无端口记录 = 未曾注入, 不写孤儿行
+  writePortPrefs({ ...readPortPrefs(), [hostId]: { ...current, appliedFingerprint: fingerprint } });
+}
+
+/** 清理路径 (白名单为空) bootstrap 后调用:daemon env 已清, 摘除生效记录。 */
+function clearHostAppliedFingerprint(hostId: string): void {
+  const current = readPortPrefs()[hostId];
+  if (!current?.appliedFingerprint) return;
+  const next = { ...readPortPrefs() };
+  delete next[hostId].appliedFingerprint;
+  writePortPrefs(next);
+}
+
 /** host 被删时清理端口记录 (registerRemoteSshIpc 的 remove 路径调用)。 */
 export function removeRemoteMcpForwardPref(hostId: string): void {
   const current = readPortPrefs();
   if (!(hostId in current)) return;
   const next = { ...current };
   delete next[hostId];
-  const file = portPrefsPath();
-  const tmp = `${file}.tmp`;
-  fs.mkdirSync(path.dirname(file), { recursive: true });
-  fs.writeFileSync(tmp, JSON.stringify(next, null, 2), 'utf-8');
-  fs.renameSync(tmp, file);
-  portPrefsCache = next;
+  writePortPrefs(next);
 }
 
 // ── 远端 config.toml 管理段 (纯函数, 便于单测) ──────────────────────────────
@@ -414,17 +438,6 @@ async function ensureRemotePort(host: RemoteHost, localBridgePort: number): Prom
 // ── per-host 串行锁与共用 forward 入口 ───────────────────────────────────────
 
 /**
- * bootstrap 未确认完成的 host 集合 (进程内存态)。config 写入成功但
- * bootstrap 超时/中断 (旧 daemon 还活着) 时, 下次 ensure 会看到
- * changed=false && daemonRunning=true → 永远跳过 bootstrap, daemon 一直
- * 持旧 env (无 token) → 远端请求 401 且不自愈 (review P2 回归)。进入
- * bootstrap 分支前悲观标记, 全部成功后清除; 失败保留, 下次 ensure 强制
- * 重试 bootstrap。已知边界:进程重启后标记丢失, 跨进程残留需 daemon 自行
- * 重启或 token 轮换 (指纹漂移) 触发, 接受为该罕见组合下的限制。
- */
-const pendingBootstrapHosts = new Set<string>();
-
-/**
  * per-host 串行链:同一 host 的 forward 端口分配 / config.toml 读写 / daemon
  * bootstrap 必须串行——并发时两个 ensure 会互相交错 arm 与 config 写入,
  * 把 config 写成已失效的端口。codex daemon ensure 与 cc per-query forward
@@ -542,14 +555,6 @@ async function doEnsureRemoteCodexMcpBridge(
         servers: strippedUserServers,
       });
     }
-    if (changed && deps.hasLiveTurnOnHost?.(host.id)) {
-      // 漂移生效要重启 daemon, 重启会断 live turn:本次跳过写入与重启,
-      // config 保持旧值 (下次 ensure 仍 changed=true 会重试), 远端降级无 MCP。
-      log.warn('remote MCP config drift deferred: live turn in progress on host', {
-        host: host.id,
-      });
-      return { ok: true };
-    }
     if (changed) {
       await writeRemoteConfig(host, next);
       log.info('remote codex config.toml mcp_servers updated', {
@@ -559,12 +564,29 @@ async function doEnsureRemoteCodexMcpBridge(
       });
     }
 
+    // 「daemon env 是否已生效」的唯一持久事实:应有指纹 (清理路径为 null —
+    // 目标是 daemon 不持 token) vs bootstrap 确认时落盘的已生效指纹。
+    // 不一致 ⇒ 必须 (重) bootstrap;bootstrap 失败/中断 + app 重启后它依然
+    // 成立, 自愈不依赖任何进程内存态 (Greptile P1: 重启丢失令牌更新状态)。
+    // changed 是并列的独立触发:指纹只含 token|bridge 代际, 端口 / server
+    // 列表变化不进指纹, 只能靠 changed 驱动重启生效。
+    const desiredFingerprint = serverNames.length > 0 ? tokenFingerprint : null;
+    const appliedFingerprint = readPortPrefs()[host.id]?.appliedFingerprint ?? null;
+    const driftUnapplied = desiredFingerprint !== appliedFingerprint;
+    const needApply = changed || driftUnapplied;
+
     const daemonRunning = await isDaemonRunning(host);
-    if (!daemonRunning || changed || pendingBootstrapHosts.has(host.id)) {
-      // 悲观标记:bootstrap 任何一步失败都保留标记, 下次 ensure 强制重试 —
-      // 否则 config 已写入 (changed=false) + 旧 daemon 存活 (daemonRunning)
-      // 的组合会让 daemon 永远持旧 env, 远端请求 401 且不自愈。
-      pendingBootstrapHosts.add(host.id);
+    if (needApply && deps.hasLiveTurnOnHost?.(host.id)) {
+      // bootstrap 重启会断 live turn:config 已就绪 (changed 时已写入, daemon
+      // 运行中不读 config), 本次只推迟重启 — driftUnapplied 是持久事实,
+      // turn 结束后的 ensure (turn-done 挂钩 / 下次 session start) 必然补刀,
+      // 宽限期内 daemon 持旧 env (协同降级) 但 turn 本身不被打断。
+      log.warn('remote MCP daemon bootstrap deferred: live turn in progress on host', {
+        host: host.id,
+      });
+      return { ok: true };
+    }
+    if (!daemonRunning || needApply) {
       await bootstrapDaemon(host, effectiveToken);
       // 防御:bootstrap 若覆盖了 config.toml (managed_install 行为未文档化),
       // 管理段丢失时补写一次并再次 bootstrap。最多两轮,避免无限循环。
@@ -576,7 +598,10 @@ async function doEnsureRemoteCodexMcpBridge(
         await writeRemoteConfig(host, next);
         await bootstrapDaemon(host, effectiveToken);
       }
-      pendingBootstrapHosts.delete(host.id);
+      // bootstrap 确认完成才落已生效指纹;失败/中断不落 → 下次 ensure
+      // driftUnapplied 仍成立, 强制重试 (跨 app 重启同样成立)。
+      if (desiredFingerprint) writeHostAppliedFingerprint(host.id, desiredFingerprint);
+      else clearHostAppliedFingerprint(host.id);
       log.info('remote codex daemon (re)bootstrapped with MCP bridge env', {
         host: host.id,
         daemonWasRunning: daemonRunning,
