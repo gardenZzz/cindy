@@ -463,8 +463,8 @@ export function NewMakerDraftRoute() {
     effectiveWorkingDir != null &&
     effectiveDeviceLinkDeviceId == null;
   const collabPolicy = useCollabProjectPolicy(effectiveWorkingDir, collabPolicyEligible, {
-    // 远端 draft 的 workingDir 是远端路径, 本机项目插件查询无意义 (main 侧
-    // 对 remote 已放行), 跳过 IPC 直接按 enabled 处理。
+    // 远端 draft 的 workingDir 是远端路径, 本机项目级查询无意义, 跳过;
+    // 用户级/全局级 collab 开关仍生效 (与 main 侧 remote 分支同口径)。
     skipQuery: effectiveRemoteHostId != null,
   });
   const projectPickerOptions = useProjectPickerOptions();
