@@ -309,13 +309,17 @@ function readConfigCmd(): string {
   )}`;
 }
 
-function writeConfigCmd(contentBase64: string): string {
+function writeConfigCmd(): string {
   // 原子写:先 decode 到 tmp 再 mv 就位。直接 `> config.toml` 时, decode
   // 失败或 SSH 中断会把用户配置截断成空/半截 — 这里编辑的是真实远端
   // config.toml, 错误路径不得破坏现有内容 (tmp 残留无害, 下次覆盖)。
+  // base64 内容经 stdin 传入, 不进 argv:用户 config.toml 可能已含 secret
+  // (其他 MCP server 的 bearer / provider token), argv 在远端 `ps` / audit
+  // log 可见 — 与 bootstrap token 的 "secrets only live in stdin" 同约束
+  // (review: PR #778 codex-connector R17 P1)。
   return `bash -c ${shellQuoteSh(
     `${codexHomePrefix(DEFAULT_INSTALL_ROOT)}; mkdir -p "$CODEX_HOME" && ` +
-      `printf '%s' ${shellQuoteSh(contentBase64)} | base64 -d > "$CODEX_HOME/config.toml.tmp" && ` +
+      `base64 -d > "$CODEX_HOME/config.toml.tmp" && ` +
       `mv "$CODEX_HOME/config.toml.tmp" "$CODEX_HOME/config.toml"`,
   )}`;
 }
@@ -330,7 +334,13 @@ async function readRemoteConfig(host: RemoteHost): Promise<string> {
 
 async function writeRemoteConfig(host: RemoteHost, content: string): Promise<void> {
   const b64 = Buffer.from(content, 'utf-8').toString('base64');
-  const result = await host.exec(writeConfigCmd(b64), { timeoutMs: 15_000, label: 'write codex config.toml' });
+  const result = await host.exec(writeConfigCmd(), {
+    timeoutMs: 15_000,
+    label: 'write codex config.toml',
+    // base64 单行无空白, stdin 写完即 EOF, base64 -d 读到 EOF 解码 (与
+    // bootstrapDaemon 的 stdin 协议同通道, cmd 不进日志见 exec label 约定)。
+    input: `${b64}\n`,
+  });
   if (result.exitCode !== 0) {
     throw new Error(`write remote config.toml failed: ${result.stderr.trim().slice(0, 200)}`);
   }
