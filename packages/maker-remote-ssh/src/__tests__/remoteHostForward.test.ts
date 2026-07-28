@@ -274,6 +274,24 @@ describe('RemoteHost remote forwarding', () => {
     expect(rejected).toBe(true);
   });
 
+  it('rejects forwarded connections from non-loopback sources (fail-closed, PR #715 copilot)', async () => {
+    // 远端 sshd 配了 permissive GatewayPorts 时, 隧道口绑到非 loopback 接口,
+    // 远端网络的任意机器都能经隧道借用本机 Proxy — 只接受 loopback 来源
+    // (远端 daemon 与 sshd 同机, 合法来源恒为 loopback)。
+    const client = new FakeClient();
+    const host = makeReadyHost(client);
+    const fwd = await host.ensureRemoteForward({ localHost: '127.0.0.1', localPort: 7890 });
+
+    let rejected = false;
+    client.emit(
+      'tcp connection',
+      { srcIP: '192.168.1.50', srcPort: 55003, destIP: '192.168.1.10', destPort: fwd.remotePort },
+      () => { throw new Error('unexpected accept'); },
+      () => { rejected = true; },
+    );
+    expect(rejected).toBe(true);
+  });
+
   it('close() unforwards on the live client and drops the record', async () => {
     const client = new FakeClient();
     const host = makeReadyHost(client);
