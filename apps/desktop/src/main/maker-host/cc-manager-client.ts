@@ -381,6 +381,7 @@ export async function openCcManagerSession(opts: {
     // forceFreshQuery:alive 也 kill + fresh (bridge MCP 重启后首轮注入,
     // 见 opts.forceFreshQuery 注释)。
     const killAliveForFresh = listedSession?.alive === true && opts.forceFreshQuery === true;
+    let killSettled = true;
     if (killAliveForFresh) {
       // kill 失败不得吞错继续 (greptile P1):旧 session 仍 alive 时 fresh
       // start 必撞 SESSION_ALREADY_EXISTS, 且后续重试沿同一路径永久卡死。
@@ -396,8 +397,14 @@ export async function openCcManagerSession(opts: {
       // .end, consume loop 退出后才从注册表移除, 见 maker-cc-manager
       // session-registry.ts) — kill 响应返回时 session 往往仍 alive,
       // 立即 start 同样撞 SESSION_ALREADY_EXISTS (greptile P1)。轮询
-      // list 直到不再 alive;超时也上抛, 走同一"重试可恢复"路径。
-      const killWaitDeadline = Date.now() + 5_000;
+      // list 直到不再 alive:退避 (150ms→1s) 覆盖慢退出 (SSH 大 RTT /
+      // SDK abort 慢), 总预算 15s。
+      // 超时不硬失败 (greptile R22 P1):固定期限的上抛会让恢复路径死锁 —
+      // 重试只是重复同样的 kill+超时, 无法加速 consume loop 退出。降级为
+      // attach 仍在退出中的 query:其自然终止后的下次 send 会按 dead
+      // 条目走正常 fresh start, 恢复可能晚一拍但永不死锁。
+      const killWaitDeadline = Date.now() + 15_000;
+      let pollDelayMs = 150;
       for (;;) {
         const after = await client.request<SessionListResult>(METHODS.SESSION_LIST, {}, {
           timeoutMs: RPC_REQUEST_TIMEOUT_MS,
@@ -406,19 +413,30 @@ export async function openCcManagerSession(opts: {
           after.sessions.find((s) => s.sessionId === opts.sessionId)?.alive === true;
         if (!stillAlive) break;
         if (Date.now() > killWaitDeadline) {
-          throw new Error(
-            `cc-mgr: session ${opts.sessionId} still alive 5s after kill (forced fresh)`,
-          );
+          killSettled = false;
+          break;
         }
-        await new Promise((r) => setTimeout(r, 150));
+        await new Promise((r) => setTimeout(r, pollDelayMs));
+        pollDelayMs = Math.min(pollDelayMs * 2, 1_000);
       }
-      log.info('cc-mgr: alive session killed for forced fresh start (bridge MCP re-inject)', {
-        hostId: opts.host.id,
-        sessionId: opts.sessionId,
-        daemonLastSeq: listedSession.lastSeq,
-      });
+      if (killSettled) {
+        log.info('cc-mgr: alive session killed for forced fresh start (bridge MCP re-inject)', {
+          hostId: opts.host.id,
+          sessionId: opts.sessionId,
+          daemonLastSeq: listedSession.lastSeq,
+        });
+      } else {
+        log.warn(
+          'cc-mgr: kill not settled within 15s — attaching to the still-terminating query (fresh start deferred to its natural death)',
+          {
+            hostId: opts.host.id,
+            sessionId: opts.sessionId,
+          },
+        );
+      }
     }
-    const existing = listedSession?.alive && !killAliveForFresh ? listedSession : undefined;
+    const existing =
+      listedSession?.alive && (!killAliveForFresh || !killSettled) ? listedSession : undefined;
 
     // 对齐 codex 模式: alive → attach live-only, dead/absent → fresh start。
     // 不 replay 旧 events,不追踪 cursor。
