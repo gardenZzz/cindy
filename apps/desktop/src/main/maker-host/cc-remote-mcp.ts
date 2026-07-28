@@ -109,8 +109,21 @@ export async function buildCcRemoteHttpMcpServers(
     vendorOptions?: Record<string, unknown>;
   },
   deps: CcRemoteHttpMcpDeps,
-): Promise<{ servers: Record<string, CcRemoteHttpMcpServerConfig>; cleanup: () => void }> {
-  const empty = { servers: {}, cleanup: () => {} };
+): Promise<{
+  servers: Record<string, CcRemoteHttpMcpServerConfig>;
+  cleanup: () => void;
+  /**
+   * true = 调用方应对已有 alive query 走 forceFresh (kill + fresh start):
+   * 本要注入但 token 不可用时, attach 回带旧 Authorization header 的旧
+   * query 会让协同 MCP 持续 401 — 重建为「无协同」的干净 query 才是
+   * fail-closed (codex-connector R21 P2)。
+   */
+  needsFreshStart?: boolean;
+}> {
+  const empty: { servers: Record<string, CcRemoteHttpMcpServerConfig>; cleanup: () => void; needsFreshStart?: boolean } = {
+    servers: {},
+    cleanup: () => {},
+  };
   const started = await deps.ensureBridgeStarted();
   if (!started) return empty;
   // collab 全局禁用时 bridge 名单不反映开关 (keepOrcaProviderStable) —
@@ -124,7 +137,12 @@ export async function buildCcRemoteHttpMcpServers(
   // token 可用性必须在 register 之前确认:null 时下发出 "Bearer null" 还
   // 保留已注册 ctx (注册后失败无任何 cleanup 可达, 见 race review P1)。
   const bridgeToken = await (deps.getBridgeToken ?? getRemoteMcpBridgeToken)();
-  if (!bridgeToken) return empty;
+  if (!bridgeToken) {
+    // token 失效但本要注入 (names 非空):标记 needsFreshStart — 否则调用方
+    // 按 injectedServerCount===0 不 forceFresh, attach 回带旧 token header
+    // 的 alive query, 协同 MCP 持续 401 (codex-connector R21 P2)。
+    return { ...empty, needsFreshStart: names.length > 0 };
+  }
   const synthesize = deps.synthesizeVendorOptions ?? synthesizeCcRemoteVendorOptions;
   const ctx = {
     agentKind: 'claude-code' as const,

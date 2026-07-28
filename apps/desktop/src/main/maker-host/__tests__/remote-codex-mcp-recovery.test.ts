@@ -31,6 +31,7 @@ function makeDeps(overrides?: Partial<Parameters<typeof refreshRemoteCodexMcpAft
     getReadyHost: (id: string) => host(id),
     ensureBridgeStarted: async () => ({ port: 38080, serverNames: ['cindy_orca'], bridgeInstanceId: 'bridge-2' }),
     getLiveTurnChecker: () => checker,
+    isCollabEnabled: () => true,
     log: { warn },
     ...overrides,
   };
@@ -51,6 +52,8 @@ describe('refreshRemoteCodexMcpAfterBridgeRecreate', () => {
       expect(['host-a', 'host-b']).toContain(callHost.id);
       expect(callDeps.ensureBridgeStarted).toBe(deps.ensureBridgeStarted);
       expect(callDeps.hasLiveTurnOnHost).toBe(checker);
+      // R21 P1: 恢复路径必须透传 Collab 闸门 — 禁用时 ensure 走清理而非重注入。
+      expect(callDeps.isCollabEnabled).toBe(deps.isCollabEnabled);
     }
   });
 

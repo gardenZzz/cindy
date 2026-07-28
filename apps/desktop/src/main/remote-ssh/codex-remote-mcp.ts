@@ -558,6 +558,52 @@ export function ensureRemoteMcpForward(
 // ── 主入口 ──────────────────────────────────────────────────────────────────
 
 /**
+ * bridge shutdown 时的立即清理 (无 bridge 变体, codex-connector R21 P1):
+ * 插件 / 全局设置变更触发 shutdownCodexEnvironment 后, 远端 daemon config
+ * 仍指向已停 bridge — 立刻剥受管段 + 清 daemon env, 让「指向死 bridge 的
+ * 404 / connection-refused MCP」当场降级为「无 MCP」;lazy 重建后恢复遍历
+ * (remote-codex-mcp-recovery) 会按常规漂移路径重新注入。
+ *
+ * live turn 时整体跳过:旧 config 在 turn 中仍可用 (daemon 内存态),
+ * turn-done 的 ensure 会兜底。失败只记 warn 不抛 (shutdown 路径不因此被
+ * 阻断)。与 ensure 共用 per-host 串行锁。
+ */
+export function stripRemoteCodexMcpConfig(
+  host: RemoteHost,
+  deps?: { hasLiveTurnOnHost?: (hostId: string) => boolean },
+): Promise<void> {
+  return withHostSerial(host.id, async () => {
+    try {
+      if (deps?.hasLiveTurnOnHost?.(host.id)) return;
+      const existing = await readRemoteConfig(host);
+      const { next, changed } = mergeManagedMcpBlock(existing, '', { serverNames: [] });
+      if (changed) {
+        await writeRemoteConfig(host, next);
+        log.info('remote codex config.toml managed block stripped on bridge shutdown', {
+          host: host.id,
+        });
+      }
+      const applied = readPortPrefs()[host.id]?.appliedFingerprint;
+      const daemonRunning = await isDaemonRunning(host);
+      if (daemonRunning && (changed || applied)) {
+        await bootstrapDaemon(host, '');
+        log.info('remote codex daemon rebootstrapped with empty MCP env on bridge shutdown', {
+          host: host.id,
+        });
+      }
+      if (changed || applied) clearHostAppliedFingerprint(host.id);
+      // 清理生效后拆 MCP forward (R21 P2 语义:live turn 已在上面整体跳过)。
+      await releaseRemoteMcpForwardIfAny(host);
+    } catch (err) {
+      log.warn('strip remote codex MCP config on bridge shutdown failed', {
+        host: host.id,
+        error: err instanceof Error ? err.message : String(err),
+      });
+    }
+  });
+}
+
+/**
  * 确保远端 codex daemon 能用上本机 MCP bridge。幂等,挂在 remote codex
  * session 的 start/resume 前置 (ensureRemoteReadyForSessionStart)。
  * 整个 ensure 在 per-host 串行锁内执行 (见 withHostSerial)。
@@ -646,12 +692,11 @@ async function doEnsureRemoteCodexMcpBridge(
     // 只有确实要下发 server 时才 arm forward:清理路径 (serverNames 空)
     // 剥 config / 清 env 都不经隧道 — forward 被拒或扫描窗口耗尽不该
     // 阻断清理, 否则旧受管段与 daemon env 残留成「持续暴露死 MCP」
-    // (codex-connector R20 P2)。清理路径下 MCP forward 本身也是清理对象:
-    // 有 bridgeLocalPort 记录就拆掉。
+    // (codex-connector R20 P2)。拆除旧 forward 则推迟到清理真正生效
+    // (bootstrap) 时:live turn 期间 defer 不拆 — daemon 内存里的旧
+    // config 还指着这个端口, 早拆会让进行中的协同调用 connection
+    // refused, 与「不打断 live turn」自相矛盾 (codex-connector R21 P2)。
     const remotePort = serverNames.length > 0 ? await ensureRemotePort(host, bridge.port) : 0;
-    if (serverNames.length === 0) {
-      await releaseRemoteMcpForwardIfAny(host);
-    }
 
     // token 与 bridge 代际一起进指纹:token 轮换 (账号切换) 与 bridge 重建
     // (旧 mcp-session-id 全失效, codex-connector P2) 都构成 config 漂移,
@@ -738,6 +783,11 @@ async function doEnsureRemoteCodexMcpBridge(
       // driftUnapplied 仍成立, 强制重试 (跨 app 重启同样成立)。
       if (desiredFingerprint) writeHostAppliedFingerprint(host.id, desiredFingerprint);
       else clearHostAppliedFingerprint(host.id);
+      if (serverNames.length === 0) {
+        // 清理真正生效 (daemon 已持空 env 重启) 才拆 MCP forward — 见
+        // ensureRemotePort 调用点注释 (R21 P2: live turn defer 期间不拆)。
+        await releaseRemoteMcpForwardIfAny(host);
+      }
       log.info('remote codex daemon (re)bootstrapped with MCP bridge env', {
         host: host.id,
         daemonWasRunning: daemonRunning,

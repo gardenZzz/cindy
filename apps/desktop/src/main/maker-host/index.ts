@@ -117,7 +117,7 @@ import {
   unregisterCodexMcpThreadContext,
 } from '../mcp-integrations/codexEnvironment.js';
 import type { CodexHttpBridge } from '../mcp-integrations/codexHttpBridge.js';
-import { ensureRemoteMcpForward, setRemoteMcpForwardRearmedHook } from '../remote-ssh/codex-remote-mcp.js';
+import { ensureRemoteMcpForward, setRemoteMcpForwardRearmedHook, stripRemoteCodexMcpConfig } from '../remote-ssh/codex-remote-mcp.js';
 import { buildCcRemoteHttpMcpServers } from './cc-remote-mcp.js';
 import { getRemoteSessionStartEnsure, getRemoteCodexLiveTurnChecker, setRemoteCcTurnSettledHandler } from './remote-session-start-ensure.js';
 import {
@@ -295,6 +295,33 @@ function invalidateActiveRemoteCcQueries(opts: { hostId?: string; reason: string
 }
 
 /**
+ * bridge shutdown 时的远端即时失效 (codex-connector R21 P1):插件/全局
+ * 设置变更触发 shutdownCodexEnvironment 后, 远端 session 的 MCP URL /
+ * session id 都指向已停 bridge — 等 lazy 重建会让窗口期内 send 持续
+ * 404 / connection-refused。这里立刻:
+ *   - 远端 CC:fresh 失效 + 无 turn query detach (下次 send 触发 lazy
+ *     重建并重注入, 全链路自愈);
+ *   - 远端 codex:逐 host strip 受管段 + 清 daemon env (404 MCP 当场降级
+ *     为无 MCP);lazy 重建后恢复遍历重新注入。
+ * 挂在 shutdownCodexEnvironment 的各调用点 (hook-control / 账号切换)。
+ */
+export function handleCodexEnvironmentShutdownForRemote(): void {
+  invalidateActiveRemoteCcQueries({ reason: 'bridge-shutdown' });
+  const hostIds = new Set<string>();
+  for (const s of _maker?.listActiveSessions() ?? []) {
+    if (s.remoteHostId && s.agentKind === 'codex') hostIds.add(s.remoteHostId);
+  }
+  const liveTurnChecker = getRemoteCodexLiveTurnChecker();
+  for (const hostId of hostIds) {
+    const host = getRemoteSshPool().get(hostId);
+    if (host?.getStatus() !== 'ready') continue;
+    void stripRemoteCodexMcpConfig(host, {
+      hasLiveTurnOnHost: liveTurnChecker ?? undefined,
+    });
+  }
+}
+
+/**
  * 远端 codex daemon / cc query 经 SSH remote-forward 直连本机 MCP bridge 的
  * 注入链路 (remote-ssh/codex-remote-mcp.ts、cc-remote-mcp 调用) 调用:确保
  * HTTP bridge 已启动并返回端口、server 名单与 bridge 实例 (per-session
@@ -343,6 +370,9 @@ export async function ensureCodexMcpBridgeStartedForRemote(): Promise<{
           },
           ensureBridgeStarted: ensureCodexMcpBridgeStartedForRemote,
           getLiveTurnChecker: getRemoteCodexLiveTurnChecker,
+          // 恢复路径同闸门 (codex-connector R21 P1):collab 全局禁用时
+          // ensure 走清理而非重注入。
+          isCollabEnabled: () => getPluginRegistry().isEnabled('collab'),
           log: desktopMakerLogger,
         });
         // 远端 CC 侧同源恢复 (codex-connector R19 P2):活跃 query 持旧
@@ -615,6 +645,7 @@ export function getMaker(): Maker {
         // 注入失败降级为"远端无协同 MCP"(历史行为),不阻塞 session 建立。
         let mcpCleanup: () => void = () => {};
         let injectedServerCount = 0;
+        let mcpNeedsFreshStart = false;
         try {
           const injected = await buildCcRemoteHttpMcpServers(
             {
@@ -632,6 +663,7 @@ export function getMaker(): Maker {
             },
           );
           mcpCleanup = injected.cleanup;
+          mcpNeedsFreshStart = injected.needsFreshStart === true;
           if (Object.keys(injected.servers).length > 0) {
             injectedServerCount = Object.keys(injected.servers).length;
             const mutableParams = startParams as { mcpServers?: Record<string, unknown> };
@@ -653,8 +685,11 @@ export function getMaker(): Maker {
         // bridge 内存表还在) 不触发 — 本 Set 随进程生命周期。
         // 状态只在 open 成功后提交:open 失败 (daemon 未起等) 时下次重试
         // 仍要 forceFresh, 否则 attach 到旧 query 上协同 MCP 永久 404。
+        // token 失效 (mcpNeedsFreshStart) 同样强制 fresh:attach 回带旧
+        // token header 的 alive query 会持续 401 (codex-connector R21 P2)。
         const forceFreshQuery =
-          injectedServerCount > 0 && !forcedFreshCcBridgeSessions.has(sessionId);
+          (injectedServerCount > 0 || mcpNeedsFreshStart) &&
+          !forcedFreshCcBridgeSessions.has(sessionId);
 
         // 协同 MCP 已 mutate 进 startParams.mcpServers;这里再把 proxy env 合入
         // 得到最终 startParams (mcpServers 与 env 都带上)。

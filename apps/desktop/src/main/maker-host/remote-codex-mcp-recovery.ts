@@ -29,6 +29,12 @@ export interface RemoteCodexMcpRecoveryDeps {
   ensureBridgeStarted: () => Promise<RemoteMcpBridgeEndpoint | null>;
   /** live-turn 判定缺失时 (checker 未装配) 返回 null → 整体不触发 (宁可不补刀, 不误杀 turn)。 */
   getLiveTurnChecker: () => ((hostId: string) => boolean) | null;
+  /**
+   * Collab 全局开关 (plugin registry Tier 4)。恢复路径的 ensure 必须透传 —
+   * 缺省视为开启的话, 用户禁用 Collab 后 bridge 重建会把刚清理的受管段
+   * 重新注入回去 (codex-connector R21 P1)。
+   */
+  isCollabEnabled: () => boolean;
   log: { warn: (msg: string, meta?: Record<string, unknown>) => void };
 }
 
@@ -41,6 +47,7 @@ export function refreshRemoteCodexMcpAfterBridgeRecreate(deps: RemoteCodexMcpRec
     void ensureRemoteCodexMcpBridge(host, {
       ensureBridgeStarted: deps.ensureBridgeStarted,
       hasLiveTurnOnHost: liveTurnChecker,
+      isCollabEnabled: deps.isCollabEnabled,
     }).then((result) => {
       if (!result.ok) {
         deps.log.warn('remote MCP recovery after bridge recreate failed', {
