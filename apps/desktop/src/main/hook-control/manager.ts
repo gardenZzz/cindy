@@ -2048,8 +2048,15 @@ export function createHookControlManager(deps: HookControlManagerDeps): HookCont
       return;
     }
     if (msg.type === 'group.message') {
-      // 群消息实时中继入本地窗口(group-relay-v1)。fire-and-forget:
+      // 群消息实时中继入本地窗口(group-relay-v1)。只接受来自对应 provider
+      // transport 的帧(错误路由的连接不得写窗口); fire-and-forget:
       // 失败只记日志, 窗口是上下文增强, 不影响任务链路。内容不写日志。
+      if (msg.payload.provider !== expectedProvider) {
+        log.warn(
+          `group.message ignored: provider=${msg.payload.provider} on ${expectedProvider} transport`,
+        );
+        return;
+      }
       void recordGroupMessage(msg.payload).catch((err) =>
         log.warn(`group window record failed: ${String(err)}`),
       );
