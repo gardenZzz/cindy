@@ -2308,17 +2308,17 @@ export function handleStreamEvent(
       const finalized = finalizeStreamingInState(state);
       const clientId = event.persistId ?? crypto.randomUUID();
 
-      const existingUpdatePlanIdx =
-        toolName === 'update_plan'
+      const existingUpdatableToolIdx =
+        toolName === 'update_plan' || toolName === 'web_search'
           ? finalized.messages.findIndex(
               (m) =>
-                m.role === 'tool_use' && m.toolName === 'update_plan' && m.toolUseId === toolUseId,
+                m.role === 'tool_use' && m.toolName === toolName && m.toolUseId === toolUseId,
             )
           : -1;
-      if (existingUpdatePlanIdx >= 0) {
+      if (existingUpdatableToolIdx >= 0) {
         const messages = finalized.messages.slice();
-        messages[existingUpdatePlanIdx] = {
-          ...messages[existingUpdatePlanIdx],
+        messages[existingUpdatableToolIdx] = {
+          ...messages[existingUpdatableToolIdx],
           content: formatToolUseSummary(toolName, input),
           toolInput: input,
         };
