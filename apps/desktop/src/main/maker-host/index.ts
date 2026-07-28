@@ -538,11 +538,10 @@ export function getMaker(): Maker {
         // session 时强制 fresh start (startParams 带 resumeSdkSessionId,
         // 上下文经远端 cc CLI session 文件恢复)。SSH 断线重连 (app 未重启,
         // bridge 内存表还在) 不触发 — 本 Set 随进程生命周期。
-        let forceFreshQuery = false;
-        if (injectedServerCount > 0 && !forcedFreshCcBridgeSessions.has(sessionId)) {
-          forceFreshQuery = true;
-          forcedFreshCcBridgeSessions.add(sessionId);
-        }
+        // 状态只在 open 成功后提交:open 失败 (daemon 未起等) 时下次重试
+        // 仍要 forceFresh, 否则 attach 到旧 query 上协同 MCP 永久 404。
+        const forceFreshQuery =
+          injectedServerCount > 0 && !forcedFreshCcBridgeSessions.has(sessionId);
 
         // 协同 MCP 已 mutate 进 startParams.mcpServers;这里再把 proxy env 合入
         // 得到最终 startParams (mcpServers 与 env 都带上)。
@@ -575,6 +574,9 @@ export function getMaker(): Maker {
             throw err;
           }
         })();
+        if (forceFreshQuery) {
+          forcedFreshCcBridgeSessions.add(sessionId);
+        }
 
         // 把 ssh transport disposer 串进 remoteQuery.close — maker-core 不知道
         // ssh / RpcClient / nc 这层 transport, 只会调它认得的 Query.close()。
