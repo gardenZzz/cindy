@@ -469,13 +469,20 @@ export function BackgroundTasksBody({
   // 不可见(非激活 tab / 壳子隐藏)时暂停 store 订阅;active/shellVisible 缺省视为可见。
   const visible = (active ?? true) && (shellVisible ?? true);
 
+  const inputs = useSessionTaskInputs(sessionId, !visible);
+
   // 快照水合:挂载 / 切会话时拉一次存量后台任务(订阅前已启动 / 重载清空
   // taskUpdates 后事件流看不到的任务)。listSessionBackgroundTasksFor 按会话来源
   // 路由 —— 本机走本地 IPC,device-link 远程隧道到被控端(任务真身在被控端,
   // 本机快照必空);老被控端无此 channel 时内部降级空表。失败静默,实时事件流
   // 自然补上(与 useBackgroundBashTasks 的快照失败同口径)。
+  // taskUpdatesEmpty 参与依赖:reloadMessages(rewind / 远程 origin 对账)会在
+  // 面板已挂载时清空 taskUpdates,布尔翻 true 即自动重水合;翻回 false 的那次
+  // 重跑只是多一次幂等快照(seed 仅补缺),不会循环。
+  const taskUpdatesEmpty = inputs.taskUpdates.size === 0;
   useEffect(() => {
     if (!sessionId) return;
+    void taskUpdatesEmpty;
     let disposed = false;
     void listSessionBackgroundTasksFor(sessionId)
       .then(({ tasks }) => {
@@ -488,9 +495,7 @@ export function BackgroundTasksBody({
     return () => {
       disposed = true;
     };
-  }, [sessionId]);
-
-  const inputs = useSessionTaskInputs(sessionId, !visible);
+  }, [sessionId, taskUpdatesEmpty]);
 
   const { running, completed } = useMemo(
     () =>

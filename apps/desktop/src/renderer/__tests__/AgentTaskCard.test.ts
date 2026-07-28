@@ -255,6 +255,34 @@ describe('AgentTaskCard', () => {
     expect(container.textContent).toContain('WORKFLOW_HISTORY_SUMMARY');
   });
 
+  it('recovers the panel-entry task id from the tool result on history reload', () => {
+    // 重载后 update 清空,但持久化 tool_result 里有 CLI 任务 id —— 卡片必须仍是
+    // 面板入口(与面板 listSessionTasks 的提取同源,focusTaskId 才配得上)。
+    openBackgroundTasksTabMock.mockClear();
+    const { container } = render(
+      React.createElement(AgentTaskCard, {
+        sessionId: 'session-1',
+        toolCall: {
+          clientId: 'wf-call-1',
+          role: 'tool_use',
+          content: '',
+          toolUseId: 'tu-wf-1',
+          toolName: 'Workflow',
+          toolInput: { script: 'export const meta = {}' },
+        },
+        result: 'Workflow launched in background. Task ID: wf_restored42',
+      }),
+    );
+    const btn = headerButton(container);
+    expect(btn).not.toBeNull();
+    act(() => {
+      btn!.click();
+    });
+    expect(openBackgroundTasksTabMock).toHaveBeenCalledWith('session-1', {
+      focusTaskId: 'wf_restored42',
+    });
+  });
+
   it('renders no inline expand region for workflow cards', () => {
     const { container } = render(
       React.createElement(AgentTaskCard, {

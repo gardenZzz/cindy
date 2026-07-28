@@ -233,11 +233,13 @@ export function getWorkflowProgressFor(
  * 「订阅前已启动 / 重载清空 taskUpdates 后」的存量任务。远程会话任务真身在
  * 被控端,必须隧道读(控制端 main 无该会话 handle,本机读必空);老被控端无此
  * channel 或隧道失败一律降级空表,面板退化为事件流 + 消息扫描两源。
+ * 归属用粘滞解析(与 estimatedSessionValueFor 同款):这是一次性水合,relay
+ * 瞬时重连清空注册表的窗口内若误判为本机,会 seed 一张空表且面板不重试。
  */
 export function listSessionBackgroundTasksFor(
   sessionId: string,
 ): ReturnType<typeof window.electronAPI.maker.listSessionBackgroundTasks> {
-  const deviceId = getSessionDeviceId(sessionId);
+  const deviceId = getStickySessionDeviceId(sessionId);
   if (!deviceId) return window.electronAPI.maker.listSessionBackgroundTasks(sessionId);
   return (
     invokeRemote(deviceId, 'maker:session-background-tasks:list', [sessionId]) as ReturnType<

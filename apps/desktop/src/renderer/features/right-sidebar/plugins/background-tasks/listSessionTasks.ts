@@ -164,8 +164,10 @@ function deriveTitle(
  * 匹配)。两种形态防御兼容:CLI 即时结果文案「Workflow launched in background.
  * Task ID: <id>」与 JSON 化结果里的 "taskId":"<id>"。**无公开契约**,提不到一律
  * undefined —— 调用方回落现状(详情视图显示无进度占位),绝不误伤。
+ * AgentTaskCard 历史重载的面板入口恢复复用同一实现(卡片与面板 taskId 必须同源,
+ * 否则 focusTaskId 定位配不上)。
  */
-function extractWorkflowTaskId(content: unknown): string | undefined {
+export function extractWorkflowTaskId(content: unknown): string | undefined {
   let text: string;
   if (typeof content === 'string') {
     text = content;
