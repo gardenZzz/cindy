@@ -231,8 +231,9 @@ export async function buildGroupContextPrefix(
   if (truncated) lines.unshift('[... 更早的消息已省略 ...]');
   const header =
     cursor > 0 ? '[自你上次请求后群里新增的消息]' : '[群里最近的消息]';
+  // lane 标识含 IM 聊天 id, 不写日志(同 manager/session-runner 的约定)。
   log.info(
-    `group context assembled: chat=${lane.chatId} entries=${lines.length}${truncated ? ' (truncated)' : ''}`,
+    `group context assembled: entries=${lines.length}${truncated ? ' (truncated)' : ''}`,
   );
   // 显式数据栅栏: 群消息是未受信任的第三方数据, 用 tag 块与指令区隔开
   // (与 Slack 通道的 thread_context 块同一约定)。自然语言栅栏不能根绝
