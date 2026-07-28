@@ -172,6 +172,26 @@ describe('listSessionTasks 配对', () => {
     });
   });
 
+  it('workflow 条目携带 resultPreview(保留换行、截断);非 workflow 不带', () => {
+    // 详情视图降级兜底(事件树与 wf 文件都拿不到时)的数据来源。
+    const longTail = 'x'.repeat(3000);
+    const { completed } = listSessionTasks({
+      messages: [
+        toolUse('c1', 'tu-wf', 'Workflow'),
+        toolResult('r1', 'tu-wf', `第一行结论\n第二行明细\n${longTail}`),
+        toolUse('c2', 'tu-task', 'Task', { description: 'agent task' }),
+        toolResult('r2', 'tu-task', 'agent result'),
+      ],
+      taskUpdates: undefined,
+      isSessionStreaming: false,
+    });
+    const wf = completed.find((it) => it.toolUseId === 'tu-wf')!;
+    expect(wf.resultPreview).toContain('第一行结论\n第二行明细');
+    expect(wf.resultPreview!.length).toBeLessThanOrEqual(2000);
+    expect(wf.resultPreview!.endsWith('…')).toBe(true);
+    expect(completed.find((it) => it.toolUseId === 'tu-task')!.resultPreview).toBeUndefined();
+  });
+
   it('提取出的 taskId 进去重别名:同 taskId 的孤儿 update 不再重复出行', () => {
     const orphan = makeUpdate({ taskId: 'w9gvjxzk1', taskType: 'local_workflow' });
     const { running, completed } = listSessionTasks({

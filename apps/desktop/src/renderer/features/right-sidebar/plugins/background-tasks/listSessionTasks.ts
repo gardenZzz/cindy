@@ -32,6 +32,12 @@ export interface SessionTaskItem {
   update?: AgentTaskUpdate;
   toolCallClientId?: string;
   toolUseId?: string;
+  /**
+   * workflow 的最终输出文本(配对 tool_result,保留换行、截断到 2000):
+   * 详情视图在事件树与 wf 文件都拿不到时(老被控端 / SSH / 未落盘即退出)
+   * 的兜底展示,让「点开面板」在降级场景也不落空。仅 workflow 条目携带。
+   */
+  resultPreview?: string;
   /** 消息窗口内出现顺序;孤儿 update 排最后。 */
   orderIndex: number;
 }
@@ -186,6 +192,32 @@ export function extractWorkflowTaskId(content: unknown): string | undefined {
   return match?.[1];
 }
 
+/** workflow 最终输出的兜底展示上限(详情视图无进度树时用)。 */
+const RESULT_PREVIEW_MAX = 2000;
+
+/**
+ * tool_result 内容 → 可展示文本:字符串原样(保留换行,区别于单行化的
+ * compactText),对象/数组 JSON 化;超限截断加省略号;空白纯空返回 undefined。
+ */
+function clipResultText(content: unknown): string | undefined {
+  let text: string;
+  if (typeof content === 'string') {
+    text = content;
+  } else if (isRecord(content) || Array.isArray(content)) {
+    try {
+      text = JSON.stringify(content, null, 1);
+    } catch {
+      return undefined;
+    }
+  } else {
+    return undefined;
+  }
+  const trimmed = text.trim();
+  if (!trimmed) return undefined;
+  if (trimmed.length <= RESULT_PREVIEW_MAX) return trimmed;
+  return `${trimmed.slice(0, RESULT_PREVIEW_MAX - 1)}…`;
+}
+
 /** 与 findTaskUpdate 同口径:先 toolUseId、后 clientId 查 map。 */
 function findUpdate(
   taskUpdates: ReadonlyMap<string, AgentTaskUpdate> | undefined,
@@ -296,6 +328,7 @@ export function listSessionTasks(input: {
       update?.provider ?? (toolName.startsWith('collab:') ? 'codex' : 'claude-code');
 
     const taskId = update?.taskId ?? derivedTaskId;
+    const resultPreview = kind === 'workflow' ? clipResultText(resultContent) : undefined;
     items.push({
       // key 用统一 taskId 链(含 derivedTaskId):恢复行先出现、快照水合后 update
       // 才到时 key 不得从 toolUseId 翻成 taskId —— 详情视图按 key 选中,翻 key 会
@@ -309,6 +342,7 @@ export function listSessionTasks(input: {
       ...(update ? { update } : {}),
       toolCallClientId: msg.clientId,
       ...(toolUseId ? { toolUseId } : {}),
+      ...(resultPreview !== undefined ? { resultPreview } : {}),
       orderIndex: i,
     });
   }
