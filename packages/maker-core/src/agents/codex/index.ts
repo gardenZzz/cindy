@@ -94,6 +94,7 @@ import {
   TurnRetryTracker,
   buildBackendUnreachableMessage,
 } from './retry-escalation.js';
+import { extractNonSecretErrorSignals } from '@cindy/maker-shared/error-redaction';
 import { AppServerHost, type ThreadEventHandlers, type ThreadSubscription } from './app-server/host.js';
 import { AppServerRequestTimeoutError } from './app-server/client.js';
 import { createStdioTransport } from './app-server/stdioTransport.js';
@@ -2097,16 +2098,13 @@ export class CodexAgent extends BaseAgent {
     // 孤儿 turn 的 item 事件不会被渲染到本次 send 下。
     const bufferedOrphanTurnIds = new Set<string>();
     type TurnCompletedParams = Parameters<NonNullable<ThreadEventHandlers['turnCompleted']>>[0];
-    type ErrorNotificationParams = Parameters<NonNullable<ThreadEventHandlers['error']>>[0];
-    // 缓冲隔离期间到达的终态事件按 turnId 暂存 (greptile R11 P1): 对账证明
-    // 合法时重放收口 send, 证明孤儿时丢弃 — 直接丢会让合法 turn 的 send
-    // 永久卡 generating (turn 已死, 响应到达后激活一具尸体); 直接处理会让
-    // 孤儿终态提前收口在飞 send。一个 turn 至多一条终态, 单槽覆盖即可。
-    const bufferedTerminalEvents = new Map<
-      string,
-      | { kind: 'completed'; params: TurnCompletedParams }
-      | { kind: 'error'; params: ErrorNotificationParams }
-    >();
+    // 缓冲隔离期间到达的**所有** turn 事件按 turnId 排队 (greptile R11 P1 +
+    // codex R12 P1): 对账证明合法时激活后按到达序重放 (早期 item/usage 不丢,
+    // 终态自然收口 send), 证明孤儿时整队丢弃。只拦 turnStarted 或只缓存终态
+    // 都会出反例: 前者让孤儿输出渲染到在飞 send 下, 后者把合法 turn 的
+    // 早期输出/终态永久丢掉 (send 卡 generating)。队列元素是重放闭包 —
+    // 重放时 buffer 已清空且 turn 已激活, 闭包重进 handler 走正常路径。
+    const bufferedTurnEventQueues = new Map<string, Array<() => void>>();
     // 正常完成的 turn 也必须保留墓碑:app-server 允许 turn/completed 早于仍在
     // 后台收尾的 item 事件到达。没有这层墓碑时,currentTurnId 已清空,迟到 item
     // 会重新发出 running status,而该 turn 的 done 已消费完,会话将永久假忙。
@@ -3286,6 +3284,10 @@ export class CodexAgent extends BaseAgent {
     const commandExecutionApproval = async (
       params: CommandExecutionRequestApprovalParams,
     ): Promise<CommandExecutionRequestApprovalResponse> => {
+      // buffered/墓碑 turn 的审批请求不得上 UI (codex R12 P1) — 孤儿直接拒。
+      const turnGate = gateServerRequestTurn(params.turnId);
+      if (turnGate === false) return { decision: 'decline' };
+      if (turnGate instanceof Promise && !(await turnGate)) return { decision: 'decline' };
       // requestId: approvalId 优先 (zsh-exec-bridge 多 callback 场景); 否则用 itemId
       const requestId = params.approvalId ?? params.itemId;
       const decision = await awaitApprovalDecision(requestId, 'commandExecution', {
@@ -3304,6 +3306,10 @@ export class CodexAgent extends BaseAgent {
     const fileChangeApproval = async (
       params: FileChangeRequestApprovalParams,
     ): Promise<FileChangeRequestApprovalResponse> => {
+      // buffered/墓碑 turn 的审批请求不得上 UI (codex R12 P1) — 孤儿直接拒。
+      const turnGate = gateServerRequestTurn(params.turnId);
+      if (turnGate === false) return { decision: 'decline' };
+      if (turnGate instanceof Promise && !(await turnGate)) return { decision: 'decline' };
       const requestId = params.itemId;
       const decision = await awaitApprovalDecision(requestId, 'fileChange', {
         kind: 'permission',
@@ -3407,6 +3413,12 @@ export class CodexAgent extends BaseAgent {
     const mcpServerElicitation = async (
       params: McpServerElicitationRequestParams,
     ): Promise<McpServerElicitationRequestResponse> => {
+      // buffered/墓碑 turn 的 elicitation 不得上 UI / auto-approve (codex R12 P1)。
+      const turnGate = gateServerRequestTurn(params.turnId);
+      if (turnGate === false) return { action: 'decline', content: null, _meta: null };
+      if (turnGate instanceof Promise && !(await turnGate)) {
+        return { action: 'decline', content: null, _meta: null };
+      }
       if (!isMcpToolApprovalElicitation(params)) {
         log.warn('unsupported MCP server elicitation -> decline', {
           serverName: params.serverName,
@@ -3469,6 +3481,11 @@ export class CodexAgent extends BaseAgent {
     const permissionsApproval = async (
       params: PermissionsRequestApprovalParams,
     ): Promise<PermissionsRequestApprovalResponse> => {
+      // buffered/墓碑 turn 的审批请求不得上 UI (codex R12 P1) — 孤儿直接拒
+      // (空 permissions 即拒绝授权, 与非 accept 分支同款)。
+      const turnGate = gateServerRequestTurn(params.turnId);
+      if (turnGate === false) return { permissions: {}, scope: 'turn' };
+      if (turnGate instanceof Promise && !(await turnGate)) return { permissions: {}, scope: 'turn' };
       const requestId = params.itemId ?? params.turnId;
       const decision = await awaitApprovalDecision(requestId, 'commandExecution', {
         kind: 'permission',
@@ -3613,6 +3630,10 @@ export class CodexAgent extends BaseAgent {
       params: ToolRequestUserInputParams,
       meta: { requestId: string | number },
     ): Promise<ToolRequestUserInputResponse> => {
+      // buffered/墓碑 turn 的输入请求不得上 UI (codex R12 P1) — 空 answers 即拒。
+      const turnGate = gateServerRequestTurn(params.turnId);
+      if (turnGate === false) return { answers: {} };
+      if (turnGate instanceof Promise && !(await turnGate)) return { answers: {} };
       const requestId = String(meta.requestId);
       const questions = normalizeRequestUserInputQuestions(params.questions);
       if (questions.length === 0) return { answers: {} };
@@ -3647,6 +3668,24 @@ export class CodexAgent extends BaseAgent {
       params: DynamicToolCallParams,
       meta: { requestId: string | number },
     ): Promise<DynamicToolCallResponse> => {
+      // buffered/墓碑 turn 的 tool call 不得上 UI (codex R12 P1)。
+      const turnGate = gateServerRequestTurn(params.turnId);
+      if (turnGate === false) {
+        return {
+          contentItems: [
+            { type: 'inputText', text: 'Request was rejected because the owning turn is no longer active.' },
+          ],
+          success: false,
+        };
+      }
+      if (turnGate instanceof Promise && !(await turnGate)) {
+        return {
+          contentItems: [
+            { type: 'inputText', text: 'Request was rejected because the owning turn is no longer active.' },
+          ],
+          success: false,
+        };
+      }
       if (!isAskUserDynamicTool(params)) {
         return {
           contentItems: [{ type: 'inputText', text: `Unsupported dynamic tool: ${params.tool}` }],
@@ -3749,6 +3788,54 @@ export class CodexAgent extends BaseAgent {
       // 忽略; 若响应证明合法 (id 一致)  buffer 已清空, 后续事件正常。
       if (bufferedOrphanTurnIds.has(turnId)) return true;
       return currentTurnId !== null && turnId !== currentTurnId;
+    };
+
+    // buffered turn 的事件入口闸 (greptile R11 P1 + codex R12 P1): 命中缓冲
+    // 则把「重进本 handler」的闭包按到达序排进该 turn 的队列, 等对账 —
+    // 合法则激活后按序重放 (早期输出不丢, 终态自然收口), 孤儿则整队丢弃。
+    // 返回 true = 已入队, 调用方直接 return。重放闭包执行时 buffer 已清空
+    // 且 turn 已激活, 重进 handler 会走正常路径, 不会二次入队。
+    const enqueueIfBufferedTurn = (turnId: string | null | undefined, replay: () => void): boolean => {
+      if (!turnId || !bufferedOrphanTurnIds.has(turnId)) return false;
+      const queue = bufferedTurnEventQueues.get(turnId) ?? [];
+      queue.push(replay);
+      bufferedTurnEventQueues.set(turnId, queue);
+      return true;
+    };
+
+    // buffered turn 的 server request (审批/输入) 挂起信号 (codex R12 P1):
+    // 归属未定前请求不得上 UI — 用户可能为隐藏的孤儿 turn 批准操作, 而
+    // best-effort interrupt 输了竞态时操作会真实执行。每个 buffered id 一组
+    // waiter, 对账时 settle: 合法 → true 继续正常流程; 孤儿 / RPC 失败 →
+    // false, 调用方返回拒绝响应。挂起窗口 = turn/start RPC 窗口 (最坏
+    // 60s), 远小于 daemon 侧审批等待时长。
+    const bufferedReconcileWaiters = new Map<string, Array<(valid: boolean) => void>>();
+
+    const waitForBufferedTurnReconcile = (turnId: string): Promise<boolean> =>
+      new Promise((resolve) => {
+        const waiters = bufferedReconcileWaiters.get(turnId) ?? [];
+        waiters.push(resolve);
+        bufferedReconcileWaiters.set(turnId, waiters);
+      });
+
+    const settleBufferedTurnReconcile = (turnId: string, valid: boolean): void => {
+      const waiters = bufferedReconcileWaiters.get(turnId);
+      if (!waiters) return;
+      bufferedReconcileWaiters.delete(turnId);
+      for (const resolve of waiters) resolve(valid);
+    };
+
+    // server request 入口闸 (codex R12 P1): true = 放行; false = 拒绝
+    // (terminal/completed 墓碑 turn — 批了也没人消费; buffered 孤儿)。
+    // buffered 归属未定 → 返回 Promise 挂起到对账再定。非 async 签名是故意的:
+    // 同步快速路径不引入 microtask 延迟 — handler 第一行的 broker.track 与
+    // 紧随其后的 serverRequest/resolved 存在竞态, 哪怕一跳 await 也会让
+    // resolved 抢在 track 之前到达 (测试回归实证)。
+    const gateServerRequestTurn = (turnId: string | null | undefined): boolean | Promise<boolean> => {
+      if (!turnId) return true;
+      if (terminalErroredTurnIds.has(turnId) || completedTurnIds.has(turnId)) return false;
+      if (!bufferedOrphanTurnIds.has(turnId)) return true;
+      return waitForBufferedTurnReconcile(turnId);
     };
 
     const stopActiveRolloutPlanFallback = (): void => {
@@ -4213,6 +4300,7 @@ export class CodexAgent extends BaseAgent {
         });
       },
       tokenUsageUpdated: (params) => {
+        if (enqueueIfBufferedTurn(params.turnId, () => handlers.tokenUsageUpdated?.(params))) return;
         if (shouldIgnoreStaleTurnEvent(params.turnId)) return;
         const last = params.tokenUsage?.last;
         if (!last) return;
@@ -4236,18 +4324,16 @@ export class CodexAgent extends BaseAgent {
         }
       },
       turnCompleted: (params) => {
-        // 缓冲隔离期间收到终态: 缓存等响应按归属对账 (greptile R11 P1) — 合法
-        // 则重放收口 send, 孤儿则丢弃 + 墓碑。直接处理会让孤儿 completed
-        // 提前收口在飞 send (handleTurnCompleted 在 currentTurnId===null 下
-        // 也会收口 emit done); 直接丢弃会把尸体 turn 激活成 in-flight,
-        // send 永久卡 generating。
-        if (bufferedOrphanTurnIds.has(params.turn.id)) {
-          bufferedTerminalEvents.set(params.turn.id, { kind: 'completed', params });
-          return;
-        }
+        // buffered turn 的终态同样进队列等对账 (greptile R11 P1 + codex R12 P1):
+        // 合法 → 激活后按序重放, handleTurnCompleted 自然收口 send; 孤儿 →
+        // 整队丢弃。直接处理会让孤儿 completed 提前收口在飞 send
+        // (handleTurnCompleted 在 currentTurnId===null 下也收口 emit done);
+        // 直接丢弃会把尸体 turn 激活成 in-flight, send 永久卡 generating。
+        if (enqueueIfBufferedTurn(params.turn.id, () => handlers.turnCompleted?.(params))) return;
         handleTurnCompleted(params);
       },
       itemStarted: (params) => {
+        if (enqueueIfBufferedTurn(params.turnId, () => handlers.itemStarted?.(params))) return;
         if (shouldIgnoreStaleTurnEvent(params.turnId)) return;
         if (interceptProposedPlanItem(params.item)) return;
         noteActiveToolContext(params.item, params.turnId);
@@ -4261,6 +4347,7 @@ export class CodexAgent extends BaseAgent {
         });
       },
       itemUpdated: (params) => {
+        if (enqueueIfBufferedTurn(params.turnId, () => handlers.itemUpdated?.(params))) return;
         if (shouldIgnoreStaleTurnEvent(params.turnId)) return;
         if (interceptProposedPlanItem(params.item)) return;
         noteActiveToolContext(params.item, params.turnId);
@@ -4273,6 +4360,7 @@ export class CodexAgent extends BaseAgent {
         });
       },
       itemCompleted: (params) => {
+        if (enqueueIfBufferedTurn(params.turnId, () => handlers.itemCompleted?.(params))) return;
         if (shouldIgnoreStaleTurnEvent(params.turnId)) return;
         if (interceptProposedPlanItem(params.item)) return;
         noteActiveToolContext(params.item, params.turnId);
@@ -4288,19 +4376,23 @@ export class CodexAgent extends BaseAgent {
         if (isTurnInFlight) pushStatus('Generating...');
       },
       turnPlanUpdated: (params) => {
+        if (enqueueIfBufferedTurn(params.turnId, () => handlers.turnPlanUpdated?.(params))) return;
         if (shouldIgnoreStaleTurnEvent(params.turnId)) return;
         latestPlanByTurn.set(params.turnId, params.plan);
         translatePlanUpdatedNotification(params, eventQueue);
       },
       reasoningSummaryTextDelta: (params) => {
+        if (enqueueIfBufferedTurn(params.turnId, () => handlers.reasoningSummaryTextDelta?.(params))) return;
         if (shouldIgnoreStaleTurnEvent(params.turnId)) return;
         translateReasoningSummaryTextDelta(params, eventQueue, { rt: translatorRt, log });
       },
       reasoningSummaryPartAdded: (params) => {
+        if (enqueueIfBufferedTurn(params.turnId, () => handlers.reasoningSummaryPartAdded?.(params))) return;
         if (shouldIgnoreStaleTurnEvent(params.turnId)) return;
         translateReasoningSummaryPartAdded(params, eventQueue, { rt: translatorRt, log });
       },
       reasoningTextDelta: (params) => {
+        if (enqueueIfBufferedTurn(params.turnId, () => handlers.reasoningTextDelta?.(params))) return;
         if (shouldIgnoreStaleTurnEvent(params.turnId)) return;
         translateReasoningTextDelta(params, eventQueue, { rt: translatorRt, log });
       },
@@ -4336,6 +4428,7 @@ export class CodexAgent extends BaseAgent {
         }
       },
       autoApprovalReviewStarted: (params: ItemGuardianApprovalReviewStartedNotification) => {
+        if (enqueueIfBufferedTurn(params.turnId, () => handlers.autoApprovalReviewStarted?.(params))) return;
         if (shouldIgnoreStaleTurnEvent(params.turnId)) return;
         log.debug('Codex automatic approval review started', {
           reviewId: params.reviewId,
@@ -4345,6 +4438,7 @@ export class CodexAgent extends BaseAgent {
         });
       },
       autoApprovalReviewCompleted: (params) => {
+        if (enqueueIfBufferedTurn(params.turnId, () => handlers.autoApprovalReviewCompleted?.(params))) return;
         if (shouldIgnoreStaleTurnEvent(params.turnId)) return;
         handleGuardianReviewCompleted(params);
       },
@@ -4354,16 +4448,10 @@ export class CodexAgent extends BaseAgent {
         log.warn('Codex Guardian warning', { threadId: params.threadId, message: params.message });
       },
       error: (params) => {
-        // 缓冲隔离期间收到终态 error: 缓存等对账 (greptile R11 P1) — 吞下会
-        // 让合法 turn 的 send 永久卡 generating (turn 已死却被激活)。
-        // willRetry 的非终态 error 不决定 turn 生死, 丢弃即可 (合法 turn
-        // 激活后 daemon 还会继续发)。
-        if (params.turnId && bufferedOrphanTurnIds.has(params.turnId)) {
-          if (params.willRetry !== true) {
-            bufferedTerminalEvents.set(params.turnId, { kind: 'error', params });
-          }
-          return;
-        }
+        // buffered turn 的 error (含终态) 同样进队列等对账 (greptile R11 P1 +
+        // codex R12 P1): 合法 → 激活后重放走正常终端路径收口 send; 孤儿 →
+        // 丢弃, 不得让孤儿 error 终结合法 send。
+        if (enqueueIfBufferedTurn(params.turnId, () => handlers.error?.(params))) return;
         if (shouldIgnoreStaleTurnEvent(params.turnId)) return;
         let effectiveParams = params;
         let isTerminalError = params.willRetry !== true;
@@ -4396,9 +4484,16 @@ export class CodexAgent extends BaseAgent {
         // auth 相关错误 (缺失 401 / 无效凭证 marker) 排除: 它们走 auth 修复 UX
         // (「同步登录态」/ 重新登录), 升级成「后端不可达」会抢路径并误导排查
         // (review: PR #715 五轮审核 P1 — 判定与 translator 共用 isAuthRelated*)。
+        // rate-limit / usage-limit (429 / quota) 同样排除 (codex R12 P2):
+        // 那是 provider 让等的正常退避窗口, daemon 的 willRetry 会在窗口后
+        // 成功; 升级成「后端不可达」+ proxy/VPN 引导既误杀可恢复重试又误导
+        // 排查方向。willRetry 透出 (networkRetryNotice) 不受影响, 用户仍能
+        // 看到「在限流退避」。
         if (!isTerminalError && targetsCurrentTurn) {
           const rawMessage = params.error?.message ?? '';
-          if (!isAuthRelatedErrorMessage(rawMessage)) {
+          const retrySignals = extractNonSecretErrorSignals(rawMessage);
+          const isRateLimitBackoff = retrySignals.errorStatus === 429 || retrySignals.usageLimit;
+          if (!isAuthRelatedErrorMessage(rawMessage) && !isRateLimitBackoff) {
             const decision = turnRetryTracker.track(
               params.turnId || currentTurnId || '(pending)',
               Date.now(),
@@ -4656,9 +4751,11 @@ export class CodexAgent extends BaseAgent {
               for (const bufferedId of bufferedOrphanTurnIds) {
                 if (bufferedId === resp.turn.id) continue;
                 terminalErroredTurnIds.add(bufferedId);
-                // 孤儿缓冲期间收到的终态一并丢弃 (greptile R11 P1) — 不得
-                // 让孤儿 error/completed 收口本次 send。
-                bufferedTerminalEvents.delete(bufferedId);
+                // 孤儿的事件队列整队丢弃 (greptile R11 P1) — 任何事件都不得
+                // 渲染到 / 收口本次 send; 挂起的审批/输入请求按拒绝释放
+                // (codex R12 P1)。
+                bufferedTurnEventQueues.delete(bufferedId);
+                settleBufferedTurnReconcile(bufferedId, false);
                 log.warn('buffered turnStarted proven orphan by turn/start response — interrupting', {
                   turnId: bufferedId,
                   acceptedTurnId: resp.turn.id,
@@ -4681,20 +4778,6 @@ export class CodexAgent extends BaseAgent {
                 translatorRt.lastAuthErrorKey = null;
                 translatorRt.networkRetryNotice = null;
                 turnRetryTracker.reset();
-                // 缓冲期间已收到终态 (greptile R11 P1): 重放让 send 收口 —
-                // 直接丢弃会把尸体 turn 激活成 in-flight, UI 永久卡
-                // generating。重放时 isTurnStartPending 仍为 true (finally
-                // 复位在本响应处理之后): completed 自动记墓碑 +
-                // currentTurnId===null 下收口 emit done; terminal error 的
-                // targetsPendingTurn=true → 正常终端路径 (墓碑 + 错误透出 +
-                // Done 状态)。随后下方激活逻辑被墓碑挡住, 不激活尸体。
-                const terminalEvent = bufferedTerminalEvents.get(resp.turn.id);
-                bufferedTerminalEvents.delete(resp.turn.id);
-                if (terminalEvent?.kind === 'completed') {
-                  handleTurnCompleted(terminalEvent.params);
-                } else if (terminalEvent?.kind === 'error') {
-                  handlers.error?.(terminalEvent.params);
-                }
               }
             }
             // turn/start 成功 → 孤儿守卫解除 (上次失败的 RPC 若也有迟到 started,
@@ -4709,6 +4792,26 @@ export class CodexAgent extends BaseAgent {
               currentTurnPlanModeActive = turnStartsInPlanMode;
               pendingTurnStartPlanMode = null;
               startRolloutPlanFallback(resp.turn.id);
+              // 合法 buffered turn 激活成功: 挂起的审批/输入请求放行 (走正常
+              // UI 流程), 再按到达序重放缓存事件 (greptile R11 P1 +
+              // codex R12 P1): 早期 item/usage 不再永久丢失; 队列里若有终态
+              // (turn 在缓冲期间已结束), 重放自然收口 send — 不会把尸体 turn
+              // 挂成 in-flight 永久卡 generating。重放闭包重进 handler 时
+              // buffer 已清空 + currentTurnId 已置, 全部走正常路径。
+              settleBufferedTurnReconcile(resp.turn.id, true);
+              const replayQueue = bufferedTurnEventQueues.get(resp.turn.id);
+              if (replayQueue) {
+                bufferedTurnEventQueues.delete(resp.turn.id);
+                log.debug('replaying buffered events for accepted turn', {
+                  turnId: resp.turn.id,
+                  eventCount: replayQueue.length,
+                });
+                for (const replay of replayQueue) replay();
+              }
+            } else {
+              // 未激活 (墓碑): 队列丢弃, 挂起请求按拒绝释放 — 不得穿透。
+              bufferedTurnEventQueues.delete(resp.turn.id);
+              settleBufferedTurnReconcile(resp.turn.id, false);
             }
             // turn/start 在飞期间权限被收紧 → 本 turn 携带的还是旧宽松策略,
             // 拿到 id 立即补中断 (fire-and-forget, 失败仅 warn); turn 已终结则
@@ -4866,6 +4969,7 @@ export class CodexAgent extends BaseAgent {
           // 没人消费, 全部 interrupt + 墓碑。
           for (const bufferedId of bufferedOrphanTurnIds) {
             terminalErroredTurnIds.add(bufferedId);
+            settleBufferedTurnReconcile(bufferedId, false);
             if (threadId) {
               host.request(Method.TurnInterrupt, { threadId, turnId: bufferedId }).catch((e2: unknown) => {
                 log.warn('buffered orphan turn interrupt failed (best-effort)', {
@@ -4876,7 +4980,7 @@ export class CodexAgent extends BaseAgent {
             }
           }
           bufferedOrphanTurnIds.clear();
-          bufferedTerminalEvents.clear();
+          bufferedTurnEventQueues.clear();
           log.error('turn/start failed', { error: String(finalErr) });
           eventQueue.push({
             type: 'error',
