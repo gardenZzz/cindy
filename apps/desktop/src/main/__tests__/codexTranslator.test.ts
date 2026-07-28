@@ -337,6 +337,46 @@ describe('webSearch', () => {
     });
   });
 
+  it('completed 的权威 action 变化时用同一 id 补发 tool_use 更新', () => {
+    feedItem('started', {
+      type: 'webSearch',
+      id: 'ws-final-action',
+      query: '',
+      action: { type: 'search', query: 'early query', queries: null },
+    });
+    feedItem('completed', {
+      type: 'webSearch',
+      id: 'ws-final-action',
+      query: '',
+      action: { type: 'openPage', url: 'https://example.com/final' },
+    });
+
+    expect(coll.events.map((event) => event.type)).toEqual([
+      'tool_use',
+      'tool_use',
+      'tool_result_full',
+      'tool_result',
+    ]);
+    expect(coll.events.slice(0, 2).map((event) => event.data)).toEqual([
+      {
+        toolUseId: 'ws-final-action',
+        toolName: 'web_search',
+        input: {
+          query: 'early query',
+          action: { type: 'search', query: 'early query', queries: null },
+        },
+      },
+      {
+        toolUseId: 'ws-final-action',
+        toolName: 'web_search',
+        input: {
+          query: 'https://example.com/final',
+          action: { type: 'openPage', url: 'https://example.com/final' },
+        },
+      },
+    ]);
+  });
+
   it('completed 快照丢失字段时仍用 started 的 legacy query 补发调用记录', () => {
     feedItem('started', {
       type: 'webSearch',

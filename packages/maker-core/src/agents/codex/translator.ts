@@ -61,6 +61,8 @@ export interface CodexRuntimeState {
   emittedToolUse: Set<string>;
   /** 尚未 emit 的 Web Search 候选输入，供跨 started/updated/completed 快照补全。 */
   pendingWebSearchInput: Map<string, WebSearchInput>;
+  /** 已 emit 的 Web Search 输入，用于判断 completed 是否带来权威参数更新。 */
+  emittedWebSearchInput: Map<string, WebSearchInput>;
   /**
    * Auth retry-loop dedupe key (`<threadId>|<turnId>`)。daemon 撞 401 时
    * willRetry=true 通知会按 retry 频率 (~每秒) 持续发, 不 dedupe 会让
@@ -87,6 +89,7 @@ export function newCodexRuntimeState(): CodexRuntimeState {
     itemTextLen: new Map(),
     emittedToolUse: new Set(),
     pendingWebSearchInput: new Map(),
+    emittedWebSearchInput: new Map(),
     lastAuthErrorKey: null,
     networkRetryNotice: null,
   };
@@ -949,6 +952,7 @@ function emitWebSearchToolUse(
   ctx: CodexTranslateContext,
 ): void {
   ctx.rt.emittedToolUse.add(item.id);
+  ctx.rt.emittedWebSearchInput.set(item.id, input);
   queue.push({
     type: 'tool_use',
     data: {
@@ -986,14 +990,23 @@ function handleWebSearch(
 
   // completed
   const toolUseEmitted = ctx.rt.emittedToolUse.has(item.id);
+  const emittedInput = ctx.rt.emittedWebSearchInput.get(item.id);
   ctx.rt.emittedToolUse.delete(item.id);
   ctx.rt.pendingWebSearchInput.delete(item.id);
+  ctx.rt.emittedWebSearchInput.delete(item.id);
   // 防御缺失 started/updated 的历史或异常事件序列，保持 tool_use → result 顺序。
   if (!toolUseEmitted) {
     // completed 仍无可展示参数时整条忽略，避免补发空白 tool_use 和孤立 result。
     if (!input.query) return;
     emitWebSearchToolUse(item, input, queue, ctx);
     ctx.rt.emittedToolUse.delete(item.id);
+    ctx.rt.emittedWebSearchInput.delete(item.id);
+  } else if (input.query && JSON.stringify(input) !== JSON.stringify(emittedInput)) {
+    // started/updated 用于实时展示；completed 可能补充权威 URL、pattern 或修正后的
+    // query。沿用同一 toolUseId 补发，由 Desktop 持久层与 renderer 原位更新。
+    emitWebSearchToolUse(item, input, queue, ctx);
+    ctx.rt.emittedToolUse.delete(item.id);
+    ctx.rt.emittedWebSearchInput.delete(item.id);
   }
   queue.push({
     type: 'tool_result_full',
