@@ -116,7 +116,7 @@ describe('listSessionTasks 配对', () => {
     const { running } = listSessionTasks({
       messages: [toolUse('c3', 'toolu-3', 'collab:reviewer', { description: 'review it' })],
       taskUpdates: undefined,
-      isSessionStreaming: false,
+      isSessionStreaming: true,
     });
     expect(running).toHaveLength(1);
     expect(running[0]).toMatchObject({ kind: 'agent', provider: 'codex', title: 'review it' });
@@ -246,7 +246,7 @@ describe('listSessionTasks 去重', () => {
         toolUse('c2', 'toolu-dup', 'Task', { description: 'second' }),
       ],
       taskUpdates: undefined,
-      isSessionStreaming: false,
+      isSessionStreaming: true,
     });
     expect(running.length + completed.length).toBe(1);
     expect(running[0]?.title).toBe('first');
@@ -321,7 +321,7 @@ describe('listSessionTasks 孤儿 gating', () => {
 // ---------------------------------------------------------------------------
 
 describe('listSessionTasks 历史条目状态推导', () => {
-  it('有 tool_result(toolUseId 命中)→ completed;没有 → running', () => {
+  it('有 tool_result(toolUseId 命中)→ completed;没有且非流式 → stopped(死任务不转圈)', () => {
     const { running, completed } = listSessionTasks({
       messages: [
         toolUse('c1', 'toolu-done', 'Task', { description: 'done task' }),
@@ -333,8 +333,20 @@ describe('listSessionTasks 历史条目状态推导', () => {
       taskUpdates: undefined,
       isSessionStreaming: false,
     });
-    expect(completed).toHaveLength(1);
-    expect(completed[0]).toMatchObject({ title: 'done task', status: 'completed' });
+    expect(running).toHaveLength(0);
+    expect(completed).toHaveLength(2);
+    expect(completed.find((it) => it.title === 'done task')).toMatchObject({ status: 'completed' });
+    // 强杀/崩溃留下的 tool_use(无结果、无 update、会话非流式):同步 Task 永远
+    // 不会再有结果,断言 running 会永久转圈 —— 按 stopped(被中断)呈现。
+    expect(completed.find((it) => it.title === 'open task')).toMatchObject({ status: 'stopped' });
+  });
+
+  it('流式中无结果的行仍为 running(事件可能尚未到达)', () => {
+    const { running } = listSessionTasks({
+      messages: [toolUse('c1', 'toolu-open', 'Task', { description: 'open task' })],
+      taskUpdates: undefined,
+      isSessionStreaming: true,
+    });
     expect(running).toHaveLength(1);
     expect(running[0]).toMatchObject({ title: 'open task', status: 'running' });
   });
@@ -354,7 +366,7 @@ describe('listSessionTasks 历史条目状态推导', () => {
     const { running } = listSessionTasks({
       messages: [toolUse('c1', 'toolu-1', 'Task', { prompt: longPrompt })],
       taskUpdates: undefined,
-      isSessionStreaming: false,
+      isSessionStreaming: true,
     });
     expect(running[0].title).toHaveLength(96);
     expect(running[0].title.endsWith('…')).toBe(true);
@@ -377,7 +389,7 @@ describe('listSessionTasks 后台 Bash', () => {
         }),
       ],
       taskUpdates: undefined,
-      isSessionStreaming: false,
+      isSessionStreaming: true,
     });
     expect(running).toHaveLength(2);
     expect(running[0]).toMatchObject({ kind: 'bash', title: 'pnpm dev', provider: 'claude-code' });
