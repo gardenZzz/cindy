@@ -106,8 +106,17 @@ function readHistoryFileStatus(
   let pending = historyFileStatusCache.get(key);
   if (!pending) {
     pending = getWorkflowProgressFor(sessionId, taskId)
-      .then((progress) => fileStatusToTaskStatus(progress?.status))
-      .catch(() => null);
+      .then((progress) => {
+        const mapped = fileStatusToTaskStatus(progress?.status);
+        // 只缓存终态:null(文件缺失/未收口)可能是终态通知先于落盘的窄窗口,
+        // 永久缓存会把这张卡钉死在推导状态 —— 让下次挂载重读。
+        if (mapped === null) historyFileStatusCache.delete(key);
+        return mapped;
+      })
+      .catch(() => {
+        historyFileStatusCache.delete(key);
+        return null;
+      });
     historyFileStatusCache.set(key, pending);
   }
   return pending;

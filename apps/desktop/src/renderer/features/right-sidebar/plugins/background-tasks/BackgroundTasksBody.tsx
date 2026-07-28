@@ -595,10 +595,10 @@ export function BackgroundTasksBody({
     // 串行而非并发:每次 miss 都可能触发 main 侧跨 session 目录扫描(远程会话
     // 则是隧道往返),多行同时 fan-out 会同时打出成倍的重复 IO;串行把它压成
     // 温和的背景补读,per-task 记忆保证每任务至多一次。
-    let inFlightIndex = 0;
+    let inFlightIndex = -1;
     void (async () => {
       for (let i = 0; i < pending.length; i++) {
-        if (disposed) return;
+        if (disposed) return; // 只停发新请求;在飞的那次照常落地(见下)
         inFlightIndex = i;
         const taskId = pending[i];
         let mapped: ReturnType<typeof fileStatusToTaskStatus> = null;
@@ -608,27 +608,26 @@ export function BackgroundTasksBody({
         } catch {
           // 静默:与 wf 文件辅源的其余读取同口径,保持推导状态。
         }
-        // 读取一返回就推进收口 —— miss(文件缺失/未收口 → mapped=null)也是
-        // 「已请求过」,不得在 cleanup 里被退回;否则该项每次列表重算都被
-        // 重新入队,变成无限重读,违反每任务至多一次的契约。
-        inFlightIndex = i + 1;
-        if (disposed) return;
-        if (!mapped) continue;
-        const status = mapped;
-        setFileStatusByTaskId((prev) => {
-          if (prev.get(taskId) === status) return prev;
-          const next = new Map(prev);
-          next.set(taskId, status);
-          return next;
-        });
+        // 结果落地**不看 disposed**:live workflow 每个进度帧都会重建 running
+        // 数组触发本 effect 重跑,若在飞结果被丢弃 + 退回记忆,就变成每帧一次
+        // 文件重读。组件仍挂载时 setState 安全;卸载后 React 静默忽略。
+        // miss(mapped=null)同样算「已请求过」,不退回不重试。
+        if (mapped) {
+          const status = mapped;
+          setFileStatusByTaskId((prev) => {
+            if (prev.get(taskId) === status) return prev;
+            const next = new Map(prev);
+            next.set(taskId, status);
+            return next;
+          });
+        }
       }
     })();
     return () => {
       disposed = true;
-      // 只退回真正未完成的(在飞被丢结果的那项及其后):completed 中途变化
-      // (快照水合 seed 等)不得让剩余批次被永久跳过。已读到 null 的 miss 项
-      // 已收口,不退回。
-      for (let i = inFlightIndex; i < pending.length; i++) {
+      // 只退回**尚未发起**的项:completed 中途变化(快照水合 seed 等)不得让
+      // 剩余批次被永久跳过;在飞项会自行落地,不退回(否则重复读)。
+      for (let i = inFlightIndex + 1; i < pending.length; i++) {
         fileStatusRequestedRef.current.delete(pending[i]);
       }
     };
