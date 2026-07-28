@@ -89,6 +89,21 @@ export interface OrcaBridgeMcpDeps {
   ) => Promise<void>;
   wireSession: (session: Session) => void;
   hydrateSessionRoute?: (sessionId: string, providerId: string | null) => void | Promise<void>;
+  /**
+   * 远端 session 重建前的 preflight (SSH 重连 / agent install / 远端 MCP
+   * 注入), 与宿主 IPC create/send 路径的 remote ensure 同语义。bridge
+   * rehydrate (ensureSessionFromMeta) 直调 core createSession 不经 IPC 层,
+   * 必须由宿主注入本回调补齐 — 缺失时 app 重启后 worker 回报会在 SSH 未
+   * 重连 / agent 未安装 / 远端无协同 MCP 的状态下重建 lead
+   * (review: PR #778 codex-connector R17 P1)。仅远端 capable 的宿主注入,
+   * 缺省 no-op。
+   */
+  ensureRemoteSessionStart?: (params: {
+    sessionId: string;
+    agentKind: AgentKind;
+    remoteHostId: string;
+    workingDir: string;
+  }) => Promise<void>;
   orcaTeamStore?: OrcaTeamStore;
   dispatchInterAgentMessage?: (params: {
     targetSessionId: string;
@@ -413,6 +428,17 @@ async function ensureSessionFromMeta(
   await deps.hydrateSessionRoute?.(meta.sessionId, meta.providerId ?? null);
   const active = maker.getSession(meta.sessionId);
   if (active) return active;
+  // 远端 lead 重建前必须跑宿主 remote preflight (SSH 重连 / agent install /
+  // 远端 MCP 注入):bridge 直调 core createSession 不经 maker-ipc, 跳过这步
+  // 会让 app 重启后的首次 worker 回报 host-not-ready 或远端无协同 MCP。
+  if (meta.remoteHostId) {
+    await deps.ensureRemoteSessionStart?.({
+      sessionId: meta.sessionId,
+      agentKind: meta.agentKind,
+      remoteHostId: meta.remoteHostId,
+      workingDir: meta.workingDir,
+    });
+  }
   const session = await maker.createSession({
     id: meta.sessionId,
     agentKind: meta.agentKind,
