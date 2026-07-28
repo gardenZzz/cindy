@@ -32,6 +32,7 @@ import {
   type AgentDeps,
   type StartSessionOptions,
   type OneShotOptions,
+  type RefreshLocalModelsOptions,
   type SendOptions,
 } from '../base-agent.js';
 import type { AgentCredentialMode } from '../../interfaces/auth-adapter.js';
@@ -89,6 +90,7 @@ import {
   type CodexRuntimeState,
 } from './translator.js';
 import { AppServerHost, type ThreadEventHandlers, type ThreadSubscription } from './app-server/host.js';
+import { AppServerRequestTimeoutError } from './app-server/client.js';
 import { createStdioTransport } from './app-server/stdioTransport.js';
 import { CodexInteractionBroker } from './interaction-broker.js';
 import { SYSTEM_PROMPT_APPEND as MAKER_CODEX_SYSTEM_PROMPT_APPEND } from './system-prompt-append.js';
@@ -273,6 +275,18 @@ function buildCodexDeveloperInstructions(parts: {
  */
 export function hostKey(remoteHostId?: string | null): string {
   return remoteHostId ? `remote:${remoteHostId}` : 'local';
+}
+
+const LOCAL_CONTROL_PLANE_HOST_PREFIX = 'local-control:';
+const CODEX_MODEL_LIST_RPC_TIMEOUT_MS = 20_000;
+const CODEX_MODEL_REFRESH_DEADLINE_MS = 20_000;
+
+function localControlPlaneHostKey(credentialMode: AgentCredentialMode): string {
+  return `${LOCAL_CONTROL_PLANE_HOST_PREFIX}${credentialMode}`;
+}
+
+function isLocalControlPlaneHostKey(key: string): boolean {
+  return key.startsWith(LOCAL_CONTROL_PLANE_HOST_PREFIX);
 }
 
 /**
@@ -1364,9 +1378,13 @@ export class CodexAgent extends BaseAgent {
   private async getHost(
     remoteHostId?: string,
     credentialMode?: AgentCredentialMode,
-    opts: { ignoreBindingLeases?: number } = {},
+    opts: {
+      ignoreBindingLeases?: number;
+      keyOverride?: string;
+      hostPurpose?: 'control-plane';
+    } = {},
   ): Promise<AppServerHost> {
-    const key = hostKey(remoteHostId);
+    const key = opts.keyOverride ?? hostKey(remoteHostId);
     // spawnMode = 调用方原始诉求(undefined 保持 adapter fallback,spawn 行为不变)。
     // 复用判定分两级(review P2:归一化解析走 getState、含 reconcile/fs,不允许进
     // 无条件路径):
@@ -1491,12 +1509,19 @@ export class CodexAgent extends BaseAgent {
         credentialModeResolved: boolean;
         generation: number;
       } | null = null;
-      const promise = this.createHost(remoteHostId, key, spawnMode, generation, (resolvedMode) => {
-        if (inflightEntry) {
-          inflightEntry.credentialMode = resolvedMode;
-          inflightEntry.credentialModeResolved = true;
-        }
-      }).finally(() => {
+      const promise = this.createHost(
+        remoteHostId,
+        key,
+        spawnMode,
+        generation,
+        (resolvedMode) => {
+          if (inflightEntry) {
+            inflightEntry.credentialMode = resolvedMode;
+            inflightEntry.credentialModeResolved = true;
+          }
+        },
+        opts.hostPurpose,
+      ).finally(() => {
         // 成功: this.hosts 已赋值, 后续走快路径; 失败: 清掉 promise 让下次调用能重试
         const current = this.hostPromises.get(key);
         if (current?.promise === promise) this.hostPromises.delete(key);
@@ -1538,30 +1563,86 @@ export class CodexAgent extends BaseAgent {
    * 成功时未必已经触发模型注册表刷新。`model/list` 是官方 app-server 的权威读取面，
    * 同时也是 cache ready barrier；分页全部读完后才一次性交给宿主，避免 UI 看到半份目录。
    */
-  override async refreshLocalModels(): Promise<boolean> {
-    const { key, host } = await this.getUtilityHost();
+  override async refreshLocalModels(options?: RefreshLocalModelsOptions): Promise<boolean> {
+    const credentialMode = options?.credentialMode;
+    if (!credentialMode) return this.refreshLocalModelsWithinDeadline(options);
+
+    const key = localControlPlaneHostKey(credentialMode);
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const deadline = new Promise<never>((_, reject) => {
+      timer = setTimeout(() => {
+        reject(new AppServerRequestTimeoutError('model refresh', CODEX_MODEL_REFRESH_DEADLINE_MS));
+      }, CODEX_MODEL_REFRESH_DEADLINE_MS);
+    });
+    try {
+      return await Promise.race([
+        this.refreshLocalModelsWithinDeadline(options),
+        deadline,
+      ]);
+    } catch (error) {
+      if (error instanceof AppServerRequestTimeoutError) {
+        await this.retireHostKey(key, 'Codex control-plane model refresh timed out', {
+          failIfActive: false,
+          logPrefix: 'codex model refresh',
+        });
+      }
+      throw error;
+    } finally {
+      if (timer !== undefined) clearTimeout(timer);
+    }
+  }
+
+  private async refreshLocalModelsWithinDeadline(
+    options?: RefreshLocalModelsOptions,
+  ): Promise<boolean> {
+    const credentialMode = options?.credentialMode;
+    // 显式 provider 刷新使用独立 control-plane app-server。不能为了发一次 model/list
+    // 切换共享 local host 的凭证形态：切换协调器会关闭空闲会话，忙碌会话则直接拒绝。
+    const key = credentialMode
+      ? localControlPlaneHostKey(credentialMode)
+      : hostKey();
+    const host = credentialMode
+      ? await this.getHost(undefined, credentialMode, {
+        keyOverride: key,
+        hostPurpose: 'control-plane',
+      })
+      : (await this.getUtilityHost()).host;
     const init = await host.ensureStarted();
     if (init.codexHome) this.codexHome = init.codexHome;
 
     const models: CodexModelListResponse['data'] = [];
     const seenCursors = new Set<string>();
     let cursor: string | null = null;
-    do {
-      const page: CodexModelListResponse = await host.request<CodexModelListResponse>(Method.ModelList, {
-        cursor,
-        limit: 100,
-        includeHidden: false,
-      });
-      models.push(...(Array.isArray(page.data) ? page.data : []));
-      const next: string | null = typeof page.nextCursor === 'string' && page.nextCursor.length > 0
-        ? page.nextCursor
-        : null;
-      if (next && seenCursors.has(next)) {
-        throw new Error(`Codex app-server model/list repeated cursor: ${next}`);
+    try {
+      do {
+        const page: CodexModelListResponse = await host.request<CodexModelListResponse>(
+          Method.ModelList,
+          {
+            cursor,
+            limit: 100,
+            includeHidden: false,
+          },
+          { timeoutMs: CODEX_MODEL_LIST_RPC_TIMEOUT_MS },
+        );
+        models.push(...(Array.isArray(page.data) ? page.data : []));
+        const next: string | null = typeof page.nextCursor === 'string' && page.nextCursor.length > 0
+          ? page.nextCursor
+          : null;
+        if (next && seenCursors.has(next)) {
+          throw new Error(`Codex app-server model/list repeated cursor: ${next}`);
+        }
+        if (next) seenCursors.add(next);
+        cursor = next;
+      } while (cursor !== null);
+    } catch (error) {
+      if (credentialMode && error instanceof AppServerRequestTimeoutError) {
+        await this.retireHostKey(key, 'Codex control-plane model/list timed out', {
+          failIfActive: false,
+          logPrefix: 'codex model list refresh',
+        });
       }
-      if (next) seenCursors.add(next);
-      cursor = next;
-    } while (cursor !== null);
+      throw error;
+    }
 
     // Auth 切换 / logout 可能在分页请求期间 retire 旧 host。旧账号的迟到响应绝不能
     // 覆盖新账号目录；只有仍登记为当前 local host 的结果才允许交给宿主。
@@ -1596,6 +1677,7 @@ export class CodexAgent extends BaseAgent {
     credentialMode: AgentCredentialMode | undefined,
     generation: number,
     onSpawnCredentialModeResolved?: (mode: AgentCredentialMode | undefined) => void,
+    hostPurpose?: 'control-plane',
   ): Promise<AppServerHost> {
     const seq = (this.createHostSeqByKey.get(key) ?? 0) + 1;
     this.createHostSeqByKey.set(key, seq);
@@ -1676,7 +1758,11 @@ export class CodexAgent extends BaseAgent {
         try {
           const cfg = await this.deps.prepareCodexExtraSpawnConfig(
             this.deps.mcpProviders ?? [],
-            { remoteHostId, credentialMode: spawnCredentialMode },
+            {
+              remoteHostId,
+              credentialMode: spawnCredentialMode,
+              ...(hostPurpose ? { hostPurpose } : {}),
+            },
           );
           assertCurrentGeneration('spawn config');
           Object.assign(env, cfg.extraEnv);
@@ -1759,14 +1845,15 @@ export class CodexAgent extends BaseAgent {
       // 持续撞鉴权失败; auth.invalidate 会触发 logout + 通知 UI 重登。延后到 microtask
       // 防止在 JSON-RPC response 分发回调里同步收割自己。远端也走同一结构化协议路径。
       onAuthInvalidated: (reason) => {
+        const usesLocalAuth = !remoteHostId;
         this.deps.logger.warn('codex auth invalidated', {
           reason,
           key,
-          localAuthWillInvalidate: key === hostKey(),
+          localAuthWillInvalidate: usesLocalAuth,
         });
         Promise.resolve()
           .then(async () => {
-            if (key === hostKey()) {
+            if (usesLocalAuth) {
               try {
                 await this.deps.auth.invalidate?.(reason);
               } catch (e) {
@@ -5137,16 +5224,24 @@ export class CodexAgent extends BaseAgent {
   }
 
   /**
-   * 本地 Codex OAuth/logout 失效时强制收掉 local host。
+   * 本地 Codex OAuth/logout 失效时强制收掉共享 local host 与独立 control-plane hosts。
    *
-   * 这条路径说明当前 local host 持有的凭证已经不可用，不能因为仍有订阅就继续保留；
-   * 但仍然只处理 local key，不能扩散到 remote host。
+   * 这些 host 都持有本机凭证，账号边界变化后不能继续复用；remote hosts 使用远端
+   * 用户配置，不在本次清理范围内。
    */
   async forceDisposeLocalHostForAuthChange(reason = 'CodexAgent local auth changed'): Promise<void> {
-    await this.retireHostKey(hostKey(), reason, {
-      failIfActive: false,
-      logPrefix: 'codex local auth restart',
-    });
+    const keys = new Set<string>([hostKey()]);
+    for (const key of this.hosts.keys()) {
+      if (isLocalControlPlaneHostKey(key)) keys.add(key);
+    }
+    for (const key of this.hostPromises.keys()) {
+      if (isLocalControlPlaneHostKey(key)) keys.add(key);
+    }
+    await Promise.all(Array.from(keys, (key) =>
+      this.retireHostKey(key, reason, {
+        failIfActive: false,
+        logPrefix: 'codex local auth restart',
+      })));
   }
 
   private async disposeLocalHostForCredentialChangeUnlocked(key: string, reason: string): Promise<void> {
@@ -5266,13 +5361,16 @@ export class CodexAgent extends BaseAgent {
     this.memoryOverride = enabled;
     // 立即 push, 让所有 live thread 通过 server 端 reload_user_config 拿到新值
     try {
-      if (this.hosts.size === 0) {
+      const localSessionHosts = Array.from(this.hosts.entries()).filter(
+        ([key]) => !key.startsWith('remote:') && !isLocalControlPlaneHostKey(key),
+      );
+      if (localSessionHosts.length === 0) {
         log.info('setMemory ◀ no live app-server, will apply on next session');
         return { effective: 'next-session' };
       }
-      await Promise.all(Array.from(this.hosts.entries()).filter(([key]) => !key.startsWith('remote:')).map(async ([key, host]) => {
-        // Remote hosts do not receive Maker Memory, so their native setting is
-        // owned by the target rather than this local manager.
+      await Promise.all(localSessionHosts.map(async ([key, host]) => {
+        // Only thread-serving local hosts receive Maker Memory. Remote hosts own
+        // their native setting; model-list control-plane hosts have no live threads.
         await host.request(Method.ExperimentalFeatureEnablementSet, {
           enablement: { memories: enabled },
         });
