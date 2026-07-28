@@ -73,4 +73,18 @@ describe('remoteCcQueryFactory cleanup wiring', () => {
     );
     expect(existingGuard).toBeGreaterThan(killFirst);
   });
+
+  it('clears forced-fresh tracking when the bridge instance is rebuilt', () => {
+    // review P2 回归:custom MCP CRUD / 全局插件开关触发
+    // shutdownCodexEnvironment 后 bridge lazy 重建, 旧 bridge 的
+    // mcp-session-id 全部失效 — ensureCodexMcpBridgeStartedForRemote 必须
+    // 检测实例更换并清空 forcedFresh 集合 (在返回新 bridge 之前), 否则
+    // 已 fresh 的 session attach 回持旧 id 的 query, 协同 MCP 404。
+    const ensureFn = source.indexOf('export async function ensureCodexMcpBridgeStartedForRemote');
+    expect(ensureFn).toBeGreaterThan(-1);
+    const clearIdx = source.indexOf('forcedFreshCcBridgeSessions.clear()', ensureFn);
+    expect(clearIdx).toBeGreaterThan(ensureFn);
+    const returnIdx = source.indexOf('return { port: cfg.bridge.port', ensureFn);
+    expect(returnIdx).toBeGreaterThan(clearIdx);
+  });
 });

@@ -1157,13 +1157,36 @@ export function NewMakerDraftRoute() {
           attachmentState.clearFiles();
         }
         resetDraftWorkspaceAfterSend();
-        navigate(`/cc-agent/${newSession.id}`, { replace: true });
+        // F-COLLAB: draft 阶段开了协同 toggle → 与 send/goal 路径同口径,
+        // createSession 后立刻 enableOrca 拉起 Worker;失败 toast 但保留
+        // Lead 会话继续 navigate (用户可继续单 session, 不阻断)。
+        let orcaWorkersRevealState: { focusWorkerSessionId: string } | null = null;
+        if (effectiveCollab.enabled) {
+          try {
+            const result = await window.electronAPI.maker.enableOrca(
+              newSession.id,
+              draftEnableOrcaOptions(effectiveCollab, localProviders, !localProvidersLoading),
+            );
+            orcaWorkersRevealState = { focusWorkerSessionId: result.workerSessionId };
+          } catch (err) {
+            log.error('[add remote project] enableOrca failed (continuing as single session)', err);
+            toast.error(
+              getCollaborationStartErrorMessage(err, t, { continueAsSingleSession: true }),
+            );
+          }
+        }
+        navigate(`/cc-agent/${newSession.id}`, {
+          replace: true,
+          state: orcaWorkersRevealState
+            ? { orcaWorkersReveal: orcaWorkersRevealState }
+            : undefined,
+        });
       } catch (err) {
         log.error('[add remote project]', err);
         throw err;
       }
     },
-    [draft.vendor, chatPrefs, chatInitialPermissionMode, chatInitialProviderId, draftInitialModel, draftInitialEffort, effectiveFastMode, effectiveDeviceLinkDeviceId, localProviders, capabilityAgentKind, effectivePlanMode, attachmentState, createSession, navigate, t],
+    [draft.vendor, chatPrefs, chatInitialPermissionMode, chatInitialProviderId, draftInitialModel, draftInitialEffort, effectiveFastMode, effectiveDeviceLinkDeviceId, localProviders, localProvidersLoading, effectiveCollab, capabilityAgentKind, effectivePlanMode, attachmentState, createSession, navigate, t],
   );
 
   // ─── 切 vendor ──────────────────────────────────────────────────────

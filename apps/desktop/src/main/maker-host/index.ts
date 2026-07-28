@@ -248,6 +248,12 @@ let _codexMcpProviders: McpProvider[] | null = null;
  * 重连 (bridge 表还在) 不重复 kill。见 remoteCcQueryFactory 注释。
  */
 const forcedFreshCcBridgeSessions = new Set<string>();
+/**
+ * 本进程见过的 bridge 实例 — ensureCodexMcpBridgeStartedForRemote 据此检测
+ * bridge 重建并清空 forcedFreshCcBridgeSessions (旧 bridge 的
+ * mcp-session-id 随重建全部失效)。
+ */
+let _lastBridgeForForcedFresh: CodexHttpBridge | null = null;
 /** getMaker() 首次构造时发起的自定义 MCP 初始加载 promise，供 bootstrap 在注册会话 IPC 前 await。 */
 let _initialCustomMcpRefresh: Promise<void> | undefined;
 type CodexLocalCredentialChangeGuard = Awaited<ReturnType<CodexAgent['beginLocalHostCredentialChange']>>;
@@ -285,6 +291,16 @@ export async function ensureCodexMcpBridgeStartedForRemote(): Promise<{
       logger: desktopMakerLogger,
     });
     if (!cfg.bridge) return null;
+    if (cfg.bridge !== _lastBridgeForForcedFresh) {
+      // bridge 重建 (custom MCP CRUD / 全局插件开关触发
+      // shutdownCodexEnvironment 后的 lazy 重建):旧 bridge 的
+      // mcp-session-id 全部失效, 之前 fresh 过的 session 必须重新
+      // forceFresh — 否则 reconnect attach 回持旧 id 的 query, 协同 MCP
+      // 404 (review P2 回归)。首次调用 (null → 实例) 也走这里, 对空 Set
+      // clear 无害。
+      forcedFreshCcBridgeSessions.clear();
+      _lastBridgeForForcedFresh = cfg.bridge;
+    }
     return { port: cfg.bridge.port, serverNames: cfg.bridgeServerNames, bridge: cfg.bridge };
   } catch (err) {
     desktopMakerLogger.error('ensureCodexMcpBridgeStartedForRemote failed', {
