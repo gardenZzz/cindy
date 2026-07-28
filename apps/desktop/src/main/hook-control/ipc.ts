@@ -67,7 +67,11 @@ import {
 import { createHookTransport } from './transport.js';
 import { registerSlackToolBridge, unregisterSlackToolBridge } from './slackToolBridge.js';
 import { createHookBindingStore } from './bindings.js';
-import { buildGroupContextPrefix, resetGroupContextCursors } from './groupWindow.js';
+import {
+  buildGroupContextPrefix,
+  resetGroupContextCursors,
+  sweepGroupWindowExpired,
+} from './groupWindow.js';
 import { createHookDispatcher } from './dispatcher.js';
 import { createMakerHookSessionRunner } from './session-runner.js';
 import { resolveHookInteraction } from './interactions.js';
@@ -791,6 +795,13 @@ export function registerHookControlIpc(): void {
 export function startHookControlAccount(): void {
   if (!hookControlAvailable()) return;
   ensureInstances().manager.activateAccount();
+  // 群窗口 TTL 兜底: 流量路径的清扫只在有群消息/派发时触发, 这里保证
+  // 群不再活跃(或通道停用)后过期行也会在每次启动被清掉。
+  void sweepGroupWindowExpired().catch((err: unknown) => {
+    log.warn(
+      `group window startup sweep failed (${err instanceof Error ? err.name : 'unknown'})`,
+    );
+  });
 }
 
 /** Close hook ingress before the old account DB is disposed. */

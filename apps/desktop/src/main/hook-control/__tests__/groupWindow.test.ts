@@ -24,6 +24,7 @@ import {
   groupLaneOf,
   recordGroupMessage,
   resetGroupContextCursors,
+  sweepGroupWindowExpired,
 } from '../groupWindow.js';
 
 function migrationSql(): string {
@@ -95,6 +96,26 @@ describe('recordGroupMessage', () => {
       .prepare('SELECT message_id FROM hook_group_messages ORDER BY id ASC LIMIT 1')
       .get() as { message_id: string };
     expect(oldest.message_id).toBe('m2');
+  });
+});
+
+describe('sweepGroupWindowExpired', () => {
+  it('启动清扫在无流量时也清掉过期行(强制绕过间隔门控)', async () => {
+    const fresh = frame({ messageId: 'fresh' });
+    await recordGroupMessage(fresh);
+    // 直接落一条 8 天前的过期行, 模拟群早已不活跃(无按键 GC 机会)。
+    sqlite
+      .prepare(
+        `INSERT INTO hook_group_messages
+           (provider, chat_id, thread_id, message_id, chat_name, author, is_bot, text, file_names, sent_at, created_at)
+         VALUES ('telegram', '-901', '', 'stale', 'Old', '@x', 0, 'old', NULL, ?, ?)`,
+      )
+      .run(Date.now() - 8 * 24 * 60 * 60 * 1000, Date.now());
+    await sweepGroupWindowExpired();
+    const ids = sqlite
+      .prepare('SELECT message_id AS id FROM hook_group_messages ORDER BY id ASC')
+      .all() as Array<{ id: string }>;
+    expect(ids.map((row) => row.id)).toEqual(['fresh']);
   });
 });
 
@@ -194,6 +215,9 @@ describe('buildGroupContextPrefix', () => {
     // 恶意闭合标签被中和, 真正的闭合标签只出现一次(结尾)。
     expect(assembly.prefix.match(/<\/group_chat_context>/g)).toHaveLength(1);
     expect(assembly.prefix).toContain('\u200b');
+    // \u95ed\u5408\u4e4b\u540e\u7684\u8bf4\u660e\u6587\u5b57\u4e0d\u5f97\u518d\u51fa\u73b0\u5b57\u9762\u5f00\u6807\u7b7e(\u907f\u514d\u89e3\u6790\u5668\u628a\u540e\u7eed\u5185\u5bb9
+    // \u8bef\u5224\u8fdb\u672a\u53d7\u4fe1\u5757): \u5f00\u6807\u7b7e\u5168\u6587\u53ea\u6709\u5757\u9996\u4e00\u5904\u3002
+    expect(assembly.prefix.match(/<group_chat_context>/g)).toHaveLength(1);
   });
 
   it('topic lane 与主群流窗口隔离', async () => {
