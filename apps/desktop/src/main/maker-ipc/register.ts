@@ -166,7 +166,7 @@ import { t } from '../i18n.js';
 import { createLogger } from '../logger.js';
 import { desktopClaudeAuthAdapter, desktopCodexAuthAdapter, readClaudeApiKey } from '../maker-host/auth-adapters.js';
 import { prepareSharedProjectSkillLinks } from '../maker-host/shared-global-skills.js';
-import { setRemoteCodexLiveTurnChecker, setRemoteSessionStartEnsure } from '../maker-host/remote-session-start-ensure.js';
+import { setRemoteCodexLiveTurnChecker, setRemoteSessionStartEnsure, getRemoteCcTurnSettledHandler } from '../maker-host/remote-session-start-ensure.js';
 import { syncExternalCodexSessionFromDesktop } from '../maker-host/codex-local-sessions.js';
 import { getCodexProxyAuthInjection, getCodexProxyAuthInjectionState } from '../maker-host/codex-proxy-host.js';
 import {
@@ -4410,17 +4410,24 @@ export function registerMakerIpc(maker: Maker, options: RegisterMakerIpcOptions)
   // daemon bootstrap (driftUnapplied 持久指纹, 见 codex-remote-mcp.ts) 在
   // idle 时点必然补刀 — 不等用户下次操作 (Greptile: defer 需要可靠自愈
   // 路径)。ensure 幂等, 无漂移时仅一次 config 读 + daemon 探活。经模块级
-  // holder 供各 turn 收口路径调用。
+  // holder 供各 turn 收口路径调用。远端 CC 走 holder 的 detach 补偿
+  // (bridge 重建 / 端口重绑已让 fresh 失效时重建 query)。
   refreshRemoteCodexMcpOnTurnSettledHolder = (sessionId: string): void => {
     const session = maker.getSession(sessionId);
     const remoteHostId = session?.remoteHostId;
-    if (!remoteHostId || session?.agentKind !== 'codex') return;
-    const host = getRemoteSshPool().get(remoteHostId);
-    if (host?.getStatus() !== 'ready') return;
-    void ensureRemoteCodexMcpBridge(host, {
-      ensureBridgeStarted: ensureCodexMcpBridgeStartedForRemote,
-      hasLiveTurnOnHost: codexRemoteHasLiveTurn,
-    });
+    if (!remoteHostId) return;
+    if (session.agentKind === 'codex') {
+      const host = getRemoteSshPool().get(remoteHostId);
+      if (host?.getStatus() !== 'ready') return;
+      void ensureRemoteCodexMcpBridge(host, {
+        ensureBridgeStarted: ensureCodexMcpBridgeStartedForRemote,
+        hasLiveTurnOnHost: codexRemoteHasLiveTurn,
+      });
+      return;
+    }
+    if (session.agentKind === 'claude-code') {
+      getRemoteCcTurnSettledHandler()?.(sessionId);
+    }
   };
 
   const makerSessionRegistry = createElectronIpcHandlerRegistry();

@@ -44,3 +44,20 @@ export function setRemoteCodexLiveTurnChecker(fn: RemoteCodexLiveTurnChecker): v
 export function getRemoteCodexLiveTurnChecker(): RemoteCodexLiveTurnChecker | null {
   return liveTurnChecker;
 }
+
+/**
+ * 远端 CC session turn 收口的补偿判定 (maker-host 装配, register.ts 的
+ * turn 收口路径经 holder 调用):fresh 标记已失效且无 turn 时 detach 旧
+ * query, 下次 send 重新注入。
+ */
+export type RemoteCcTurnSettledHandler = (sessionId: string) => void;
+
+let ccTurnSettledHandler: RemoteCcTurnSettledHandler | null = null;
+
+export function setRemoteCcTurnSettledHandler(fn: RemoteCcTurnSettledHandler): void {
+  ccTurnSettledHandler = fn;
+}
+
+export function getRemoteCcTurnSettledHandler(): RemoteCcTurnSettledHandler | null {
+  return ccTurnSettledHandler;
+}
