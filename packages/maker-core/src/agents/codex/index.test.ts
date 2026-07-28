@@ -6390,6 +6390,131 @@ describe('CodexAgent turn lifecycle', () => {
     await handle.close();
   });
 
+  it('buffers an ambiguous turnStarted during a retry-pending window and interrupts it once the response proves it an orphan (codex R9 P2)', async () => {
+    // 第一次 turn/start 失败立孤儿守卫; 第二次 send 的 turn/start 在飞期间
+    // 第一次的迟到 started 到达 — 归属不明 (协议不带 request id), 必须缓冲
+    // 隔离而不是接受 (否则孤儿 item 事件渲染到第二次 send 下)。响应到了按
+    // turnId 对账: 不一致 → interrupt + 墓碑; 响应的 turn 正常激活。
+    const firstStart = deferred<unknown>();
+    const secondStart = deferred<unknown>();
+    let attempt = 0;
+    const agent = new CodexAgent(createDeps());
+    const host = installFakeHost(agent, (method) => {
+      if (method === Method.TurnStart) {
+        attempt += 1;
+        if (attempt === 1) return firstStart.promise;
+        return secondStart.promise;
+      }
+      return undefined;
+    });
+    const handle = await agent.startSession({
+      sessionId: 'session-buffered-orphan-started',
+      model: 'gpt-5.4',
+      workingDir: '/repo',
+    });
+    const subscribeCalls = host.subscribeThread.mock.calls as unknown as Array<[string, ThreadEventHandlers]>;
+    const handlers = subscribeCalls[0]?.[1];
+    const iterator = handle.events()[Symbol.asyncIterator]();
+
+    // 第一次 send → turn/start 悬挂 → 失败 (立孤儿守卫)。
+    const send1 = handle.send({ type: 'user', content: 'first' });
+    for (let i = 0; i < 5; i += 1) {
+      if (host.request.mock.calls.some(([method]) => method === Method.TurnStart)) break;
+      await Promise.resolve();
+    }
+    firstStart.reject(new Error('codex app-server turn/start timed out after 60000ms'));
+    await send1;
+    expect(await nextEvent(iterator)).toMatchObject({ type: 'status', data: { isRunning: true } });
+    expect(await nextEvent(iterator)).toMatchObject({ type: 'error', data: { isTerminal: true } });
+    expect(await nextEvent(iterator)).toMatchObject({
+      type: 'status',
+      data: { status: 'Done', isRunning: false },
+    });
+
+    // 第二次 send → turn/start 在飞 → 第一次的迟到 started 到达: 缓冲隔离,
+    // 既不激活也不立即 interrupt (归属未定)。
+    const send2 = handle.send({ type: 'user', content: 'second' });
+    for (let i = 0; i < 5; i += 1) {
+      if (host.request.mock.calls.filter(([method]) => method === Method.TurnStart).length >= 2) break;
+      await Promise.resolve();
+    }
+    handlers.turnStarted?.({ threadId: 'start-thread-id', turn: { id: 'orphan-turn' } });
+    expect(handle.isTurnRunning?.()).toBe(false);
+    expect(handle.getCurrentTurnId?.()).toBeNull();
+    expect(
+      host.request.mock.calls.some(
+        ([method, params]) =>
+          method === Method.TurnInterrupt && (params as { turnId?: string }).turnId === 'orphan-turn',
+      ),
+    ).toBe(false);
+
+    // 第二次响应 turn-2 ≠ orphan-turn → 孤儿坐实: interrupt + 墓碑; turn-2 激活。
+    secondStart.resolve({ turn: { id: 'turn-2' } });
+    await send2;
+    await vi.waitFor(() => {
+      expect(host.request).toHaveBeenCalledWith(
+        Method.TurnInterrupt,
+        expect.objectContaining({ threadId: 'start-thread-id', turnId: 'orphan-turn' }),
+      );
+    });
+    expect(handle.isTurnRunning?.()).toBe(true);
+    expect(handle.getCurrentTurnId?.()).toBe('turn-2');
+    await handle.close();
+  });
+
+  it('activates a buffered turnStarted when the turn/start response returns the same id (codex R9 P2)', async () => {
+    // 同款 pending 窗口, 但到达的 started 就是在飞 RPC 自己的 (合法
+    // started-before-resp 与孤儿守卫共存): 缓冲期间不激活; 响应 id 一致 →
+    // 正常激活, 不发 interrupt。
+    const firstStart = deferred<unknown>();
+    const secondStart = deferred<unknown>();
+    let attempt = 0;
+    const agent = new CodexAgent(createDeps());
+    const host = installFakeHost(agent, (method) => {
+      if (method === Method.TurnStart) {
+        attempt += 1;
+        if (attempt === 1) return firstStart.promise;
+        return secondStart.promise;
+      }
+      return undefined;
+    });
+    const handle = await agent.startSession({
+      sessionId: 'session-buffered-started-accepted',
+      model: 'gpt-5.4',
+      workingDir: '/repo',
+    });
+    const subscribeCalls = host.subscribeThread.mock.calls as unknown as Array<[string, ThreadEventHandlers]>;
+    const handlers = subscribeCalls[0]?.[1];
+
+    const send1 = handle.send({ type: 'user', content: 'first' });
+    for (let i = 0; i < 5; i += 1) {
+      if (host.request.mock.calls.some(([method]) => method === Method.TurnStart)) break;
+      await Promise.resolve();
+    }
+    firstStart.reject(new Error('codex app-server turn/start timed out after 60000ms'));
+    await send1;
+
+    const send2 = handle.send({ type: 'user', content: 'second' });
+    for (let i = 0; i < 5; i += 1) {
+      if (host.request.mock.calls.filter(([method]) => method === Method.TurnStart).length >= 2) break;
+      await Promise.resolve();
+    }
+    // 在飞 RPC 自己的 started 先到: 缓冲, 不立即激活。
+    handlers.turnStarted?.({ threadId: 'start-thread-id', turn: { id: 'early-turn' } });
+    expect(handle.isTurnRunning?.()).toBe(false);
+    expect(handle.getCurrentTurnId?.()).toBeNull();
+
+    // 响应 id 一致 → 激活, 全程无 interrupt。
+    secondStart.resolve({ turn: { id: 'early-turn' } });
+    await send2;
+    expect(handle.isTurnRunning?.()).toBe(true);
+    expect(handle.getCurrentTurnId?.()).toBe('early-turn');
+    expect(
+      host.request.mock.calls.some(([method]) => method === Method.TurnInterrupt),
+    ).toBe(false);
+    await handle.close();
+  });
+
   it('clears running state and emits done status after terminal error notification', async () => {
     const agent = new CodexAgent(createDeps());
     const host = installFakeHost(agent);

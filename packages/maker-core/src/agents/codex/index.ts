@@ -2090,6 +2090,12 @@ export class CodexAgent extends BaseAgent {
     // turn/start RPC 失败(超时/拒绝)后置位: server 可能实际已建 turn,
     // 迟到的孤儿 turnStarted 由 turnStarted handler 拦下并补 interrupt。
     let turnStartFailedWithoutTurnId = false;
+    // 孤儿守卫生效期间又有新 turn/start 在飞时, 到达的 turnStarted 归属不明
+    // (协议不带 request id: 可能是失败 RPC 的孤儿, 也可能是在飞 RPC 合法的
+    // started-before-resp) — 先缓冲隔离, 等响应到了按 turnId 对账: 一致激活,
+    // 不一致 interrupt + 墓碑 (codex R9 P2)。缓冲期间不置 currentTurnId,
+    // 孤儿 turn 的 item 事件不会被渲染到本次 send 下。
+    const bufferedOrphanTurnIds = new Set<string>();
     type TurnCompletedParams = Parameters<NonNullable<ThreadEventHandlers['turnCompleted']>>[0];
     // 正常完成的 turn 也必须保留墓碑:app-server 允许 turn/completed 早于仍在
     // 后台收尾的 item 事件到达。没有这层墓碑时,currentTurnId 已清空,迟到 item
@@ -4127,10 +4133,20 @@ export class CodexAgent extends BaseAgent {
         if (turnsCompletedBeforeStartResp.has(params.turn.id)) return;
         // turn/start RPC 已失败(超时/拒绝)但 daemon 实际已建 turn — 迟到的孤儿
         // turnStarted 不得重新激活已报终态错误的会话 (greptile P1): 立墓碑 +
-        // 补 interrupt 让 daemon 停掉这个没人消费的 turn。仅在没有新 turn/start
-        // 在飞时判定 — 在飞期间到达的 started 按正常路径处理 (与成功路径的
-        // started-先于-resp 乱序共存; 该固有歧义不由本守卫承担)。
-        if (turnStartFailedWithoutTurnId && !isTurnStartPending && currentTurnId === null) {
+        // 补 interrupt 让 daemon 停掉这个没人消费的 turn。
+        if (turnStartFailedWithoutTurnId && currentTurnId === null) {
+          if (isTurnStartPending) {
+            // 新 turn/start 在飞 → 归属不明 (失败 RPC 的孤儿 vs 在飞 RPC 合法的
+            // started-before-resp, 协议层无法区分): 缓冲隔离, 等响应按 turnId
+            // 对账 (codex R9 P2)。直接接受会让孤儿 turn 的 item 事件渲染到
+            // 本次 send 下。
+            bufferedOrphanTurnIds.add(params.turn.id);
+            log.debug('buffering ambiguous turnStarted until turn/start response arrives', {
+              turnId: params.turn.id,
+              threadId,
+            });
+            return;
+          }
           terminalErroredTurnIds.add(params.turn.id);
           log.warn('ignoring orphan turnStarted from a failed turn/start — interrupting server-side turn', {
             turnId: params.turn.id,
@@ -4204,6 +4220,9 @@ export class CodexAgent extends BaseAgent {
         }
       },
       turnCompleted: (params) => {
+        // daemon 自己跑完的 buffered 孤儿 turn 无需再等对账 — 出缓冲防泄漏
+        // (codex R9 P2); completed 本体走既有 stale/墓碑路径。
+        bufferedOrphanTurnIds.delete(params.turn.id);
         handleTurnCompleted(params);
       },
       itemStarted: (params) => {
@@ -4597,6 +4616,38 @@ export class CodexAgent extends BaseAgent {
         // 普通 LLM 错误 / 超时 / auth 失败照原路径报错。
         const handleTurnStartResp = (resp: TurnStartResponse): void => {
           if (resp.turn?.id) {
+            // 缓冲的歧义 started 对账 (codex R9 P2): 本响应确立在飞 RPC 的
+            // turnId — 缓冲里 id 一致的是它的合法 started (下方正常激活),
+            // 不一致的是失败 RPC 的孤儿 (interrupt + 墓碑, 没人消费)。
+            if (bufferedOrphanTurnIds.size > 0) {
+              const wasBuffered = bufferedOrphanTurnIds.has(resp.turn.id);
+              for (const bufferedId of bufferedOrphanTurnIds) {
+                if (bufferedId === resp.turn.id) continue;
+                terminalErroredTurnIds.add(bufferedId);
+                log.warn('buffered turnStarted proven orphan by turn/start response — interrupting', {
+                  turnId: bufferedId,
+                  acceptedTurnId: resp.turn.id,
+                  threadId,
+                });
+                if (threadId) {
+                  host.request(Method.TurnInterrupt, { threadId, turnId: bufferedId }).catch((e2: unknown) => {
+                    log.warn('buffered orphan turn interrupt failed (best-effort)', {
+                      turnId: bufferedId,
+                      error: e2 instanceof Error ? e2.message : String(e2),
+                    });
+                  });
+                }
+              }
+              bufferedOrphanTurnIds.clear();
+              if (wasBuffered) {
+                // 合法 started 曾被缓冲: 补做 turnStarted 正常路径被跳过的
+                // per-turn 状态重置 (与 turnStarted handler 同款)。
+                proposedPlanText = null;
+                translatorRt.lastAuthErrorKey = null;
+                translatorRt.networkRetryNotice = null;
+                turnRetryTracker.reset();
+              }
+            }
             // turn/start 成功 → 孤儿守卫解除 (上次失败的 RPC 若也有迟到 started,
             // 那是一次新的语义重叠, 由 turn id 匹配路径处理)。
             turnStartFailedWithoutTurnId = false;
@@ -4762,6 +4813,20 @@ export class CodexAgent extends BaseAgent {
             isTurnInFlight = false;
             currentTurnPlanModeActive = false;
           }
+          // 缓冲的歧义 started 随本次失败一并坐实孤儿身份 (codex R9 P2):
+          // 没人消费, 全部 interrupt + 墓碑。
+          for (const bufferedId of bufferedOrphanTurnIds) {
+            terminalErroredTurnIds.add(bufferedId);
+            if (threadId) {
+              host.request(Method.TurnInterrupt, { threadId, turnId: bufferedId }).catch((e2: unknown) => {
+                log.warn('buffered orphan turn interrupt failed (best-effort)', {
+                  turnId: bufferedId,
+                  error: e2 instanceof Error ? e2.message : String(e2),
+                });
+              });
+            }
+          }
+          bufferedOrphanTurnIds.clear();
           log.error('turn/start failed', { error: String(finalErr) });
           eventQueue.push({
             type: 'error',

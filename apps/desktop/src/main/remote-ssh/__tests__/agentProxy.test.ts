@@ -43,10 +43,12 @@ vi.mock('node:fs', async (importOriginal) => {
 });
 
 import {
+  applyAgentProxyForHost,
   buildAgentProxyEnv,
   buildAgentProxyEnvUppercase,
   buildAgentProxyMarkerContent,
   ensureAgentProxyTunnel,
+  getAgentProxyTunnelState,
   killRemoteCodexDaemon,
   reconcileCodexAgentProxyEnv,
 } from '../agent-proxy';
@@ -277,6 +279,87 @@ describe('killRemoteCodexDaemon', () => {
     };
     const result = await killRemoteCodexDaemon(host);
     expect(result).toMatchObject({ ok: false, reason: 'pkill_failed' });
+  });
+});
+
+describe('applyAgentProxyForHost disable path', () => {
+  it('reports apply error when the daemon survives pkill during proxy disable (codex R9 P2)', async () => {
+    // 先 enable 建隧道 (marker 已就位)。
+    setSshHostAgentProxy('test-host', PREF);
+    const { host } = makeFakeHost({ marker: "export HTTPS_PROXY='http://127.0.0.1:17893'" });
+    await applyAgentProxyForHost(host);
+    expect(getAgentProxyTunnelState('test-host')?.active).toBe(true);
+
+    // disable: 隧道拆 + marker 清, 但 daemon 没死透 — 旧 daemon 还握着指向
+    // 已关闭端口的 proxy env, 卡片必须落错误而不是谎称「已关闭」。
+    setSshHostAgentProxy('test-host', null);
+    const baseExec = host.exec.bind(host);
+    host.exec = async (cmd: string, execOpts?: { input?: string }) => {
+      if (cmd.includes('pkill')) {
+        return {
+          stdout: '',
+          stderr: 'daemon still alive after TERM(5s)+KILL(2s)',
+          exitCode: 3,
+          signal: null,
+        };
+      }
+      return baseExec(cmd, execOpts);
+    };
+    await applyAgentProxyForHost(host);
+    const state = getAgentProxyTunnelState('test-host');
+    expect(state?.active).toBe(false);
+    expect(state?.lastError).toMatch(/survived pkill/);
+  });
+
+  it('serializes concurrent reconciles per host so a fast-path caller never probes mid-restart (codex R9 P2)', async () => {
+    // 并发 reconcile (两个 transport 的 beforeDaemonProbe 同时触发): 第一个
+    // 还在等 killRemoteCodexDaemon 时, 第二个必须排队, 不得走 marker-match
+    // fast path 直接去 probe 旧 daemon。
+    setSshHostAgentProxy('test-host', PREF);
+    const { host, state } = makeFakeHost({ marker: null });
+
+    let killStarted = false;
+    let releaseKill: (() => void) | null = null;
+    const baseExec = host.exec.bind(host);
+    host.exec = async (cmd: string, execOpts?: { input?: string }) => {
+      if (cmd.includes('pkill')) {
+        // 进入 kill-and-wait 即翻牌 (baseExec 的记录要等释放后才有,
+        // 不能拿 execCalls 当等待信号)。
+        killStarted = true;
+        await new Promise<void>((resolve) => {
+          releaseKill = resolve;
+        });
+      }
+      return baseExec(cmd, execOpts);
+    };
+
+    const order: string[] = [];
+    const first = reconcileCodexAgentProxyEnv(host).then((r) => {
+      order.push('first-done');
+      return r;
+    });
+    // 等第一个写完 marker 并卡在 kill-and-wait 阶段。
+    await vi.waitFor(() => {
+      expect(killStarted).toBe(true);
+    });
+    const second = reconcileCodexAgentProxyEnv(host).then((r) => {
+      order.push('second-done');
+      return r;
+    });
+    // 第二个已入队但不得开工: 给它一拍机会, 确认没有第二个 cat/pkill 发生。
+    await Promise.resolve();
+    const execCountWhileFirstBlocked = state.execCalls.length;
+    await Promise.resolve();
+    expect(state.execCalls.length).toBe(execCountWhileFirstBlocked);
+
+    releaseKill?.();
+    const [r1, r2] = await Promise.all([first, second]);
+    expect(r1.markerChanged).toBe(true);
+    expect(r1.daemonRestarted).toBe(true);
+    // 第二个在第一个完成后才走对账: 此时 marker 已一致 → fast path 零副作用。
+    expect(r2).toEqual({ markerChanged: false, daemonRestarted: false });
+    expect(order).toEqual(['first-done', 'second-done']);
+    expect(state.pkillCount).toBe(1);
   });
 });
 
