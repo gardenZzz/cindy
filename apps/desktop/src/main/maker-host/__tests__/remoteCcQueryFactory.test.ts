@@ -81,6 +81,11 @@ describe('remoteCcQueryFactory cleanup wiring', () => {
       ccManagerClientSource.indexOf('const existing =', killFirst),
     );
     expect(killForFreshBlock).not.toContain('.catch(() => undefined)');
+    // greptile P1 回归②:registry.kill 对 alive session 是异步终止
+    // (consume loop 退出后才移除) — kill 响应后必须轮询 list 确认不再
+    // alive 才放行 start, 否则同撞 ALREADY_EXISTS。
+    expect(killForFreshBlock).toContain('METHODS.SESSION_LIST');
+    expect(killForFreshBlock).toContain('stillAlive');
   });
 
   it('clears forced-fresh tracking when the bridge instance is rebuilt', () => {
