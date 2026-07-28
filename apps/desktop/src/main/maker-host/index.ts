@@ -119,7 +119,8 @@ import {
 import type { CodexHttpBridge } from '../mcp-integrations/codexHttpBridge.js';
 import { ensureRemoteMcpForward } from '../remote-ssh/codex-remote-mcp.js';
 import { buildCcRemoteHttpMcpServers } from './cc-remote-mcp.js';
-import { getRemoteSessionStartEnsure } from './remote-session-start-ensure.js';
+import { getRemoteSessionStartEnsure, getRemoteCodexLiveTurnChecker } from './remote-session-start-ensure.js';
+import { refreshRemoteCodexMcpAfterBridgeRecreate } from './remote-codex-mcp-recovery.js';
 import { CODEX_DISABLED_BUILTIN_PLUGIN_IDS_KEY } from '../mcp-integrations/codexBuiltinToolPolicy.js';
 import { buildCodexProxySpawnArgs, CODEX_OPENAI_COMPACT_PROVIDER_ID } from './codex-gateway-config.js';
 import {
@@ -301,7 +302,29 @@ export async function ensureCodexMcpBridgeStartedForRemote(): Promise<{
       // 404 (review P2 回归)。首次调用 (null → 实例) 也走这里, 对空 Set
       // clear 无害。
       forcedFreshCcBridgeSessions.clear();
+      const isRecreate = _lastBridgeForForcedFresh !== null;
       _lastBridgeForForcedFresh = cfg.bridge;
+      if (isRecreate) {
+        // 远端 codex 侧同步恢复:session 的 SSH forward 仍指旧 bridge 端口、
+        // daemon 持旧 MCP session — 对活跃 remote codex host 补一次
+        // best-effort ensure 全链路自愈 (codex-connector R18 P1)。
+        refreshRemoteCodexMcpAfterBridgeRecreate({
+          listRemoteCodexHostIds: () => {
+            const ids = new Set<string>();
+            for (const s of _maker?.listActiveSessions() ?? []) {
+              if (s.remoteHostId && s.agentKind === 'codex') ids.add(s.remoteHostId);
+            }
+            return [...ids];
+          },
+          getReadyHost: (hostId) => {
+            const host = getRemoteSshPool().get(hostId);
+            return host?.getStatus() === 'ready' ? host : null;
+          },
+          ensureBridgeStarted: ensureCodexMcpBridgeStartedForRemote,
+          getLiveTurnChecker: getRemoteCodexLiveTurnChecker,
+          log: desktopMakerLogger,
+        });
+      }
     }
     return {
       port: cfg.bridge.port,

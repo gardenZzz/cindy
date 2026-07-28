@@ -166,7 +166,7 @@ import { t } from '../i18n.js';
 import { createLogger } from '../logger.js';
 import { desktopClaudeAuthAdapter, desktopCodexAuthAdapter, readClaudeApiKey } from '../maker-host/auth-adapters.js';
 import { prepareSharedProjectSkillLinks } from '../maker-host/shared-global-skills.js';
-import { setRemoteSessionStartEnsure } from '../maker-host/remote-session-start-ensure.js';
+import { setRemoteCodexLiveTurnChecker, setRemoteSessionStartEnsure } from '../maker-host/remote-session-start-ensure.js';
 import { syncExternalCodexSessionFromDesktop } from '../maker-host/codex-local-sessions.js';
 import { getCodexProxyAuthInjection, getCodexProxyAuthInjectionState } from '../maker-host/codex-proxy-host.js';
 import {
@@ -4404,6 +4404,7 @@ export function registerMakerIpc(maker: Maker, options: RegisterMakerIpcOptions)
         s.agentKind === 'codex' &&
         (agentInputCoordinatorHolder?.hasActiveTurnForRewind(s.id) ?? false),
     );
+  setRemoteCodexLiveTurnChecker(codexRemoteHasLiveTurn);
 
   // turn 结束后补一次远端 MCP ensure (best-effort):live turn 期间被推迟的
   // daemon bootstrap (driftUnapplied 持久指纹, 见 codex-remote-mcp.ts) 在

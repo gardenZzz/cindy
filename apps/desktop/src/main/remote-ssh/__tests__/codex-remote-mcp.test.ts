@@ -729,3 +729,21 @@ describe('ensureRemoteCodexMcpBridge drift self-heal (appliedFingerprint)', () =
     expect(execCmds2.join('\n')).not.toContain('bootstrap');
   });
 });
+
+describe('daemon bootstrap env parity (codex-connector R18 P1)', () => {
+  it('sources the agent-proxy env marker in the MCP bootstrap wrapper', async () => {
+    // daemon 的两条启动路径 (transport bootstrap / 本模块 MCP bootstrap)
+    // 必须产出一致 env:bootstrap cmd 必须 source proxy marker — 否则本路径
+    // 重启的 daemon 丢 proxy env, 且 marker 内容未变时 proxy reconcile 走
+    // fast path 不再纠正, 远端流量永久旁路用户 proxy。
+    const { host, execCmds } = fakeHost('host-proxy-env-parity', '');
+    const result = await ensureRemoteCodexMcpBridge(host, {
+      ensureBridgeStarted: async () => ({ port: 38080, serverNames: SERVERS, bridgeInstanceId: 'bridge-1' }),
+      hasLiveTurnOnHost: () => false,
+    });
+    expect(result.ok).toBe(true);
+    const bootstrapCmd = execCmds.find((c) => c.includes('bootstrap'));
+    expect(bootstrapCmd).toBeTruthy();
+    expect(bootstrapCmd).toContain('agent-proxy.env');
+  });
+});
