@@ -6370,6 +6370,9 @@
       "identityGithubUser": "제출 계정: GitHub 사용자 @{{login}}(본인)",
       "identityPlatform": "제출 계정: Cindy 플랫폼 대리 제출(GitHub App {{login}})",
       "envLine": "제출 시 자동으로 첨부됩니다: 클라이언트 {{appVersion}} · {{platform}} {{arch}} · 표시 언어 {{uiLanguage}}",
+      "regionLine": "지역: {{region}}",
+      "regionCodeCn": "CN",
+      "regionCodeDev": "Dev",
       "submit": "제출",
       "cancel": "취소"
     },

@@ -21,6 +21,7 @@
  * - User-initiated stopSession (NOT called on session switch anymore)
  */
 
+import type { CindyRegion } from '@cindy/maker-shared/brand-identity';
 import { redactSensitiveText } from '@cindy/maker-shared/error-redaction';
 import { applyCodexPlanSnapshotOnDone } from '@cindy/maker-shared/message-render';
 import type { MessageRole, Message, MessageAutomationOrigin } from '@/lib/ccAgent.types';
@@ -88,6 +89,7 @@ import { getUserPrompt } from '@/lib/userPromptStore';
 import { getMakerMemoryEnabled } from '@/lib/memorySettingsStore';
 import { buildUserMessageAttachmentPayload } from '@/lib/messageAttachmentPayload';
 import {
+  parseIssueEnvRegion,
   parseIssueSubmissionIdentity,
   type IssueSubmissionIdentity,
 } from '@/lib/issueConfirmPayload';
@@ -572,8 +574,18 @@ export interface PendingPlanReview {
 export interface PendingIssueConfirm {
   requestId: string;
   draft: { title: string; body: string; type: 'bug' | 'feature' };
-  /** 只读展示的环境信息(main 会附进 issue body)。 */
-  env: { appVersion: string; platform: string; arch: string; osVersion: string };
+  /**
+   * 只读展示的环境信息(main 会附进 issue body)。`region` 是本构建的区域身份
+   * (中国版 / 国际版 / 开发版);main 侧 payload 未带时按 undefined 处理,卡片
+   * 省略该段而不是猜一个区域。
+   */
+  env: {
+    appVersion: string;
+    platform: string;
+    arch: string;
+    osVersion: string;
+    region?: CindyRegion;
+  };
   /** main 已经选定、确认后不会自动切换的实际 GitHub 作者身份。 */
   submissionIdentity: IssueSubmissionIdentity;
 }
@@ -3798,9 +3810,16 @@ function initGlobalListeners(): void {
       // ephemeral 卡片(同 permission 语义,无 persistId 不落库),直接写 state,
       // 不走 handleStreamEvent —— 它不属于 agent 事件流。
       const draft = request.draft as PendingIssueConfirm['draft'] | undefined;
-      const env = request.env as PendingIssueConfirm['env'] | undefined;
+      // region 必须先 Omit 掉再重建成 unknown:交叉类型做不到这件事
+      // (`CindyRegion & unknown` 仍是 `CindyRegion`),那样写会让 TS 以为 IPC 传来的
+      // region 已经是合法值,下面的白名单校验看着像在校验、实际没有类型层面的约束。
+      const rawEnv = request.env as
+        | (Omit<PendingIssueConfirm['env'], 'region'> & { region?: unknown })
+        | undefined;
       const submissionIdentity = parseIssueSubmissionIdentity(request.submissionIdentity);
-      if (!draft || !env || !submissionIdentity) return;
+      if (!draft || !rawEnv || !submissionIdentity) return;
+      // region 过一遍白名单:非法值宁可不展示区域,也不能把 CN 版说成默认版。
+      const env = { ...rawEnv, region: parseIssueEnvRegion(rawEnv.region) };
       setState(sessionId, (s) => ({
         ...s,
         pendingIssueConfirm: {
