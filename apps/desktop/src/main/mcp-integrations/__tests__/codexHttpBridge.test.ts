@@ -77,7 +77,7 @@ describe('codexHttpBridge', () => {
 
   it('accepts an additional bearer token (remote daemon) and rejects unknown tokens', async () => {
     bridge = await startCodexHttpBridge({
-      serverFactories: { cindy_test: createTestServer },
+      serverFactories: { cindy_orca: createTestServer, cindy_test: createTestServer },
       additionalBearerTokens: () => ['remote-persistent-token'],
       logger: noopLogger(),
     });
@@ -92,8 +92,8 @@ describe('codexHttpBridge', () => {
         clientInfo: { name: 'test-client', version: '1.0.0' },
       },
     });
-    const postInit = (token: string) =>
-      fetch(bridge!.url('cindy_test'), {
+    const postInit = (serverName: string, token: string) =>
+      fetch(bridge!.url(serverName), {
         method: 'POST',
         headers: {
           authorization: `Bearer ${token}`,
@@ -103,18 +103,26 @@ describe('codexHttpBridge', () => {
         body: initBody,
       });
 
-    // 主 token (per-run, 本地 codex 子进程) 可用 — 现状不变。
-    const mainResp = await postInit(bridge.token);
+    // 主 token (per-run, 本地 codex 子进程) 全通 — 白名单与非白名单都可用。
+    const mainResp = await postInit('cindy_orca', bridge.token);
     expect(mainResp.status).toBe(200);
     await mainResp.text();
+    const mainNonCollab = await postInit('cindy_test', bridge.token);
+    expect(mainNonCollab.status).toBe(200);
+    await mainNonCollab.text();
 
-    // additional token (远端常驻 daemon 的 persistent token) 同样放行。
-    const remoteResp = await postInit('remote-persistent-token');
+    // additional token (远端常驻 daemon 的 persistent token) 仅限协同白名单:
+    // 同一 remote-forward 能摸到完整 /mcp/<name> 路由, 拿到 token 的远端
+    // 进程不得初始化本机非协同 server (codex-connector P1 回归)。
+    const remoteResp = await postInit('cindy_orca', 'remote-persistent-token');
     expect(remoteResp.status).toBe(200);
     await remoteResp.text();
+    const remoteNonCollab = await postInit('cindy_test', 'remote-persistent-token');
+    expect(remoteNonCollab.status).toBe(403);
+    await remoteNonCollab.text();
 
     // 未知 token 一律 401 (防呆过滤)。
-    const badResp = await postInit('not-a-real-token');
+    const badResp = await postInit('cindy_orca', 'not-a-real-token');
     expect(badResp.status).toBe(401);
     await badResp.text();
   });
@@ -557,7 +565,9 @@ describe('codexHttpBridge', () => {
 
   it('resolves identity from ?session= query without _meta.threadId (remote cc)', async () => {
     bridge = await startCodexHttpBridge({
-      serverFactories: { cindy_test: createTestServer },
+      // remote cc 走 persistent token, 仅限协同白名单 — 用白名单内的
+      // cindy_orca 模拟真实 cc 流量 (scope 收窄后 cindy_test 会被 403)。
+      serverFactories: { cindy_orca: createTestServer },
       additionalBearerTokens: () => ['remote-persistent-token'],
       logger: noopLogger(),
     });
@@ -573,7 +583,7 @@ describe('codexHttpBridge', () => {
       accept: 'application/json, text/event-stream',
       'content-type': 'application/json',
     };
-    const sessionUrl = `${bridge.url('cindy_test')}?session=cc-session-1`;
+    const sessionUrl = `${bridge.url('cindy_orca')}?session=cc-session-1`;
     const initBody = (id: number) =>
       JSON.stringify({
         jsonrpc: '2.0',
@@ -664,8 +674,10 @@ describe('codexHttpBridge', () => {
 
   it('applies the frozen plugin policy to ?session= ctx tool calls (remote cc)', async () => {
     bridge = await startCodexHttpBridge({
-      serverFactories: { cindy_test: createTestServer },
-      pluginIdByServerName: { cindy_test: 'ssh' },
+      // server 名用白名单内的 cindy_orca 模拟真实 remote cc 流量
+      // (persistent token scope 收窄后非白名单 server 会被 403)。
+      serverFactories: { cindy_orca: createTestServer },
+      pluginIdByServerName: { cindy_orca: 'ssh' },
       additionalBearerTokens: () => ['remote-persistent-token'],
       logger: noopLogger(),
     });
@@ -685,7 +697,7 @@ describe('codexHttpBridge', () => {
       accept: 'application/json, text/event-stream',
       'content-type': 'application/json',
     };
-    const sessionUrl = `${bridge.url('cindy_test')}?session=cc-disabled`;
+    const sessionUrl = `${bridge.url('cindy_orca')}?session=cc-disabled`;
     const initResp = await fetch(sessionUrl, {
       method: 'POST',
       headers,
@@ -725,8 +737,10 @@ describe('codexHttpBridge', () => {
     // threadId 时, policy 判定不得按那个 thread ctx 放行 —— 执行态身份与
     // policy ctx 都必须是 ?session= 强优先。
     bridge = await startCodexHttpBridge({
-      serverFactories: { cindy_test: createTestServer },
-      pluginIdByServerName: { cindy_test: 'ssh' },
+      // server 名用白名单内的 cindy_orca 模拟真实 remote cc 流量
+      // (persistent token scope 收窄后非白名单 server 会被 403)。
+      serverFactories: { cindy_orca: createTestServer },
+      pluginIdByServerName: { cindy_orca: 'ssh' },
       additionalBearerTokens: () => ['remote-persistent-token'],
       logger: noopLogger(),
     });
@@ -751,7 +765,7 @@ describe('codexHttpBridge', () => {
       accept: 'application/json, text/event-stream',
       'content-type': 'application/json',
     };
-    const sessionUrl = `${bridge.url('cindy_test')}?session=cc-disabled`;
+    const sessionUrl = `${bridge.url('cindy_orca')}?session=cc-disabled`;
     const initResp = await fetch(sessionUrl, {
       method: 'POST',
       headers,

@@ -16,16 +16,18 @@
 import type { RemoteHost } from '@cindy/maker-remote-ssh';
 
 import type { CodexHttpBridge } from '../mcp-integrations/codexHttpBridge.js';
+import { REMOTE_COLLAB_SERVER_NAMES } from '../mcp-integrations/codexHttpBridge.js';
 import { getRemoteMcpBridgeToken } from '../mcp-integrations/remoteMcpBridgeToken.js';
 import { getSessionOrcaRole, getWorkerLink } from '../localDb/orcaTeamStore.js';
 
 /**
- * cc 远端允许经 remote-forward 暴露的 server 白名单。只放协同必需的
- * cindy_orca / orca_worker_bridge:其余 in-process server (cindy_memory 远端
- * 本就显式禁用、cindy_ssh 的 exec 从本机发起等) 维持"远端不可用"现状,
- * 收窄影响面,后续按需逐个评估放开。
+ * cc 远端允许经 remote-forward 暴露的 server 白名单 — 唯一真源在
+ * codexHttpBridge.ts (REMOTE_COLLAB_SERVER_NAMES, bridge 鉴权层对
+ * persistent token 也按它 scope):只放协同必需的 cindy_orca /
+ * orca_worker_bridge;其余 in-process server (cindy_memory 远端本就显式
+ * 禁用、cindy_ssh 的 exec 从本机发起等) 维持"远端不可用"现状,收窄影响面。
  */
-const CC_REMOTE_HTTP_MCP_SERVER_NAMES = new Set(['cindy_orca', 'orca_worker_bridge']);
+const CC_REMOTE_HTTP_MCP_SERVER_NAMES = REMOTE_COLLAB_SERVER_NAMES;
 
 /**
  * cc remote 的 MCP session ctx 合成:与 synthesizeOrcaVendorOptionsFromDb

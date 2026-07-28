@@ -282,6 +282,7 @@ export function setBeforeLocalCodexSessionStartHook(hook: (() => Promise<void>) 
 export async function ensureCodexMcpBridgeStartedForRemote(): Promise<{
   port: number;
   serverNames: string[];
+  bridgeInstanceId: string;
   bridge: CodexHttpBridge;
 } | null> {
   if (!_codexMcpProviders) return null;
@@ -301,7 +302,12 @@ export async function ensureCodexMcpBridgeStartedForRemote(): Promise<{
       forcedFreshCcBridgeSessions.clear();
       _lastBridgeForForcedFresh = cfg.bridge;
     }
-    return { port: cfg.bridge.port, serverNames: cfg.bridgeServerNames, bridge: cfg.bridge };
+    return {
+      port: cfg.bridge.port,
+      serverNames: cfg.bridgeServerNames,
+      bridgeInstanceId: cfg.bridge.instanceId,
+      bridge: cfg.bridge,
+    };
   } catch (err) {
     desktopMakerLogger.error('ensureCodexMcpBridgeStartedForRemote failed', {
       message: err instanceof Error ? err.message : String(err),

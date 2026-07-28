@@ -31,6 +31,18 @@ const SERVER_HEADER = 'Lizi_MCPS/1.0';
 const MCP_PATH_PREFIX = '/mcp/';
 const SHUTDOWN_TIMEOUT_MS = 5_000;
 /**
+ * 远端 (SSH remote-forward) 允许暴露的 server 白名单 — additionalBearerTokens
+ * (persistent token) 认证的请求只能访问这些 server。这是 codex/cc 两条远端
+ * 注入路径共享的唯一真源 (remote-ssh/codex-remote-mcp.ts 与
+ * maker-host/cc-remote-mcp.ts 都引用它, 不要各自另立常量):只放协同必需的
+ * cindy_orca / orca_worker_bridge;拿到 persistent token 的远端进程不得经
+ * bridge 初始化 cindy_ssh / cindy_memory 等本机 server。
+ */
+export const REMOTE_COLLAB_SERVER_NAMES: ReadonlySet<string> = new Set([
+  'cindy_orca',
+  'orca_worker_bridge',
+]);
+/**
  * init request body 上限 (1MB)。codex MCP init payload 实际 < 1KB,
  * 1MB 给极端情况留余量。超限直接 413 拒绝 — 防巨大 body 在 JSON.parse
  * 同步阶段卡 event loop 几秒。
@@ -42,6 +54,12 @@ const INIT_BODY_MAX_BYTES = 1 * 1024 * 1024;
 export interface CodexHttpBridge {
   port: number;
   token: string;
+  /**
+   * 本实例的代际 id (每次启动随机生成)。bridge 重建后旧实例签发的
+   * mcp-session-id 全部失效 — 远端常驻 daemon 的漂移检测据此触发
+   * re-bootstrap (写进受管段指纹), cc 侧据此清空 forcedFresh 集合。
+   */
+  instanceId: string;
   /** 拼出 codex 端 config 用的 URL，例如 http://127.0.0.1:54321/mcp/lizi_feishu */
   url(serverName: string): string;
   registerThreadContext(threadId: string, ctx: LiziMcpSessionContext): void;
@@ -122,15 +140,18 @@ export async function startCodexHttpBridge(
       }
 
       // bearer token 鉴权:主 token (per-run, 本地 codex 子进程) / 额外 token
-      // (persistent, 远端常驻 codex daemon 与远端 cc 共用)。
+      // (persistent, 远端常驻 codex daemon 与远端 cc 共用)。两类 token 权限
+      // 不同:主 token 全通;额外 token 只允许访问 REMOTE_COLLAB_SERVER_NAMES
+      // 白名单 (远端进程拿到 token 也不得初始化本机非协同 server)。
       const auth = req.headers['authorization'];
       const presented =
         typeof auth === 'string' && auth.startsWith('Bearer ') ? auth.slice(7) : null;
-      const accepted =
+      const isPrimaryToken = presented !== null && presented === token;
+      const isScopedRemoteToken =
+        !isPrimaryToken &&
         presented !== null &&
-        (presented === token ||
-          (opts.additionalBearerTokens?.().includes(presented) ?? false));
-      if (!accepted) {
+        (opts.additionalBearerTokens?.().includes(presented) ?? false);
+      if (!isPrimaryToken && !isScopedRemoteToken) {
         res.statusCode = 401;
         res.setHeader('WWW-Authenticate', 'Bearer');
         res.end();
@@ -169,6 +190,15 @@ export async function startCodexHttpBridge(
       if (!serverName) {
         res.statusCode = 404;
         res.end();
+        return;
+      }
+      // scoped (persistent) token 仅限协同白名单 server:同一 remote-forward
+      // 能摸到完整 /mcp/<name> 路由, 不得经它初始化本机非协同 server
+      // (cindy_ssh / cindy_memory 等) — codex-connector P1。
+      if (isScopedRemoteToken && !REMOTE_COLLAB_SERVER_NAMES.has(serverName)) {
+        res.statusCode = 403;
+        res.end();
+        log.warn('rejected scoped remote token for non-collab server', { serverName });
         return;
       }
       const createMcpServer = opts.serverFactories[serverName];
@@ -296,6 +326,7 @@ export async function startCodexHttpBridge(
   return {
     port,
     token,
+    instanceId: randomBytes(8).toString('hex'),
     url: (serverName) => `http://127.0.0.1:${port}${MCP_PATH_PREFIX}${encodeURIComponent(serverName)}`,
     registerThreadContext: threadContextStore.registerThreadContext,
     unregisterThreadContext: threadContextStore.unregisterThreadContext,
