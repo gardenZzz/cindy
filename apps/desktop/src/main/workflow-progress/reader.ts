@@ -41,11 +41,21 @@ export function deriveWorkflowsDir(
   workingDir: string,
   sdkSessionId: string,
 ): string {
+  return homePathModule(homeDir).join(
+    deriveProjectDir(homeDir, workingDir),
+    sdkSessionId,
+    'workflows',
+  );
+}
+
+/** 该工作目录的 project 根(各 sdkSessionId 子目录的父级)。 */
+function deriveProjectDir(homeDir: string, workingDir: string): string {
   const slug = workingDir.replace(/[^a-zA-Z0-9]/g, '-');
-  const homePath = /^[A-Za-z]:[\\/]/.test(homeDir) || homeDir.startsWith('\\\\')
-    ? path.win32
-    : path.posix;
-  return homePath.join(homeDir, '.claude', 'projects', slug, sdkSessionId, 'workflows');
+  return homePathModule(homeDir).join(homeDir, '.claude', 'projects', slug);
+}
+
+function homePathModule(homeDir: string): typeof path.posix {
+  return /^[A-Za-z]:[\\/]/.test(homeDir) || homeDir.startsWith('\\\\') ? path.win32 : path.posix;
 }
 
 function asString(v: unknown): string | undefined {
@@ -191,6 +201,50 @@ export async function readWorkflowProgressByTaskId(
     } catch {
       continue; // 单个文件坏了不影响其它
     }
+  }
+  return null;
+}
+
+/** 跨 session 扫描的目录数上限:防御异常庞大的 project 目录,正常仓库远够用。 */
+const CROSS_SESSION_SCAN_MAX_DIRS = 200;
+
+/**
+ * 按 taskId 定位 workflow 记录,带跨 sdkSessionId 换代兜底:
+ * 1. 先读当前 sdkSessionId 的精确目录(绝大多数命中在这);
+ * 2. miss 时扫描同 project 下其它 session 目录 —— CC resume 会换 sdkSessionId,
+ *    换代前跑的 workflow 记录留在旧目录,只用最新 id 定位必落空。
+ * taskId(wf_ 随机 id)全局唯一,跨目录匹配不会错配;目录数超上限时放弃剩余
+ * (best-effort,与其余读取路径同一降级语义)。
+ */
+export async function readWorkflowProgressForSession(
+  homeDir: string,
+  workingDir: string,
+  sdkSessionId: string,
+  taskId: string,
+): Promise<WorkflowProgress | null> {
+  const exact = await readWorkflowProgressByTaskId(
+    deriveWorkflowsDir(homeDir, workingDir, sdkSessionId),
+    taskId,
+  );
+  if (exact) return exact;
+  const projectDir = deriveProjectDir(homeDir, workingDir);
+  const homePath = homePathModule(homeDir);
+  let sessionDirs: string[];
+  try {
+    sessionDirs = await fs.readdir(projectDir);
+  } catch {
+    return null;
+  }
+  let scanned = 0;
+  for (const name of sessionDirs) {
+    if (name === sdkSessionId) continue; // 精确目录已查过
+    if (scanned >= CROSS_SESSION_SCAN_MAX_DIRS) break;
+    scanned += 1;
+    const progress = await readWorkflowProgressByTaskId(
+      homePath.join(projectDir, name, 'workflows'),
+      taskId,
+    );
+    if (progress) return progress;
   }
   return null;
 }

@@ -8,6 +8,7 @@ import {
   deriveWorkflowsDir,
   extractWorkflowProgress,
   readWorkflowProgressByTaskId,
+  readWorkflowProgressForSession,
 } from '../reader';
 
 // 取自实测的真实 wf_*.json 结构(裁剪;2026-07 样本含 lastTool*/resultPreview/
@@ -266,5 +267,44 @@ describe('readWorkflowProgressByTaskId', () => {
 
   it('returns null for empty taskId', async () => {
     expect(await readWorkflowProgressByTaskId(dir, '')).toBeNull();
+  });
+});
+
+describe('readWorkflowProgressForSession(跨 sdkSessionId 换代兜底)', () => {
+  let home: string;
+  // slug 规则:非字母数字 → '-'(含前导 '/')。
+  const workingDir = '/tmp/proj x';
+  const slug = '-tmp-proj-x';
+
+  beforeEach(async () => {
+    home = await fs.mkdtemp(path.join(os.tmpdir(), 'wf-home-'));
+  });
+  afterEach(async () => {
+    await fs.rm(home, { recursive: true, force: true });
+  });
+
+  async function writeRecord(sdkSessionId: string, record: Record<string, unknown>) {
+    const dir = path.join(home, '.claude', 'projects', slug, sdkSessionId, 'workflows');
+    await fs.mkdir(dir, { recursive: true });
+    await fs.writeFile(path.join(dir, `${String(record.runId)}.json`), JSON.stringify(record));
+  }
+
+  it('当前 sdkSessionId 目录命中时直接返回', async () => {
+    await writeRecord('sdk-new', { runId: 'wf_new', taskId: 't1', workflowProgress: [] });
+    const p = await readWorkflowProgressForSession(home, workingDir, 'sdk-new', 't1');
+    expect(p?.runId).toBe('wf_new');
+  });
+
+  it('resume 换代后:精确目录 miss,按 taskId 在旧 session 目录里找到记录', async () => {
+    await writeRecord('sdk-old', { runId: 'wf_old', taskId: 't1', workflowProgress: [] });
+    await writeRecord('sdk-new', { runId: 'wf_x', taskId: 'other', workflowProgress: [] });
+    const p = await readWorkflowProgressForSession(home, workingDir, 'sdk-new', 't1');
+    expect(p?.runId).toBe('wf_old');
+  });
+
+  it('全部目录无匹配 → null;project 目录不存在 → null(不抛)', async () => {
+    await writeRecord('sdk-old', { runId: 'wf_old', taskId: 'other', workflowProgress: [] });
+    expect(await readWorkflowProgressForSession(home, workingDir, 'sdk-new', 'missing')).toBeNull();
+    expect(await readWorkflowProgressForSession(home, '/no/such/proj', 'sdk-x', 't1')).toBeNull();
   });
 });
