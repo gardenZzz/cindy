@@ -155,6 +155,23 @@ describe('listSessionTasks 配对', () => {
     expect(byToolUseId('tu-none').taskId).toBeUndefined();
   });
 
+  it('无 toolUseId 的旧 Workflow:adjacency 命中的结果文本同样恢复 taskId(与 settled 判定同口径)', () => {
+    const { completed } = listSessionTasks({
+      messages: [
+        toolUse('c1', null, 'Workflow'),
+        toolResult('r1', null, 'Workflow launched in background. Task ID: wf_legacy7'),
+      ],
+      taskUpdates: undefined,
+      isSessionStreaming: false,
+    });
+    expect(completed).toHaveLength(1);
+    expect(completed[0]).toMatchObject({
+      kind: 'workflow',
+      status: 'completed',
+      taskId: 'wf_legacy7',
+    });
+  });
+
   it('提取出的 taskId 进去重别名:同 taskId 的孤儿 update 不再重复出行', () => {
     const orphan = makeUpdate({ taskId: 'w9gvjxzk1', taskType: 'local_workflow' });
     const { running, completed } = listSessionTasks({

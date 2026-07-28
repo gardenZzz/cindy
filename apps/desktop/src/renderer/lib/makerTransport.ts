@@ -209,7 +209,9 @@ export function getWorkflowProgressFor(
   sessionId: string,
   taskId: string,
 ): Promise<import('../../shared/workflow-progress').WorkflowProgress | null> {
-  const deviceId = getSessionDeviceId(sessionId);
+  // 粘滞归属(与 listSessionBackgroundTasksFor 同款):relay 瞬时重连清空注册表的
+  // 窗口内误判本机会在本地读必空,且详情视图不会因归属恢复而重试。
+  const deviceId = getStickySessionDeviceId(sessionId);
   if (!deviceId) return window.electronAPI.maker.getWorkflowProgress(sessionId, taskId);
   const blockedUntil = workflowProgressUnsupportedUntil.get(deviceId);
   if (blockedUntil !== undefined && blockedUntil > Date.now()) return Promise.resolve(null);
