@@ -309,6 +309,38 @@ export class AppServerHost {
     return this.startPromise;
   }
 
+  /**
+   * ensureStarted 的限时变体 (codex R13 P1): startSession 直调路径用。
+   * 冷启动 / transport 重建时 bootstrap 也可能永不返回 (远端 daemon 挂死 /
+   * SSH 通道无响应) — request() 的关键 RPC 已带 startup+request 整体
+   * deadline, 但 startSession 的 initialize 直调绕开了它, 需要同款上界,
+   * 否则 UI 无限卡 session 初始化。
+   *
+   * 与 request() 内 startup deadline 同款语义: 超时只 reject 本次等待,
+   * startPromise 后台继续 (并发共享, 下次调用可直接复用其结果), 挂
+   * swallow catch 防迟到 settle 变 unhandled rejection。
+   */
+  async ensureStartedWithTimeout(timeoutMs: number, label: string): Promise<InitializeResponse> {
+    const started = this.ensureStarted();
+    let timer: NodeJS.Timeout | null = null;
+    try {
+      return await Promise.race([
+        started,
+        new Promise<never>((_, reject) => {
+          timer = setTimeout(() => {
+            reject(new Error(`app-server startup (for ${label}) timed out after ${timeoutMs}ms`));
+          }, timeoutMs);
+          timer.unref?.();
+        }),
+      ]);
+    } catch (err) {
+      started.catch(() => { /* late startup failure swallowed after timeout */ });
+      throw err;
+    } finally {
+      if (timer) clearTimeout(timer);
+    }
+  }
+
   private async bootstrap(capabilities?: InitializeCapabilities): Promise<InitializeResponse> {
     const client = new AppServerClient({
       createTransport: this.opts.createTransport,

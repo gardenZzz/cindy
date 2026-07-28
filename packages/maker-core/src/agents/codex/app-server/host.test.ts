@@ -140,3 +140,28 @@ describe('AppServerHost.request startup timeout', () => {
     await host.shutdown();
   });
 });
+
+describe('AppServerHost.ensureStartedWithTimeout', () => {
+  it('rejects when startup hangs past the budget and keeps the shared bootstrap reusable (codex R13 P1)', async () => {
+    // startSession 的 initialize 直调与 request() 的 startup deadline 同款语义:
+    // 超时只截断本次等待, startPromise 后台继续, 后续调用直接复用不重新 spawn。
+    const createTransport = vi.fn(() => new DelayedTransport(60));
+    const host = new AppServerHost({
+      createTransport,
+      logger,
+      clientInfo: { name: 'cindy-test', version: '0.0.0' },
+    });
+
+    await expect(host.ensureStartedWithTimeout(20, 'startSession initialize')).rejects.toThrow(
+      'app-server startup (for startSession initialize) timed out after 20ms',
+    );
+
+    // 后台 bootstrap (60ms) 完成后, 同一个 startPromise 直接可用。
+    await expect(host.ensureStartedWithTimeout(1_000, 'startSession initialize')).resolves.toMatchObject({
+      userAgent: 'mock-codex/test',
+    });
+    expect(createTransport).toHaveBeenCalledTimes(1);
+
+    await host.shutdown();
+  });
+});
