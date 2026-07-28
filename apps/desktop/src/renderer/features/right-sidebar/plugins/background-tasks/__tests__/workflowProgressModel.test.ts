@@ -291,7 +291,7 @@ describe('buildWorkflowTreeModel', () => {
     expect(noFile.aggregate.status).toBe('running');
   });
 
-  it('aggregate.agentCount:file.agentCount 优先,缺失取 agent 行数', () => {
+  it('aggregate.agentCount:file.agentCount 与实时行数取大;文件缺失取行数', () => {
     const entries: WorkflowProgressEntry[] = [
       agentEntry(0, { agentId: 'a1', label: 'l1', state: 'running' }),
       agentEntry(1, { agentId: 'a2', label: 'l2', state: 'running' }),
@@ -302,6 +302,14 @@ describe('buildWorkflowTreeModel', () => {
       taskStatus: 'running',
     })!;
     expect(withCount.aggregate.agentCount).toBe(7);
+
+    // 运行期文件快照滞后(agentCount 还是 0 而实时行已 spawn)→ 不得盖过行数。
+    const staleFile = buildWorkflowTreeModel({
+      entries,
+      fileProgress: fileProgress({ agentCount: 0 }),
+      taskStatus: 'running',
+    })!;
+    expect(staleFile.aggregate.agentCount).toBe(2);
 
     const withoutCount = buildWorkflowTreeModel({ entries, taskStatus: 'running' })!;
     expect(withoutCount.aggregate.agentCount).toBe(2);

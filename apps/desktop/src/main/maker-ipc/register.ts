@@ -277,10 +277,7 @@ import {
   recordTurnSpend,
 } from '../usageBroadcaster.js';
 import { throwIpcError } from '../utils/ipcValidate.js';
-import {
-  deriveWorkflowsDir,
-  readWorkflowProgressByTaskId,
-} from '../workflow-progress/reader.js';
+import { readWorkflowProgressForSession } from '../workflow-progress/reader.js';
 import {
   AgentInputCoordinator,
 } from './agent-input-coordinator.js';
@@ -3271,14 +3268,13 @@ export function registerMakerIpc(maker: Maker, options: RegisterMakerIpcOptions 
           if (s.remoteHostId) return null;
           const { sdkSessionId, workDir } = s;
           if (!sdkSessionId || !workDir) return null;
-          const dir = deriveWorkflowsDir(os.homedir(), workDir, sdkSessionId);
-          return await readWorkflowProgressByTaskId(dir, taskId);
+          // reader 内部带跨 sdkSessionId 换代兜底:resume 换代前跑的 workflow
+          // 记录在旧 session 目录,精确目录 miss 后按 taskId 扫同 project 下其它目录。
+          return await readWorkflowProgressForSession(os.homedir(), workDir, sdkSessionId, taskId);
         }
         // 会话不活跃(app 重启后看历史 / 会话已被关闭释放):workflow 记录文件仍在
-        // 本机磁盘,回退持久化 session 行的 working_dir + sdk_session_id 定位目录。
-        // 边界:remote_host_id 非空(SSH)与活跃分支同理返回 null;DB 存的是**最新**
-        // sdkSessionId,resume 换代后旧 workflow 的目录对不上 → reader 找不到文件
-        // 返回 null,与活跃分支同样降级,不会误读别的会话的记录。
+        // 本机磁盘,回退持久化 session 行的 working_dir + sdk_session_id 定位目录
+        // (同样带跨换代兜底)。remote_host_id 非空(SSH)与活跃分支同理返回 null。
         const db = getDbClient().drizzle;
         const rows = await db
           .select({
@@ -3291,8 +3287,12 @@ export function registerMakerIpc(maker: Maker, options: RegisterMakerIpcOptions 
           .limit(1);
         const row = rows[0];
         if (!row || row.remoteHostId || !row.sdkSessionId || !row.workingDir) return null;
-        const dir = deriveWorkflowsDir(os.homedir(), row.workingDir, row.sdkSessionId);
-        return await readWorkflowProgressByTaskId(dir, taskId);
+        return await readWorkflowProgressForSession(
+          os.homedir(),
+          row.workingDir,
+          row.sdkSessionId,
+          taskId,
+        );
       } catch {
         return null;
       }

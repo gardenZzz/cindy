@@ -130,7 +130,12 @@ export function buildWorkflowTreeModel(input: {
   const fileStatus = file?.status;
   return {
     aggregate: {
-      agentCount: file?.agentCount ?? agentRowCount,
+      // 两源取大:运行期文件快照可能滞后(agentCount 还是 0 而实时行已 spawn),
+      // 不得让陈旧文件值盖过可见行数;终态时文件计数 ≥ 行数(条目截断),取大同样对。
+      agentCount:
+        file?.agentCount !== undefined
+          ? Math.max(file.agentCount, agentRowCount)
+          : agentRowCount,
       // 文件已有终态结论时以文件为准(词表更细,如 killed);否则跟随任务状态。
       status:
         fileStatus !== undefined && TERMINAL_FILE_STATUSES.has(fileStatus)
