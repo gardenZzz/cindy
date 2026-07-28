@@ -7033,6 +7033,150 @@ describe('CodexAgent turn lifecycle', () => {
     await handle.close();
   });
 
+  it('quarantines an orphan terminal error that arrives before its turnStarted (codex R14 P1)', async () => {
+    // 孤儿 turn 的终态 error 可以比它的 turnStarted 先到: id 尚未入 buffer,
+    // 若只按 buffered 集合拦截会穿透 (targetsPendingTurn=true 被按在飞 send
+    // 的终态处理, 终结合法的新 send) — 孤儿守卫 + pending + 无活跃 turn 时
+    // 未知 id 的 error 视同 started 预缓冲, 等对账。
+    const firstStart = deferred<unknown>();
+    const secondStart = deferred<unknown>();
+    let attempt = 0;
+    const agent = new CodexAgent(createDeps());
+    const host = installFakeHost(agent, (method) => {
+      if (method === Method.TurnStart) {
+        attempt += 1;
+        if (attempt === 1) return firstStart.promise;
+        return secondStart.promise;
+      }
+      return undefined;
+    });
+    const handle = await agent.startSession({
+      sessionId: 'session-orphan-error-first',
+      model: 'gpt-5.4',
+      workingDir: '/repo',
+    });
+    const subscribeCalls = host.subscribeThread.mock.calls as unknown as Array<[string, ThreadEventHandlers]>;
+    const handlers = subscribeCalls[0]?.[1];
+    const iterator = handle.events()[Symbol.asyncIterator]();
+
+    const send1 = handle.send({ type: 'user', content: 'first' });
+    for (let i = 0; i < 5; i += 1) {
+      if (host.request.mock.calls.some(([method]) => method === Method.TurnStart)) break;
+      await Promise.resolve();
+    }
+    firstStart.reject(new Error('codex app-server turn/start timed out after 60000ms'));
+    await send1;
+    expect(await nextEvent(iterator)).toMatchObject({ type: 'status', data: { isRunning: true } });
+    expect(await nextEvent(iterator)).toMatchObject({ type: 'error', data: { isTerminal: true } });
+    expect(await nextEvent(iterator)).toMatchObject({
+      type: 'status',
+      data: { status: 'Done', isRunning: false },
+    });
+
+    const send2 = handle.send({ type: 'user', content: 'second' });
+    for (let i = 0; i < 5; i += 1) {
+      if (host.request.mock.calls.filter(([method]) => method === Method.TurnStart).length >= 2) break;
+      await Promise.resolve();
+    }
+    expect(await nextEvent(iterator)).toMatchObject({ type: 'status', data: { isRunning: true } });
+    // 孤儿 turn 的 terminal error 先于它的 turnStarted 到达: 预缓冲, 不穿透。
+    handlers.error?.({
+      threadId: 'start-thread-id',
+      turnId: 'orphan-turn',
+      scope: 'turn',
+      willRetry: false,
+      error: { message: 'orphan turn died server-side' },
+    });
+    // send2 不被终结: 事件流安静, 无 error / Done 出来。
+    await expect(nextEvent(iterator)).rejects.toThrow('timed out waiting for event');
+
+    // 响应 turn-2 ≠ orphan-turn → 孤儿坐实: 墓碑 + interrupt; turn-2 激活。
+    secondStart.resolve({ turn: { id: 'turn-2' } });
+    await send2;
+    await vi.waitFor(() => {
+      expect(host.request).toHaveBeenCalledWith(
+        Method.TurnInterrupt,
+        expect.objectContaining({ threadId: 'start-thread-id', turnId: 'orphan-turn' }),
+      );
+    });
+    expect(handle.isTurnRunning?.()).toBe(true);
+    expect(handle.getCurrentTurnId?.()).toBe('turn-2');
+    await handle.close();
+  });
+
+  it('keeps the orphan guard after a successful turn so a late orphan turnStarted is tombstoned (codex R14 P1)', async () => {
+    // 失败 RPC 的 turnStarted 可能在新 turn 完成后才到 (currentTurnId 已回
+    // null, 无 pending): 守卫若在成功响应时解除, 迟到的孤儿 started 会被
+    // 正常激活成假 running (会话永久卡) — 守卫保持, 按孤儿墓碑 + interrupt。
+    const firstStart = deferred<unknown>();
+    const secondStart = deferred<unknown>();
+    let attempt = 0;
+    const agent = new CodexAgent(createDeps());
+    const host = installFakeHost(agent, (method) => {
+      if (method === Method.TurnStart) {
+        attempt += 1;
+        if (attempt === 1) return firstStart.promise;
+        return secondStart.promise;
+      }
+      return undefined;
+    });
+    const handle = await agent.startSession({
+      sessionId: 'session-late-orphan-started',
+      model: 'gpt-5.4',
+      workingDir: '/repo',
+    });
+    const subscribeCalls = host.subscribeThread.mock.calls as unknown as Array<[string, ThreadEventHandlers]>;
+    const handlers = subscribeCalls[0]?.[1];
+    const iterator = handle.events()[Symbol.asyncIterator]();
+
+    const send1 = handle.send({ type: 'user', content: 'first' });
+    for (let i = 0; i < 5; i += 1) {
+      if (host.request.mock.calls.some(([method]) => method === Method.TurnStart)) break;
+      await Promise.resolve();
+    }
+    firstStart.reject(new Error('codex app-server turn/start timed out after 60000ms'));
+    await send1;
+    expect(await nextEvent(iterator)).toMatchObject({ type: 'status', data: { isRunning: true } });
+    expect(await nextEvent(iterator)).toMatchObject({ type: 'error', data: { isTerminal: true } });
+    expect(await nextEvent(iterator)).toMatchObject({
+      type: 'status',
+      data: { status: 'Done', isRunning: false },
+    });
+
+    // 第二次 send 正常完成: started 缓冲 → 响应激活 → completed 收口。
+    const send2 = handle.send({ type: 'user', content: 'second' });
+    for (let i = 0; i < 5; i += 1) {
+      if (host.request.mock.calls.filter(([method]) => method === Method.TurnStart).length >= 2) break;
+      await Promise.resolve();
+    }
+    expect(await nextEvent(iterator)).toMatchObject({ type: 'status', data: { isRunning: true } });
+    handlers.turnStarted?.({ threadId: 'start-thread-id', turn: { id: 'turn-2' } });
+    secondStart.resolve({ turn: { id: 'turn-2' } });
+    await send2;
+    expect(handle.getCurrentTurnId?.()).toBe('turn-2');
+    handlers.turnCompleted?.({ threadId: 'start-thread-id', turn: { id: 'turn-2', status: 'completed' } });
+    expect(await nextEvent(iterator)).toMatchObject({
+      type: 'status',
+      data: { status: 'Done', isRunning: false },
+    });
+    await nextEvent(iterator); // done 事件
+    expect(handle.isTurnRunning?.()).toBe(false);
+    expect(handle.getCurrentTurnId?.()).toBeNull();
+
+    // 失败 RPC 的孤儿 started 此刻才迟到: 守卫保持 → 墓碑 + interrupt,
+    // 不得激活成假 running。
+    handlers.turnStarted?.({ threadId: 'start-thread-id', turn: { id: 'orphan-turn' } });
+    expect(handle.isTurnRunning?.()).toBe(false);
+    expect(handle.getCurrentTurnId?.()).toBeNull();
+    await vi.waitFor(() => {
+      expect(host.request).toHaveBeenCalledWith(
+        Method.TurnInterrupt,
+        expect.objectContaining({ threadId: 'start-thread-id', turnId: 'orphan-turn' }),
+      );
+    });
+    await handle.close();
+  });
+
   it('does not escalate rate-limit backoff retries to a terminal backend-unreachable error (codex R12 P2)', async () => {
     // 429 / usage-limit 的 willRetry 是 provider 退避窗口, daemon 会在窗口后
     // 自己成功 — 不得计入 retry 升级, 否则可恢复的限流被误杀成「后端不可达」。

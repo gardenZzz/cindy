@@ -3816,8 +3816,23 @@ export class CodexAgent extends BaseAgent {
     // 合法则激活后按序重放 (早期输出不丢, 终态自然收口), 孤儿则整队丢弃。
     // 返回 true = 已入队, 调用方直接 return。重放闭包执行时 buffer 已清空
     // 且 turn 已激活, 重进 handler 会走正常路径, 不会二次入队。
+    //
+    // 孤儿证据可以比它的 turnStarted 先到 (codex R14 P1): error/item 先到
+    // 时 id 尚未入 buffer, 会穿透 stale guard 被按在飞 send 处理 — 孤儿
+    // 守卫生效 + 新 RPC 在飞 + 无活跃 turn 时, 未知 id 视同 started 先进
+    // buffer 再入队, 等对账。
     const enqueueIfBufferedTurn = (turnId: string | null | undefined, replay: () => void): boolean => {
-      if (!turnId || !bufferedOrphanTurnIds.has(turnId)) return false;
+      if (!turnId) return false;
+      if (!bufferedOrphanTurnIds.has(turnId)) {
+        if (!(turnStartFailedWithoutTurnId && isTurnStartPending && currentTurnId === null)) {
+          return false;
+        }
+        bufferedOrphanTurnIds.add(turnId);
+        log.debug('buffering ambiguous turn event (evidence before turnStarted) until turn/start response arrives', {
+          turnId,
+          threadId,
+        });
+      }
       const queue = bufferedTurnEventQueues.get(turnId) ?? [];
       queue.push(replay);
       bufferedTurnEventQueues.set(turnId, queue);
@@ -4811,9 +4826,14 @@ export class CodexAgent extends BaseAgent {
                 turnRetryTracker.reset();
               }
             }
-            // turn/start 成功 → 孤儿守卫解除 (上次失败的 RPC 若也有迟到 started,
-            // 那是一次新的语义重叠, 由 turn id 匹配路径处理)。
-            turnStartFailedWithoutTurnId = false;
+            // turn/start 成功后孤儿守卫**保持**, 不解除 (codex R14 P1): 失败
+            // RPC 的孤儿证据 (turnStarted/error/completed) 可能任意晚才到 —
+            // 解除后迟到的孤儿 started 在 currentTurnId===null 窗口会被正常
+            // 激活成假 running (会话永久卡)。守卫保持下: 未知 id 的迟到
+            // started 按孤儿墓碑 + interrupt; 合法 turn 的 started 由
+            // currentTurnId 匹配 (重复 started 幂等) 或 buffered 对账放行,
+            // 不受影响。守卫在 RPC 失败路径 (4413) 已把在飞 buffer 坐实孤儿,
+            // 语义依然自洽。
             // 墓碑: 该 turn 的终态已抢在本响应之前到达 (典型: 收紧补中断后
             // turnCompleted(interrupted) 先回), 不得重新置活, 否则会话卡 running。
             const alreadyCompleted = turnsCompletedBeforeStartResp.has(resp.turn.id);
