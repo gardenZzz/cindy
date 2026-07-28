@@ -160,9 +160,12 @@ export interface HookDispatcherDeps {
    * 可选: 为派发组装本地群上下文前缀(group-relay-v1 窗口, 生产为
    * groupWindow.buildGroupContextPrefix)。只影响发给 agent 的 prompt,
    * 不影响会话标题与 UI 渲染(二者用 source.userText / 原始 prompt);
-   * 失败或空串 = 无前缀, 绝不因上下文拒单。
+   * 失败或空装配 = 无前缀, 绝不因上下文拒单。commit 在任务被受理
+   * (accepted/queued)后由本模块调用, 拒单不推进窗口游标。
    */
-  buildContextPrefix?: (payload: TaskDispatchPayload) => Promise<string>;
+  buildContextPrefix?: (
+    payload: TaskDispatchPayload,
+  ) => Promise<{ prefix: string; commit: () => void }>;
   /**
    * 可选: 内置「对话」伪目录(chat 保留别名)的解析面。rootDir 在每次
    * dispatch 时解析当前 data owner 的 app 托管目录根，allocateDir 为新会话
@@ -961,9 +964,12 @@ export function createHookDispatcher(deps: HookDispatcherDeps): HookDispatcher {
     serializeByKey(`${connectionId} ${payload.externalKey}`, async () => {
       try {
         let contextPrefix = '';
+        let commitContextCursor: () => void = () => undefined;
         if (buildContextPrefix) {
           try {
-            contextPrefix = await buildContextPrefix(dispatchPayload);
+            const assembly = await buildContextPrefix(dispatchPayload);
+            contextPrefix = assembly.prefix;
+            commitContextCursor = assembly.commit;
           } catch (error) {
             log.warn(`group context prefix failed, dispatching without it: ${String(error)}`);
           }
@@ -1008,6 +1014,7 @@ export function createHookDispatcher(deps: HookDispatcherDeps): HookDispatcher {
           }
           queue.push(task);
           queues.set(sessionId, queue);
+          commitContextCursor();
           reply(connectionId, send, {
             requestId: payload.requestId,
             result: 'queued',
@@ -1022,6 +1029,7 @@ export function createHookDispatcher(deps: HookDispatcherDeps): HookDispatcher {
         }
 
         running.add(sessionId);
+        commitContextCursor();
         reply(connectionId, send, {
           requestId: payload.requestId,
           result: 'accepted',
