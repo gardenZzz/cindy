@@ -1658,6 +1658,7 @@ describe('SSH remote worker model/provider compatibility gate (R23 P2)', () => {
         { id: 'chatgpt/gpt-5.5', efforts: ['low', 'medium', 'high', 'xhigh'], defaultEffort: 'high', supportsFastMode: true },
       ]),
       getProviderRoutingContext: vi.fn(async () => providerRoutingContext({
+        'claude-code': [],
         codex: [{ id: 'chatgpt', name: 'ChatGPT Subscription', models: ['chatgpt/gpt-5.5'] }],
       })),
     });
@@ -1685,6 +1686,7 @@ describe('SSH remote worker model/provider compatibility gate (R23 P2)', () => {
         { id: 'deepseek-v4', efforts: ['low', 'medium', 'high', 'xhigh'], defaultEffort: 'high', supportsFastMode: true },
       ]),
       getProviderRoutingContext: vi.fn(async () => providerRoutingContext({
+        'claude-code': [],
         codex: [{ id: 'deepseek', name: 'DeepSeek', models: ['deepseek-v4'], chatBridgedCodex: true }],
       })),
     });
