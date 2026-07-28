@@ -312,7 +312,7 @@ function AgentProxyTunnelCard({ hostId }: { hostId: string }) {
         className="flex items-center gap-2 rounded-lg p-3 text-12"
         style={{
           border: '1px solid var(--settings-theme-card-border)',
-          color: isError ? 'var(--error-fg, #dc2626)' : 'var(--settings-integration-subtitle)',
+          color: isError ? 'var(--error-fg)' : 'var(--settings-integration-subtitle)',
         }}
       >
         <Waypoints size={14} className="shrink-0" />
