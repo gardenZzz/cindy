@@ -14,6 +14,7 @@ import {
   stripEmptyThinkingFromBody,
   stripEncryptedContentFromBody,
   stripImageGenerationItemsWithoutIdFromBody,
+  stripNonAnthropicFields,
   stripToolUseProviderSpecificFields,
   stripToolUseProviderSpecificFieldsFromBody,
 } from './transform.js';
@@ -856,5 +857,72 @@ describe('recovery rule factories', () => {
     expect(
       rule.strip(buf({ messages: [{ role: 'assistant', content: [{ type: 'tool_use', provider_specific_fields: null }] }] })),
     ).not.toBeNull();
+  });
+});
+
+describe('stripNonAnthropicFields · glm-5.2 tool_result 图像降级 (#794)', () => {
+  const imageBlock = {
+    type: 'image',
+    source: { type: 'base64', media_type: 'image/png', data: 'AAAABBBB' },
+  };
+  const makeBody = (model: string): Record<string, unknown> => ({
+    model,
+    messages: [
+      { role: 'user', content: 'read the scan' },
+      {
+        role: 'user',
+        content: [
+          {
+            type: 'tool_result',
+            tool_use_id: 't1',
+            content: [{ type: 'text', text: 'scan follows' }, imageBlock],
+          },
+        ],
+      },
+    ],
+  });
+
+  it.each(['glm-5.2', 'z-ai/glm-5.2', 'glm-5.2[1m]', 'z-ai/glm-5.2[1m]'])(
+    '%s:tool_result 图像替换为说明性占位文本,图像字节不外泄',
+    (model) => {
+      const out = stripNonAnthropicFields(makeBody(model), ctx) as Record<string, unknown> | null;
+      expect(out).not.toBeNull();
+      const json = JSON.stringify(out);
+      expect(json).not.toContain('AAAABBBB');
+      expect(json).toContain('[image omitted:');
+      expect(json).toContain('Do NOT guess');
+      // 同一 tool_result 的文本块保留,块结构仍是 tool_result。
+      expect(json).toContain('scan follows');
+      expect(json).toContain('tool_result');
+    },
+  );
+
+  it('glm-5.2 无图像时返回 null(cache 安全契约,字节透传)', () => {
+    const body = {
+      model: 'glm-5.2',
+      messages: [
+        {
+          role: 'user',
+          content: [
+            { type: 'tool_result', tool_use_id: 't1', content: [{ type: 'text', text: 'ok' }] },
+          ],
+        },
+      ],
+    };
+    expect(stripNonAnthropicFields(body, ctx)).toBeNull();
+  });
+
+  it('未登记的 model 不受影响(字节透传)', () => {
+    expect(
+      stripNonAnthropicFields(makeBody('claude-opus-5'), ctx),
+    ).toBeNull();
+  });
+
+  it('user 消息里的图像不动,只处理 tool_result 内嵌图像', () => {
+    const body = {
+      model: 'glm-5.2',
+      messages: [{ role: 'user', content: [imageBlock] }],
+    };
+    expect(stripNonAnthropicFields(body, ctx)).toBeNull();
   });
 });

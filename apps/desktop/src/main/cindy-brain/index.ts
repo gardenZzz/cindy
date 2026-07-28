@@ -2057,6 +2057,9 @@ export async function executeGhostSetupAction(args: {
       args.ghostId,
       secretKey,
       decl,
+      runtimeManifest.network?.hosts?.length
+        ? { deliveryHosts: runtimeManifest.network.hosts }
+        : undefined,
     );
     return connected.ok
       ? { ok: true }
@@ -2693,6 +2696,7 @@ export function registerGhostIpc(): void {
       pathname,
       readBodyText,
       oauthSecrets,
+      networkHosts: runtimeManifest.network?.hosts,
       manager: getGhostOauthAccountManager(),
       ghostId,
       onChanged: (secretKey) => {

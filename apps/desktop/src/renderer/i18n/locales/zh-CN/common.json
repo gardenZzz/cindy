@@ -4041,7 +4041,14 @@
       "trigger": {
         "placeholder": "选择模型",
         "aria": "选择模型。当前：{{model}}",
-        "ariaWithEffort": "选择模型。当前：{{model}}，推理强度：{{effort}}"
+        "ariaWithEffort": "选择模型。当前：{{model}}，推理强度：{{effort}}",
+        "pendingAria": "选择模型。下条消息：{{agent}} · {{model}}",
+        "pendingAriaWithEffort": "选择模型。下条消息：{{agent}} · {{model}}，推理强度：{{effort}}",
+        "agent": {
+          "claudeCode": "Claude Code",
+          "codex": "Codex",
+          "pending": "下条：{{agent}}"
+        }
       },
       "category": {
         "anthropic": "Anthropic",
