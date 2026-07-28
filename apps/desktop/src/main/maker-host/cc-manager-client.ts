@@ -365,6 +365,8 @@ export async function openCcManagerSession(opts: {
     // chat(跟 codex remote 行为一致);基于 SDK jsonl 的 read-since-lineNo
     // recovery 是 follow-up,**尚未实现**。
     if (listedSession && !listedSession.alive) {
+      // dead 条目的 kill 只是注册表清理, 失败可吞:start 路径对 dead 条目
+      // 不撞 SESSION_ALREADY_EXISTS (该错误只对 alive 条目)。
       await client.request(
         METHODS.SESSION_KILL,
         { sessionId: opts.sessionId },
@@ -380,11 +382,16 @@ export async function openCcManagerSession(opts: {
     // 见 opts.forceFreshQuery 注释)。
     const killAliveForFresh = listedSession?.alive === true && opts.forceFreshQuery === true;
     if (killAliveForFresh) {
+      // kill 失败不得吞错继续 (greptile P1):旧 session 仍 alive 时 fresh
+      // start 必撞 SESSION_ALREADY_EXISTS, 且后续重试沿同一路径永久卡死。
+      // 让错误上抛 → open 失败 → forcedFresh 状态不提交 (maker-host 只在
+      // open 成功后 add), 下次重试仍带 forceFreshQuery 重试 kill, 瞬时
+      // 故障可恢复。
       await client.request(
         METHODS.SESSION_KILL,
         { sessionId: opts.sessionId },
         { timeoutMs: RPC_REQUEST_TIMEOUT_MS },
-      ).catch(() => undefined);
+      );
       log.info('cc-mgr: alive session killed for forced fresh start (bridge MCP re-inject)', {
         hostId: opts.host.id,
         sessionId: opts.sessionId,

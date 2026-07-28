@@ -72,6 +72,15 @@ describe('remoteCcQueryFactory cleanup wiring', () => {
       'listedSession?.alive && !killAliveForFresh',
     );
     expect(existingGuard).toBeGreaterThan(killFirst);
+
+    // greptile P1 回归:kill-for-fresh 失败不得吞错 — 旧 session 仍 alive
+    // 时继续 fresh start 必撞 SESSION_ALREADY_EXISTS 且永久卡死;错误必须
+    // 上抛, forcedFresh 状态不提交, 下次重试仍带 forceFreshQuery。
+    const killForFreshBlock = ccManagerClientSource.slice(
+      ccManagerClientSource.indexOf('if (killAliveForFresh) {'),
+      ccManagerClientSource.indexOf('const existing =', killFirst),
+    );
+    expect(killForFreshBlock).not.toContain('.catch(() => undefined)');
   });
 
   it('clears forced-fresh tracking when the bridge instance is rebuilt', () => {
