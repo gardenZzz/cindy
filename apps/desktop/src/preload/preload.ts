@@ -1,4 +1,5 @@
 import { contextBridge, ipcRenderer, webUtils } from 'electron';
+import type { MobileCodexRateLimitsResult } from '@cindy/maker-shared/device-link-contract';
 import {
   AGENT_ISLAND_GET_DISPLAY_OPTIONS_CHANNEL,
   AGENT_ISLAND_PREVIEW_SOUND_CHANNEL,
@@ -2917,6 +2918,10 @@ contextBridge.exposeInMainWorld('electronAPI', {
         statusChangedAt: number;
         /** Phase D — 启动时是否自动连接 (本地 prefs, 不写入 ~/.ssh/config). */
         autoConnect: boolean;
+        /** Agent 流量经 SSH 隧道走本地 Proxy (本地 prefs); 未开启 → null. */
+        agentProxy: { enabled: boolean; localHost: string; localPort: number } | null;
+        /** 隧道实时状态 (内存态); 无记录 → null. */
+        agentProxyTunnel: { active: boolean; remotePort?: number; lastError?: string } | null;
       }>;
     }> => ipcRenderer.invoke('maker:remote-ssh:list'),
     reloadConfig: (): Promise<{ hosts: unknown[] }> =>
@@ -2928,6 +2933,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
       user: string;
       authMethod?: 'agent' | 'key';
       identityFile?: string;
+      agentProxy?: { enabled: boolean; localHost: string; localPort: number } | null;
     }): Promise<{ host: unknown }> => ipcRenderer.invoke('maker:remote-ssh:add', host),
     update: (host: {
       id: string;
@@ -2936,6 +2942,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
       user: string;
       authMethod?: 'agent' | 'key';
       identityFile?: string;
+      agentProxy?: { enabled: boolean; localHost: string; localPort: number } | null;
     }): Promise<{ host: unknown }> => ipcRenderer.invoke('maker:remote-ssh:update', host),
     remove: (id: string): Promise<{ ok: true }> =>
       ipcRenderer.invoke('maker:remote-ssh:remove', { id }),
@@ -4594,6 +4601,9 @@ contextBridge.exposeInMainWorld('electronAPI', {
         ipcRenderer.invoke('maker:usage:today', agentKind),
       getAccount: (agentKind: 'claude-code' | 'codex'): Promise<unknown> =>
         ipcRenderer.invoke('maker:usage:account', agentKind),
+      /** Codex app-server authoritative windows and banked reset-credit metadata. */
+      getCodexRateLimits: (): Promise<MobileCodexRateLimitsResult> =>
+        ipcRenderer.invoke('maker:usage:codex-rate-limits'),
       /** Claude 订阅账号余量 (5h/周/分模型窗口, cached-first, main 侧按需后台刷新)。 */
       getClaudeSubscription: (): Promise<unknown | null> =>
         ipcRenderer.invoke('maker:usage:claude-subscription'),
