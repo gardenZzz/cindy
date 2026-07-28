@@ -3616,13 +3616,16 @@ contextBridge.exposeInMainWorld('electronAPI', {
     listProviders: (): Promise<{ providers: import('@cindy/model-providers').ProviderView[] }> =>
       ipcRenderer.invoke('maker:provider:list'),
 
-    // 自定义供应商配置 CRUD（密钥另走通用 safeStorage IPC，不经这里）。
+    // 自定义供应商配置 CRUD（配置与 runtime 密钥均由 main 原子排队）。
     createCustomProvider: (
       config: import('@cindy/model-providers').CustomProviderConfig,
-    ): Promise<{ ok: true }> => ipcRenderer.invoke('maker:provider:custom:create', config),
+      keys: Partial<Record<'claude-code' | 'codex', string>>,
+    ): Promise<{ ok: true }> =>
+      ipcRenderer.invoke('maker:provider:custom:create', config, keys),
     updateCustomProvider: (
       config: import('@cindy/model-providers').CustomProviderConfig,
-    ): Promise<{ ok: true }> => ipcRenderer.invoke('maker:provider:custom:update', config),
+      keys: Partial<Record<'claude-code' | 'codex', string>>,
+    ): Promise<{ ok: true }> => ipcRenderer.invoke('maker:provider:custom:update', config, keys),
     deleteCustomProvider: (providerId: string): Promise<{ ok: true }> =>
       ipcRenderer.invoke('maker:provider:custom:delete', providerId),
     /** 自定义供应商创建模板（目录 presets 段，纯 UI 模板数据）。 */
@@ -3641,6 +3644,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
               agent: 'claude-code' | 'codex';
               baseUrl: string;
               modelId: string;
+              authMethod: 'apiKey' | 'oauth' | 'none';
               wireProtocol?: import('@cindy/model-providers').ProviderWireProtocol;
               requestPath?: string;
               apiKey?: string | null;
@@ -3661,6 +3665,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
     fetchProviderModels: (input: {
       agent: 'claude-code' | 'codex';
       baseUrl: string;
+      authMethod: 'apiKey' | 'oauth' | 'none';
       modelsUrl?: string | null;
       apiKey?: string | null;
       headers?: Record<string, string>;
@@ -3733,12 +3738,18 @@ contextBridge.exposeInMainWorld('electronAPI', {
     ): Promise<{ tasks: Array<{ taskId: string; taskType?: string; toolUseId?: string; title?: string }> }> =>
       ipcRenderer.invoke('maker:session-background-tasks:list', sessionId),
     /** 通用 OAuth 供应商（目录 auth.oauth 描述符驱动）登录 / 登出 / 取消。 */
-    providerOAuthLogin: (providerId: string): Promise<{ ok: boolean; reason?: string }> =>
-      ipcRenderer.invoke('maker:provider:oauth:login', providerId),
+    providerOAuthLogin: (
+      providerId: string,
+      options?: { ownerId?: string },
+    ): Promise<{ ok: boolean; reason?: string }> =>
+      ipcRenderer.invoke('maker:provider:oauth:login', providerId, options),
     providerOAuthLogout: (providerId: string): Promise<{ ok: true }> =>
       ipcRenderer.invoke('maker:provider:oauth:logout', providerId),
-    providerOAuthCancel: (providerId: string): Promise<{ ok: true }> =>
-      ipcRenderer.invoke('maker:provider:oauth:cancel', providerId),
+    providerOAuthCancel: (
+      providerId: string,
+      options?: { releaseOwner?: boolean; ownerId?: string },
+    ): Promise<{ ok: true }> =>
+      ipcRenderer.invoke('maker:provider:oauth:cancel', providerId, options),
     onProviderOAuthProgress: fanOutMakerProviderOAuthProgress,
     /**
      * renderer → main 单向镜像「模型显示/隐藏」override 整张快照(modelVisibilityPrefs)。
@@ -4503,10 +4514,16 @@ contextBridge.exposeInMainWorld('electronAPI', {
     auth: {
       getState: (agentKind: 'claude-code' | 'codex'): Promise<unknown> =>
         ipcRenderer.invoke('maker:auth:get-state', agentKind),
-      triggerLogin: (agentKind: 'claude-code' | 'codex'): Promise<unknown> =>
-        ipcRenderer.invoke('maker:auth:trigger-login', agentKind),
-      cancelLogin: (agentKind: 'claude-code' | 'codex'): Promise<void> =>
-        ipcRenderer.invoke('maker:auth:cancel-login', agentKind),
+      triggerLogin: (
+        agentKind: 'claude-code' | 'codex',
+        options?: { mode?: 'browser' | 'device-code'; ownerId?: string },
+      ): Promise<unknown> =>
+        ipcRenderer.invoke('maker:auth:trigger-login', agentKind, options),
+      cancelLogin: (
+        agentKind: 'claude-code' | 'codex',
+        options?: { releaseOwner?: boolean; ownerId?: string },
+      ): Promise<void> =>
+        ipcRenderer.invoke('maker:auth:cancel-login', agentKind, options),
       logout: (agentKind: 'claude-code' | 'codex'): Promise<void> =>
         ipcRenderer.invoke('maker:auth:logout', agentKind),
       onStateChanged: fanOutMakerAuthStateChanged,
