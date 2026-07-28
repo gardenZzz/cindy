@@ -22,6 +22,19 @@ describe('waitForModelsSyncRefresh', () => {
     expect(XD_MODELS_SYNC_TIMEOUT_MS).toBeGreaterThan(0);
   });
 
+  it('preserves a live endpoint resolver for post-refresh realm changes', () => {
+    const resolveBaseUrl = vi.fn(() => 'https://model-access.global.example.com');
+    const request = buildModelsSyncRequest(resolveBaseUrl);
+
+    expect(request.options.baseUrl).toBe(resolveBaseUrl);
+    if (typeof request.options.baseUrl !== 'function') {
+      throw new Error('expected a live endpoint resolver');
+    }
+    expect(request.options.baseUrl()).toBe(
+      'https://model-access.global.example.com',
+    );
+  });
+
   it('bounds the complete fetch lifecycle without cancelling the underlying auth refresh', async () => {
     vi.useFakeTimers();
     try {

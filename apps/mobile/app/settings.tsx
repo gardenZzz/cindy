@@ -59,7 +59,6 @@ import {
 } from '@/settings/mobileSettings';
 import {
   isPushSupported,
-  markPendingUnregister,
   readPushEnabled,
   syncPushRegistration,
   writePushEnabled,
@@ -528,7 +527,6 @@ export default function SettingsScreen() {
         try {
           await syncPushRegistration({ enabled: false, apiFetch: auth.apiFetch });
         } catch {
-          await markPendingUnregister().catch(() => undefined);
           setPushMessage(t('settings.notifications.unregisterQueued'));
         }
         return;

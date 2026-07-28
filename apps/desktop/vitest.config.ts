@@ -11,6 +11,9 @@ export default defineConfig({
     'import.meta.env.VITE_ENDPOINT_MANIFEST_BASE_URL': JSON.stringify(
       clientBuildEnv.VITE_ENDPOINT_MANIFEST_BASE_URL,
     ),
+    'import.meta.env.VITE_ENDPOINT_MANIFEST_PEER_BASE_URL': JSON.stringify(
+      clientBuildEnv.VITE_ENDPOINT_MANIFEST_PEER_BASE_URL,
+    ),
   },
   plugins: [
     {

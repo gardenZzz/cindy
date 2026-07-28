@@ -89,6 +89,51 @@ describe('serverApiFetch', () => {
     );
   });
 
+  it('refresh 切换区域后重新解析业务端点，避免新 token 重试到旧区域', async () => {
+    let baseUrl = 'https://resource.cn.example.com';
+    mocks.getAccessToken.mockReturnValueOnce('token-cn').mockReturnValueOnce('token-global');
+    mocks.refresh.mockImplementation(async () => {
+      baseUrl = 'https://resource.global.example.com';
+      return true;
+    });
+    mocks.netFetch
+      .mockResolvedValueOnce({
+        ok: false,
+        status: 401,
+        json: async () => ({ error: { code: 'TOKEN_EXPIRED' } }),
+      })
+      .mockResolvedValueOnce({
+        ok: true,
+        status: 200,
+        json: async () => ({ ok: true }),
+      });
+    const resolveBaseUrl = vi.fn(() => baseUrl);
+
+    await expect(
+      serverApiFetch('/api/resource', {
+        baseUrl: resolveBaseUrl,
+      }),
+    ).resolves.toEqual({ ok: true });
+
+    expect(resolveBaseUrl).toHaveBeenCalledTimes(2);
+    expect(mocks.netFetch).toHaveBeenNthCalledWith(
+      1,
+      'https://resource.cn.example.com/api/resource',
+      expect.objectContaining({
+        headers: expect.objectContaining({ Authorization: 'Bearer token-cn' }),
+      }),
+    );
+    expect(mocks.netFetch).toHaveBeenNthCalledWith(
+      2,
+      'https://resource.global.example.com/api/resource',
+      expect.objectContaining({
+        headers: expect.objectContaining({
+          Authorization: 'Bearer token-global',
+        }),
+      }),
+    );
+  });
+
   it('ACCOUNT_UNAVAILABLE 不 refresh，直接完整退登', async () => {
     mocks.getAccessToken.mockReturnValue('token-a');
     mocks.invalidateSession.mockResolvedValue(undefined);

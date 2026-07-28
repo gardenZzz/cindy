@@ -68,6 +68,7 @@ import { deriveAvailableModels, refreshCatalogDerivedModels } from './catalog-to
 import { clearChatgptBridgeCredentialCache } from './anthropic-responses-bridge-host.js';
 import {
   getDesktopSelectableCatalog,
+  reloadActiveCatalogForEndpointChange,
   refreshDiscoveredCodexModels,
   setNativeProviderClaimListener,
 } from './createDesktopProviderService.js';
@@ -205,6 +206,16 @@ setNativeProviderClaimListener(() => {
 
 /** Re-project provider/model availability after the Cindy auth session changes. */
 export function refreshProviderAccessAfterAuthChange(): void {
+  resetProviderModelAutoRefreshCooldowns();
+  void reloadActiveCatalogForEndpointChange()
+    .then(() => {
+      refreshSelectableModelsAndBroadcast({});
+    })
+    .catch((error) => {
+      desktopMakerLogger.warn('provider catalog reload after auth realm change failed', {
+        error: error instanceof Error ? error.message : String(error),
+      });
+    });
   try {
     refreshSelectableModelsAndBroadcast({});
   } catch (error) {

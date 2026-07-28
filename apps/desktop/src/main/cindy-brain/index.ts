@@ -1902,7 +1902,7 @@ function getGhostOauthAccountManager(): GhostOauthAccountManager {
           return serverApiFetch(path, {
             method: 'POST',
             body,
-            baseUrl: getClientEndpoint('oauthBrokerApiBaseUrl'),
+            baseUrl: () => getClientEndpoint('oauthBrokerApiBaseUrl'),
           });
         },
         hasLoginToken: () => getAccessToken() !== null,

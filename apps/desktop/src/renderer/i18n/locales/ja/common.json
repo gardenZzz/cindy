@@ -3028,6 +3028,13 @@
     "ssoOrgPlaceholder": "企業 ID、slug、またはドメイン",
     "ssoOrgHint": "企業のログイン識別子が不明な場合は、管理者にお問い合わせください",
     "ssoOrgDetected": "「{{org}}」のシングルサインオン方法を選択してください",
+    "realmConsent": {
+      "title": "企業のリージョンに接続",
+      "bodyCn": "この企業は中国本土リージョンにあります。\n続行すると Cindy はこの地域に接続します。",
+      "bodyGlobal": "この企業はグローバルリージョンにあります。\n続行すると Cindy はこの地域に接続します。",
+      "agree": "ログインを続ける",
+      "disagree": "キャンセル"
+    },
     "ssoVerificationTitle": "企業 ID を確認",
     "ssoVerificationSubtitle": "初回ログインでは ID プロバイダーから返された連絡先 {{target}} の確認が必要です",
     "enterCode": "認証コードを入力",
@@ -3076,6 +3083,8 @@
       "RATE_LIMITED": "試行が多すぎます。少し待ってから再試行してください。",
       "SSO_LOGIN_REQUIRED": "この組織は SSO ログインが必要です。",
       "ORG_SSO_NOT_FOUND": "該当する企業が見つからないか、SSO サインインが有効になっていません",
+      "ORG_REALM_AMBIGUOUS": "この企業識別子は両方の地域に存在します。管理者にお問い合わせください。",
+      "ORG_REALM_UNAVAILABLE": "企業の地域を現在確認できません。ネットワークを確認して再試行してください。",
       "SSO_EMAIL_REQUIRED": "企業 ID から有効なメールアドレスを取得できません。IdP の設定を管理者に確認してください。",
       "INVALID_SSO_VERIFICATION_TICKET": "企業 ID の確認期限が切れました。SSO サインインをやり直してください。",
       "SOCIAL_TOKEN_INVALID": "プロバイダー認証の期限が切れました。",

@@ -3029,6 +3029,13 @@
     "ssoOrgPlaceholder": "Company ID, slug, or domain",
     "ssoOrgHint": "Don't know your enterprise sign-in identifier? Ask your admin",
     "ssoOrgDetected": "Choose a single sign-on connection for \"{{org}}\"",
+    "realmConsent": {
+      "title": "Connect to your enterprise region",
+      "bodyCn": "Your enterprise is in Mainland China.\nContinue to connect Cindy to this region.",
+      "bodyGlobal": "Your enterprise is in the Global region.\nContinue to connect Cindy to this region.",
+      "agree": "Continue sign-in",
+      "disagree": "Cancel"
+    },
     "ssoVerificationTitle": "Verify Your Work Identity",
     "ssoVerificationSubtitle": "First-time sign-in requires verification of the contact returned by your identity provider: {{target}}",
     "enterCode": "Enter verification code",
@@ -3077,6 +3084,8 @@
       "RATE_LIMITED": "Too many attempts. Please wait and try again.",
       "SSO_LOGIN_REQUIRED": "This organization requires SSO sign-in.",
       "ORG_SSO_NOT_FOUND": "Company not found, or it has no SSO connection enabled",
+      "ORG_REALM_AMBIGUOUS": "This enterprise identifier exists in both regions. Contact your administrator.",
+      "ORG_REALM_UNAVAILABLE": "Cindy cannot verify the enterprise region right now. Check your connection and retry.",
       "SSO_EMAIL_REQUIRED": "Your work identity did not provide a valid email. Ask your admin to check the IdP configuration.",
       "INVALID_SSO_VERIFICATION_TICKET": "Work identity verification expired. Start SSO sign-in again.",
       "SOCIAL_TOKEN_INVALID": "The provider authorization expired. Please try again.",

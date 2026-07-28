@@ -70,14 +70,14 @@ function notifyXdProviderKeyChanged(): void {
 
 function fetchCredentials(): Promise<CredentialsPayload> {
   return serverApiFetch<CredentialsPayload>(CREDENTIALS_PATH, {
-    baseUrl: getClientEndpoint('modelAccessApiBaseUrl'),
+    baseUrl: () => getClientEndpoint('modelAccessApiBaseUrl'),
   });
 }
 
 function rotateCredentials(): Promise<CredentialsPayload> {
   return serverApiFetch<CredentialsPayload>(`${CREDENTIALS_PATH}/rotate`, {
     method: 'POST',
-    baseUrl: getClientEndpoint('modelAccessApiBaseUrl'),
+    baseUrl: () => getClientEndpoint('modelAccessApiBaseUrl'),
   });
 }
 
@@ -184,7 +184,9 @@ async function runModelsSync(
 ): Promise<void> {
   let payload: { models: ModelAccessGatewayModel[] };
   try {
-    const request = buildModelsSyncRequest(getClientEndpoint('modelAccessApiBaseUrl'));
+    const request = buildModelsSyncRequest(() =>
+      getClientEndpoint('modelAccessApiBaseUrl'),
+    );
     payload = await withModelsSyncOverallDeadline(
       serverApiFetch<{ models: ModelAccessGatewayModel[] }>(
         request.path,
