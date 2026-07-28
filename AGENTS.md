@@ -85,6 +85,22 @@
 - 在 Cindy 内嵌 worktree 会话里工作、准备提交或直推、或做 code review 前，必须先读
   `docs/dev-rules/development-workflow.md`。
 
+## Agent skills
+
+### Issue tracker
+
+issue 记在本仓库自己的 GitHub Issues（`gardenZzz/cindy`），用 `gh` CLI；上游
+`makecindy/cindy` 只读参考。见 `docs/agents/issue-tracker.md`。
+
+### Triage labels
+
+用五个规范 triage 标签，名字与角色同名（`needs-triage`、`needs-info`、
+`ready-for-agent`、`ready-for-human`、`wontfix`）。见 `docs/agents/triage-labels.md`。
+
+### Domain docs
+
+单 context：根 `CONTEXT.md` + `docs/adr/`。见 `docs/agents/domain.md`。
+
 ## 通用工作流程
 
 1. 先确认用户目标、仓库边界、当前分支、worktree 和工作区状态。
