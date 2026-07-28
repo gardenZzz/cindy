@@ -20,6 +20,8 @@ const { MockCodexTransport, createdTransports } = vi.hoisted(() => {
     static threadSeq = 1;
     static failThreadStart = false;
     static dropThreadUnsubscribe = false;
+    static dropModelList = false;
+    static dropInitialize = false;
     static beforeThreadStartResponse: ((transport: MockCodexTransport) => Promise<void> | void) | null = null;
     static onCreate: ((transport: MockCodexTransport) => void) | null = null;
 
@@ -49,6 +51,7 @@ const { MockCodexTransport, createdTransports } = vi.hoisted(() => {
         return;
       }
       if (req.method === 'initialize') {
+        if (MockCodexTransport.dropInitialize) return;
         this.emitLine({
           id: req.id,
           result: {
@@ -134,6 +137,7 @@ const { MockCodexTransport, createdTransports } = vi.hoisted(() => {
         return;
       }
       if (req.method === 'model/list') {
+        if (MockCodexTransport.dropModelList) return;
         this.emitLine({ id: req.id, result: { data: [], nextCursor: null } });
         return;
       }
@@ -228,6 +232,8 @@ beforeEach(() => {
   MockCodexTransport.threadSeq = 1;
   MockCodexTransport.failThreadStart = false;
   MockCodexTransport.dropThreadUnsubscribe = false;
+  MockCodexTransport.dropModelList = false;
+  MockCodexTransport.dropInitialize = false;
   MockCodexTransport.beforeThreadStartResponse = null;
   MockCodexTransport.onCreate = null;
 });
@@ -1310,6 +1316,61 @@ describe('CodexAgent.listCustomizations', () => {
 });
 
 describe('CodexAgent.refreshLocalModels', () => {
+  it('uses an isolated OpenAI control-plane host without closing provider-oauth sessions', async () => {
+    const onCodexLocalModelsListed = vi.fn().mockResolvedValue(undefined);
+    const prepareCodexLocalCredentialModeSwitch = vi.fn(async () => {});
+    const prepareCodexExtraSpawnConfig = vi.fn(async (_providers, ctx) => ({
+      extraArgs: [],
+      extraEnv: {},
+      codexProxyActive: ctx.credentialMode === 'provider-oauth',
+    }));
+    const agent = new CodexAgent(createDeps({}, {
+      onCodexLocalModelsListed,
+      prepareCodexLocalCredentialModeSwitch,
+      prepareCodexExtraSpawnConfig,
+    }));
+    const xaiHandle = await agent.startSession({
+      sessionId: 'session-provider-oauth-before-openai-refresh',
+      providerId: 'xai',
+      model: 'xai/grok-4.3',
+      workingDir: '/repo-xai',
+    });
+
+    await expect(
+      agent.refreshLocalModels({ credentialMode: 'oauth-bearer' }),
+    ).resolves.toBe(true);
+
+    expect(createdTransports).toHaveLength(2);
+    expect(createdTransports[0].closed).toBe(false);
+    expect(prepareCodexLocalCredentialModeSwitch).not.toHaveBeenCalled();
+    expect(createdTransports[0].lines.some((line) => (
+      (JSON.parse(line) as { method?: string }).method === Method.ModelList
+    ))).toBe(false);
+    expect(createdTransports[1].lines.some((line) => (
+      (JSON.parse(line) as { method?: string }).method === Method.ModelList
+    ))).toBe(true);
+    expect(prepareCodexExtraSpawnConfig).toHaveBeenNthCalledWith(1, [], {
+      remoteHostId: undefined,
+      credentialMode: 'provider-oauth',
+    });
+    expect(prepareCodexExtraSpawnConfig).toHaveBeenNthCalledWith(2, [], {
+      remoteHostId: undefined,
+      credentialMode: 'oauth-bearer',
+      hostPurpose: 'control-plane',
+    });
+    expect(onCodexLocalModelsListed).toHaveBeenCalledOnce();
+    expect(Array.from(
+      (agent as unknown as { hosts: Map<string, unknown> }).hosts.keys(),
+    )).toEqual(['local', 'local-control:oauth-bearer']);
+    await xaiHandle.close();
+    await agent.forceDisposeLocalHostForAuthChange('test account boundary');
+    expect(createdTransports.every((transport) => transport.closed)).toBe(true);
+    expect(
+      (agent as unknown as { hosts: Map<string, unknown> }).hosts.size,
+    ).toBe(0);
+    await agent.dispose();
+  });
+
   it('reads every model/list page and publishes one complete snapshot', async () => {
     const onCodexLocalModelsListed = vi.fn().mockResolvedValue(undefined);
     const agent = new CodexAgent(createDeps({}, { onCodexLocalModelsListed }));
@@ -1332,8 +1393,16 @@ describe('CodexAgent.refreshLocalModels', () => {
 
     await expect(agent.refreshLocalModels()).resolves.toBe(true);
     expect(host.request.mock.calls.filter(([method]) => method === Method.ModelList)).toEqual([
-      [Method.ModelList, { cursor: null, limit: 100, includeHidden: false }],
-      [Method.ModelList, { cursor: 'page-2', limit: 100, includeHidden: false }],
+      [
+        Method.ModelList,
+        { cursor: null, limit: 100, includeHidden: false },
+        { timeoutMs: 20_000 },
+      ],
+      [
+        Method.ModelList,
+        { cursor: 'page-2', limit: 100, includeHidden: false },
+        { timeoutMs: 20_000 },
+      ],
     ]);
     expect(onCodexLocalModelsListed).toHaveBeenCalledOnce();
     expect(onCodexLocalModelsListed.mock.calls[0][0].map((model: { id: string }) => model.id))
@@ -1368,6 +1437,62 @@ describe('CodexAgent.refreshLocalModels', () => {
 
     await expect(agent.refreshLocalModels()).resolves.toBe(false);
     expect(onCodexLocalModelsListed).not.toHaveBeenCalled();
+  });
+
+  it('retires a wedged control-plane host after the model/list deadline', async () => {
+    vi.useFakeTimers();
+    try {
+      MockCodexTransport.dropModelList = true;
+      const agent = new CodexAgent(createDeps());
+      const refresh = agent.refreshLocalModels({ credentialMode: 'oauth-bearer' });
+      const refreshExpectation = expect(refresh).rejects.toThrow(
+        'codex app-server model refresh timed out after 20000ms',
+      );
+      await vi.advanceTimersByTimeAsync(0);
+      await vi.advanceTimersByTimeAsync(20_000);
+
+      await refreshExpectation;
+      expect(createdTransports).toHaveLength(1);
+      expect(createdTransports[0].closed).toBe(true);
+      expect(Array.from(
+        (agent as unknown as { hosts: Map<string, unknown> }).hosts.keys(),
+      )).not.toContain('local-control:oauth-bearer');
+      await agent.dispose();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('bounds initialize with the control-plane deadline and rebuilds on retry', async () => {
+    vi.useFakeTimers();
+    try {
+      MockCodexTransport.dropInitialize = true;
+      const agent = new CodexAgent(createDeps({}, {
+        onCodexLocalModelsListed: vi.fn().mockResolvedValue(undefined),
+      }));
+      const refresh = agent.refreshLocalModels({ credentialMode: 'oauth-bearer' });
+      const refreshExpectation = expect(refresh).rejects.toThrow(
+        'codex app-server model refresh timed out after 20000ms',
+      );
+      await vi.advanceTimersByTimeAsync(0);
+      await vi.advanceTimersByTimeAsync(20_000);
+
+      await refreshExpectation;
+      expect(createdTransports).toHaveLength(1);
+      expect(createdTransports[0].closed).toBe(true);
+      expect(Array.from(
+        (agent as unknown as { hosts: Map<string, unknown> }).hosts.keys(),
+      )).not.toContain('local-control:oauth-bearer');
+
+      MockCodexTransport.dropInitialize = false;
+      await expect(
+        agent.refreshLocalModels({ credentialMode: 'oauth-bearer' }),
+      ).resolves.toBe(true);
+      expect(createdTransports).toHaveLength(2);
+      await agent.dispose();
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });
 
