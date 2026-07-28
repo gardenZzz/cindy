@@ -6438,6 +6438,8 @@ describe('CodexAgent turn lifecycle', () => {
       if (host.request.mock.calls.filter(([method]) => method === Method.TurnStart).length >= 2) break;
       await Promise.resolve();
     }
+    // send2 开头的 turn-start status 先消费掉, 后续事件流才只反映通知路径。
+    expect(await nextEvent(iterator)).toMatchObject({ type: 'status', data: { isRunning: true } });
     handlers.turnStarted?.({ threadId: 'start-thread-id', turn: { id: 'orphan-turn' } });
     expect(handle.isTurnRunning?.()).toBe(false);
     expect(handle.getCurrentTurnId?.()).toBeNull();
@@ -6447,6 +6449,15 @@ describe('CodexAgent turn lifecycle', () => {
           method === Method.TurnInterrupt && (params as { turnId?: string }).turnId === 'orphan-turn',
       ),
     ).toBe(false);
+
+    // 缓冲期间孤儿 turn 的 item/error 事件不得穿透到本次 send 的事件流
+    // (greptile R10 P1): stale guard 把 buffered id 一并隔离。
+    handlers.itemStarted?.({
+      threadId: 'start-thread-id',
+      turnId: 'orphan-turn',
+      item: { type: 'agentMessage', id: 'orphan-item', text: 'orphan output' },
+    });
+    await expect(nextEvent(iterator)).rejects.toThrow('timed out waiting for event');
 
     // 第二次响应 turn-2 ≠ orphan-turn → 孤儿坐实: interrupt + 墓碑; turn-2 激活。
     secondStart.resolve({ turn: { id: 'turn-2' } });

@@ -248,6 +248,44 @@ describe('reconcileCodexAgentProxyEnv', () => {
     await expect(reconcileCodexAgentProxyEnv(host)).rejects.toThrow(/delete agent-proxy marker failed/);
     expect(state.pkillCount).toBe(0);
   });
+
+  it('rolls the marker back when pkill fails so the next reconcile retries the kill (codex R10 P2)', async () => {
+    // disable 场景 (desired=null, current=旧 proxy marker): pkill 失败时若让
+    // marker 停在 null, 下次 reconcile 命中 fast path (null===null) 永不重试
+    // kill — 存活 daemon 握着指向已拆隧道的 proxy env 一直跑到手动重启。
+    setSshHostAgentProxy('test-host', null);
+    const staleMarker = "export HTTPS_PROXY='http://127.0.0.1:17893'";
+    const { host, state } = makeFakeHost({ marker: staleMarker });
+    let pkillShouldFail = true;
+    let failedPkillCount = 0;
+    const baseExec = host.exec.bind(host);
+    host.exec = async (cmd: string, execOpts?: { input?: string }) => {
+      if (cmd.includes('pkill') && pkillShouldFail) {
+        failedPkillCount += 1;
+        return {
+          stdout: '',
+          stderr: 'daemon still alive after TERM(5s)+KILL(2s)',
+          exitCode: 3,
+          signal: null,
+        };
+      }
+      return baseExec(cmd, execOpts);
+    };
+
+    const first = await reconcileCodexAgentProxyEnv(host);
+    expect(first).toEqual({ markerChanged: true, daemonRestarted: false });
+    // marker 已回滚到原值 (与存活 daemon 的 env 一致)。
+    expect(state.marker).toBe(staleMarker);
+
+    // 下次 reconcile 仍 drift → 重写 + 重试 kill (自愈); pkill 恢复后清干净。
+    pkillShouldFail = false;
+    const second = await reconcileCodexAgentProxyEnv(host);
+    expect(second).toEqual({ markerChanged: true, daemonRestarted: true });
+    expect(state.marker).toBeNull();
+    // 两次 reconcile 各发了一次 pkill: 第一次失败 (mock 拦截), 第二次重试成功。
+    expect(failedPkillCount).toBe(1);
+    expect(state.pkillCount).toBe(1);
+  });
 });
 
 describe('killRemoteCodexDaemon', () => {
@@ -319,7 +357,9 @@ describe('applyAgentProxyForHost disable path', () => {
     const { host, state } = makeFakeHost({ marker: null });
 
     let killStarted = false;
-    let releaseKill: (() => void) | null = null;
+    // 对象持有 release: TS 不对属性做 closure 收窄 (let 声明会被 narrow 成
+    // undefined → CI typecheck TS2349 "Type 'never' has no call signatures")。
+    const killGate: { release?: () => void } = {};
     const baseExec = host.exec.bind(host);
     host.exec = async (cmd: string, execOpts?: { input?: string }) => {
       if (cmd.includes('pkill')) {
@@ -327,7 +367,7 @@ describe('applyAgentProxyForHost disable path', () => {
         // 不能拿 execCalls 当等待信号)。
         killStarted = true;
         await new Promise<void>((resolve) => {
-          releaseKill = resolve;
+          killGate.release = resolve;
         });
       }
       return baseExec(cmd, execOpts);
@@ -352,7 +392,7 @@ describe('applyAgentProxyForHost disable path', () => {
     await Promise.resolve();
     expect(state.execCalls.length).toBe(execCountWhileFirstBlocked);
 
-    releaseKill?.();
+    killGate.release?.();
     const [r1, r2] = await Promise.all([first, second]);
     expect(r1.markerChanged).toBe(true);
     expect(r1.daemonRestarted).toBe(true);
@@ -360,6 +400,34 @@ describe('applyAgentProxyForHost disable path', () => {
     expect(r2).toEqual({ markerChanged: false, daemonRestarted: false });
     expect(order).toEqual(['first-done', 'second-done']);
     expect(state.pkillCount).toBe(1);
+  });
+});
+
+describe('applyAgentProxyForHost enable path', () => {
+  it('reports apply error and rolls the marker back when the daemon survives pkill (codex R10 P1)', async () => {
+    // marker 漂移 (null → 新 proxy marker) 但 pkill 失败: 旧 daemon 还活着跑
+    // 旧 env — 不得按成功落 active, 卡片显示错误; marker 回滚到 null 供下次
+    // reconcile 重试。
+    setSshHostAgentProxy('test-host', PREF);
+    const { host, state } = makeFakeHost({ marker: null });
+    const baseExec = host.exec.bind(host);
+    host.exec = async (cmd: string, execOpts?: { input?: string }) => {
+      if (cmd.includes('pkill')) {
+        return {
+          stdout: '',
+          stderr: 'daemon still alive after TERM(5s)+KILL(2s)',
+          exitCode: 3,
+          signal: null,
+        };
+      }
+      return baseExec(cmd, execOpts);
+    };
+    await applyAgentProxyForHost(host);
+    const tunnelState = getAgentProxyTunnelState('test-host');
+    expect(tunnelState?.active).toBe(false);
+    expect(tunnelState?.lastError).toMatch(/survived pkill/);
+    // 原 marker 为 null → 回滚即删除。
+    expect(state.marker).toBeNull();
   });
 });
 

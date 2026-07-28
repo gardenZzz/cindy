@@ -640,7 +640,16 @@ export function getMaker(): Maker {
           // codex daemon 的 env marker (漂移 → 重写 + 重启 daemon), 然后才让
           // transport 探活/拉起 daemon。pref 关闭时 reconcile 是幂等 no-op。
           beforeDaemonProbe: async () => {
-            await reconcileCodexAgentProxyEnv(remoteHost);
+            // markerChanged && !daemonRestarted = 旧 daemon 活着跑旧 env —
+            // 继续 probe 会 attach 到 stale daemon, UI 报 tunnel active 而
+            // codex 流量走旧路由 (codex R10 P1): 按 bootstrap 失败抛出, 让
+            // session start 显式报错, 而不是静默复用。
+            const reconciled = await reconcileCodexAgentProxyEnv(remoteHost);
+            if (reconciled.markerChanged && !reconciled.daemonRestarted) {
+              throw new Error(
+                'codex daemon survived pkill after agent-proxy env change; refusing to attach the stale daemon (retry or restart the host)',
+              );
+            }
           },
         });
       },
