@@ -45,8 +45,12 @@ export interface ApiFetchOptions {
   token?: string | null;
   /** 跳过 401 自动 refresh（避免无限循环；refresh 自身调用时禁用）。 */
   skipAutoRefresh?: boolean;
-  /** 目标服务 base URL(必传;来自 clientEndpoints 的对应字段或注入方)。 */
-  baseUrl: string;
+  /**
+   * 目标服务 base URL(必传;来自 clientEndpoints 的对应字段或注入方)。
+   * 区域相关服务必须传 resolver：401 refresh 可能切换登录区域，重试前要重新
+   * 读取端点，不能把新区域 token 发到首次请求的旧区域。
+   */
+  baseUrl: string | (() => string);
   /** Abort the request after this many milliseconds; 0 disables the deadline. */
   timeoutMs?: number;
   /** Keep upstream response/network details out of local logs for sensitive flows. */
@@ -66,7 +70,8 @@ interface RawResponse<T> {
 }
 
 async function rawFetch<T>(apiPath: string, opts: ApiFetchOptions): Promise<RawResponse<T>> {
-  const url = opts.baseUrl + apiPath;
+  const baseUrl = typeof opts.baseUrl === 'function' ? opts.baseUrl() : opts.baseUrl;
+  const url = baseUrl + apiPath;
   const method = opts.method ?? 'GET';
   const headers: Record<string, string> = {
     'Content-Type': 'application/json',

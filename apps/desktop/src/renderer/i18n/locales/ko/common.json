@@ -3028,6 +3028,13 @@
     "ssoOrgPlaceholder": "회사 ID, slug 또는 도메인",
     "ssoOrgHint": "기업 로그인 식별자를 모르시나요? 관리자에게 문의하세요",
     "ssoOrgDetected": "\"{{org}}\"의 통합 로그인 방식을 선택하세요",
+    "realmConsent": {
+      "title": "기업 지역에 연결",
+      "bodyCn": "이 기업은 중국 본토 지역에 있습니다.\n계속하면 Cindy가 해당 지역에 연결됩니다.",
+      "bodyGlobal": "이 기업은 글로벌 지역에 있습니다.\n계속하면 Cindy가 해당 지역에 연결됩니다.",
+      "agree": "로그인 계속",
+      "disagree": "취소"
+    },
     "ssoVerificationTitle": "기업 신원 확인",
     "ssoVerificationSubtitle": "최초 로그인 시 ID 공급자가 반환한 연락처 {{target}} 확인이 필요합니다",
     "enterCode": "인증 코드 입력",
@@ -3076,6 +3083,8 @@
       "RATE_LIMITED": "시도가 너무 많습니다. 잠시 후 다시 시도하세요.",
       "SSO_LOGIN_REQUIRED": "이 조직은 SSO 로그인이 필요합니다.",
       "ORG_SSO_NOT_FOUND": "해당 기업을 찾을 수 없거나 SSO 로그인이 활성화되어 있지 않습니다",
+      "ORG_REALM_AMBIGUOUS": "이 기업 식별자가 두 지역에 모두 존재합니다. 관리자에게 문의하세요.",
+      "ORG_REALM_UNAVAILABLE": "현재 기업 지역을 확인할 수 없습니다. 네트워크를 확인한 후 다시 시도하세요.",
       "SSO_EMAIL_REQUIRED": "기업 신원에서 유효한 이메일을 받지 못했습니다. 관리자에게 IdP 설정을 확인해 달라고 요청하세요.",
       "INVALID_SSO_VERIFICATION_TICKET": "기업 신원 확인이 만료되었습니다. SSO 로그인을 다시 시작하세요.",
       "SOCIAL_TOKEN_INVALID": "제공자 인증이 만료되었습니다.",

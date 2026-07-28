@@ -66,6 +66,28 @@
       "note": "桌面登录页标题旁的品牌红胶囊（DESIGN.md §16.3），指徽标这个 UI 元素本身。徽标上的标签值另立条目（region-code-cn / region-code-dev）——本条 en 为 Region badge、各语言译文均非英文原词，caseStandardFor 天然返回 null，所以本条约束不到标签值，也无需写 checkCase。作为待产品裁决术语登记：尚未拍板是否改为可译文案（如「中国大陆版 / Mainland China」），先登记以免后续界面自造“国内版／中国版／开发版”等多套说法。"
     },
     {
+      "id": "auth-region-mainland-china",
+      "status": "proposed",
+      "en": "Mainland China",
+      "translations": {
+        "zh-CN": "中国大陆区",
+        "ja": "中国本土リージョン",
+        "ko": "중국 본토 지역"
+      },
+      "note": "企业认证与业务服务所在区域的用户可见名称，用于组织登录检测到中国大陆服务区域时的确认文案；它描述连接的服务区域，不代表当前安装的是中国大陆版。先按现有四语文案登记为 proposed，避免后续出现“中国区／国内区／China region”等多套说法。"
+    },
+    {
+      "id": "auth-region-global",
+      "status": "proposed",
+      "en": "Global region",
+      "translations": {
+        "zh-CN": "国际区",
+        "ja": "グローバルリージョン",
+        "ko": "글로벌 지역"
+      },
+      "note": "企业认证与业务服务所在区域的用户可见名称，用于组织登录检测到 Global 服务区域时的确认文案；它描述连接的服务区域，不是对当前安装版本的标签，也不同于项目配置里的 generic global scope。先按现有四语文案登记为 proposed。"
+    },
+    {
       "id": "region-code-cn",
       "status": "proposed",
       "en": "CN",

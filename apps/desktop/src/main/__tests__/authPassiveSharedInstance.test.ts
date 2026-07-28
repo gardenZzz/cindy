@@ -51,10 +51,13 @@ describe('passive shared-userData instance auth isolation', () => {
     const guardIdx = body.indexOf('if (!opts.preservePersistedRefreshToken) {');
     const passiveIdx = body.indexOf('if (isPassiveSharedUserDataInstance()) {');
     expect(guardIdx).toBeGreaterThan(-1);
-    // passive 判定必须落在 opts 守卫之内、三个 removeSafe 之前——即显式 preserve 与
+    // passive 判定必须落在 opts 守卫之内、四个 removeSafe 之前——即显式 preserve 与
     // passive 身份是两道独立的闸,任一命中都不得删盘。
     expect(passiveIdx).toBeGreaterThan(guardIdx);
-    expect(body.indexOf('removeSafe(REFRESH_TOKEN_KEY);')).toBeGreaterThan(passiveIdx);
+    expect(body.indexOf('removeSafe(AUTH_SESSION_KEY);')).toBeGreaterThan(passiveIdx);
+    expect(body.indexOf('removeSafe(LEGACY_RESOURCE_REFRESH_TOKEN_KEY);')).toBeGreaterThan(
+      passiveIdx,
+    );
     expect(body.indexOf('removeSafe(LEGACY_ACCOUNT_REFRESH_TOKEN_KEY);')).toBeGreaterThan(passiveIdx);
     expect(body.indexOf('removeSafe(LEGACY_REFRESH_TOKEN_KEY);')).toBeGreaterThan(passiveIdx);
   });
@@ -137,21 +140,35 @@ describe('passive shared-userData instance auth isolation', () => {
     // 非 passive 分支里。
     const passiveIdx = body.indexOf('if (isPassiveSharedUserDataInstance()) {');
     expect(passiveIdx).toBeGreaterThan(-1);
-    expect(body.indexOf('removeSafe(REFRESH_TOKEN_KEY);')).toBeGreaterThan(passiveIdx);
+    expect(body.indexOf('removeSafe(AUTH_SESSION_KEY);')).toBeGreaterThan(passiveIdx);
+    expect(body.indexOf('removeSafe(LEGACY_RESOURCE_REFRESH_TOKEN_KEY);')).toBeGreaterThan(
+      passiveIdx,
+    );
     expect(body.indexOf('clearReloginFlag();')).toBeGreaterThan(passiveIdx);
   });
 
   it('legacy 凭证清理:passive 启动不得删掉老构建 primary 可能还在用的文件', () => {
     const start = authSource.indexOf('// Old Feishu-auth refresh tokens');
-    const end = authSource.indexOf('const storedToken = readSafe(REFRESH_TOKEN_KEY);', start);
+    const end = authSource.indexOf('const storedToken = persistedSession.refreshToken;', start);
     const body = authSource.slice(start, end);
 
     // dev + packaged 共库双开是受支持的场景（--preserve-running）：老构建的 primary
-    // 可能仍在消费这两个 legacy 文件，passive 只是启动一下就把它们删了。
+    // 可能仍在消费三个 legacy 文件，passive 只能写入新原子记录，不能删除旧文件。
     expect(body).toContain('if (!isPassiveSharedUserDataInstance()) {');
     const guardIdx = body.indexOf('if (!isPassiveSharedUserDataInstance()) {');
     expect(body.indexOf('removeSafe(LEGACY_REFRESH_TOKEN_KEY);')).toBeGreaterThan(guardIdx);
     expect(body.indexOf('removeSafe(LEGACY_ACCOUNT_REFRESH_TOKEN_KEY);')).toBeGreaterThan(guardIdx);
+    const legacyTokenIdx = body.indexOf(
+      'const legacyToken = readSafe(LEGACY_RESOURCE_REFRESH_TOKEN_KEY);',
+    );
+    const migrationGuardIdx = body.indexOf(
+      'if (!isPassiveSharedUserDataInstance()) {',
+      legacyTokenIdx,
+    );
+    expect(migrationGuardIdx).toBeGreaterThan(legacyTokenIdx);
+    expect(body.indexOf('removeSafe(LEGACY_RESOURCE_REFRESH_TOKEN_KEY);')).toBeGreaterThan(
+      migrationGuardIdx,
+    );
   });
 
   it('其余整机一份的账号派生状态:canary flag 与账号删除 receipt 都不被 passive 清掉', () => {
@@ -186,8 +203,11 @@ describe('passive shared-userData instance auth isolation', () => {
     // passive 冷启动拿到 INVALID_REFRESH_TOKEN，最常见的原因就是 primary 刚轮换过它。
     expect(body).toContain('if (isPassiveSharedUserDataInstance()) {');
     // 非 passive 也不能无条件删：判定与删除之间另一个实例可能写入了替换凭证。
-    expect(body).toContain('removeSafeIfUnchanged(REFRESH_TOKEN_KEY, storedToken)');
-    expect(body).not.toContain('removeSafe(REFRESH_TOKEN_KEY);');
+    expect(body).toContain(
+      'const expectedSession = serializeAuthSessionRecord(storedRealm, storedToken);',
+    );
+    expect(body).toContain('removeSafeIfUnchanged(AUTH_SESSION_KEY, expectedSession)');
+    expect(body).not.toContain('removeSafe(AUTH_SESSION_KEY);');
     // 三种结果各自如实记日志，尤其 'failed' 不得报成已清理。
     expect(body).toContain("case 'deleted':");
     expect(body).toContain("case 'changed':");

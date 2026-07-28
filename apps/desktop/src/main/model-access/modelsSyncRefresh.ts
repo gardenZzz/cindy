@@ -27,9 +27,9 @@ export function withModelsSyncOverallDeadline<T>(
   });
 }
 
-export function buildModelsSyncRequest(baseUrl: string): {
+export function buildModelsSyncRequest(baseUrl: string | (() => string)): {
   path: '/api/model-access/models';
-  options: { baseUrl: string; timeoutMs: number };
+  options: { baseUrl: string | (() => string); timeoutMs: number };
 } {
   return {
     path: '/api/model-access/models',
