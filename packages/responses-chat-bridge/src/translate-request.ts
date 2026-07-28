@@ -4,9 +4,10 @@ import {
   type ChatBridgeCapabilities,
   type ChatDeveloperRole,
   type ChatCompletionsRequest,
+  type ChatImageInput,
   type ChatMessage,
   type ChatToolCallExtraContent,
-  type ResponsesContentPart,
+  type ChatUserContentPart,
   type ResponsesFunctionTool,
   type ResponsesInputItem,
   type ResponsesRequest,
@@ -62,9 +63,21 @@ function customToolArguments(input: unknown): string {
   }
 }
 
-function textFromParts(parts: ResponsesContentPart[], itemIndex: number): string {
+function messageContent(
+  item: Extract<ResponsesInputItem, { role: string }>,
+  itemIndex: number,
+  developerRole: ChatDeveloperRole,
+  imageInput: ChatImageInput | undefined,
+): string | ChatUserContentPart[] {
+  if (typeof item.content === 'string') return item.content;
+  if (!Array.isArray(item.content)) {
+    throw new UnsupportedResponsesFeatureError(`input[${itemIndex}].content`);
+  }
+
   let text = '';
-  for (const part of parts) {
+  let hasImage = false;
+  const multimodal: ChatUserContentPart[] = [];
+  for (const part of item.content) {
     if (!isPlainObject(part) || typeof part.type !== 'string') {
       throw new UnsupportedResponsesFeatureError(`input[${itemIndex}].content`);
     }
@@ -73,27 +86,45 @@ function textFromParts(parts: ResponsesContentPart[], itemIndex: number): string
         throw new UnsupportedResponsesFeatureError(`input[${itemIndex}].content.${part.type}`);
       }
       text += part.text;
+      multimodal.push({ type: 'text', text: part.text });
+      continue;
+    }
+    if (part.type === 'input_image') {
+      const normalizedRole = item.role === 'assistant'
+        ? 'assistant'
+        : normalizeRole(item.role, developerRole);
+      if (
+        normalizedRole !== 'user'
+        || imageInput !== 'image_url'
+        || part.file_id !== undefined
+        || typeof part.image_url !== 'string'
+        || part.image_url.length === 0
+      ) {
+        throw new UnsupportedResponsesFeatureError(`input content part '${part.type}'`);
+      }
+      hasImage = true;
+      multimodal.push({
+        type: 'image_url',
+        image_url: { url: part.image_url },
+      });
       continue;
     }
     throw new UnsupportedResponsesFeatureError(`input content part '${part.type}'`);
   }
-  return text;
-}
-
-function messageContent(item: Extract<ResponsesInputItem, { role: string }>, itemIndex: number): string {
-  if (typeof item.content === 'string') return item.content;
-  if (!Array.isArray(item.content)) {
-    throw new UnsupportedResponsesFeatureError(`input[${itemIndex}].content`);
-  }
-  return textFromParts(item.content, itemIndex);
+  // 无图片时维持历史 JSON 形态(string)，不让 capability 改变纯文本供应商请求。
+  return hasImage ? multimodal : text;
 }
 
 interface TranslateInputOptions {
   developerRole: ChatDeveloperRole;
+  /** 仅明确支持视觉的 Chat 上游开启；未声明时 input_image 继续 fail closed。 */
+  imageInput?: ChatImageInput;
   /** thinking 模型:为带 tool_calls 但缺 reasoning_content 的 assistant 消息注入占位。 */
   toolCallReasoningPlaceholder: boolean;
   /** Gemini 3 OpenAI 兼容层:为每步首个回放 tool call 注入官方允许的签名跳过值。 */
   googleThoughtSignaturePlaceholder: boolean;
+  /** 丢弃的无上下文内建 input item(Codex tool_search 等)回调,供 handler 记 log。 */
+  onDroppedInputItem?: (type: string, index: number) => void;
 }
 
 /** cc-switch 的占位口径:kimi/DeepSeek 要求 tool_call assistant 消息带非空 reasoning_content。 */
@@ -153,16 +184,45 @@ function translateInput(input: ResponsesRequest['input'], opts: TranslateInputOp
   for (let index = 0; index < input.length; index += 1) {
     const item = input[index];
     if (!isPlainObject(item)) throw new UnsupportedResponsesFeatureError(`input[${index}]`);
+    const itemType = typeof item.type === 'string' ? item.type : undefined;
+    if (
+      itemType === 'tool_search_call'
+      || itemType === 'tool_search_output'
+      || itemType === 'tool_search_call_output'
+    ) {
+      // Codex 内建 tool_search 的回放 item：与 namespace/web_search 工具声明同口径，
+      // 对第三方 Chat 上游无意义且不承载用户上下文，必须作为“非边界”item 剥掉降级
+      // —— 在 flushAssistant 之前处理，避免拆分本应合并的 assistant message。
+      opts.onDroppedInputItem?.(itemType, index);
+      continue;
+    }
 
     if ('role' in item && typeof item.role === 'string') {
-      const content = messageContent(item as Extract<ResponsesInputItem, { role: string }>, index);
+      const content = messageContent(
+        item as Extract<ResponsesInputItem, { role: string }>,
+        index,
+        opts.developerRole,
+        opts.imageInput,
+      );
       if (item.role === 'assistant') {
+        // messageContent 只会为 user 图片返回数组；这里再守一次类型边界，避免未来扩展误放行。
+        if (typeof content !== 'string') {
+          throw new UnsupportedResponsesFeatureError(`input[${index}].content`);
+        }
         if (!assistant) assistant = { role: 'assistant', content };
         else if (assistant.content == null) assistant.content = content;
         else if (content) assistant.content += content;
       } else {
         assistant = flushAssistant(messages, assistant, opts);
-        messages.push({ role: normalizeRole(item.role, opts.developerRole), content });
+        const role = normalizeRole(item.role, opts.developerRole);
+        if (role === 'user') {
+          messages.push({ role, content });
+        } else {
+          if (typeof content !== 'string') {
+            throw new UnsupportedResponsesFeatureError(`input[${index}].content`);
+          }
+          messages.push({ role, content });
+        }
       }
       continue;
     }
@@ -290,6 +350,8 @@ export interface TranslateResponsesRequestOptions {
   capabilities?: ChatBridgeCapabilities;
   /** 被剥掉的非 function 工具(Codex 内建 namespace / local_shell 等)回调,供 handler 记 log。 */
   onDroppedTool?: (type: string, index: number) => void;
+  /** 被剥掉的无上下文内建 input item(Codex tool_search 等)回调,供 handler 记 log。 */
+  onDroppedInputItem?: (type: string, index: number) => void;
 }
 
 /** Convert a Codex Responses request to a streaming Chat Completions request. */
@@ -304,8 +366,10 @@ export function translateResponsesRequest(
   const developerRole = capabilities.developerRole ?? 'system';
   const messages = translateInput(input.input, {
     developerRole,
+    imageInput: capabilities.imageInput,
     toolCallReasoningPlaceholder: capabilities.toolCallReasoningPlaceholder === true,
     googleThoughtSignaturePlaceholder: capabilities.googleThoughtSignaturePlaceholder === true,
+    onDroppedInputItem: opts.onDroppedInputItem,
   });
   if (input.instructions) {
     messages.unshift({ role: developerRole, content: input.instructions });

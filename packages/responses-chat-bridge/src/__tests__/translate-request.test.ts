@@ -299,6 +299,169 @@ describe('translateResponsesRequest', () => {
     }))).toThrowError(UnsupportedResponsesFeatureError);
   });
 
+  it('drops replayed Codex tool_search items without breaking tool-call merging', () => {
+    const dropped: Array<[string, number]> = [];
+    const out = translateResponsesRequest(base({
+      input: [
+        { type: 'message', role: 'user', content: 'hi' },
+        { type: 'tool_search_call', id: 'ts_1' },
+        {
+          type: 'function_call',
+          call_id: 'call_1',
+          name: 'shell',
+          arguments: '{"cmd":"ls"}',
+        },
+        { type: 'tool_search_output', id: 'ts_1', output: {} },
+        { type: 'tool_search_call_output', call_id: 'ts_1', output: {} },
+        { type: 'function_call_output', call_id: 'call_1', output: 'ok' },
+      ],
+    }), { onDroppedInputItem: (type, index) => dropped.push([type, index]) });
+
+    expect(out.messages).toEqual([
+      { role: 'user', content: 'hi' },
+      {
+        role: 'assistant',
+        content: null,
+        tool_calls: [
+          { id: 'call_1', type: 'function', function: { name: 'shell', arguments: '{"cmd":"ls"}' } },
+        ],
+      },
+      { role: 'tool', tool_call_id: 'call_1', content: 'ok' },
+    ]);
+    expect(dropped).toEqual([
+      ['tool_search_call', 1],
+      ['tool_search_output', 3],
+      ['tool_search_call_output', 4],
+    ]);
+  });
+
+  it('does not let dropped tool_search items split assistant merging', () => {
+    const dropped: string[] = [];
+    const out = translateResponsesRequest(base({
+      input: [
+        {
+          type: 'message',
+          role: 'assistant',
+          content: 'planning',
+        },
+        { type: 'tool_search_call', id: 'ts_1' },
+        { type: 'tool_search_output', id: 'ts_1', output: {} },
+        {
+          type: 'function_call',
+          call_id: 'call_1',
+          name: 'shell',
+          arguments: '{"cmd":"ls"}',
+        },
+        { type: 'tool_search_call_output', call_id: 'ts_1', output: {} },
+        {
+          type: 'function_call',
+          call_id: 'call_2',
+          name: 'shell',
+          arguments: '{"cmd":"pwd"}',
+        },
+        { type: 'function_call_output', call_id: 'call_1', output: 'a' },
+        { type: 'function_call_output', call_id: 'call_2', output: 'b' },
+      ],
+    }), { onDroppedInputItem: (type) => dropped.push(type) });
+
+    expect(out.messages).toEqual([
+      {
+        role: 'assistant',
+        content: 'planning',
+        tool_calls: [
+          { id: 'call_1', type: 'function', function: { name: 'shell', arguments: '{"cmd":"ls"}' } },
+          { id: 'call_2', type: 'function', function: { name: 'shell', arguments: '{"cmd":"pwd"}' } },
+        ],
+      },
+      { role: 'tool', tool_call_id: 'call_1', content: 'a' },
+      { role: 'tool', tool_call_id: 'call_2', content: 'b' },
+    ]);
+    expect(dropped).toEqual(['tool_search_call', 'tool_search_output', 'tool_search_call_output']);
+  });
+
+  it('translates capability-gated Kimi user images and preserves replayed history order', () => {
+    const imageUrl = 'data:image/png;base64,aW1hZ2U=';
+    const out = translateResponsesRequest(base({
+      input: [
+        {
+          type: 'message',
+          role: 'user',
+          content: [
+            { type: 'input_text', text: 'before' },
+            { type: 'input_image', image_url: imageUrl },
+            { type: 'input_text', text: 'after' },
+          ],
+        },
+        { type: 'message', role: 'assistant', content: [{ type: 'output_text', text: 'seen' }] },
+        { type: 'message', role: 'user', content: [{ type: 'input_text', text: 'continue' }] },
+      ],
+    }), { capabilities: { imageInput: 'image_url' } });
+
+    expect(out.messages).toEqual([
+      {
+        role: 'user',
+        content: [
+          { type: 'text', text: 'before' },
+          { type: 'image_url', image_url: { url: imageUrl } },
+          { type: 'text', text: 'after' },
+        ],
+      },
+      { role: 'assistant', content: 'seen' },
+      { role: 'user', content: 'continue' },
+    ]);
+  });
+
+  it('keeps pure-text JSON shape unchanged when image capability is enabled', () => {
+    const out = translateResponsesRequest(base({
+      input: [{
+        type: 'message',
+        role: 'user',
+        content: [
+          { type: 'input_text', text: 'hello' },
+          { type: 'input_text', text: ' world' },
+        ],
+      }],
+    }), { capabilities: { imageInput: 'image_url' } });
+
+    expect(out.messages).toEqual([{ role: 'user', content: 'hello world' }]);
+  });
+
+  it('keeps invalid or non-user image inputs fail-closed even with image capability', () => {
+    const capabilities = { imageInput: 'image_url' as const };
+    expect(() => translateResponsesRequest(base({
+      input: [{ type: 'message', role: 'user', content: [{ type: 'input_image', file_id: 'file_1' }] }],
+    }), { capabilities })).toThrow("input content part 'input_image'");
+    expect(() => translateResponsesRequest(base({
+      input: [{ type: 'message', role: 'user', content: [{ type: 'input_image' }] }],
+    }), { capabilities })).toThrow("input content part 'input_image'");
+    expect(() => translateResponsesRequest(base({
+      input: [{
+        type: 'message',
+        role: 'assistant',
+        content: [{ type: 'input_image', image_url: 'data:image/png;base64,eA==' }],
+      }],
+    }), { capabilities })).toThrow("input content part 'input_image'");
+    expect(() => translateResponsesRequest(base({
+      input: [{ type: 'message', role: 'user', content: [{ type: 'input_audio', audio_url: 'x' }] }],
+    }), { capabilities })).toThrow("input content part 'input_audio'");
+  });
+
+  it('allows normalized user-like roles such as latest_reminder to carry images', () => {
+    const imageUrl = 'data:image/png;base64,eA==';
+    const out = translateResponsesRequest(base({
+      input: [{
+        type: 'message',
+        role: 'latest_reminder',
+        content: [{ type: 'input_image', image_url: imageUrl }],
+      }],
+    }), { capabilities: { imageInput: 'image_url' } });
+
+    expect(out.messages).toEqual([{
+      role: 'user',
+      content: [{ type: 'image_url', image_url: { url: imageUrl } }],
+    }]);
+  });
+
   it('drops Codex built-in tools (namespace/web_search) but keeps standard function tools', () => {
     const dropped: Array<[string, number]> = [];
     const out = translateResponsesRequest(base({
