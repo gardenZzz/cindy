@@ -878,6 +878,10 @@ function nonEmptyWebSearchText(value: unknown): string {
   return typeof value === 'string' ? value.trim() : '';
 }
 
+function quoteWebSearchText(value: string): string {
+  return `'${value.replace(/['\\]/g, (char) => `\\${char}`)}'`;
+}
+
 function webSearchActionDetail(action: WebSearchAction | null | undefined): string {
   if (!action) return '';
   switch (action.type) {
@@ -895,8 +899,8 @@ function webSearchActionDetail(action: WebSearchAction | null | undefined): stri
     case 'findInPage': {
       const url = nonEmptyWebSearchText(action.url);
       const pattern = nonEmptyWebSearchText(action.pattern);
-      if (pattern && url) return `'${pattern}' in ${url}`;
-      if (pattern) return `'${pattern}'`;
+      if (pattern && url) return `${quoteWebSearchText(pattern)} in ${url}`;
+      if (pattern) return quoteWebSearchText(pattern);
       return url;
     }
     default:
@@ -904,11 +908,14 @@ function webSearchActionDetail(action: WebSearchAction | null | undefined): stri
   }
 }
 
-function webSearchInput(item: WebSearchItem): {
+function webSearchInput(
+  item: WebSearchItem,
+  actionDetail = webSearchActionDetail(item.action),
+): {
   query: string;
   action?: WebSearchAction;
 } {
-  const query = webSearchActionDetail(item.action) || nonEmptyWebSearchText(item.query);
+  const query = actionDetail || nonEmptyWebSearchText(item.query);
   return {
     query,
     ...(item.action ? { action: item.action } : {}),
@@ -939,18 +946,19 @@ function handleWebSearch(
   queue: AsyncQueue<AgentEvent>,
   ctx: CodexTranslateContext,
 ): void {
-  const input = webSearchInput(item);
+  const actionDetail = webSearchActionDetail(item.action);
+  const input = webSearchInput(item, actionDetail);
 
   if (phase === 'started') {
     if (ctx.rt.emittedToolUse.has(item.id)) return;
-    // 某些 Codex 版本在 started 只给空 legacy query，updated 才补 action；
-    // 延迟这一条展示事件，避免空参数先落库后无法无损更新。
-    if (!input.query) return;
+    // started 的 legacy query 可能为空或只是占位符，updated 才补真实 action；
+    // 延迟到 action 到达或 completed，避免旧参数先落库后无法无损更新。
+    if (!actionDetail) return;
     emitWebSearchToolUse(item, input, queue, ctx);
     return;
   }
   if (phase === 'updated') {
-    if (ctx.rt.emittedToolUse.has(item.id) || !input.query) return;
+    if (ctx.rt.emittedToolUse.has(item.id) || !actionDetail) return;
     emitWebSearchToolUse(item, input, queue, ctx);
     return;
   }
@@ -960,6 +968,8 @@ function handleWebSearch(
   ctx.rt.emittedToolUse.delete(item.id);
   // 防御缺失 started/updated 的历史或异常事件序列，保持 tool_use → result 顺序。
   if (!toolUseEmitted) {
+    // completed 仍无可展示参数时整条忽略，避免补发空白 tool_use 和孤立 result。
+    if (!input.query) return;
     emitWebSearchToolUse(item, input, queue, ctx);
     ctx.rt.emittedToolUse.delete(item.id);
   }
