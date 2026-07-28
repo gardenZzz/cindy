@@ -4360,6 +4360,34 @@ describe('CodexAgent MCP thread context hooks', () => {
     await handle.close();
   });
 
+  it('preserves the reviewer route for default remote sessions via the host effective mode (codex R17 P1)', async () => {
+    // Settings 创建的默认远程 session: 无 providerId + 无前缀 model,
+    // resolveAgentCredentialMode 解析为 undefined — 必须兜底到 host 创建时
+    // 登记的 effective mode (auth fallback 的实际钥匙), 否则远程订阅用户
+    // 的 reviewer 仍被回退 (默认值路径正是大多数用户的路径)。
+    const agent = new CodexAgent(createDeps());
+    (agent as unknown as { hostEffectiveCredentialModes: Map<string, string> })
+      .hostEffectiveCredentialModes.set('remote:gpu-box', 'oauth-bearer');
+    const host = installFakeHost(agent);
+    const handle = await agent.startSession({
+      sessionId: 'session-remote-default-auto',
+      model: 'gpt-5.5-codex',
+      workingDir: '/repo',
+      permissionMode: 'auto',
+      remoteHostId: 'gpu-box',
+    });
+
+    const startParams = host.request.mock.calls.find(([method]) => method === Method.ThreadStart)?.[1] as {
+      approvalPolicy?: string;
+      approvalsReviewer?: string;
+    };
+    expect(startParams).toMatchObject({
+      approvalPolicy: 'on-request',
+      approvalsReviewer: 'auto_review',
+    });
+    await handle.close();
+  });
+
   it('maps auto permission mode to Codex built-in automatic approval review', async () => {
     const agent = new CodexAgent(createDeps());
     const host = installFakeHost(agent, (method) => {

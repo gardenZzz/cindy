@@ -852,6 +852,23 @@ export class RemoteHost {
     accept: () => ClientChannel,
     reject: () => void,
   ): void {
+    // fail-closed (PR #715 copilot): 远端 sshd 若配了 permissive GatewayPorts,
+    // 隧道口可能绑在非 loopback 接口 — 远端网络的任意机器都能经隧道借用
+    // 本机的本地 Proxy。只接受 loopback 来源的转发连接 (远端 daemon 与
+    // sshd 同机, 合法来源恒为 loopback; IPv6 / IPv4-mapped 形式都认)。
+    if (
+      details.srcIP !== '127.0.0.1'
+      && details.srcIP !== '::1'
+      && details.srcIP !== '::ffff:127.0.0.1'
+    ) {
+      this.log.warn('ssh remote forward: rejecting non-loopback forwarded connection', {
+        id: this.id,
+        srcIP: details.srcIP,
+        destPort: details.destPort,
+      });
+      reject();
+      return;
+    }
     let record: ForwardRecord | undefined;
     for (const r of this.forwards.values()) {
       if (r.armed && r.remotePort === details.destPort) {

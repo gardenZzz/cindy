@@ -2253,14 +2253,17 @@ export class CodexAgent extends BaseAgent {
     // 同一份订阅凭证, reviewer 调用发生在 daemon 本地 — 订阅下走 daemon →
     // chatgpt.com 直连, 与本地订阅同构 (远端出网由用户网络或 agent-proxy
     // 隧道保障)。resolveAgentCredentialMode 只看 providerId/model, 远程同样
-    // 可判; 远程订阅与本地订阅同等启用 (#667 的远程一律回退是隧道方案
-    // 缺位时的保守, 隧道落地后放开)。
+    // 可判; 默认远程 session (无 providerId + 无前缀 model) 解析不出时,
+    // 兜底用 host 创建时登记的 effective mode (auth fallback 的实际钥匙 —
+    // 订阅即 oauth-bearer), 与本地默认 session 的兜底链对齐 (codex R17 P1)。
+    // 远程订阅与本地订阅同等启用 (#667 的远程一律回退是隧道方案缺位时的
+    // 保守, 隧道落地后放开)。
     const sessionCredentialMode = opts.remoteHostId
       ? resolveAgentCredentialMode({
           agentKind: 'codex',
           providerId: opts.providerId,
           model: opts.model,
-        })
+        }) ?? this.hostEffectiveCredentialModes.get(currentHostKey)
       : credentialMode ?? this.hostEffectiveCredentialModes.get(currentHostKey);
     const approvalsReviewerProtocolSupported =
       supportsCodexApprovalsReviewerProtocol(initResp.userAgent);
