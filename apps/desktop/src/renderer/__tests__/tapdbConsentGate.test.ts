@@ -385,6 +385,8 @@ describe('engagement-driven activity reporting', () => {
   beforeEach(() => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date(2026, 6, 28, 12, 0, 0));
+    // 跨窗口共享节流存 localStorage,不随 resetModules 清空,测试间必须显式隔离。
+    window.localStorage.clear();
   });
 
   afterEach(() => {
@@ -466,6 +468,40 @@ describe('engagement-driven activity reporting', () => {
     fireWindowEvent('keydown');
 
     expect(tapdb.setUser).toHaveBeenCalledTimes(2);
+  });
+
+  it('a window opened before midnight does not swallow the next day’s first interaction', async () => {
+    // 23:55 上报后窗口本该到 00:05 —— 但已换日,00:03 的交互必须放行并补当日 setUser,
+    // 否则「只在次日凌晨窗口内用了一下」的用户从第二天的活跃里整个消失。
+    vi.setSystemTime(new Date(2026, 6, 28, 23, 55, 0));
+    await initAllowed(); // app_start 消耗窗口至次日 00:05
+    authListener?.({ isAuthenticated: true, user: { id: 'user-1' } });
+    tapdb.pvEvent.mockClear();
+    tapdb.setUser.mockClear();
+
+    vi.setSystemTime(new Date(2026, 6, 29, 0, 3, 0));
+    fireWindowEvent('keydown');
+
+    expect(tapdb.pvEvent).toHaveBeenCalledWith({ '#tag': 'app_engaged' });
+    expect(tapdb.setUser).toHaveBeenCalledTimes(1);
+  });
+
+  it('a recent report from another window suppresses this window’s app_engaged (shared throttle)', async () => {
+    // detached 侧栏窗口与主窗口各有一份 module 态:共享节流经 localStorage 生效,
+    // 本窗口静默让位,窗口过期后恢复正常上报。
+    await initAllowed();
+    tapdb.pvEvent.mockClear();
+
+    vi.advanceTimersByTime(10 * 60 * 1000); // 本窗口内存窗口已过期
+    window.localStorage.setItem('tapdb.lastEngagedReportAt', String(Date.now() - 30 * 1000));
+    fireWindowEvent('keydown');
+
+    expect(tapdb.pvEvent).not.toHaveBeenCalled();
+
+    vi.advanceTimersByTime(10 * 60 * 1000); // 共享窗口也过期
+    fireWindowEvent('keydown');
+
+    expect(tapdb.pvEvent).toHaveBeenCalledWith({ '#tag': 'app_engaged' });
   });
 
   it('ignores input while unconsented, then reports normally after consent', async () => {

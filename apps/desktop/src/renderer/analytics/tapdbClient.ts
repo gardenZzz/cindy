@@ -102,11 +102,23 @@ let lastSetUserDate: string | null = null;
 /** 交互活跃上报的节流窗口。远大于单次输入间隔,一天上限 144 条。 */
 const ENGAGED_REPORT_INTERVAL_MS = 10 * 60 * 1000;
 /**
+ * 跨窗口共享的「上次 app_engaged 上报时刻」localStorage key。detached 侧栏等
+ * 窗口跑同一 renderer 入口,module 态各窗口独立 —— 只靠内存窗口,多窗口交替
+ * 交互会成倍多发 app_engaged。
+ */
+const ENGAGED_SHARED_LAST_REPORT_KEY = 'tapdb.lastEngagedReportAt';
+/**
  * 下一次允许上报活跃的时刻(epoch ms)。仅内存:reload 丢失只会让上报提前一条,
  * 服务端按天去重,无害。任何 tag 的上报(含 app_start)都会推进它,避免冷启动
  * app_start 后紧跟的第一次点击立刻再发一条。
  */
 let nextEngagedReportAt = 0;
+/**
+ * 上次上报那天的本地午夜(epoch ms)。跨过它意味着换日:即便还在节流窗口内
+ * (如 23:55 报过、00:03 再交互),也放行补报,否则新一天头 10 分钟的活跃
+ * (连同当日 setUser)会被前一天的窗口整个吞掉。
+ */
+let engagedDayEndsAt = 0;
 
 /**
  * 交互信号统一入口(focus / keydown / pointerdown)。绝大多数调用在第一行的
@@ -114,7 +126,8 @@ let nextEngagedReportAt = 0;
  * 闸检查放在节流窗口推进之前:未放行期间的交互不消耗窗口,放行后首次交互立报。
  */
 function onEngagedSignal(): void {
-  if (Date.now() < nextEngagedReportAt) return;
+  const now = Date.now();
+  if (now < nextEngagedReportAt && now < engagedDayEndsAt) return;
   if (!sdkInitialized || !reportingAllowed) return;
   try {
     reportActive('app_engaged');
@@ -352,7 +365,29 @@ function applySuperProperties(): void {
 function reportActive(tag: 'app_start' | 'app_engaged'): void {
   // 先推进节流窗口再上报:即便 pvEvent 抛异常,10 分钟内也不再重试(fire-and-forget,
   // 防止持续输入在 SDK 故障时反复触发)。app_start 同样消耗窗口,避免启动瞬间双发。
-  nextEngagedReportAt = Date.now() + ENGAGED_REPORT_INTERVAL_MS;
+  const now = Date.now();
+  nextEngagedReportAt = now + ENGAGED_REPORT_INTERVAL_MS;
+  engagedDayEndsAt = nextLocalMidnightMs(now);
+
+  // 跨窗口去重(仅 app_engaged;低频路径,localStorage 读写开销无关紧要):
+  // 同 origin 全窗口共享上次上报时刻,窗口内且同一天则本窗口静默让位 ——
+  // 内存窗口已推进,不重复发。localStorage 不可用时退化为每窗口独立节流。
+  // app_start 是窗口生命周期语义,不参与共享去重;setUser 幂等,不做跨窗口协调。
+  if (tag === 'app_engaged') {
+    try {
+      const sharedLast = Number(window.localStorage.getItem(ENGAGED_SHARED_LAST_REPORT_KEY));
+      if (
+        Number.isFinite(sharedLast) &&
+        now - sharedLast < ENGAGED_REPORT_INTERVAL_MS &&
+        getLocalDateKey(new Date(sharedLast)) === getLocalDateKey(new Date(now))
+      ) {
+        return;
+      }
+      window.localStorage.setItem(ENGAGED_SHARED_LAST_REPORT_KEY, String(now));
+    } catch {
+      // localStorage 不可用:退化为每窗口独立节流(原行为)。
+    }
+  }
 
   TapDBAPI.pvEvent({ '#tag': tag });
   log.info(`active ${tag}`);
@@ -380,6 +415,13 @@ function getLocalDateKey(date = new Date()): string {
   return `${year}-${month}-${day}`;
 }
 
+/** nowMs 所在本地日的下一个午夜(epoch ms)。 */
+function nextLocalMidnightMs(nowMs: number): number {
+  const d = new Date(nowMs);
+  d.setHours(24, 0, 0, 0);
+  return d.getTime();
+}
+
 export const __testing = {
   reset(): void {
     gateMounted = false;
@@ -390,5 +432,11 @@ export const __testing = {
     currentUserId = null;
     lastSetUserDate = null;
     nextEngagedReportAt = 0;
+    engagedDayEndsAt = 0;
+    try {
+      window.localStorage.removeItem(ENGAGED_SHARED_LAST_REPORT_KEY);
+    } catch {
+      // 测试环境无 localStorage 时忽略。
+    }
   },
 };
