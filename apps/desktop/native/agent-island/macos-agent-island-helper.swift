@@ -473,6 +473,8 @@ struct PululuMascotView: View {
       let squashY: CGFloat = dy > 0.25 ? 0.98 : 1.0
 
       drawShadow(c, v: v, width: 8.1 - abs(dy) * 0.32, opacity: 0.30)
+      // 键盘先画：角色要挡在键盘前面，而不是被键盘条横切。
+      drawKeyboard(c, v: v, phase: keyPhase, dy: -0.05)
       drawPululu(
         c,
         v: v,
@@ -485,7 +487,6 @@ struct PululuMascotView: View {
         eyesBright: true,
         headAngle: headTurn
       )
-      drawKeyboard(c, v: v, phase: keyPhase, dy: -0.05)
     }
   }
 
@@ -1052,6 +1053,8 @@ struct SpriteMascotView: View {
       let v = V(sz)
       let dy = bounce - 0.25
       drawShadow(c, v: v, width: 8.4 - abs(dy) * 0.32, opacity: 0.30)
+      // 键盘先画：角色要挡在键盘前面，而不是被键盘条横切。
+      drawKeyboard(c, v: v, phase: keyPhase, dy: -0.05)
       drawSprite(
         c,
         v: v,
@@ -1064,7 +1067,6 @@ struct SpriteMascotView: View {
         eyeYOffset: 0.05,
         angle: headTurn
       )
-      drawKeyboard(c, v: v, phase: keyPhase, dy: -0.05)
     }
   }
 
