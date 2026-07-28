@@ -2057,8 +2057,12 @@ export function createHookControlManager(deps: HookControlManagerDeps): HookCont
         );
         return;
       }
-      void recordGroupMessage(msg.payload).catch((err) =>
-        log.warn(`group window record failed: ${String(err)}`),
+      // 账号边界: 写入纳入 pendingAccountOps, 登出/切号等待落库完成后再
+      // 销毁 DB client, 不留 use-after-dispose。
+      trackAccountOp(
+        recordGroupMessage(msg.payload).catch((err) =>
+          log.warn(`group window record failed: ${String(err)}`),
+        ),
       );
       return;
     }
