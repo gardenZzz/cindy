@@ -3798,6 +3798,18 @@ export class CodexAgent extends BaseAgent {
       return /Codex send (?:cancelled|cannot be accepted)/i.test(text);
     }
 
+    // idle 孤儿判定 (codex R15 P1): 孤儿守卫生效 + 无 RPC 在飞 + 无活跃 turn
+    // 时, 未知 id 的事件只可能来自失败 RPC 的孤儿 turn (合法 turn 的 id 都
+    // 已知)。与 pending 窗口的 buffer 隔离互补: idle 时没有对账 RPC 在飞,
+    // 事件直接按孤儿处理 (立墓碑), 不缓冲。
+    const isIdleOrphanTurnId = (turnId: string | null | undefined): turnId is string =>
+      Boolean(turnId)
+      && turnStartFailedWithoutTurnId
+      && !isTurnStartPending
+      && currentTurnId === null
+      && !completedTurnIds.has(turnId as string)
+      && !terminalErroredTurnIds.has(turnId as string);
+
     const shouldIgnoreStaleTurnEvent =(turnId: string | null | undefined): boolean => {
       if (!turnId) return false;
       if (completedTurnIds.has(turnId)) return true;
@@ -3808,6 +3820,13 @@ export class CodexAgent extends BaseAgent {
       // 计错 turn / 孤儿 error 终结合法新 turn, greptile R10 P1)。其事件一律
       // 忽略; 若响应证明合法 (id 一致)  buffer 已清空, 后续事件正常。
       if (bufferedOrphanTurnIds.has(turnId)) return true;
+      // idle 孤儿 (codex R15 P1): 立墓碑并丢弃。补 interrupt 由 turnStarted
+      // 的孤儿分支负责 (幂等); started 不到的孤儿在 daemon 侧自然跑完,
+      // 其 completed 由 turnCompleted handler 的同款判定拦。
+      if (isIdleOrphanTurnId(turnId)) {
+        terminalErroredTurnIds.add(turnId);
+        return true;
+      }
       return currentTurnId !== null && turnId !== currentTurnId;
     };
 
@@ -3874,7 +3893,20 @@ export class CodexAgent extends BaseAgent {
     const gateServerRequestTurn = (turnId: string | null | undefined): boolean | Promise<boolean> => {
       if (!turnId) return true;
       if (terminalErroredTurnIds.has(turnId) || completedTurnIds.has(turnId)) return false;
-      if (!bufferedOrphanTurnIds.has(turnId)) return true;
+      if (!bufferedOrphanTurnIds.has(turnId)) {
+        // 与 enqueueIfBufferedTurn 同款预缓冲 (codex R15 P1): 孤儿 turn 的
+        // server request 同样可以比它的 turnStarted 先到 — id 未入 buffer
+        // 时若直接放行, 审批框会为隐藏孤儿 turn 上 UI。守卫生效 + RPC 在飞
+        // + 无活跃 turn 时视同 buffered, 挂起到对账。
+        if (!(turnStartFailedWithoutTurnId && isTurnStartPending && currentTurnId === null)) {
+          return true;
+        }
+        bufferedOrphanTurnIds.add(turnId);
+        log.debug('buffering ambiguous turn server request (evidence before turnStarted) until turn/start response arrives', {
+          turnId,
+          threadId,
+        });
+      }
       // 挂起到对账; waiter 恢复前复查墓碑 (codex R13 P2): 对账先 settle(true)
       // 再同步重放队列, 队列里若有终态会把该 turn 当场收口 — waiter 在
       // microtask 里恢复时 turn 已死, 此时再上 UI 就是为一个刚收口的 turn
@@ -4276,14 +4308,18 @@ export class CodexAgent extends BaseAgent {
         }
       },
       turnStarted: (params) => {
-        // terminal error 已经为该 turn 收口时，晚到的 start 只能忽略，等待 completed 做清理。
-        if (shouldIgnoreStaleTurnEvent(params.turn.id)) return;
-        // 终态已先到的 turn (墓碑) 不得被乱序晚到的 started 重新置活。
-        if (turnsCompletedBeforeStartResp.has(params.turn.id)) return;
         // turn/start RPC 已失败(超时/拒绝)但 daemon 实际已建 turn — 迟到的孤儿
         // turnStarted 不得重新激活已报终态错误的会话 (greptile P1): 立墓碑 +
-        // 补 interrupt 让 daemon 停掉这个没人消费的 turn。
-        if (turnStartFailedWithoutTurnId && currentTurnId === null) {
+        // 补 interrupt 让 daemon 停掉这个没人消费的 turn。分支先于 stale 闸
+        // (codex R15 P1): 闸对 idle 孤儿只立墓碑, turnStarted 必须走这里补
+        // interrupt; 被闸先拦就发不出了。已墓碑/已完成的 id 不重复进分支
+        // (interrupt 不重复发), 交给下面的闸拦。
+        if (
+          turnStartFailedWithoutTurnId
+          && currentTurnId === null
+          && !terminalErroredTurnIds.has(params.turn.id)
+          && !completedTurnIds.has(params.turn.id)
+        ) {
           if (isTurnStartPending) {
             // 新 turn/start 在飞 → 归属不明 (失败 RPC 的孤儿 vs 在飞 RPC 合法的
             // started-before-resp, 协议层无法区分): 缓冲隔离, 等响应按 turnId
@@ -4312,6 +4348,10 @@ export class CodexAgent extends BaseAgent {
           }
           return;
         }
+        // terminal error 已经为该 turn 收口时，晚到的 start 只能忽略，等待 completed 做清理。
+        if (shouldIgnoreStaleTurnEvent(params.turn.id)) return;
+        // 终态已先到的 turn (墓碑) 不得被乱序晚到的 started 重新置活。
+        if (turnsCompletedBeforeStartResp.has(params.turn.id)) return;
         threadMayHaveRollout = true;
         const wasSameTurn = currentTurnId === params.turn.id;
         currentTurnId = params.turn.id;
@@ -4324,8 +4364,11 @@ export class CodexAgent extends BaseAgent {
         }
         if (!wasSameTurn) currentTurnPlanModeActive = pendingTurnStartPlanMode ?? planCycleActive;
         // 新 turn 开始 → 丢弃上一 turn 未消费的 proposed plan (正常路径已在
-        // handleTurnCompleted 清空, 这里防御 stale)。
-        proposedPlanText = null;
+        // handleTurnCompleted 清空, 这里防御 stale)。same-turn 的晚到 started
+        // 不清 (codex R15 P1): buffered turn 的 item 事件可能先于它的 started
+        // 被重放 (interceptProposedPlanItem 已存 plan), 随后到达的同 id
+        // started 若无条件清空, plan 模式下刚重放的 proposed plan 永久丢失。
+        if (!wasSameTurn) proposedPlanText = null;
         terminalErroredTurnIds.delete(params.turn.id);
         // Reset auth retry-loop dedupe key — 让下一个 turn 重新可以 emit 第一条
         // auth error。详见 translator.translateErrorNotification dedupe 逻辑。
@@ -4376,6 +4419,15 @@ export class CodexAgent extends BaseAgent {
         // (handleTurnCompleted 在 currentTurnId===null 下也收口 emit done);
         // 直接丢弃会把尸体 turn 激活成 in-flight, send 永久卡 generating。
         if (enqueueIfBufferedTurn(params.turn.id, () => handlers.turnCompleted?.(params))) return;
+        // 只拦 idle 孤儿 (codex R15 P1): 无 pending 时它的 completed 会走
+        // currentTurnId===null 的收口分支 emit 假 done。terminal/completed
+        // 墓碑 turn 的迟到 completed 仍走 handleTurnCompleted 的正常
+        // bookkeeping (suppressTerminalUi 分支, 不重复出 UI 事件) — 不能上
+        // 整个 stale 闸。
+        if (isIdleOrphanTurnId(params.turn.id)) {
+          terminalErroredTurnIds.add(params.turn.id);
+          return;
+        }
         handleTurnCompleted(params);
       },
       itemStarted: (params) => {
