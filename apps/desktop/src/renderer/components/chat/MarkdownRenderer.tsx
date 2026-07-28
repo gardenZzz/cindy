@@ -563,14 +563,36 @@ const baseComponents: Components = {
   // components object).
 
   // Headings
+  //
+  // 颜色走 --md-hN-fg token(默认值 `inherit`,见 themes/colors.ts):默认主题下与
+  // 引入 token 前逐像素一致,外部导入的主题(Obsidian --hN-color / VSCode
+  // markup.heading)才会把它染成分级色。字号字重不受 token 影响。
   h1({ children, ...props }) {
-    return <h1 className="my-3 text-20 leading-[1.4] font-medium" {...props}>{children}</h1>;
+    return <h1 className="my-3 text-20 leading-[1.4] font-medium text-[var(--md-h1-fg)]" {...props}>{children}</h1>;
   },
   h2({ children, ...props }) {
-    return <h2 className="my-3 text-18 leading-[1.556] font-medium" {...props}>{children}</h2>;
+    return <h2 className="my-3 text-18 leading-[1.556] font-medium text-[var(--md-h2-fg)]" {...props}>{children}</h2>;
   },
   h3({ children, ...props }) {
-    return <h3 className="my-2 text-16 leading-[1.5] font-medium" {...props}>{children}</h3>;
+    return <h3 className="my-2 text-16 leading-[1.5] font-medium text-[var(--md-h3-fg)]" {...props}>{children}</h3>;
+  },
+  // h4-h6 此前没有 renderer(走 react-markdown 默认的裸 tag,字号字重由 Tailwind
+  // preflight 归一成继承)。这里只补颜色 class,刻意不加字号/字重/间距 —— 保持
+  // 原有观感不变。
+  h4({ children, ...props }) {
+    return <h4 className="text-[var(--md-h4-fg)]" {...props}>{children}</h4>;
+  },
+  h5({ children, ...props }) {
+    return <h5 className="text-[var(--md-h5-fg)]" {...props}>{children}</h5>;
+  },
+  h6({ children, ...props }) {
+    return <h6 className="text-[var(--md-h6-fg)]" {...props}>{children}</h6>;
+  },
+
+  // 加粗:同上,只接颜色 token。font-weight 仍由 Tailwind preflight 的
+  // `b, strong { font-weight: bolder }` 提供,这里不覆盖。
+  strong({ children, ...props }) {
+    return <strong className="text-[var(--md-strong-fg)]" {...props}>{children}</strong>;
   },
 
   // Blockquote
@@ -601,10 +623,10 @@ const baseComponents: Components = {
  * chat 调用方不传 prop, 这里整个函数永远不会运行 → chat 路径零开销零行为变化。
  *
  * 实现:
- *   - 已有 base renderer (h1-h3 / p / pre / table / ul / ol / blockquote / hr):
+ *   - 已有 base renderer (h1-h6 / p / pre / table / ul / ol / blockquote / hr):
  *     把 lineAttr merge 进 props 后透传给 base 函数。base 内部 spread props 时
  *     data-source-line 自然落到对应 DOM 节点上。
- *   - base 没有的 (h4-h6 / li): 直接 createElement 渲染原生 tag。
+ *   - base 没有的 (li): 直接 createElement 渲染原生 tag。
  */
 type BlockTag = 'h1' | 'h2' | 'h3' | 'h4' | 'h5' | 'h6' | 'p' | 'pre' | 'table' | 'ul' | 'ol' | 'li' | 'blockquote' | 'hr';
 
@@ -825,6 +847,12 @@ function localKindFromAbsPath(absPath: string, fallback: MarkdownLocalKind): Mar
  * unresolved / ambiguous / unsupported scheme — renders as plain text by the
  * call sites, not as a chip. So this component is always interactive: click
  * to open, hover to highlight, right-click for the file menu.
+ *
+ * 标签是 `<code role="button">` 而不是 `<button>`,这条不能回退:这个 chip 是
+ * 行内代码升级来的,复制消息时 Chromium 会把选区原样序列化进 `text/html`,而
+ * `<button>` 不在外部富文本编辑器(Slack / 飞书 / Notion / Word)的粘贴白名单
+ * 里——整个节点连同路径文字会被丢弃,只在原位留下一个断行。`<code>` 既是语义
+ * 正解,粘出去还会落成对方的行内代码。详见 InlineReferenceChip 的同款说明。
  */
 function FileTargetChip({
   resolvedAbsPath,
@@ -882,11 +910,18 @@ function FileTargetChip({
 
   return (
     <>
-      <button
-        type="button"
+      <code
+        role="button"
+        tabIndex={0}
         title={title}
         onClick={activate}
         onContextMenu={ctxMenu.onContextMenu}
+        onKeyDown={(e) => {
+          // 换掉原生按钮元素后,键盘激活要自己补回来。
+          if (e.key !== 'Enter' && e.key !== ' ') return;
+          e.preventDefault();
+          activate();
+        }}
         className={cn(
           'inline rounded-[6px] border-0 px-1 py-0.5',
           'font-mono text-14 align-baseline',
@@ -898,7 +933,7 @@ function FileTargetChip({
         )}
       >
         {children}
-      </button>
+      </code>
       {ctxMenu.menu}
     </>
   );
