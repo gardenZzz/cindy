@@ -308,6 +308,12 @@ describe('readWorkflowProgressForSession(跨 sdkSessionId 换代兜底)', () => 
     expect(await readWorkflowProgressForSession(home, '/no/such/proj', 'sdk-x', 't1')).toBeNull();
   });
 
+  it('sdkSessionId 为 null(/clear 置空)时跳过精确目录,跨目录扫描仍能命中', async () => {
+    await writeRecord('sdk-old', { runId: 'wf_old', taskId: 't1', workflowProgress: [] });
+    const p = await readWorkflowProgressForSession(home, workingDir, null, 't1');
+    expect(p?.runId).toBe('wf_old');
+  });
+
   it('project 根的 <sdkSessionId>.jsonl 转录文件不消耗扫描配额', async () => {
     // 长寿项目根目录里普通文件远多于 session 目录:配额只对目录计数,
     // 否则 readdir 顺序里文件排前时老 workflow 目录根本轮不到。

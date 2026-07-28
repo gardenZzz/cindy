@@ -219,14 +219,18 @@ const CROSS_SESSION_SCAN_MAX_DIRS = 200;
 export async function readWorkflowProgressForSession(
   homeDir: string,
   workingDir: string,
-  sdkSessionId: string,
+  // null = 会话没有当前 sdkSessionId(/clear 会把持久化列置空):跳过精确目录,
+  // 直接跨目录扫描 —— taskId 全局唯一,定位只需要 workingDir。
+  sdkSessionId: string | null,
   taskId: string,
 ): Promise<WorkflowProgress | null> {
-  const exact = await readWorkflowProgressByTaskId(
-    deriveWorkflowsDir(homeDir, workingDir, sdkSessionId),
-    taskId,
-  );
-  if (exact) return exact;
+  if (sdkSessionId) {
+    const exact = await readWorkflowProgressByTaskId(
+      deriveWorkflowsDir(homeDir, workingDir, sdkSessionId),
+      taskId,
+    );
+    if (exact) return exact;
+  }
   const projectDir = deriveProjectDir(homeDir, workingDir);
   const homePath = homePathModule(homeDir);
   let projectEntries: import('node:fs').Dirent[];

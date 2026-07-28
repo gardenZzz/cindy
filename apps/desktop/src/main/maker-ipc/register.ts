@@ -3326,10 +3326,16 @@ export function registerMakerIpc(maker: Maker, options: RegisterMakerIpcOptions 
           // 执行本 handler(见 allowlist 的 maker:get-workflow-progress 准入)。
           if (s.remoteHostId) return null;
           const { sdkSessionId, workDir } = s;
-          if (!sdkSessionId || !workDir) return null;
+          // sdkSessionId 允许为空(/clear 后置空):reader 跳过精确目录直接跨目录扫描。
+          if (!workDir) return null;
           // reader 内部带跨 sdkSessionId 换代兜底:resume 换代前跑的 workflow
           // 记录在旧 session 目录,精确目录 miss 后按 taskId 扫同 project 下其它目录。
-          return await readWorkflowProgressForSession(os.homedir(), workDir, sdkSessionId, taskId);
+          return await readWorkflowProgressForSession(
+            os.homedir(),
+            workDir,
+            sdkSessionId ?? null,
+            taskId,
+          );
         }
         // 会话不活跃(app 重启后看历史 / 会话已被关闭释放):workflow 记录文件仍在
         // 本机磁盘,回退持久化 session 行的 working_dir + sdk_session_id 定位目录
@@ -3345,11 +3351,13 @@ export function registerMakerIpc(maker: Maker, options: RegisterMakerIpcOptions 
           .where(eq(sessions.id, sessionId))
           .limit(1);
         const row = rows[0];
-        if (!row || row.remoteHostId || !row.sdkSessionId || !row.workingDir) return null;
+        // sdkSessionId 允许为空:/clear 会把它置 null,但旧 wf 记录文件仍在,
+        // reader 会跳过精确目录直接跨目录扫描(taskId 全局唯一)。
+        if (!row || row.remoteHostId || !row.workingDir) return null;
         return await readWorkflowProgressForSession(
           os.homedir(),
           row.workingDir,
-          row.sdkSessionId,
+          row.sdkSessionId ?? null,
           taskId,
         );
       } catch {
