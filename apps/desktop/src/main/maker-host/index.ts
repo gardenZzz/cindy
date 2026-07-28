@@ -119,8 +119,8 @@ import {
 } from '../mcp-integrations/codexEnvironment.js';
 import type { CodexHttpBridge } from '../mcp-integrations/codexHttpBridge.js';
 import { ensureRemoteMcpForward, setRemoteMcpForwardRearmedHook, stripRemoteCodexMcpConfig } from '../remote-ssh/codex-remote-mcp.js';
-import { buildCcRemoteHttpMcpServers } from './cc-remote-mcp.js';
-import { getRemoteSessionStartEnsure, getRemoteCodexLiveTurnChecker, setRemoteCcTurnSettledHandler } from './remote-session-start-ensure.js';
+import { buildCcRemoteHttpMcpServers, readCcAppliedFingerprint, writeCcAppliedFingerprint } from './cc-remote-mcp.js';
+import { getRemoteSessionStartEnsure, getRemoteCodexLiveTurnChecker, setRemoteCcTurnSettledHandler, setRemoteCcStaleQuery } from './remote-session-start-ensure.js';
 import {
   refreshRemoteCodexMcpAfterBridgeRecreate,
   invalidateRemoteCcQueriesForMcpGenerationChange,
@@ -522,6 +522,7 @@ export function getMaker(): Maker {
     });
     // register.ts 的 turn 收口经 holder 回调:远端 CC 的 fresh 已失效且
     // 无 turn 时 detach 旧 query (bridge 重建 / 端口重绑的补刀路径)。
+    setRemoteCcStaleQuery((sessionId) => staleInvalidatedCcSessions.has(sessionId));
     setRemoteCcTurnSettledHandler((sessionId) => {
       maybeDetachStaleRemoteCcQuery(
         {
@@ -529,7 +530,7 @@ export function getMaker(): Maker {
             const s = _maker?.getSession(id);
             return s && s.agentKind === 'claude-code' ? s : null;
           },
-          hasFreshMark: (id) => forcedFreshCcBridgeSessions.has(id),
+          hasStaleMark: (id) => staleInvalidatedCcSessions.has(id),
           log: desktopMakerLogger,
         },
         sessionId,
@@ -665,6 +666,7 @@ export function getMaker(): Maker {
         let mcpCleanup: () => void = () => {};
         let injectedServerCount = 0;
         let mcpNeedsFreshStart = false;
+        let mcpInjectFingerprint: string | undefined;
         try {
           const injected = await buildCcRemoteHttpMcpServers(
             {
@@ -683,6 +685,7 @@ export function getMaker(): Maker {
           );
           mcpCleanup = injected.cleanup;
           mcpNeedsFreshStart = injected.needsFreshStart === true;
+          mcpInjectFingerprint = injected.fingerprint;
           if (Object.keys(injected.servers).length > 0) {
             injectedServerCount = Object.keys(injected.servers).length;
             const mutableParams = startParams as { mcpServers?: Record<string, unknown> };
@@ -709,8 +712,16 @@ export function getMaker(): Maker {
         // 被 invalidate 过 (staleInvalidatedCcSessions) 也一样:collab 禁用
         // 等场景重建时无 server 可注, 不 forceFresh 会 attach 回带旧 collab
         // URL 的 query (codex-connector R22 P2)。
+        // 持久代际指纹 drift (codex-connector R23 P2):collab 开→关 /
+        // token 轮换 / bridge 代际 / 端口重绑后跨 app 重启, 进程内集合
+        // 清空也能判出存活 query 的 MCP 配置属旧代际。
+        const ccAppliedFingerprint = readCcAppliedFingerprint(sessionId);
+        const ccGenerationDrift =
+          mcpInjectFingerprint !== undefined &&
+          ccAppliedFingerprint !== null &&
+          mcpInjectFingerprint !== ccAppliedFingerprint;
         const forceFreshQuery =
-          (injectedServerCount > 0 || mcpNeedsFreshStart || staleInvalidatedCcSessions.has(sessionId)) &&
+          (injectedServerCount > 0 || mcpNeedsFreshStart || staleInvalidatedCcSessions.has(sessionId) || ccGenerationDrift) &&
           !forcedFreshCcBridgeSessions.has(sessionId);
 
         // 协同 MCP 已 mutate 进 startParams.mcpServers;这里再把 proxy env 合入
@@ -747,6 +758,11 @@ export function getMaker(): Maker {
         if (forceFreshQuery) {
           forcedFreshCcBridgeSessions.add(sessionId);
           staleInvalidatedCcSessions.delete(sessionId);
+        }
+        // 注入/禁用代际随 open 成功落盘 (attach 也算 — 它确认了该 query
+        // 的 MCP 代际);下次 open 前据此判 drift。
+        if (mcpInjectFingerprint) {
+          writeCcAppliedFingerprint(sessionId, mcpInjectFingerprint);
         }
 
         // 把 ssh transport disposer 串进 remoteQuery.close — maker-core 不知道

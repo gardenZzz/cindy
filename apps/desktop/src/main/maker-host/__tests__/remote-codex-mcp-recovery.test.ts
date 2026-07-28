@@ -133,33 +133,33 @@ describe('invalidateRemoteCcQueriesForMcpGenerationChange', () => {
 });
 
 describe('maybeDetachStaleRemoteCcQuery', () => {
-  it('detaches when the fresh mark is gone and no turn is running', () => {
+  it('detaches only when the session was explicitly invalidated (stale mark) and no turn is running', () => {
     const s = { id: 'cc-1', remoteHostId: 'host-a', isTurnRunning: () => false, detach: vi.fn(async () => {}) };
     maybeDetachStaleRemoteCcQuery(
-      { getSession: () => s, hasFreshMark: () => false, log: { warn: vi.fn() } },
+      { getSession: () => s, hasStaleMark: () => true, log: { warn: vi.fn() } },
       'cc-1',
     );
     expect(s.detach).toHaveBeenCalledTimes(1);
   });
 
-  it('is a no-op when the fresh mark is still valid or the session is local or a turn is running', () => {
+  it('is a no-op for healthy sessions without a stale mark (never-fresh is not stale), local sessions, and running turns', () => {
     const fresh = { id: 'cc-1', remoteHostId: 'host-a', isTurnRunning: () => false, detach: vi.fn(async () => {}) };
     maybeDetachStaleRemoteCcQuery(
-      { getSession: () => fresh, hasFreshMark: () => true, log: { warn: vi.fn() } },
+      { getSession: () => fresh, hasStaleMark: () => false, log: { warn: vi.fn() } },
       'cc-1',
     );
     expect(fresh.detach).not.toHaveBeenCalled();
 
     const local = { id: 'cc-2', remoteHostId: null, isTurnRunning: () => false, detach: vi.fn(async () => {}) };
     maybeDetachStaleRemoteCcQuery(
-      { getSession: () => local, hasFreshMark: () => false, log: { warn: vi.fn() } },
+      { getSession: () => local, hasStaleMark: () => true, log: { warn: vi.fn() } },
       'cc-2',
     );
     expect(local.detach).not.toHaveBeenCalled();
 
     const running = { id: 'cc-3', remoteHostId: 'host-a', isTurnRunning: () => true, detach: vi.fn(async () => {}) };
     maybeDetachStaleRemoteCcQuery(
-      { getSession: () => running, hasFreshMark: () => false, log: { warn: vi.fn() } },
+      { getSession: () => running, hasStaleMark: () => true, log: { warn: vi.fn() } },
       'cc-3',
     );
     expect(running.detach).not.toHaveBeenCalled();

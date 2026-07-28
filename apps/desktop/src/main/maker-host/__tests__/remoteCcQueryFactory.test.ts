@@ -134,3 +134,17 @@ describe('cc-manager-client forced-fresh kill settle (Greptile R22/R23 P1)', () 
     expect(client).toContain('restart the remote');
   });
 });
+
+describe('remoteCcQueryFactory persistent generation drift (R23 P2)', () => {
+  it('drives forceFresh from the persisted cc generation fingerprint and writes it after open', () => {
+    // collab 开→关 / token 轮换 / bridge 代际跨 app 重启:进程内集合清空
+    // 也要靠 applied 指纹判出旧代际 query。
+    expect(source).toContain('readCcAppliedFingerprint(sessionId)');
+    expect(source).toContain('ccGenerationDrift');
+    expect(source).toContain('mcpInjectFingerprint !== ccAppliedFingerprint');
+    // drift 必须进入 forceFreshQuery 判定。
+    expect(source).toContain('|| ccGenerationDrift)');
+    // open 成功后 (含 attach) 必须落盘 applied 指纹。
+    expect(source).toContain('writeCcAppliedFingerprint(sessionId, mcpInjectFingerprint)');
+  });
+});

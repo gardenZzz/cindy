@@ -653,8 +653,12 @@ export function createOrcaWorkerCreationService(deps: OrcaWorkerCreationDeps): O
             'subscription-direct models require the local proxy path — pick an SSH-compatible model',
         };
       }
-      const remoteRouteProvider = resolved.providerId !== null
-        ? agentProviders.find((candidate) => candidate.id === resolved.providerId)
+      // 默认路由 (resolved.providerId=null) 同样要闸:budgetRouteProviderId
+      // 已按显式来源 → 模型默认路由 → 缓存兜底顺序解析出实际落点
+      // (codex-connector R23 P2), 不能只查显式选择。
+      const remoteRouteProviderId = resolved.providerId ?? budgetRouteProviderId;
+      const remoteRouteProvider = remoteRouteProviderId !== null
+        ? agentProviders.find((candidate) => candidate.id === remoteRouteProviderId)
         : undefined;
       if (remoteRouteProvider?.chatBridgedCodex === true) {
         return {

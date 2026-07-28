@@ -1721,3 +1721,43 @@ describe('SSH remote worker model/provider compatibility gate (R23 P2)', () => {
     ).resolves.toMatchObject({ ok: true });
   });
 });
+
+  it('rejects chat-bridged providers resolved through the default route (no explicit providerId)', async () => {
+    // R23 P2 回归:resolved.providerId 为 null (默认路由) 时, 兼容闸必须
+    // 仍按 budgetRouteProviderId 解析出的实际落点判定 — 只查显式选择会漏。
+    const { service } = createDeps({
+      getLeadSessionRow: vi.fn(async () => ({
+        id: 'lead-1',
+        agentKind: 'codex' as const,
+        workingDir: '/srv/repo',
+        model: 'gpt-5.5',
+        effort: 'medium',
+        permissionMode: 'default',
+        fastMode: false,
+        providerId: 'deepseek',
+        remoteHostId: 'remote-host-1',
+      })),
+      getAvailableModels: vi.fn(() => [
+        { id: 'deepseek-v4', efforts: ['low', 'medium', 'high', 'xhigh'], defaultEffort: 'high', supportsFastMode: true },
+      ]),
+      getProviderRoutingContext: vi.fn(async () => providerRoutingContext({
+        'claude-code': [],
+        codex: [{ id: 'deepseek', name: 'DeepSeek', models: ['deepseek-v4'], chatBridgedCodex: true }],
+      })),
+    });
+
+    await expect(
+      service.createWorker({
+        leadSessionId: 'lead-1',
+        role: 'reviewer',
+        agent: 'codex',
+        label: 'reviewer',
+        model: 'deepseek-v4',
+        // 不传 providerId — 走默认路由解析到 deepseek (chatBridged)。
+      }),
+    ).resolves.toMatchObject({
+      ok: false,
+      errorCode: 'INVALID_PARAMS',
+      message: expect.stringContaining('not available for SSH remote workers'),
+    });
+  });

@@ -167,7 +167,7 @@ import { t } from '../i18n.js';
 import { createLogger } from '../logger.js';
 import { desktopClaudeAuthAdapter, desktopCodexAuthAdapter, readClaudeApiKey } from '../maker-host/auth-adapters.js';
 import { prepareSharedProjectSkillLinks } from '../maker-host/shared-global-skills.js';
-import { setRemoteCodexLiveTurnChecker, setRemoteSessionStartEnsure, getRemoteCcTurnSettledHandler } from '../maker-host/remote-session-start-ensure.js';
+import { setRemoteCodexLiveTurnChecker, setRemoteSessionStartEnsure, getRemoteCcTurnSettledHandler, getRemoteCcStaleQuery } from '../maker-host/remote-session-start-ensure.js';
 import { syncExternalCodexSessionFromDesktop } from '../maker-host/codex-local-sessions.js';
 import { getCodexProxyAuthInjection, getCodexProxyAuthInjectionState } from '../maker-host/codex-proxy-host.js';
 import {
@@ -5156,7 +5156,7 @@ export function registerMakerIpc(maker: Maker, options: RegisterMakerIpcOptions)
         await runAcceptedCallback(onAccepted, targetSessionId, clientId);
       };
 
-      const live = maker.getSession(targetSessionId);
+      let live = maker.getSession(targetSessionId);
       if (live) {
         if (live.isTurnRunning?.()) {
           await enqueueSendToSessionMessage({
@@ -5197,6 +5197,29 @@ export function registerMakerIpc(maker: Maker, options: RegisterMakerIpcOptions)
         ) {
           await ensureRemoteReadyForSessionStart({ session: live });
         }
+        // 远端 CC 的 invalidate 竞态 (codex-connector R23 P2):invalidate
+        // (bridge 重建 / 端口重绑 / shutdown) 的 detach 是 fire-and-forget,
+        // session 在 detach 完成前仍 active — 此时直发会进带旧 MCP URL 的
+        // query。stale 命中时先同步 detach 再落 lazy-resume (forceFresh)。
+        if (
+          live.remoteHostId &&
+          live.agentKind === 'claude-code' &&
+          getRemoteCcStaleQuery()?.(live.id) === true
+        ) {
+          try {
+            await live.detach();
+          } catch (err) {
+            log.warn('sendToSession: detach stale remote CC session failed, falling through to lazy-resume', {
+              targetSessionId,
+              err: err instanceof Error ? err.message : String(err),
+            });
+          }
+          // detach 后不得继续 live 直发 (session 已 closed) — 置空落入
+          // 下方 lazy-resume (bootstrap 重建 → factory forceFresh)。
+          live = undefined;
+        }
+      }
+      if (live) {
         try {
           const sendResult = await sendUserMessageWithAwaitedGitBaseline(
             live,
