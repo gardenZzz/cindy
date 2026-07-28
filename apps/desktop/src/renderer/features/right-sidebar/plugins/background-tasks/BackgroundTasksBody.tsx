@@ -49,6 +49,10 @@ import type { LucideIcon } from 'lucide-react';
 
 import { cn } from '@/lib/utils';
 import { Spinner } from '@/components/ui/spinner';
+import {
+  getSessionDeviceId,
+  remoteProjectsStore,
+} from '@/features/device-link/remoteProjectsStore';
 import { makerChatStore, EMPTY_TASK_UPDATES } from '@/lib/makerChatStore';
 import type { AgentTaskUpdate, ChatMessage } from '@/lib/makerChatStore';
 import {
@@ -454,6 +458,12 @@ function WorkflowDetail({
       <div className="min-h-0 flex-1 overflow-y-auto px-2 py-2">
         {model ? (
           <WorkflowProgressTree model={model} />
+        ) : item.update?.summary || item.resultPreview ? (
+          // 降级兜底:事件树与 wf 文件都拿不到(老被控端 / SSH / 未落盘即退出)时,
+          // 展示 workflow 的结果文本 —— 面板是主视图,点开不能只剩一句「暂无进度」。
+          <div className="whitespace-pre-wrap break-words px-2 py-1 text-12 leading-5 text-[var(--text-secondary)]">
+            {item.update?.summary ?? item.resultPreview}
+          </div>
         ) : (
           <div className="px-2 py-6 text-center text-12 text-[var(--text-tertiary)]">
             {t('rightSidebar.backgroundTasks.noProgress')}
@@ -503,6 +513,14 @@ export function BackgroundTasksBody({
   // 面板已挂载时清空 taskUpdates,布尔翻 true 即自动重水合;翻回 false 的那次
   // 重跑只是多一次幂等快照(seed 仅补缺),不会循环。
   const taskUpdatesEmpty = inputs.taskUpdates.size === 0;
+  // liveDeviceId 参与依赖:面板挂载时被控设备恰好瞬断的话,隧道失败被降级成
+  // 空表且此后无人重试 —— 订阅注册表,重连(undefined → deviceId)时重水合。
+  // 本机会话恒 undefined,零开销;断连翻 undefined 的那次重跑经 sticky 路由
+  // 仍走隧道,失败降级空表,无害。
+  const liveDeviceId = useSyncExternalStore(
+    remoteProjectsStore.subscribe,
+    useCallback(() => (sessionId ? getSessionDeviceId(sessionId) : undefined), [sessionId]),
+  );
   useEffect(() => {
     if (!sessionId) return;
     let disposed = false;
@@ -517,7 +535,7 @@ export function BackgroundTasksBody({
     return () => {
       disposed = true;
     };
-  }, [sessionId, taskUpdatesEmpty]);
+  }, [sessionId, taskUpdatesEmpty, liveDeviceId]);
 
   const { running, completed } = useMemo(
     () =>
