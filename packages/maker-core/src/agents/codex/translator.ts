@@ -871,7 +871,67 @@ function mcpContentTextParts(content: unknown[] | undefined): string[] {
 }
 
 // ── webSearch → tool_use + tool_result_full + tool_result ────────────────────
-// v2 加了 action 字段 (Search/OpenPage/FindInPage), 用 query 兜底显示。
+// v2 的 legacy query 可能为空，真实动作优先在 action 中；归一成 query 供现有
+// maker-shared / Desktop / Mobile 展示链路消费，同时保留 action 供展开详情核验。
+
+function nonEmptyWebSearchText(value: unknown): string {
+  return typeof value === 'string' ? value.trim() : '';
+}
+
+function webSearchActionDetail(action: WebSearchAction | null | undefined): string {
+  if (!action) return '';
+  switch (action.type) {
+    case 'search': {
+      const query = nonEmptyWebSearchText(action.query);
+      if (query) return query;
+      const queries = Array.isArray(action.queries)
+        ? action.queries.map(nonEmptyWebSearchText).filter(Boolean)
+        : [];
+      if (queries.length === 0) return '';
+      return queries.length > 1 ? `${queries[0]} ...` : queries[0];
+    }
+    case 'openPage':
+      return nonEmptyWebSearchText(action.url);
+    case 'findInPage': {
+      const url = nonEmptyWebSearchText(action.url);
+      const pattern = nonEmptyWebSearchText(action.pattern);
+      if (pattern && url) return `'${pattern}' in ${url}`;
+      if (pattern) return `'${pattern}'`;
+      return url;
+    }
+    default:
+      return '';
+  }
+}
+
+function webSearchInput(item: WebSearchItem): {
+  query: string;
+  action?: WebSearchAction;
+} {
+  const query = webSearchActionDetail(item.action) || nonEmptyWebSearchText(item.query);
+  return {
+    query,
+    ...(item.action ? { action: item.action } : {}),
+  };
+}
+
+function emitWebSearchToolUse(
+  item: WebSearchItem,
+  input: ReturnType<typeof webSearchInput>,
+  queue: AsyncQueue<AgentEvent>,
+  ctx: CodexTranslateContext,
+): void {
+  ctx.rt.emittedToolUse.add(item.id);
+  queue.push({
+    type: 'tool_use',
+    data: {
+      toolUseId: item.id,
+      toolName: 'web_search',
+      input,
+    },
+    source: 'codex',
+  });
+}
 
 function handleWebSearch(
   phase: ItemPhase,
@@ -879,24 +939,30 @@ function handleWebSearch(
   queue: AsyncQueue<AgentEvent>,
   ctx: CodexTranslateContext,
 ): void {
+  const input = webSearchInput(item);
+
   if (phase === 'started') {
     if (ctx.rt.emittedToolUse.has(item.id)) return;
-    ctx.rt.emittedToolUse.add(item.id);
-    queue.push({
-      type: 'tool_use',
-      data: {
-        toolUseId: item.id,
-        toolName: 'web_search',
-        input: { query: item.query, action: item.action ?? undefined },
-      },
-      source: 'codex',
-    });
+    // 某些 Codex 版本在 started 只给空 legacy query，updated 才补 action；
+    // 延迟这一条展示事件，避免空参数先落库后无法无损更新。
+    if (!input.query) return;
+    emitWebSearchToolUse(item, input, queue, ctx);
     return;
   }
-  if (phase === 'updated') return;
+  if (phase === 'updated') {
+    if (ctx.rt.emittedToolUse.has(item.id) || !input.query) return;
+    emitWebSearchToolUse(item, input, queue, ctx);
+    return;
+  }
 
   // completed
+  const toolUseEmitted = ctx.rt.emittedToolUse.has(item.id);
   ctx.rt.emittedToolUse.delete(item.id);
+  // 防御缺失 started/updated 的历史或异常事件序列，保持 tool_use → result 顺序。
+  if (!toolUseEmitted) {
+    emitWebSearchToolUse(item, input, queue, ctx);
+    ctx.rt.emittedToolUse.delete(item.id);
+  }
   queue.push({
     type: 'tool_result_full',
     data: { toolUseId: item.id, fullText: '', isError: false },
