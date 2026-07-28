@@ -81,7 +81,8 @@ import {
   getBrowserAvailability,
   openBrowserForLogin,
 } from '../mcp-integrations/browser.js';
-import { shutdownCodexEnvironment } from '../mcp-integrations/codexEnvironment.js';
+import { getActiveCodexBridgeInstanceId, shutdownCodexEnvironment } from '../mcp-integrations/codexEnvironment.js';
+import { getRemoteMcpBridgeToken } from '../mcp-integrations/remoteMcpBridgeToken.js';
 import {
   checkComputerDriverUpdate,
   cancelComputerDriverPermissionGrant,
@@ -255,7 +256,7 @@ import {
   saveTurnStartedAtForDeferred,
 } from '../messagePersistBroadcaster.js';
 import { ensureCcManagerInstalledOrInstall } from '../remote-ssh/cc-manager-install.js';
-import { ensureRemoteCodexMcpBridge } from '../remote-ssh/codex-remote-mcp.js';
+import { ensureRemoteCodexMcpBridge, hasPendingRemoteMcpDrift } from '../remote-ssh/codex-remote-mcp.js';
 import { reconcileCodexAgentProxyEnv } from '../remote-ssh/agent-proxy.js';
 import { ensureRemoteAgentInstalledOrInstall, ensureRemoteHostReady, getRemoteSshPool, isCcMgrUpgradeInFlight } from '../remote-ssh/index.js';
 import {
@@ -5180,6 +5181,22 @@ export function registerMakerIpc(maker: Maker, options: RegisterMakerIpcOptions)
               : null,
           };
         }
+        // idle-live send 前的轻量 MCP 漂移判定 (纯本地, 零远程 RTT):
+        // bridge shutdown strip / token 轮换 / bridge 重建 / 端口重绑后,
+        // live 直发路径原本不经任何 ensure, daemon 会带着死 URL / 空 env
+        // 跑到 turn-done 才恢复 (codex-connector R23 P1)。命中漂移才走完整
+        // remote ensure (含 lazy 重建 bridge), 无漂移零开销。
+        if (
+          live.remoteHostId &&
+          live.agentKind === 'codex' &&
+          hasPendingRemoteMcpDrift(live.remoteHostId, {
+            collabEnabled: getPluginRegistry().isEnabled('collab'),
+            token: getRemoteMcpBridgeToken(),
+            bridgeInstanceId: getActiveCodexBridgeInstanceId(),
+          })
+        ) {
+          await ensureRemoteReadyForSessionStart({ session: live });
+        }
         try {
           const sendResult = await sendUserMessageWithAwaitedGitBaseline(
             live,
@@ -6054,6 +6071,10 @@ export function registerMakerIpc(maker: Maker, options: RegisterMakerIpcOptions)
             requiresExplicitRoute: providerRouteRequiresExplicitSelection(
               provider.routing[agent]?.authStrategy,
             ),
+            // chat-bridged codex 供应商标记 (SSH 远端 worker 兼容闸用,
+            // 见 orcaWorkerCreationService R23 P2 校验;wireProtocol 仅
+            // codex 侧存在, 其他 agent 恒 false)。
+            chatBridgedCodex: agent === 'codex' && provider.routing[agent]?.wireProtocol === 'openai-chat',
           };
         });
       return {

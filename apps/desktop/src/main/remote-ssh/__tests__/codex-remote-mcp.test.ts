@@ -16,6 +16,7 @@ import {
   mergeManagedMcpBlock,
   ensureRemoteCodexMcpBridge,
   stripRemoteCodexMcpConfig,
+  hasPendingRemoteMcpDrift,
 } from '../codex-remote-mcp.js';
 
 // safeStorage 在测试 stub 里 isEncryptionAvailable=false → token 真源恒 null;
@@ -1122,5 +1123,57 @@ describe('codex-connector R21 regressions', () => {
     expect(configContent).not.toContain('cindy-remote-mcp');
     expect(configContent).toContain('model = "gpt-5.5"');
     expect(prefsOf('host-strip-shutdown')?.appliedFingerprint).toBeUndefined();
+  });
+});
+
+describe('hasPendingRemoteMcpDrift (R23 P1 lightweight live-send gate)', () => {
+  const base = { collabEnabled: true, token: 'tok', bridgeInstanceId: 'bridge-1' };
+
+  it('is true when the host was never injected (no applied fingerprint)', () => {
+    expect(hasPendingRemoteMcpDrift('host-drift-new', base)).toBe(true);
+  });
+
+  it('is false once the applied fingerprint matches the full desired state', async () => {
+    const { host } = fakeHost('host-drift-match', '');
+    await ensureRemoteCodexMcpBridge(host, {
+      ensureBridgeStarted: async () => ({ port: 38080, serverNames: SERVERS, bridgeInstanceId: 'bridge-1' }),
+      hasLiveTurnOnHost: () => false,
+    });
+    expect(hasPendingRemoteMcpDrift('host-drift-match', {
+      collabEnabled: true,
+      token: 'test-persistent-token',
+      bridgeInstanceId: 'bridge-1',
+    })).toBe(false);
+    expect(hasPendingRemoteMcpDrift('host-drift-match', {
+      collabEnabled: true,
+      token: 'test-persistent-token',
+      bridgeInstanceId: 'bridge-2',
+    })).toBe(true);
+  });
+
+  it('is true after a bridge shutdown strip (applied cleared) when collab stays enabled', async () => {
+    const { host } = fakeHost('host-drift-strip', '');
+    await ensureRemoteCodexMcpBridge(host, {
+      ensureBridgeStarted: async () => ({ port: 38080, serverNames: SERVERS, bridgeInstanceId: 'bridge-1' }),
+      hasLiveTurnOnHost: () => false,
+    });
+    await stripRemoteCodexMcpConfig(host, { hasLiveTurnOnHost: () => false });
+    expect(hasPendingRemoteMcpDrift('host-drift-strip', {
+      collabEnabled: true,
+      token: 'test-persistent-token',
+      bridgeInstanceId: null,
+    })).toBe(true);
+  });
+
+  it('follows cleanup semantics when collab is disabled or token is missing', async () => {
+    const { host } = fakeHost('host-drift-collab-off', '');
+    await ensureRemoteCodexMcpBridge(host, {
+      ensureBridgeStarted: async () => ({ port: 38080, serverNames: SERVERS, bridgeInstanceId: 'bridge-1' }),
+      hasLiveTurnOnHost: () => false,
+    });
+    expect(hasPendingRemoteMcpDrift('host-drift-collab-off', { ...base, collabEnabled: false })).toBe(true);
+    expect(hasPendingRemoteMcpDrift('host-drift-collab-off', { ...base, token: null })).toBe(true);
+    await stripRemoteCodexMcpConfig(host, { hasLiveTurnOnHost: () => false });
+    expect(hasPendingRemoteMcpDrift('host-drift-collab-off', { ...base, collabEnabled: false })).toBe(false);
   });
 });

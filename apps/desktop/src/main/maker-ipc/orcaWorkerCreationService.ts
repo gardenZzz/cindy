@@ -2,6 +2,7 @@ import type { AgentKind } from '@cindy/maker-core';
 import type { AuthStrategy } from '@cindy/model-providers';
 
 import { isCredentialModeSwitchBusyError } from '../maker-host/codex-credential-switch.js';
+import { isSubscriptionDirectModel } from '../../shared/subscriptionModels.js';
 import type { DispatchWorkerTaskResult, OrcaWorkerEffort, OrcaWorkerStatus } from './orcaTeamService.js';
 import type { MakerSessionCreateOpts } from './sessionRequest.js';
 
@@ -66,6 +67,13 @@ export interface OrcaWorkerProviderSnapshot {
   >;
   /** true 表示该来源必须写入 session provider store 才能注入自己的 API key/OAuth token。 */
   requiresExplicitRoute?: boolean;
+  /**
+   * true 表示 chat-bridged codex 供应商 (wireProtocol=openai-chat, 与
+   * renderer/lib/providerModels.ts 的 isChatBridgedCodexProvider 同语义):
+   * 其 Responses→Chat 翻译只挂在本地 codex-proxy, SSH 远端 worker 不兼容
+   * (codex-connector R23 P2 的拒绝依据)。
+   */
+  chatBridgedCodex?: boolean;
 }
 
 /** 自带凭证或明确无鉴权的第三方路由都不能回落到 worker/lead 的默认上游。 */
@@ -626,6 +634,37 @@ export function createOrcaWorkerCreationService(deps: OrcaWorkerCreationDeps): O
         errorCode: 'BUDGET_MODEL_REQUIRES_API_MODE',
         message: budgetModelRequiresApiKeyMessage(resolved.model),
       };
+    }
+
+    // SSH 远端 worker 的模型/来源兼容闸 (codex-connector R23 P2):remote
+    // transport 不经本地 proxy — subscription-direct 模型 (chatgpt/xai) 与
+    // chat-bridged codex 供应商 (wireProtocol=openai-chat, 其 Responses→Chat
+    // 翻译只挂在本地 codex-proxy) 送到远端必失败。ChatInput 对 remoteHostId
+    // 已用 excludeSubscriptionDirect / excludeChatBridgedCodex 隐藏
+    // (renderer/lib/providerModels.ts 同语义), worker 创建 (UI popover 与
+    // MCP 调用) 在此统一拒绝, 失败提前到创建前而非远端运行期。
+    if (lead.remoteHostId) {
+      if (isSubscriptionDirectModel(resolved.model)) {
+        return {
+          ok: false,
+          errorCode: 'INVALID_PARAMS',
+          message:
+            `model "${resolved.model}" is not available for SSH remote workers: ` +
+            'subscription-direct models require the local proxy path — pick an SSH-compatible model',
+        };
+      }
+      const remoteRouteProvider = resolved.providerId !== null
+        ? agentProviders.find((candidate) => candidate.id === resolved.providerId)
+        : undefined;
+      if (remoteRouteProvider?.chatBridgedCodex === true) {
+        return {
+          ok: false,
+          errorCode: 'INVALID_PARAMS',
+          message:
+            `provider "${remoteRouteProvider.id}" is not available for SSH remote workers: ` +
+            'chat-bridged Codex providers require the local proxy path — pick an SSH-compatible provider',
+        };
+      }
     }
 
     if (params.model !== undefined && explicitModelDefaultProviderId === null) {
