@@ -51,3 +51,71 @@ export function refreshRemoteCodexMcpAfterBridgeRecreate(deps: RemoteCodexMcpRec
     });
   }
 }
+
+// ── 远端 CC query 的代际失效 (bridge 重建 / forward 端口重绑) ────────────────
+
+export interface RemoteCcSessionLike {
+  id: string;
+  remoteHostId: string | null;
+  isTurnRunning: () => boolean;
+  detach: () => Promise<void>;
+}
+
+export interface RemoteCcInvalidationDeps {
+  listRemoteCcSessions: () => RemoteCcSessionLike[];
+  /** 删除 session 的「本进程已 fresh」标记 (forcedFreshCcBridgeSessions)。 */
+  clearFreshMark: (sessionId: string) => void;
+  log: { warn: (msg: string, meta?: Record<string, unknown>) => void };
+}
+
+/**
+ * 让活跃的远端 CC query 随 MCP 代际变化 (bridge 重建 / forward 端口重绑)
+ * 失效:fresh 标记无条件删 (下次注入重新 forceFresh);无 turn 的直接
+ * detach (下次 send 走 lazy-resume → remoteCcQueryFactory 重新注入新
+ * URL);有 turn 的只删标记不打断 — turn 结束经 maybeDetachStaleRemoteCcQuery
+ * 补 detach (codex-connector R19 P2)。
+ */
+export function invalidateRemoteCcQueriesForMcpGenerationChange(
+  deps: RemoteCcInvalidationDeps,
+  opts: { hostId?: string; reason: string },
+): void {
+  for (const s of deps.listRemoteCcSessions()) {
+    if (!s.remoteHostId) continue;
+    if (opts.hostId && s.remoteHostId !== opts.hostId) continue;
+    deps.clearFreshMark(s.id);
+    if (s.isTurnRunning()) continue;
+    void s.detach().catch((err) => {
+      deps.log.warn('remote CC query detach after MCP generation change failed', {
+        sessionId: s.id,
+        reason: opts.reason,
+        message: err instanceof Error ? err.message : String(err),
+      });
+    });
+  }
+}
+
+export interface RemoteCcTurnSettledDeps {
+  getSession: (sessionId: string) => RemoteCcSessionLike | null;
+  /** 该 session 的 fresh 标记是否仍有效 (无效 = 代际已变 / 本进程未 fresh)。 */
+  hasFreshMark: (sessionId: string) => boolean;
+  log: { warn: (msg: string, meta?: Record<string, unknown>) => void };
+}
+
+/**
+ * turn 收口时对远端 CC session 的补偿判定:fresh 标记已失效 (bridge 重建 /
+ * 端口重绑时已删) 且当前无 turn → detach,让下次 send 走 factory 重新注入
+ * 并 forceFresh (kill 已 idle 的旧 query);标记有效则 no-op。
+ */
+export function maybeDetachStaleRemoteCcQuery(deps: RemoteCcTurnSettledDeps, sessionId: string): void {
+  const s = deps.getSession(sessionId);
+  if (!s || !s.remoteHostId) return;
+  if (deps.hasFreshMark(sessionId)) return;
+  if (s.isTurnRunning()) return;
+  void s.detach().catch((err) => {
+    deps.log.warn('remote CC stale query detach on turn settled failed', {
+      sessionId,
+      message: err instanceof Error ? err.message : String(err),
+    });
+  });
+}
+

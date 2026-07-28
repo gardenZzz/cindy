@@ -75,7 +75,7 @@ export interface EnsureRemoteCodexMcpResult {
 
 // ── per-host 固定 remotePort 与已生效指纹持久化 ─────────────────────────────
 
-type PortPrefs = Record<string, { remotePort: number; appliedFingerprint?: string }>;
+type PortPrefs = Record<string, { remotePort: number; appliedFingerprint?: string; bridgeLocalPort?: number }>;
 
 function portPrefsPath(): string {
   return path.join(app.getPath('userData'), 'remote-mcp-forwards.json');
@@ -98,6 +98,10 @@ function readPortPrefs(): PortPrefs {
             const fp = (v as { appliedFingerprint?: unknown })?.appliedFingerprint;
             if (typeof fp === 'string' && fp.length > 0) {
               out[hostId].appliedFingerprint = fp;
+            }
+            const blp = (v as { bridgeLocalPort?: unknown })?.bridgeLocalPort;
+            if (typeof blp === 'number' && Number.isInteger(blp) && blp > 0 && blp < 65536) {
+              out[hostId].bridgeLocalPort = blp;
             }
           }
         }
@@ -128,6 +132,13 @@ function writePortPrefs(next: PortPrefs): void {
 
 function writeHostRemotePort(hostId: string, remotePort: number): void {
   writePortPrefs({ ...readPortPrefs(), [hostId]: { ...readPortPrefs()[hostId], remotePort } });
+}
+
+/** 记录本机 bridge 当前本地端口:bridge 重建换端口时识别并拆除旧 forward。 */
+function writeHostBridgeLocalPort(hostId: string, bridgeLocalPort: number): void {
+  const current = readPortPrefs()[hostId];
+  if (!current) return;
+  writePortPrefs({ ...readPortPrefs(), [hostId]: { ...current, bridgeLocalPort } });
 }
 
 /**
@@ -414,7 +425,28 @@ async function bootstrapDaemon(host: RemoteHost, token: string): Promise<void> {
 // ── per-host 固定 remotePort:持久化值优先, 被占则由 RemoteHost 顺延探测 ──────
 
 async function ensureRemotePort(host: RemoteHost, localBridgePort: number): Promise<number> {
-  const preferred = readPortPrefs()[host.id]?.remotePort;
+  const prefs = readPortPrefs()[host.id];
+  const preferred = prefs?.remotePort;
+  // bridge 重建换本地端口:旧 localPort 的 forward 在 RemoteHost 上仍 armed
+  // (ensureRemoteForward 按 localHost:localPort 幂等, 不主动拆) — 不拆每次
+  // 重建多吃一个远端端口, 最终填满扫描窗口 (codex-connector R19 P2)。
+  const staleBridgeLocalPort = prefs?.bridgeLocalPort;
+  if (staleBridgeLocalPort !== undefined && staleBridgeLocalPort !== localBridgePort) {
+    try {
+      await host.closeRemoteForward('127.0.0.1', staleBridgeLocalPort);
+      log.info('stale remote MCP forward closed after bridge port change', {
+        host: host.id,
+        staleLocalPort: staleBridgeLocalPort,
+        localPort: localBridgePort,
+      });
+    } catch (err) {
+      log.warn('close stale remote MCP forward failed (continuing)', {
+        host: host.id,
+        staleLocalPort: staleBridgeLocalPort,
+        error: err instanceof Error ? err.message : String(err),
+      });
+    }
+  }
   // 端口分配下推给 RemoteHost.ensureRemoteForward (#715):先试上次实际绑定
   // 的端口,再按首选基数顺延探测;断线重连自动 re-arm,重绑到新端口时经
   // onRearmed 通知。连接代际竞争 (bind 期间 SSH 换代) 由 RemoteHost 内部
@@ -431,6 +463,7 @@ async function ensureRemotePort(host: RemoteHost, localBridgePort: number): Prom
         host: host.id,
         remotePort,
       });
+      rearmedHook?.(host.id, remotePort);
     },
   });
   if (fwd.remotePort !== preferred) {
@@ -439,7 +472,22 @@ async function ensureRemotePort(host: RemoteHost, localBridgePort: number): Prom
     writeHostRemotePort(host.id, fwd.remotePort);
     log.info('remote MCP forward port (re)assigned', { host: host.id, remotePort: fwd.remotePort });
   }
+  if (staleBridgeLocalPort !== localBridgePort) {
+    writeHostBridgeLocalPort(host.id, localBridgePort);
+  }
   return fwd.remotePort;
+}
+
+/**
+ * forward 端口重绑 (onRearmed) 时的宿主钩子:maker-host 注入,用于让该
+ * host 上活跃 remote CC query 的 fresh 状态失效并重建 (旧 query 的
+ * mcpServers URL 还指旧端口, codex-connector R19 P2)。remote-ssh 不反向
+ * 依赖 maker-host, 经本钩子解耦。
+ */
+let rearmedHook: ((hostId: string, remotePort: number) => void) | null = null;
+
+export function setRemoteMcpForwardRearmedHook(fn: (hostId: string, remotePort: number) => void): void {
+  rearmedHook = fn;
 }
 
 // ── per-host 串行锁与共用 forward 入口 ───────────────────────────────────────
@@ -521,13 +569,25 @@ async function doEnsureRemoteCodexMcpBridge(
     // 只注入协同白名单 server:bridge 上还挂着其他 in-process provider
     // (cindy_memory / cindy_ssh 等), 全量写进远端 daemon config 会让远端
     // session 获得本机 MCP 能力, 越出协同边界 (与 cc 侧白名单同语义)。
-    const serverNames = bridge.serverNames.filter((n) => CODEX_REMOTE_MCP_SERVER_NAMES.has(n));
+    const filteredNames = bridge.serverNames.filter((n) => CODEX_REMOTE_MCP_SERVER_NAMES.has(n));
     const token = getRemoteMcpBridgeToken();
+    let serverNames = filteredNames;
     if (serverNames.length > 0 && !token) {
-      log.warn('remote MCP injection skipped: persistent token unavailable (safeStorage?)', {
+      // token 不可用但本 host 之前注入过 (appliedFingerprint 在):旧 config
+      // 与 daemon env 会让远端继续暴露 cindy_orca / orca_worker_bridge 而
+      // 每次调用 401 — 比「降级无 MCP」更糟。按清理路径剥受管段 + 清 env
+      // (codex-connector R19 P2);token 恢复后下次 ensure 自然重新注入。
+      // 之前没注入过则维持早退 (无清理对象)。
+      if (!readPortPrefs()[host.id]?.appliedFingerprint) {
+        log.warn('remote MCP injection skipped: persistent token unavailable (safeStorage?)', {
+          host: host.id,
+        });
+        return { ok: false, reason: 'token-unavailable' };
+      }
+      log.warn('remote MCP token lost after prior injection — cleaning remote managed block', {
         host: host.id,
       });
-      return { ok: false, reason: 'token-unavailable' };
+      serverNames = [];
     }
     // 清理路径 (白名单为空, collab 被禁用等) 不强求 token:剥除受管段不需要
     // 指纹, bootstrap 传空 token — daemon 不再持有有效 token 正是清理目标。
@@ -575,9 +635,20 @@ async function doEnsureRemoteCodexMcpBridge(
     // 目标是 daemon 不持 token) vs bootstrap 确认时落盘的已生效指纹。
     // 不一致 ⇒ 必须 (重) bootstrap;bootstrap 失败/中断 + app 重启后它依然
     // 成立, 自愈不依赖任何进程内存态 (Greptile P1: 重启丢失令牌更新状态)。
-    // changed 是并列的独立触发:指纹只含 token|bridge 代际, 端口 / server
-    // 列表变化不进指纹, 只能靠 changed 驱动重启生效。
-    const desiredFingerprint = serverNames.length > 0 ? tokenFingerprint : null;
+    // 指纹成分 = token|bridge 代际|remotePort|server 列表:后两者不进
+    // config 的指纹注释行 (那里的职责是触发 config 重写), 但同样是「必须
+    // 重启 daemon 才生效」的成分 — 端口重绑 / server 列表变化 + bootstrap
+    // 失败时缺了它们 driftUnapplied 会漏判, daemon 永远拿着旧 URL /
+    // server 列表 (codex-connector R19 P1)。changed 仍是并列独立触发。
+    const desiredFingerprint = serverNames.length > 0
+      ? createHash('sha256')
+          .update(
+            `${effectiveToken}|${bridge.bridgeInstanceId}|${remotePort}|${[...serverNames].sort().join(',')}`,
+            'utf8',
+          )
+          .digest('hex')
+          .slice(0, 12)
+      : null;
     const appliedFingerprint = readPortPrefs()[host.id]?.appliedFingerprint ?? null;
     const driftUnapplied = desiredFingerprint !== appliedFingerprint;
     const needApply = changed || driftUnapplied;

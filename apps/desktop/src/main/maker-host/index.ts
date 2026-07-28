@@ -117,10 +117,14 @@ import {
   unregisterCodexMcpThreadContext,
 } from '../mcp-integrations/codexEnvironment.js';
 import type { CodexHttpBridge } from '../mcp-integrations/codexHttpBridge.js';
-import { ensureRemoteMcpForward } from '../remote-ssh/codex-remote-mcp.js';
+import { ensureRemoteMcpForward, setRemoteMcpForwardRearmedHook } from '../remote-ssh/codex-remote-mcp.js';
 import { buildCcRemoteHttpMcpServers } from './cc-remote-mcp.js';
-import { getRemoteSessionStartEnsure, getRemoteCodexLiveTurnChecker } from './remote-session-start-ensure.js';
-import { refreshRemoteCodexMcpAfterBridgeRecreate } from './remote-codex-mcp-recovery.js';
+import { getRemoteSessionStartEnsure, getRemoteCodexLiveTurnChecker, setRemoteCcTurnSettledHandler } from './remote-session-start-ensure.js';
+import {
+  refreshRemoteCodexMcpAfterBridgeRecreate,
+  invalidateRemoteCcQueriesForMcpGenerationChange,
+  maybeDetachStaleRemoteCcQuery,
+} from './remote-codex-mcp-recovery.js';
 import { CODEX_DISABLED_BUILTIN_PLUGIN_IDS_KEY } from '../mcp-integrations/codexBuiltinToolPolicy.js';
 import { buildCodexProxySpawnArgs, CODEX_OPENAI_COMPACT_PROVIDER_ID } from './codex-gateway-config.js';
 import {
@@ -274,6 +278,23 @@ export function setBeforeLocalCodexSessionStartHook(hook: (() => Promise<void>) 
 }
 
 /**
+ * bridge 重建 / forward 端口重绑后的远端 CC query 失效 (装配版)。
+ * fresh 标记无条件删 (下次注入重新 forceFresh);无 turn 的直接 detach,
+ * 有 turn 的由 turn-done holder 补 detach — 不打断进行中的 turn。
+ */
+function invalidateActiveRemoteCcQueries(opts: { hostId?: string; reason: string }): void {
+  invalidateRemoteCcQueriesForMcpGenerationChange(
+    {
+      listRemoteCcSessions: () =>
+        (_maker?.listActiveSessions() ?? []).filter((s) => s.agentKind === 'claude-code'),
+      clearFreshMark: (sessionId) => forcedFreshCcBridgeSessions.delete(sessionId),
+      log: desktopMakerLogger,
+    },
+    opts,
+  );
+}
+
+/**
  * 远端 codex daemon / cc query 经 SSH remote-forward 直连本机 MCP bridge 的
  * 注入链路 (remote-ssh/codex-remote-mcp.ts、cc-remote-mcp 调用) 调用:确保
  * HTTP bridge 已启动并返回端口、server 名单与 bridge 实例 (per-session
@@ -324,6 +345,11 @@ export async function ensureCodexMcpBridgeStartedForRemote(): Promise<{
           getLiveTurnChecker: getRemoteCodexLiveTurnChecker,
           log: desktopMakerLogger,
         });
+        // 远端 CC 侧同源恢复 (codex-connector R19 P2):活跃 query 持旧
+        // bridge 的 mcpServers URL / mcp-session-id — fresh 标记失效 +
+        // 无 turn 的 detach (下次 send 重新注入);有 turn 的只删标记,
+        // turn-done 经 maybeDetachStaleRemoteCcQuery 补 detach。
+        invalidateActiveRemoteCcQueries({ reason: 'bridge-recreate' });
       }
     }
     return {
@@ -434,6 +460,31 @@ export function getMaker(): Maker {
       markKnownOrcaWorkerSession,
       broadcastOrcaWorkerChanged,
       logger: desktopMakerLogger,
+    });
+    // forward 端口重绑 (SSH 重连 onRearmed) 时, 该 host 上活跃远端 CC
+    // query 的 mcpServers URL 还指旧端口 — fresh 失效 + detach 促重建
+    // (codex-connector R19 P2)。
+    setRemoteMcpForwardRearmedHook((hostId, remotePort) => {
+      desktopMakerLogger.info('remote MCP forward re-armed — invalidating remote CC queries on host', {
+        hostId,
+        remotePort,
+      });
+      invalidateActiveRemoteCcQueries({ hostId, reason: 'forward-rearmed' });
+    });
+    // register.ts 的 turn 收口经 holder 回调:远端 CC 的 fresh 已失效且
+    // 无 turn 时 detach 旧 query (bridge 重建 / 端口重绑的补刀路径)。
+    setRemoteCcTurnSettledHandler((sessionId) => {
+      maybeDetachStaleRemoteCcQuery(
+        {
+          getSession: (id) => {
+            const s = _maker?.getSession(id);
+            return s && s.agentKind === 'claude-code' ? s : null;
+          },
+          hasFreshMark: (id) => forcedFreshCcBridgeSessions.has(id),
+          log: desktopMakerLogger,
+        },
+        sessionId,
+      );
     });
     const orcaBridgeDeps = {
       getMaker: () => {

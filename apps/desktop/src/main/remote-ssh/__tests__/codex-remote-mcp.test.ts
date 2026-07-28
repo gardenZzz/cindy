@@ -20,8 +20,10 @@ import {
 // safeStorage 在测试 stub 里 isEncryptionAvailable=false → token 真源恒 null;
 // 走完整 ensure 流程的用例需要固定 token。
 vi.mock('../../mcp-integrations/remoteMcpBridgeToken.js', () => ({
-  getRemoteMcpBridgeToken: () => 'test-persistent-token',
+  getRemoteMcpBridgeToken: vi.fn(() => 'test-persistent-token'),
 }));
+
+import { getRemoteMcpBridgeToken } from '../../mcp-integrations/remoteMcpBridgeToken.js';
 
 const SERVERS = ['cindy_orca', 'orca_worker_bridge'];
 
@@ -68,6 +70,17 @@ function decodeWrittenConfig(inputs: string[]): string | null {
     return Buffer.from(t, 'base64').toString('utf-8');
   }
   return null;
+}
+
+/** 读 prefs 文件里某 host 的记录 (appliedFingerprint / 端口断言用)。 */
+function prefsOf(hostId: string): { remotePort?: number; appliedFingerprint?: string; bridgeLocalPort?: number } | null {
+  const file = path.join(app.getPath('userData'), 'remote-mcp-forwards.json');
+  if (!fs.existsSync(file)) return null;
+  const raw = JSON.parse(fs.readFileSync(file, 'utf-8')) as Record<
+    string,
+    { remotePort?: number; appliedFingerprint?: string; bridgeLocalPort?: number }
+  >;
+  return raw[hostId] ?? null;
 }
 
 describe('renderManagedMcpBlock', () => {
@@ -598,12 +611,6 @@ describe('ensureRemoteCodexMcpBridge server whitelist', () => {
 });
 
 describe('ensureRemoteCodexMcpBridge drift self-heal (appliedFingerprint)', () => {
-  function prefsOf(hostId: string): { remotePort?: number; appliedFingerprint?: string } | null {
-    const file = path.join(app.getPath('userData'), 'remote-mcp-forwards.json');
-    if (!fs.existsSync(file)) return null;
-    const raw = JSON.parse(fs.readFileSync(file, 'utf-8')) as Record<string, { remotePort?: number; appliedFingerprint?: string }>;
-    return raw[hostId] ?? null;
-  }
 
   it('bootstraps on the next ensure once the live turn settles (deferred drift stays persistent)', async () => {
     // defer 语义回归:live turn 期间 config 照写但 bootstrap 推迟;漂移未生效
@@ -745,5 +752,147 @@ describe('daemon bootstrap env parity (codex-connector R18 P1)', () => {
     const bootstrapCmd = execCmds.find((c) => c.includes('bootstrap'));
     expect(bootstrapCmd).toBeTruthy();
     expect(bootstrapCmd).toContain('agent-proxy.env');
+  });
+});
+
+describe('codex-connector R19 regressions', () => {
+  it('retries bootstrap after a port rebind + failed bootstrap (applied fingerprint tracks remotePort)', async () => {
+    // R19 P1 回归:applied 指纹必须含 remotePort — 端口重绑 + bootstrap
+    // 失败后 config 已是新 URL (changed=false), 若指纹不含端口则
+    // driftUnapplied 漏判, daemon 永远拿旧 URL。
+    let port = 47921;
+    let bootstrapAttempts = 0;
+    let configContent = '';
+    const host = {
+      id: 'host-port-drift',
+      exec: async (cmd: string, opts?: { input?: string }) => {
+        if (cmd.includes('cat "$CODEX_HOME/config.toml"')) {
+          return { exitCode: 0, stdout: configContent, stderr: '' };
+        }
+        if (cmd.includes('bootstrap')) {
+          bootstrapAttempts += 1;
+          if (bootstrapAttempts === 2) {
+            return { exitCode: 1, stdout: '', stderr: 'timed out' }; // 重绑后那次失败
+          }
+          return { exitCode: 0, stdout: 'ok', stderr: '' };
+        }
+        if (cmd.includes('base64 -d')) {
+          const written = decodeWrittenConfig(opts?.input ? [opts.input] : []);
+          if (written !== null) configContent = written;
+        }
+        return { exitCode: 0, stdout: 'ok', stderr: '' };
+      },
+      ensureRemoteForward: async () => ({ remotePort: port, close: async () => {} }),
+    } as unknown as RemoteHost;
+    const deps = {
+      ensureBridgeStarted: async () => ({ port: 38080, serverNames: SERVERS, bridgeInstanceId: 'bridge-1' }),
+      hasLiveTurnOnHost: () => false,
+    };
+
+    expect((await ensureRemoteCodexMcpBridge(host, deps)).ok).toBe(true);
+    expect(bootstrapAttempts).toBe(1); // 首轮 47921 注入成功
+
+    port = 47930; // 模拟重连重绑新端口
+    expect((await ensureRemoteCodexMcpBridge(host, deps)).ok).toBe(false);
+    expect(bootstrapAttempts).toBe(2); // 重绑后 bootstrap 失败
+
+    // changed=false (config 已是 47930) 但 desired(含 47930) ≠ applied(含 47921)
+    expect((await ensureRemoteCodexMcpBridge(host, deps)).ok).toBe(true);
+    expect(bootstrapAttempts).toBe(3); // 指纹端口成分驱动强制重试
+  });
+
+  it('closes the stale forward when the bridge local port changes (R19 P2)', async () => {
+    const closeCalls: Array<{ addr: string; port: number }> = [];
+    let configContent = '';
+    const host = {
+      id: 'host-stale-forward',
+      exec: async (cmd: string, opts?: { input?: string }) => {
+        if (cmd.includes('cat "$CODEX_HOME/config.toml"')) {
+          return { exitCode: 0, stdout: configContent, stderr: '' };
+        }
+        if (cmd.includes('base64 -d')) {
+          const written = decodeWrittenConfig(opts?.input ? [opts.input] : []);
+          if (written !== null) configContent = written;
+        }
+        return { exitCode: 0, stdout: 'ok', stderr: '' };
+      },
+      ensureRemoteForward: async (spec: { localHost: string; localPort: number; preferredRemotePort?: number }) => ({
+        remotePort: spec.preferredRemotePort ?? 47921,
+        close: async () => {},
+      }),
+      closeRemoteForward: async (addr: string, port: number) => {
+        closeCalls.push({ addr, port });
+      },
+    } as unknown as RemoteHost;
+    const deps = (bridgePort: number, instanceId: string) => ({
+      ensureBridgeStarted: async () => ({ port: bridgePort, serverNames: SERVERS, bridgeInstanceId: instanceId }),
+      hasLiveTurnOnHost: () => false,
+    });
+
+    await ensureRemoteCodexMcpBridge(host, deps(38080, 'bridge-1'));
+    expect(closeCalls).toHaveLength(0); // 首次无旧目标可拆
+
+    await ensureRemoteCodexMcpBridge(host, deps(38081, 'bridge-2')); // bridge 重建换端口
+    expect(closeCalls).toEqual([{ addr: '127.0.0.1', port: 38080 }]); // 旧 forward 被拆
+
+    await ensureRemoteCodexMcpBridge(host, deps(38081, 'bridge-2'));
+    expect(closeCalls).toHaveLength(1); // 同端口不再误拆
+  });
+
+  it('cleans the stale managed block when the token is lost after a prior injection (R19 P2)', async () => {
+    // token 不可用但注入过:旧 config/env 会让远端持续 401 — 按清理路径
+    // 剥段 + 清 env + 摘除 applied;token 恢复后可重新注入。
+    const stale = renderManagedMcpBlock({ remotePort: 47921, serverNames: SERVERS, tokenFingerprint: 'fp-old' });
+    let configContent = `model = "gpt-5.5"\n\n${stale}\n`;
+    const execCmds: string[] = [];
+    const host = {
+      id: 'host-token-lost',
+      exec: async (cmd: string, opts?: { input?: string }) => {
+        execCmds.push(cmd);
+        if (cmd.includes('cat "$CODEX_HOME/config.toml"')) {
+          return { exitCode: 0, stdout: configContent, stderr: '' };
+        }
+        if (cmd.includes('base64 -d')) {
+          const written = decodeWrittenConfig(opts?.input ? [opts.input] : []);
+          if (written !== null) configContent = written;
+        }
+        return { exitCode: 0, stdout: 'ok', stderr: '' };
+      },
+      ensureRemoteForward: async (spec: { localHost: string; localPort: number; preferredRemotePort?: number }) => ({
+        remotePort: spec.preferredRemotePort ?? 47921,
+        close: async () => {},
+      }),
+    } as unknown as RemoteHost;
+    const deps = {
+      ensureBridgeStarted: async () => ({ port: 38080, serverNames: SERVERS, bridgeInstanceId: 'bridge-1' }),
+      hasLiveTurnOnHost: () => false,
+    };
+
+    // 先成功注入 (appliedFingerprint 落盘)。
+    expect((await ensureRemoteCodexMcpBridge(host, deps)).ok).toBe(true);
+    expect(prefsOf('host-token-lost')?.appliedFingerprint).toBeTruthy();
+
+    // token 失效 (safeStorage 不可用 / 轮换重写失败)。
+    const tokenMock = vi.mocked(getRemoteMcpBridgeToken);
+    tokenMock.mockReturnValueOnce(null);
+    const result = await ensureRemoteCodexMcpBridge(host, deps);
+    expect(result.ok).toBe(true); // 清理路径按成功收尾
+    const joined = execCmds.join('\n');
+    expect(joined).toContain('bootstrap'); // 清 env
+    expect(configContent).not.toContain('cindy-remote-mcp'); // 受管段已剥除
+    expect(prefsOf('host-token-lost')?.appliedFingerprint).toBeUndefined(); // applied 摘除
+  });
+
+  it('returns token-unavailable without cleanup when the host was never injected', async () => {
+    const tokenMock = vi.mocked(getRemoteMcpBridgeToken);
+    tokenMock.mockReturnValueOnce(null);
+    const { host, execCmds } = fakeHost('host-token-never', '');
+    const result = await ensureRemoteCodexMcpBridge(host, {
+      ensureBridgeStarted: async () => ({ port: 38080, serverNames: SERVERS, bridgeInstanceId: 'bridge-1' }),
+      hasLiveTurnOnHost: () => false,
+    });
+    expect(result.ok).toBe(false);
+    expect(result.reason).toBe('token-unavailable');
+    expect(execCmds.join('\n')).not.toContain('bootstrap'); // 无清理对象不动作
   });
 });

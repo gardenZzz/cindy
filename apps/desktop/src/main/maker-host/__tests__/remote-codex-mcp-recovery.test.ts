@@ -10,7 +10,11 @@ vi.mock('../../remote-ssh/codex-remote-mcp.js', () => ({
   ensureRemoteCodexMcpBridge: vi.fn(async () => ({ ok: true })),
 }));
 
-import { refreshRemoteCodexMcpAfterBridgeRecreate } from '../remote-codex-mcp-recovery.js';
+import {
+  refreshRemoteCodexMcpAfterBridgeRecreate,
+  invalidateRemoteCcQueriesForMcpGenerationChange,
+  maybeDetachStaleRemoteCcQuery,
+} from '../remote-codex-mcp-recovery.js';
 import { ensureRemoteCodexMcpBridge } from '../../remote-ssh/codex-remote-mcp.js';
 
 const ensureMock = vi.mocked(ensureRemoteCodexMcpBridge);
@@ -75,5 +79,86 @@ describe('refreshRemoteCodexMcpAfterBridgeRecreate', () => {
         expect.objectContaining({ hostId: 'host-a', reason: 'forward-failed' }),
       );
     });
+  });
+});
+
+describe('invalidateRemoteCcQueriesForMcpGenerationChange', () => {
+  function ccSession(id: string, remoteHostId: string | null, running = false) {
+    return {
+      id,
+      remoteHostId,
+      isTurnRunning: () => running,
+      detach: vi.fn(async () => {}),
+    };
+  }
+
+  it('clears fresh marks and detaches idle remote CC queries; skips running turns without detaching', () => {
+    const idle = ccSession('cc-1', 'host-a');
+    const running = ccSession('cc-2', 'host-a', true);
+    const local = ccSession('cc-3', null);
+    const cleared: string[] = [];
+    invalidateRemoteCcQueriesForMcpGenerationChange(
+      {
+        listRemoteCcSessions: () => [idle, running, local],
+        clearFreshMark: (id) => cleared.push(id),
+        log: { warn: vi.fn() },
+      },
+      { reason: 'bridge-recreate' },
+    );
+    expect(cleared).toEqual(['cc-1', 'cc-2']);
+    expect(idle.detach).toHaveBeenCalledTimes(1);
+    expect(running.detach).not.toHaveBeenCalled();
+    expect(local.detach).not.toHaveBeenCalled();
+  });
+
+  it('scopes invalidation to the given hostId (forward rearm affects one host)', () => {
+    const onA = ccSession('cc-1', 'host-a');
+    const onB = ccSession('cc-2', 'host-b');
+    const cleared: string[] = [];
+    invalidateRemoteCcQueriesForMcpGenerationChange(
+      {
+        listRemoteCcSessions: () => [onA, onB],
+        clearFreshMark: (id) => cleared.push(id),
+        log: { warn: vi.fn() },
+      },
+      { hostId: 'host-a', reason: 'forward-rearmed' },
+    );
+    expect(cleared).toEqual(['cc-1']);
+    expect(onA.detach).toHaveBeenCalledTimes(1);
+    expect(onB.detach).not.toHaveBeenCalled();
+  });
+});
+
+describe('maybeDetachStaleRemoteCcQuery', () => {
+  it('detaches when the fresh mark is gone and no turn is running', () => {
+    const s = { id: 'cc-1', remoteHostId: 'host-a', isTurnRunning: () => false, detach: vi.fn(async () => {}) };
+    maybeDetachStaleRemoteCcQuery(
+      { getSession: () => s, hasFreshMark: () => false, log: { warn: vi.fn() } },
+      'cc-1',
+    );
+    expect(s.detach).toHaveBeenCalledTimes(1);
+  });
+
+  it('is a no-op when the fresh mark is still valid or the session is local or a turn is running', () => {
+    const fresh = { id: 'cc-1', remoteHostId: 'host-a', isTurnRunning: () => false, detach: vi.fn(async () => {}) };
+    maybeDetachStaleRemoteCcQuery(
+      { getSession: () => fresh, hasFreshMark: () => true, log: { warn: vi.fn() } },
+      'cc-1',
+    );
+    expect(fresh.detach).not.toHaveBeenCalled();
+
+    const local = { id: 'cc-2', remoteHostId: null, isTurnRunning: () => false, detach: vi.fn(async () => {}) };
+    maybeDetachStaleRemoteCcQuery(
+      { getSession: () => local, hasFreshMark: () => false, log: { warn: vi.fn() } },
+      'cc-2',
+    );
+    expect(local.detach).not.toHaveBeenCalled();
+
+    const running = { id: 'cc-3', remoteHostId: 'host-a', isTurnRunning: () => true, detach: vi.fn(async () => {}) };
+    maybeDetachStaleRemoteCcQuery(
+      { getSession: () => running, hasFreshMark: () => false, log: { warn: vi.fn() } },
+      'cc-3',
+    );
+    expect(running.detach).not.toHaveBeenCalled();
   });
 });
