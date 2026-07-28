@@ -87,6 +87,32 @@ function statusIcon(status: AgentTaskUpdate['status']) {
   return LoaderCircle;
 }
 
+/**
+ * workflow 历史卡文件终态读取的模块级共享(key = sessionId+taskId):历史会话
+ * 可能同屏多张卡,各读一遍会把 main 侧跨目录扫描放大 N 倍。终态文件不可变,
+ * 正结果永久有效;负结果(读不到)同样缓存 —— 历史卡的文件早已定型,与面板
+ * 补读的 per-task 记忆同口径,不轮询不重试。
+ */
+const historyFileStatusCache = new Map<
+  string,
+  Promise<'completed' | 'failed' | 'stopped' | null>
+>();
+
+function readHistoryFileStatus(
+  sessionId: string,
+  taskId: string,
+): Promise<'completed' | 'failed' | 'stopped' | null> {
+  const key = `${sessionId} ${taskId}`;
+  let pending = historyFileStatusCache.get(key);
+  if (!pending) {
+    pending = getWorkflowProgressFor(sessionId, taskId)
+      .then((progress) => fileStatusToTaskStatus(progress?.status))
+      .catch(() => null);
+    historyFileStatusCache.set(key, pending);
+  }
+  return pending;
+}
+
 export function AgentTaskCard({ toolCall, update, result, subagentModel, sessionId }: AgentTaskCardProps) {
   const { t } = useTranslation();
   const blockId = `task:${toolCall?.clientId ?? update?.taskId ?? 'unknown'}`;
@@ -116,15 +142,11 @@ export function AgentTaskCard({ toolCall, update, result, subagentModel, session
     if (!isWorkflow || update?.status || !sessionId || !workflowTaskId) return;
     let disposed = false;
     try {
-      void getWorkflowProgressFor(sessionId, workflowTaskId)
-        .then((progress) => {
-          if (disposed) return;
-          const mapped = fileStatusToTaskStatus(progress?.status);
-          if (mapped) setHistoryFileStatus(mapped);
-        })
-        .catch(() => {
-          // 静默:文件辅源缺失时保持推导状态。
-        });
+      // 经模块级缓存共享:同屏多张历史卡同 taskId 只读一次(见 readHistoryFileStatus)。
+      void readHistoryFileStatus(sessionId, workflowTaskId).then((mapped) => {
+        if (disposed) return;
+        if (mapped) setHistoryFileStatus(mapped);
+      });
     } catch {
       // 静默:transport 不可用(极端环境)同样保持推导状态。
     }
