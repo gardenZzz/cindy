@@ -2579,10 +2579,17 @@ export function ChatInput({
       // alone.
       if (storageKey !== undefined) {
         const draft = getComposerDraft(storageKey);
-        if (draft?.text && composerDocIsEmpty(editor.state.doc)) {
+        // 判空同外部草稿订阅:草稿正文可能是「空文档 JSON」而不是 undefined。此时
+        // 编辑器本来就是空的,setContent 只会原地重建 doc(replace(0, size)),把按
+        // 位置存活的状态(语音插入点、草稿装饰锚点)推到 block 边界上。本 effect 依赖
+        // voiceInput.isBusy,录音开始与结束各会重跑一次——新建对话页的草稿键固定、
+        // 常留着一份空正文,于是上屏文字前凭空多出一个空行。
+        const draftDocument =
+          draft?.text && tiptapDocHasContent(draft.text) ? draft.text : null;
+        if (draftDocument && composerDocIsEmpty(editor.state.doc)) {
           isRestoringRef.current = true;
           try {
-            editor.commands.setContent(normalizeComposerDocumentJSON(draft.text));
+            editor.commands.setContent(normalizeComposerDocumentJSON(draftDocument));
           } finally {
             isRestoringRef.current = false;
           }
