@@ -306,6 +306,7 @@ import { refreshCodexMcpEnvironment } from './codexMcpRefresh.js';
 import { broadcastSchedulerChanged } from './schedule.js';
 import { validateExtraDirs } from './extraDirsValidator.js';
 import { prepareHandoffWorktree, shouldRecycleHandoffWorktreeOnFailure } from './handoffWorktree.js';
+import { validateHandoffWorkingDir } from './handoffWorkingDir.js';
 import { registerProjectPluginPolicyHandlers } from './projectPluginPolicyHandlers.js';
 import {
   restoreMissingManagedWorktreeForSession,
@@ -803,6 +804,8 @@ interface OrcaCollabService {
       title?: string;
       /** create 分支可选:true = 为新 session 预建独立 git worktree 并以其为 workingDir(jump 忽略)。 */
       useWorktree?: boolean;
+      /** create 分支可选:新 session 的工作目录覆盖(绝对路径,须已存在;jump 忽略)。#811 */
+      workingDir?: string;
       /** Host-owned create defaults for non-session callers such as scheduler script tasks. */
       createDefaults?: SendToSessionCreateDefaults;
     },
@@ -4515,6 +4518,8 @@ export function registerMakerIpc(maker: Maker, options: RegisterMakerIpcOptions)
       dispatcherSessionId?: string;
       title?: string;
       useWorktree?: boolean;
+      /** create 分支可选:新 session 的工作目录覆盖(绝对路径,须已存在;jump 忽略)。#811 */
+      workingDir?: string;
       onAccepted?: () => void | Promise<void>;
       onAcceptedRollback?: () => void | Promise<void>;
       origin?: AgentInputQueuedMessage['origin'];
@@ -4531,6 +4536,7 @@ export function registerMakerIpc(maker: Maker, options: RegisterMakerIpcOptions)
       dispatcherSessionId,
       title,
       useWorktree,
+      workingDir: workingDirOverride,
       onAccepted,
       onAcceptedRollback,
       origin,
@@ -4577,6 +4583,27 @@ export function registerMakerIpc(maker: Maker, options: RegisterMakerIpcOptions)
               message: `dispatcher session ${dispatcherSessionId} not found`,
             };
           }
+          // working_dir 覆盖(#811):把新 session 落到指定项目目录,而不是恒继承
+          // dispatcher 的目录。先于 worktree 预建校验——use_worktree 的 base 仓库
+          // 也从覆盖后的目录(校验器规范化后的形态)解析。
+          let resolvedWorkDir = meta.workDir;
+          if (workingDirOverride !== undefined) {
+            // 远程 SSH 会话的 workDir 是远端路径,本机 stat 校验对它无意义
+            // (本机恰好同名目录会假阳性、远端合法目录会假阴性)——fail-closed
+            // 拒绝,待远程校验通道具备后再放开。
+            if (meta.remoteHostId) {
+              return {
+                ok: false,
+                errorCode: 'INVALID_ARGS',
+                message: 'working_dir 暂不支持远程会话(远端路径无法在本机校验)',
+              };
+            }
+            const checked = await validateHandoffWorkingDir(workingDirOverride);
+            if (!checked.ok) {
+              return { ok: false, errorCode: 'INVALID_ARGS', message: checked.message };
+            }
+            resolvedWorkDir = checked.dir;
+          }
           // useWorktree:为新 session 预建正规 session worktree(与 UI 新会话勾选
           // worktree 同类:worktreeStore 绑定 + 关闭时 auto-stash 清理),新 session 的
           // id 必须用预生成的那个(worktree 绑定已按它登记)。失败硬报 WORKTREE_UNAVAILABLE
@@ -4593,8 +4620,13 @@ export function registerMakerIpc(maker: Maker, options: RegisterMakerIpcOptions)
                 createWorktree: worktreeManager.createWorktree,
                 createId: () => randomUUID(),
               },
-              dispatcherSessionId,
-              meta.workDir,
+              // working_dir 覆盖时不带 dispatcherSessionId:resolveHandoffBaseRepo
+              // 的「dispatcher 自身 worktree」捷径按路径包含判定——覆盖目录若指向
+              // dispatcher worktree 树内的**嵌套独立仓库**,捷径会跳过 detectCwd、
+              // 误用 dispatcher 的 baseRepo。去掉捷径后 detectCwd 按目录自身探测
+              // git 根;覆盖目录落在登记过的 worktree 内时,listAll 反查分支仍生效。
+              workingDirOverride !== undefined ? undefined : dispatcherSessionId,
+              resolvedWorkDir,
             );
             if (!prep.ok) {
               return { ok: false, errorCode: 'WORKTREE_UNAVAILABLE', message: prep.message };
@@ -4608,14 +4640,21 @@ export function registerMakerIpc(maker: Maker, options: RegisterMakerIpcOptions)
             .limit(1);
           inherited = {
             agentKind: meta.agentKind,
-            workingDir: meta.workDir,
+            workingDir: resolvedWorkDir,
+            // 覆盖目录必有真实项目目录 → 归 project 工作区(标题/侧栏分组按项目
+            // 语义走);未覆盖时保持缺省继承,行为不变。
+            ...(workingDirOverride !== undefined ? { workspaceKind: 'project' as const } : {}),
             model: meta.model,
             effort: (row?.effort ?? undefined) as SendToSessionCreateDefaults['effort'],
             fastMode: !!row?.fastMode,
             providerId: row?.providerId ?? undefined,
-            permissionMode: inheritSourcePermissionMode
-              ? permissionModeOrAsk(row?.permissionMode)
-              : 'bypassPermissions',
+            // working_dir 覆盖时强制继承来源会话的权限档(review 反馈):把新目录
+            // 以 Full access 打开是相对 dispatcher 的权限升级,跨项目 handoff
+            // 不应隐式发生;未覆盖时保持既有缺省(bypassPermissions)不变。
+            permissionMode:
+              inheritSourcePermissionMode || workingDirOverride !== undefined
+                ? permissionModeOrAsk(row?.permissionMode)
+                : 'bypassPermissions',
           };
         } else {
           if (useWorktree) {
