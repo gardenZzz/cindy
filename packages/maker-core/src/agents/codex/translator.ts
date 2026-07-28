@@ -59,6 +59,8 @@ export interface CodexRuntimeState {
   itemTextLen: Map<string, number>;
   /** 已经 emit 过 tool_use 的 item.id (避免 started + 第一次 updated 重复)。 */
   emittedToolUse: Set<string>;
+  /** 尚未 emit 的 Web Search 候选输入，供跨 started/updated/completed 快照补全。 */
+  pendingWebSearchInput: Map<string, WebSearchInput>;
   /**
    * Auth retry-loop dedupe key (`<threadId>|<turnId>`)。daemon 撞 401 时
    * willRetry=true 通知会按 retry 频率 (~每秒) 持续发, 不 dedupe 会让
@@ -84,6 +86,7 @@ export function newCodexRuntimeState(): CodexRuntimeState {
     reasoningTextLen: new Map(),
     itemTextLen: new Map(),
     emittedToolUse: new Set(),
+    pendingWebSearchInput: new Map(),
     lastAuthErrorKey: null,
     networkRetryNotice: null,
   };
@@ -429,6 +432,11 @@ interface WebSearchItem {
   id: string;
   query: string;
   action?: WebSearchAction | null;
+}
+
+interface WebSearchInput {
+  query: string;
+  action?: WebSearchAction;
 }
 
 type PatchApplyStatus = 'inProgress' | 'completed' | 'failed' | 'declined';
@@ -911,10 +919,7 @@ function webSearchActionDetail(action: WebSearchAction | null | undefined): stri
 function webSearchInput(
   item: WebSearchItem,
   actionDetail = webSearchActionDetail(item.action),
-): {
-  query: string;
-  action?: WebSearchAction;
-} {
+): WebSearchInput {
   const query = actionDetail || nonEmptyWebSearchText(item.query);
   return {
     query,
@@ -922,9 +927,24 @@ function webSearchInput(
   };
 }
 
+function rememberWebSearchInput(
+  item: WebSearchItem,
+  input: WebSearchInput,
+  actionDetail: string,
+  ctx: CodexTranslateContext,
+): WebSearchInput {
+  const pending = ctx.rt.pendingWebSearchInput.get(item.id);
+  // 真实 action 优先级最高；在它到达前，保留最新的非空 legacy query 作为兜底。
+  if (input.query && (actionDetail || !webSearchActionDetail(pending?.action))) {
+    ctx.rt.pendingWebSearchInput.set(item.id, input);
+    return input;
+  }
+  return pending ?? input;
+}
+
 function emitWebSearchToolUse(
   item: WebSearchItem,
-  input: ReturnType<typeof webSearchInput>,
+  input: WebSearchInput,
   queue: AsyncQueue<AgentEvent>,
   ctx: CodexTranslateContext,
 ): void {
@@ -947,7 +967,8 @@ function handleWebSearch(
   ctx: CodexTranslateContext,
 ): void {
   const actionDetail = webSearchActionDetail(item.action);
-  const input = webSearchInput(item, actionDetail);
+  const currentInput = webSearchInput(item, actionDetail);
+  const input = rememberWebSearchInput(item, currentInput, actionDetail, ctx);
 
   if (phase === 'started') {
     if (ctx.rt.emittedToolUse.has(item.id)) return;
@@ -966,6 +987,7 @@ function handleWebSearch(
   // completed
   const toolUseEmitted = ctx.rt.emittedToolUse.has(item.id);
   ctx.rt.emittedToolUse.delete(item.id);
+  ctx.rt.pendingWebSearchInput.delete(item.id);
   // 防御缺失 started/updated 的历史或异常事件序列，保持 tool_use → result 顺序。
   if (!toolUseEmitted) {
     // completed 仍无可展示参数时整条忽略，避免补发空白 tool_use 和孤立 result。

@@ -337,7 +337,7 @@ describe('webSearch', () => {
     });
   });
 
-  it('只有 legacy query 时在 completed 补发调用记录', () => {
+  it('completed 快照丢失字段时仍用 started 的 legacy query 补发调用记录', () => {
     feedItem('started', {
       type: 'webSearch',
       id: 'ws-legacy-only',
@@ -349,7 +349,7 @@ describe('webSearch', () => {
     feedItem('completed', {
       type: 'webSearch',
       id: 'ws-legacy-only',
-      query: 'legacy query',
+      query: '',
       action: null,
     });
 
