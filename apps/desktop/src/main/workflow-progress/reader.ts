@@ -97,9 +97,13 @@ export function extractWorkflowProgress(record: unknown): WorkflowProgress | nul
       const index = asNumber(e.index);
       if (title && index != null) phases.push({ index, title });
     } else if (e.type === 'workflow_agent') {
+      // agentId 允许缺失:排队中的 agent 尚未分配 id(事件流侧同语义),workflow
+      // 提前退出时文件里会留下这种行 —— 丢弃会让重载后的树比 live 少行。
+      // label 与 agentId 双缺才跳过(没有任何可展示身份)。
       const agentId = asString(e.agentId);
       const state = asString(e.state);
-      if (!agentId || !state) continue;
+      const label = asString(e.label) ?? agentId;
+      if (!label || !state) continue;
       const model = asString(e.model);
       const phaseTitle = asString(e.phaseTitle);
       const attempt = asNumber(e.attempt);
@@ -109,8 +113,8 @@ export function extractWorkflowProgress(record: unknown): WorkflowProgress | nul
       const durationMs = asNumber(e.durationMs);
       const error = asTruncated(e.error, 300);
       agents.push({
-        label: asString(e.label) ?? agentId,
-        agentId,
+        label,
+        ...(agentId ? { agentId } : {}),
         state,
         ...(model ? { model } : {}),
         ...(phaseTitle ? { phaseTitle } : {}),

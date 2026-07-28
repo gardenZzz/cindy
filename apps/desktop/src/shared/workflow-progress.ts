@@ -10,7 +10,8 @@
 export interface WorkflowAgentProgress {
   /** 脚本里 agent() 的 label(如 "search:ai-tech");缺失时回退 agentId。 */
   label: string;
-  agentId: string;
+  /** 运行时 agent id;排队中尚未分配时缺失(与事件流 workflow_agent 同语义)。 */
+  agentId?: string;
   /** 该 agent 实际跑的模型 raw id(如 claude-opus-4-8[1m])。 */
   model?: string;
   /** 运行时原始状态:queued / running / done / failed / stopped 等(原样透传)。 */

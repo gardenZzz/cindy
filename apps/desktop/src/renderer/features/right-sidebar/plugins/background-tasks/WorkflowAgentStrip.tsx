@@ -6,10 +6,12 @@
  * 语义 token,与状态点/running 色的设计定稿同源)。
  *
  * - 纯视觉增强,aria-hidden(相邻的摘要行/聚合行已承担文字语义);每格 title
- *   提示 label · state(数据原词透传,非 i18n 文案)。
+ *   提示 label · 状态(状态经 chat.workflowTree.state.* 本地化,词表外原词兜底)。
  * - 无动画(DESIGN.md §14.4:不为常驻状态加循环动效,状态变化直接换色)。
  * - maxVisible 截断(卡片等紧凑场景),超出部分以 +n 文本收尾。
  */
+
+import { useTranslation } from 'react-i18next';
 
 import {
   workflowAgentVisualState,
@@ -36,9 +38,18 @@ export function WorkflowAgentStrip({
   /** 紧凑场景(聊天卡片)截断上限;省略 = 全量 wrap。 */
   maxVisible?: number;
 }) {
+  const { t } = useTranslation();
   if (cells.length === 0) return null;
   const visible = maxVisible !== undefined ? cells.slice(0, maxVisible) : cells;
   const overflow = cells.length - visible.length;
+  // title 是用户可见 tooltip:状态词走 i18n(与树行同一词表 key),词表外原词兜底。
+  const cellTitle = (cell: WorkflowAgentStripCell): string | undefined => {
+    const stateLabel = cell.state
+      ? t(`chat.workflowTree.state.${cell.state}`, { defaultValue: cell.state })
+      : undefined;
+    if (cell.label && stateLabel) return `${cell.label} · ${stateLabel}`;
+    return cell.label ?? stateLabel;
+  };
   return (
     <span
       data-workflow-agent-strip="true"
@@ -49,7 +60,7 @@ export function WorkflowAgentStrip({
         <span
           // 稳定序:workflow_progress 条目顺序即 spawn 顺序,index 作 key 足够。
           key={i}
-          title={cell.label ? `${cell.label} · ${cell.state ?? ''}` : cell.state}
+          title={cellTitle(cell)}
           className={`h-2 w-2 rounded-[2px] ${STATE_BG[workflowAgentVisualState(cell.state)]}`}
         />
       ))}
