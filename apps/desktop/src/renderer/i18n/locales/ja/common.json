@@ -3021,7 +3021,10 @@
       "errorBody": "{{appName}} に戻ってもう一度ログインしてください。",
       "returnButton": "{{appName}} に戻る"
     },
-    "globalRegion": "Global",
+    "regionPill": {
+      "cn": "CN",
+      "dev": "Dev"
+    },
     "errors": {
       "fallback": "ログインに失敗しました。再試行してください。",
       "AUTH_SERVICE_UNAVAILABLE": "ログインサービスは一時的に利用できません。",

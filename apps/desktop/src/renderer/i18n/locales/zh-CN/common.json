@@ -3021,7 +3021,10 @@
       "errorBody": "请回到 {{appName}} 重新登录。",
       "returnButton": "回到 {{appName}}"
     },
-    "globalRegion": "Global",
+    "regionPill": {
+      "cn": "CN",
+      "dev": "Dev"
+    },
     "errors": {
       "fallback": "登录失败，请稍后重试",
       "AUTH_SERVICE_UNAVAILABLE": "登录服务暂不可用",
