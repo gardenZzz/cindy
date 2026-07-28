@@ -207,19 +207,32 @@ async function readRemoteMarker(host: RemoteHost): Promise<string | null> {
 
 async function writeRemoteMarker(host: RemoteHost, content: string | null): Promise<void> {
   if (content == null) {
-    await host.exec(`bash -c 'rm -f "${REMOTE_AGENT_PROXY_ENV_PATH}"'`, {
+    const result = await host.exec(`bash -c 'rm -f "${REMOTE_AGENT_PROXY_ENV_PATH}"'`, {
       timeoutMs: 10_000,
       label: 'delete-agent-proxy-marker',
     });
+    if (result.exitCode !== 0) {
+      throw new Error(
+        `delete agent-proxy marker failed (exit ${result.exitCode}): ${result.stderr.trim().slice(0, 200)}`,
+      );
+    }
     return;
   }
   // mkdir -p 兜底: install root 通常在 codex 安装时已建, 但 proxy-only
   // 场景 (只开了 claude 没装 codex) 目录可能还不存在。内容走 stdin,
   // 不进 cmd (与 repo 的 secret-hygiene 惯例一致, 虽然 marker 本身无密钥)。
-  await host.exec(
+  const result = await host.exec(
     `bash -c 'mkdir -p "${REMOTE_INSTALL_ROOT}" && cat > "${REMOTE_AGENT_PROXY_ENV_PATH}"'`,
     { timeoutMs: 10_000, label: 'write-agent-proxy-marker', input: content },
   );
+  // exec 对非零退出码 resolve 不 throw — 写失败必须显式挡 (review: PR #715
+  // codex R7 P1): 否则 reconcile 会继续 pkill, daemon 起来没 marker 直连,
+  // fail-closed 破。throw 由调用方收口 (apply 落 tunnel state / probe 中断)。
+  if (result.exitCode !== 0) {
+    throw new Error(
+      `write agent-proxy marker failed (exit ${result.exitCode}): ${result.stderr.trim().slice(0, 200)}`,
+    );
+  }
 }
 
 /**

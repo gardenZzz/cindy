@@ -262,8 +262,11 @@ function AgentProxyTunnelCard({ hostId }: { hostId: string }) {
     () => remoteSshHostsStore.get()?.find((h) => h.config.id === hostId) ?? null,
   );
   // 触发一次 ensure, 保证 cold start (没开过 Settings 列表) 也有快照。
+  // ensure() 可能因 IPC 失败 reject — 裸 void 会把 rejection 抛成 renderer
+  // unhandled rejection; 与 useRemoteSshHosts hook 同款 catch 守护
+  // (review: PR #715 copilot R7)。
   useEffect(() => {
-    void remoteSshHostsStore.ensure();
+    void remoteSshHostsStore.ensure().catch(() => {});
   }, []);
 
   const pref = snap?.agentProxy ?? null;
@@ -274,7 +277,15 @@ function AgentProxyTunnelCard({ hostId }: { hostId: string }) {
   let icon;
   let text: string;
   let isError = false;
-  if (tunnel?.active && tunnel.remotePort != null) {
+  if (snap?.status !== 'ready') {
+    // 主机断连/重连中: 隧道已 disarm 或正在拆除 — 即使隧道状态快照还没翻到
+    // 非活跃 (断连帧先于 mark-inactive 帧到达), 也优先显示「等待连接」,
+    // 不渲染过期的「已建立」(review: PR #715 收官审查 P2)。断连时
+    // markAgentProxyTunnelInactive 会清掉 lastError, 错误分支只在 ready
+    // 状态 (连接正常但建隧道失败) 下有语义。
+    icon = <AlertCircle size={14} />;
+    text = t('settings.remote.detail.agentProxyWaiting', { target: localTarget });
+  } else if (tunnel?.active && tunnel.remotePort != null) {
     icon = <CheckCircle2 size={14} />;
     text = t('settings.remote.detail.agentProxyActive', {
       port: tunnel.remotePort,
@@ -284,11 +295,6 @@ function AgentProxyTunnelCard({ hostId }: { hostId: string }) {
     icon = <AlertCircle size={14} />;
     text = t('settings.remote.detail.agentProxyError', { message: tunnel.lastError });
     isError = true;
-  } else if (snap?.status !== 'ready') {
-    // 主机断连时隧道已 disarm 且没有在途的建立动作 — 不能渲染
-    // 「建立中」spinner (误导, review: PR #715 greptile R4)。
-    icon = <AlertCircle size={14} />;
-    text = t('settings.remote.detail.agentProxyWaiting', { target: localTarget });
   } else {
     icon = <Spinner size={12} />;
     text = t('settings.remote.detail.agentProxyPending', { target: localTarget });
