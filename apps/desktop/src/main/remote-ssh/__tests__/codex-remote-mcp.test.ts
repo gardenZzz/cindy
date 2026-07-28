@@ -4,8 +4,11 @@
  * 追加语义(漂移检测是"内容一致则不重写、不重启 daemon"的前提)。
  */
 
-import { describe, expect, it, vi } from 'vitest';
+import { describe, expect, it, vi, beforeAll } from 'vitest';
+import fs from 'node:fs';
+import path from 'node:path';
 
+import { app } from 'electron';
 import type { RemoteHost } from '@cindy/maker-remote-ssh';
 
 import {
@@ -21,6 +24,13 @@ vi.mock('../../mcp-integrations/remoteMcpBridgeToken.js', () => ({
 }));
 
 const SERVERS = ['cindy_orca', 'orca_worker_bridge'];
+
+// remote-mcp-forwards.json 在真实 userData stub 目录跨 vitest 运行残留
+// (appliedFingerprint 持久化后会影响 driftUnapplied 判定) — 每次运行起始
+// 清掉;模块级 portPrefsCache 是懒加载, 此刻必然未读, 首读即空文件。
+beforeAll(() => {
+  fs.rmSync(path.join(app.getPath('userData'), 'remote-mcp-forwards.json'), { force: true });
+});
 
 /** 走完整 ensure 流程的 fake host:读 config 返回给定内容, 其余命令一律成功。 */
 function fakeHost(hostId: string, configContent: string) {
@@ -355,9 +365,10 @@ describe('ensureRemoteCodexMcpBridge live-turn defer', () => {
     ensureBridgeStarted: async () => ({ port: 38080, serverNames: SERVERS, bridgeInstanceId: 'bridge-1' }),
   };
 
-  it('defers config write and daemon restart while a live turn exists on the host', async () => {
+  it('writes config but defers daemon restart while a live turn exists on the host', async () => {
     // P1 回归:config 漂移生效必须重启 daemon, 重启会断同 host 的 live turn —
-    // 有 turn 时跳过写入与重启 (config 留旧值, 下次 ensure 重试)。
+    // 有 turn 时 config 照写 (daemon 运行中不读 config, 落盘无害) 但 bootstrap
+    // 推迟;driftUnapplied 是持久指纹事实, turn 结束后的 ensure 必然补刀。
     const { host, execCmds } = fakeHost('host-defer-live', '');
     const result = await ensureRemoteCodexMcpBridge(host, {
       ...bridgeDeps,
@@ -366,8 +377,8 @@ describe('ensureRemoteCodexMcpBridge live-turn defer', () => {
     expect(result.ok).toBe(true);
     const joined = execCmds.join('\n');
     expect(joined).toContain('config.toml'); // 仍读了 config (漂移检测)
-    expect(joined).not.toContain('base64 -d'); // 不写 config
-    expect(joined).not.toContain('bootstrap'); // 不重启 daemon
+    expect(joined).toContain('base64 -d'); // config 照写 (落盘等新指纹)
+    expect(joined).not.toContain('bootstrap'); // 但不重启 daemon
   });
 
   it('writes config and rebootstraps once the host has no live turn', async () => {
@@ -583,5 +594,138 @@ describe('ensureRemoteCodexMcpBridge server whitelist', () => {
     const joined3 = execCmds3.join('\n');
     expect(joined3).not.toContain('base64 -d');
     expect(joined3).not.toContain('bootstrap');
+  });
+});
+
+describe('ensureRemoteCodexMcpBridge drift self-heal (appliedFingerprint)', () => {
+  function prefsOf(hostId: string): { remotePort?: number; appliedFingerprint?: string } | null {
+    const file = path.join(app.getPath('userData'), 'remote-mcp-forwards.json');
+    if (!fs.existsSync(file)) return null;
+    const raw = JSON.parse(fs.readFileSync(file, 'utf-8')) as Record<string, { remotePort?: number; appliedFingerprint?: string }>;
+    return raw[hostId] ?? null;
+  }
+
+  it('bootstraps on the next ensure once the live turn settles (deferred drift stays persistent)', async () => {
+    // defer 语义回归:live turn 期间 config 照写但 bootstrap 推迟;漂移未生效
+    // 是持久指纹事实 — turn 结束 (hasLiveTurn=false) 后的 ensure 即使
+    // changed=false 也必然补刀 (turn-done 挂钩 / 下次 session start)。
+    let configContent = '';
+    const execCmds: string[] = [];
+    const host = {
+      id: 'host-defer-heal',
+      exec: async (cmd: string, opts?: { input?: string }) => {
+        execCmds.push(cmd);
+        if (cmd.includes('cat "$CODEX_HOME/config.toml"')) {
+          return { exitCode: 0, stdout: configContent, stderr: '' };
+        }
+        if (cmd.includes('base64 -d')) {
+          const written = decodeWrittenConfig(opts?.input ? [opts.input] : []);
+          if (written !== null) configContent = written;
+        }
+        return { exitCode: 0, stdout: 'ok', stderr: '' };
+      },
+      ensureRemoteForward: async (spec: { localHost: string; localPort: number; preferredRemotePort?: number }) => ({
+        remotePort: spec.preferredRemotePort ?? 47923,
+        close: async () => {},
+      }),
+    } as unknown as RemoteHost;
+    const deps = (live: boolean) => ({
+      ensureBridgeStarted: async () => ({ port: 38080, serverNames: SERVERS, bridgeInstanceId: 'bridge-1' }),
+      hasLiveTurnOnHost: () => live,
+    });
+
+    const first = await ensureRemoteCodexMcpBridge(host, deps(true));
+    expect(first.ok).toBe(true);
+    expect(execCmds.join('\n')).not.toContain('bootstrap'); // live: 推迟重启
+    expect(prefsOf('host-defer-heal')?.appliedFingerprint).toBeUndefined(); // 未生效不落盘
+
+    const second = await ensureRemoteCodexMcpBridge(host, deps(false));
+    expect(second.ok).toBe(true);
+    expect(execCmds.join('\n')).toContain('bootstrap'); // idle: 持久漂移驱动补刀
+    expect(prefsOf('host-defer-heal')?.appliedFingerprint).toBeTruthy(); // 生效后落盘
+  });
+
+  it('retries bootstrap after an app restart even when config is unchanged (Greptile P1)', async () => {
+    // Greptile P1 回归:config 已写入 + bootstrap 失败 + app 重启 → 进程内
+    // pending 全丢, 但 appliedFingerprint 持久缺失 ⇒ driftUnapplied 仍成立,
+    // 下次 ensure (changed=false + 旧 daemon 在跑) 强制重试 bootstrap,
+    // daemon 不会永远持旧 token 401。
+    let bootstrapAttempts = 0;
+    let configContent = '';
+    const makeHost = () =>
+      ({
+        id: 'host-restart-heal',
+        exec: async (cmd: string, opts?: { input?: string }) => {
+          if (cmd.includes('cat "$CODEX_HOME/config.toml"')) {
+            return { exitCode: 0, stdout: configContent, stderr: '' };
+          }
+          if (cmd.includes('bootstrap')) {
+            bootstrapAttempts += 1;
+            if (bootstrapAttempts === 1) {
+              return { exitCode: 1, stdout: '', stderr: 'timed out' }; // 首轮失败
+            }
+            return { exitCode: 0, stdout: 'ok', stderr: '' };
+          }
+          if (cmd.includes('base64 -d')) {
+            const written = decodeWrittenConfig(opts?.input ? [opts.input] : []);
+            if (written !== null) configContent = written;
+          }
+          return { exitCode: 0, stdout: 'ok', stderr: '' };
+        },
+        ensureRemoteForward: async (spec: { localHost: string; localPort: number; preferredRemotePort?: number }) => ({
+          remotePort: spec.preferredRemotePort ?? 47924,
+          close: async () => {},
+        }),
+      }) as unknown as RemoteHost;
+    const deps = {
+      ensureBridgeStarted: async () => ({ port: 38080, serverNames: SERVERS, bridgeInstanceId: 'bridge-1' }),
+      hasLiveTurnOnHost: () => false,
+    };
+
+    const first = await ensureRemoteCodexMcpBridge(makeHost(), deps);
+    expect(first.ok).toBe(false); // bootstrap 失败折叠
+    expect(bootstrapAttempts).toBe(1);
+
+    // 模拟 app 重启:模块状态 (串行锁 / prefs cache) 全清, prefs 文件保留。
+    vi.resetModules();
+    const fresh = await import('../codex-remote-mcp.js');
+    const second = await fresh.ensureRemoteCodexMcpBridge(makeHost(), deps);
+    expect(second.ok).toBe(true);
+    expect(bootstrapAttempts).toBe(2); // appliedFingerprint 缺失 ⇒ 强制重试
+  });
+
+  it('clears appliedFingerprint after the cleanup-path bootstrap so later ensures stay quiet', async () => {
+    // 清理路径:受管段剥除 + bootstrap (清 daemon env) 后 applied 记录摘除 —
+    // 否则 desiredFingerprint=null 与残留 applied 恒不等, 之后每次 ensure
+    // 都会无谓重启 daemon。
+    const stale = renderManagedMcpBlock({ remotePort: 47925, serverNames: SERVERS, tokenFingerprint: 'fp-old' });
+    const { host, execCmds } = fakeHost('host-cleanup-quiet', `model = "gpt-5.5"\n\n${stale}\n`);
+    const result = await ensureRemoteCodexMcpBridge(host, {
+      ensureBridgeStarted: async () => ({ port: 38080, serverNames: ['cindy_memory'], bridgeInstanceId: 'bridge-1' }),
+      hasLiveTurnOnHost: () => false,
+    });
+    expect(result.ok).toBe(true);
+    expect(execCmds.join('\n')).toContain('bootstrap');
+    expect(prefsOf('host-cleanup-quiet')?.appliedFingerprint).toBeUndefined();
+
+    // 下轮 ensure:无受管段、无 applied、desired=null → 静默, 不再 bootstrap。
+    const execCmds2: string[] = [];
+    const host2 = {
+      id: 'host-cleanup-quiet',
+      exec: async (cmd: string) => {
+        execCmds2.push(cmd);
+        return { exitCode: 0, stdout: 'model = "gpt-5.5"\n', stderr: '' };
+      },
+      ensureRemoteForward: async (spec: { localHost: string; localPort: number; preferredRemotePort?: number }) => ({
+        remotePort: spec.preferredRemotePort ?? 47925,
+        close: async () => {},
+      }),
+    } as unknown as RemoteHost;
+    const second = await ensureRemoteCodexMcpBridge(host2, {
+      ensureBridgeStarted: async () => ({ port: 38080, serverNames: ['cindy_memory'], bridgeInstanceId: 'bridge-1' }),
+      hasLiveTurnOnHost: () => false,
+    });
+    expect(second.ok).toBe(true);
+    expect(execCmds2.join('\n')).not.toContain('bootstrap');
   });
 });

@@ -1644,6 +1644,11 @@ const rewindInputSessions = new Set<string>();
 const SESSION_REWIND_INPUT_LOCK_ID = 'session-rewind';
 const SESSION_REWIND_STOP_TIMEOUT_MS = 15_000;
 let pendingCredentialSwitchHolder: PendingCredentialSwitchService | null = null;
+// turn 收口时对远端 codex MCP 做一次 best-effort ensure 的钩子 (live turn
+// 期间被推迟的 daemon bootstrap 在 idle 时点补刀)。真实现定义在
+// registerMakerIpcs 闭包内 (依赖 maker / ensure 函数), 模块级 turn 收口
+// 路径经 holder 调用; 未注入时 no-op。
+let refreshRemoteCodexMcpOnTurnSettledHolder: ((sessionId: string) => void) | null = null;
 let deferredCodexRestartHolder: DeferredCodexRestartService | null = null;
 let pendingAgentSwitchApplyHolder:
   ((sessionId: string, signal?: AbortSignal) => Promise<() => void>) | null = null;
@@ -2316,6 +2321,7 @@ function settleSilentStopDone(sessionId: string, reason: 'exhausted' | 'skip' | 
   void pendingCredentialSwitchHolder?.onTurnSettled(sessionId);
   deferredCodexRestartHolder?.onSessionSettled();
   agentInputCoordinatorHolder?.onExternalTurnSettled(sessionId);
+  refreshRemoteCodexMcpOnTurnSettledHolder?.(sessionId);
   fireSilentStopSettled(sessionId, reason);
 }
 
@@ -2715,6 +2721,7 @@ export function wireSessionToIpc(session: ReturnType<Maker['getSession']>): void
       void pendingCredentialSwitchHolder?.onTurnSettled(session.id);
       deferredCodexRestartHolder?.onSessionSettled();
       agentInputCoordinatorHolder?.onExternalTurnSettled(session.id);
+      refreshRemoteCodexMcpOnTurnSettledHolder?.(session.id);
     } else if (shouldMarkTurnStatusIdleAfterBroadcast) {
       sessionTurnActivityTracker.scheduleIdleAfterStatusBroadcast(session.id);
       // status:isRunning=false 即逻辑 turn 结束(可重试 error 不发这个信号)。
@@ -3241,6 +3248,7 @@ export function wireSessionToIpc(session: ReturnType<Maker['getSession']>): void
       pendingCredentialSwitchHolder?.onSessionClosed(session.id);
       deferredCodexRestartHolder?.onSessionSettled();
       agentInputCoordinatorHolder?.onExternalTurnSettled(session.id);
+      refreshRemoteCodexMcpOnTurnSettledHolder?.(session.id);
       gitSnapshotCoordinator?.onSessionClosed(session.id);
       wiredSessionsById.delete(session.id);
       for (const dispose of registration.disposers) dispose();
@@ -4374,14 +4382,9 @@ export function registerMakerIpc(maker: Maker, options: RegisterMakerIpcOptions)
         await ensureRemoteCodexMcpBridge(host, {
           ensureBridgeStarted: ensureCodexMcpBridgeStartedForRemote,
           // config 漂移生效要重启 daemon, 重启会断同 host 的 live turn:
-          // 有 turn 在跑时本次降级 (config 留旧值, 下次 ensure 重试)。
-          hasLiveTurnOnHost: (hostId) =>
-            maker.listActiveSessions().some(
-              (s) =>
-                s.remoteHostId === hostId &&
-                s.agentKind === 'codex' &&
-                (agentInputCoordinatorHolder?.hasActiveTurnForRewind(s.id) ?? false),
-            ),
+          // 有 turn 在跑时 config 照写但 bootstrap 推迟 (driftUnapplied 持久,
+          // turn-done 挂钩补刀)。
+          hasLiveTurnOnHost: codexRemoteHasLiveTurn,
         });
       }
     }
@@ -4391,6 +4394,33 @@ export function registerMakerIpc(maker: Maker, options: RegisterMakerIpcOptions)
   // 直调 core createSession 不经 IPC 层, 经 holder 回调本函数补齐 preflight
   // (review: PR #778 codex-connector R17 P1)。
   setRemoteSessionStartEnsure(ensureRemoteReadyForSessionStart);
+
+  // codex 远端 daemon 的 live-turn 判定 (ensure 与 turn-done 挂钩共用):
+  // bootstrap 重启会断同 host 的 live turn, defer/补刀都以此为据。
+  const codexRemoteHasLiveTurn = (hostId: string): boolean =>
+    maker.listActiveSessions().some(
+      (s) =>
+        s.remoteHostId === hostId &&
+        s.agentKind === 'codex' &&
+        (agentInputCoordinatorHolder?.hasActiveTurnForRewind(s.id) ?? false),
+    );
+
+  // turn 结束后补一次远端 MCP ensure (best-effort):live turn 期间被推迟的
+  // daemon bootstrap (driftUnapplied 持久指纹, 见 codex-remote-mcp.ts) 在
+  // idle 时点必然补刀 — 不等用户下次操作 (Greptile: defer 需要可靠自愈
+  // 路径)。ensure 幂等, 无漂移时仅一次 config 读 + daemon 探活。经模块级
+  // holder 供各 turn 收口路径调用。
+  refreshRemoteCodexMcpOnTurnSettledHolder = (sessionId: string): void => {
+    const session = maker.getSession(sessionId);
+    const remoteHostId = session?.remoteHostId;
+    if (!remoteHostId || session?.agentKind !== 'codex') return;
+    const host = getRemoteSshPool().get(remoteHostId);
+    if (host?.getStatus() !== 'ready') return;
+    void ensureRemoteCodexMcpBridge(host, {
+      ensureBridgeStarted: ensureCodexMcpBridgeStartedForRemote,
+      hasLiveTurnOnHost: codexRemoteHasLiveTurn,
+    });
+  };
 
   const makerSessionRegistry = createElectronIpcHandlerRegistry();
   registerMakerSessionCreateHandler(
