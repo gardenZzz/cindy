@@ -53,7 +53,12 @@ function normalizeAgentProxy(raw: unknown): SshHostAgentProxyPref | undefined {
   const v = raw as Record<string, unknown>;
   const localHost = typeof v.localHost === 'string' ? v.localHost.trim() : '';
   const localPort = typeof v.localPort === 'number' ? v.localPort : NaN;
-  if (!localHost || /\s/.test(localHost)) return undefined;
+  // 引号与空白同样拒 (与 IPC normalizeAgentProxyInput / renderer 校验对齐,
+  // review: PR #715 copilot R8): 手编 prefs 的脏值不应在启动时被恢复成
+  // 可用 pref, 然后晚到 net.connect 才以难懂的方式失败。
+  if (!localHost || /\s/.test(localHost) || localHost.includes("'") || localHost.includes('"')) {
+    return undefined;
+  }
   if (!Number.isInteger(localPort) || localPort < 1 || localPort > 65535) return undefined;
   return { enabled: v.enabled === true, localHost, localPort };
 }

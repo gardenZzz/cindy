@@ -520,7 +520,15 @@ export class RemoteHost {
    * 指定, 通常是 127.0.0.1 上的 Proxy 端口。
    */
   async ensureRemoteForward(spec: RemoteForwardSpec): Promise<RemoteForward> {
-    if (!spec.localHost || /\s/.test(spec.localHost)) {
+    // 引号与空白同样拒 (与 desktop IPC / prefs-store 校验对齐, review:
+    // PR #715 copilot R8): localHost 是 net.connect 的目的地, 含引号的值
+    // 会晚到 connect 时才以难懂的错误失败, 入口直接给清晰校验错误。
+    if (
+      !spec.localHost ||
+      /\s/.test(spec.localHost) ||
+      spec.localHost.includes("'") ||
+      spec.localHost.includes('"')
+    ) {
       throw new Error(`ensureRemoteForward: invalid localHost "${spec.localHost}"`);
     }
     if (!Number.isInteger(spec.localPort) || spec.localPort < 1 || spec.localPort > 65535) {

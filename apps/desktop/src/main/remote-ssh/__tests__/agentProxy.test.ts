@@ -319,7 +319,17 @@ describe('ssh-host-prefs-store agentProxy', () => {
       setSshHostAgentProxy('h1', { enabled: true, localHost: 'bad host', localPort: 7890 }),
     ).toThrow(/invalid agentProxy/);
     expect(() =>
+      setSshHostAgentProxy('h1', { enabled: true, localPort: 7890, localHost: '127.0.0.1' }),
+    ).not.toThrow();
+    expect(() =>
       setSshHostAgentProxy('h1', { enabled: true, localHost: '127.0.0.1', localPort: 0 }),
+    ).toThrow(/invalid agentProxy/);
+    // 引号同样拒 (与 IPC / renderer 校验对齐, review: PR #715 copilot R8)。
+    expect(() =>
+      setSshHostAgentProxy('h1', { enabled: true, localHost: `12'7.0.0.1`, localPort: 7890 }),
+    ).toThrow(/invalid agentProxy/);
+    expect(() =>
+      setSshHostAgentProxy('h1', { enabled: true, localHost: '12"7.0.0.1', localPort: 7890 }),
     ).toThrow(/invalid agentProxy/);
   });
 });

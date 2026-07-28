@@ -193,6 +193,14 @@ describe('RemoteHost remote forwarding', () => {
     await expect(
       host.ensureRemoteForward({ localHost: '127.0.0.1', localPort: 7890, preferredRemotePort: 70000 }),
     ).rejects.toThrow(/preferredRemotePort/);
+    // localHost 的引号与空白同样拒 (与 desktop IPC / prefs-store 对齐,
+    // review: PR #715 copilot R8) — 否则晚到 net.connect 才以难懂的错误失败。
+    await expect(
+      host.ensureRemoteForward({ localHost: `12'7.0.0.1`, localPort: 7890 }),
+    ).rejects.toThrow(/localHost/);
+    await expect(
+      host.ensureRemoteForward({ localHost: '12"7.0.0.1', localPort: 7890 }),
+    ).rejects.toThrow(/localHost/);
   });
 
   it('is idempotent for the same local target (no duplicate forwardIn)', async () => {
