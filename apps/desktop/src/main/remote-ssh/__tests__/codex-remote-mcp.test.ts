@@ -15,6 +15,7 @@ import {
   renderManagedMcpBlock,
   mergeManagedMcpBlock,
   ensureRemoteCodexMcpBridge,
+  stripRemoteCodexMcpConfig,
 } from '../codex-remote-mcp.js';
 
 // safeStorage 在测试 stub 里 isEncryptionAvailable=false → token 真源恒 null;
@@ -1010,5 +1011,116 @@ describe('codex-connector R20 regressions', () => {
     expect(execCmds.join('\n')).toContain('bootstrap');
     expect(configContent).not.toContain('cindy-remote-mcp'); // 剥段
     expect(configContent).toContain('model = "gpt-5.5"'); // 用户配置保留
+  });
+});
+
+describe('codex-connector R21 regressions', () => {
+  it('does not release the forward while a live turn defers cleanup; releases after the turn settles (R21 P2)', async () => {
+    // R20-1 把拆 forward 放进清理路径, 但拆在 live-turn defer 判定之前 —
+    // turn 中 daemon 内存 config 仍指该端口, 早拆 = connection refused。
+    // 修正:bootstrap (清理真正生效) 时才拆。
+    const stale = renderManagedMcpBlock({ remotePort: 47921, serverNames: SERVERS, tokenFingerprint: 'fp-old' });
+    let configContent = `model = "gpt-5.5"\n\n${stale}\n`;
+    const closeCalls: Array<{ addr: string; port: number }> = [];
+    const host = {
+      id: 'host-defer-norelease',
+      exec: async (cmd: string, opts?: { input?: string }) => {
+        if (cmd.includes('cat "$CODEX_HOME/config.toml"')) {
+          return { exitCode: 0, stdout: configContent, stderr: '' };
+        }
+        if (cmd.includes('base64 -d')) {
+          const written = decodeWrittenConfig(opts?.input ? [opts.input] : []);
+          if (written !== null) configContent = written;
+        }
+        return { exitCode: 0, stdout: 'ok', stderr: '' };
+      },
+      ensureRemoteForward: async (spec: { localHost: string; localPort: number; preferredRemotePort?: number }) => ({
+        remotePort: spec.preferredRemotePort ?? 47921,
+        close: async () => {},
+      }),
+      closeRemoteForward: async (addr: string, port: number) => {
+        closeCalls.push({ addr, port });
+      },
+    } as unknown as RemoteHost;
+    const deps = (live: boolean) => ({
+      ensureBridgeStarted: async () => ({ port: 38080, serverNames: ['cindy_memory'], bridgeInstanceId: 'bridge-1' }),
+      hasLiveTurnOnHost: () => live,
+    });
+
+    // 先注入 (留下 bridgeLocalPort)。
+    const hostForInject = {
+      ...host,
+      exec: async (cmd: string, opts?: { input?: string }) => {
+        if (cmd.includes('cat "$CODEX_HOME/config.toml"')) {
+          return { exitCode: 0, stdout: configContent, stderr: '' };
+        }
+        if (cmd.includes('base64 -d')) {
+          const written = decodeWrittenConfig(opts?.input ? [opts.input] : []);
+          if (written !== null) configContent = written;
+        }
+        return { exitCode: 0, stdout: 'ok', stderr: '' };
+      },
+    } as unknown as RemoteHost;
+    expect((await ensureRemoteCodexMcpBridge(hostForInject, {
+      ensureBridgeStarted: async () => ({ port: 38080, serverNames: SERVERS, bridgeInstanceId: 'bridge-1' }),
+      hasLiveTurnOnHost: () => false,
+    })).ok).toBe(true);
+
+    // live turn 中的清理:config 剥除但不 bootstrap、不拆 forward。
+    const first = await ensureRemoteCodexMcpBridge(host, deps(true));
+    expect(first.ok).toBe(true);
+    expect(closeCalls).toHaveLength(0);
+
+    // turn 结束后:bootstrap 生效 + forward 拆除。
+    const second = await ensureRemoteCodexMcpBridge(host, deps(false));
+    expect(second.ok).toBe(true);
+    expect(closeCalls).toEqual([{ addr: '127.0.0.1', port: 38080 }]);
+  });
+
+  it('stripRemoteCodexMcpConfig strips the block, clears env, and skips entirely during a live turn (R21 P1)', async () => {
+    const stale = renderManagedMcpBlock({ remotePort: 47921, serverNames: SERVERS, tokenFingerprint: 'fp-old' });
+    let configContent = `model = "gpt-5.5"\n\n${stale}\n`;
+    const execCmds: string[] = [];
+    const host = {
+      id: 'host-strip-shutdown',
+      exec: async (cmd: string, opts?: { input?: string }) => {
+        execCmds.push(cmd);
+        if (cmd.includes('cat "$CODEX_HOME/config.toml"')) {
+          return { exitCode: 0, stdout: configContent, stderr: '' };
+        }
+        if (cmd.includes('base64 -d')) {
+          const written = decodeWrittenConfig(opts?.input ? [opts.input] : []);
+          if (written !== null) configContent = written;
+        }
+        return { exitCode: 0, stdout: 'ok', stderr: '' };
+      },
+      ensureRemoteForward: async (spec: { localHost: string; localPort: number; preferredRemotePort?: number }) => ({
+        remotePort: spec.preferredRemotePort ?? 47921,
+        close: async () => {},
+      }),
+      closeRemoteForward: async () => {},
+    } as unknown as RemoteHost;
+
+    // 先注入成功。
+    expect((await ensureRemoteCodexMcpBridge(host, {
+      ensureBridgeStarted: async () => ({ port: 38080, serverNames: SERVERS, bridgeInstanceId: 'bridge-1' }),
+      hasLiveTurnOnHost: () => false,
+    })).ok).toBe(true);
+    expect(prefsOf('host-strip-shutdown')?.appliedFingerprint).toBeTruthy();
+    execCmds.length = 0;
+
+    // live turn 中 strip:整体跳过 (不写不重启)。
+    await stripRemoteCodexMcpConfig(host, { hasLiveTurnOnHost: () => true });
+    expect(execCmds.join('\n')).not.toContain('base64 -d');
+    expect(execCmds.join('\n')).not.toContain('bootstrap');
+
+    // idle 后 strip:剥段 + bootstrap 清 env + applied 摘除。
+    await stripRemoteCodexMcpConfig(host, { hasLiveTurnOnHost: () => false });
+    const joined = execCmds.join('\n');
+    expect(joined).toContain('base64 -d');
+    expect(joined).toContain('bootstrap');
+    expect(configContent).not.toContain('cindy-remote-mcp');
+    expect(configContent).toContain('model = "gpt-5.5"');
+    expect(prefsOf('host-strip-shutdown')?.appliedFingerprint).toBeUndefined();
   });
 });

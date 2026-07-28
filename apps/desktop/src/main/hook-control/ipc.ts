@@ -21,7 +21,7 @@ import { isModelVisible, visibleModelUnion } from '@cindy/model-providers';
 import { BRAND_NAME } from '@cindy/maker-shared/branding';
 
 import { createLogger } from '../logger.js';
-import { getMaker, restartCodexAfterAuthModeChange } from '../maker-host/index.js';
+import { getMaker, handleCodexEnvironmentShutdownForRemote, restartCodexAfterAuthModeChange } from '../maker-host/index.js';
 import { shutdownCodexEnvironment } from '../mcp-integrations/codexEnvironment.js';
 import { getDesktopProviderService } from '../maker-host/createDesktopProviderService.js';
 import { getModelVisibilityOverride } from '../maker-host/model-visibility-mirror.js';
@@ -150,6 +150,9 @@ async function drainCodexMcpRefreshForSlackAvailability(): Promise<void> {
       try {
         await restartCodexAfterAuthModeChange();
         await shutdownCodexEnvironment();
+        // 远端 session 的 MCP URL / session id 已指向停掉的 bridge — 立刻
+        // 失效 (CC detach + codex strip), 不等 lazy 重建 (codex-connector R21 P1)。
+        handleCodexEnvironmentShutdownForRemote();
         log.info('Codex MCP environment refreshed after Slack provider availability changed', {
           enabled: latestSlackToolProviderEnabled,
         });

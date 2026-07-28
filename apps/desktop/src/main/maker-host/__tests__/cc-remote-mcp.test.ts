@@ -71,6 +71,43 @@ describe('buildCcRemoteHttpMcpServers', () => {
     expect(() => cleanup()).not.toThrow();
   });
 
+  it('flags needsFreshStart when the bridge token is unavailable (R21 P2)', async () => {
+    // token 失效但本要注入:调用方必须 forceFresh — 否则 attach 回带旧
+    // Authorization header 的 alive query, 协同 MCP 持续 401。
+    const { bridge } = fakeBridge();
+    const { servers, needsFreshStart } = await buildCcRemoteHttpMcpServers(
+      { host: HOST, sessionId: 's1', workingDir: '/remote/repo' },
+      {
+        ensureBridgeStarted: async () => ({
+          port: 38080,
+          serverNames: ['cindy_orca', 'orca_worker_bridge'],
+          bridge,
+        }),
+        ensureForward: vi.fn(async () => 47921),
+        getBridgeToken: async () => null,
+      },
+    );
+    expect(servers).toEqual({});
+    expect(needsFreshStart).toBe(true);
+  });
+
+  it('does not flag needsFreshStart when the token is available', async () => {
+    const { bridge } = fakeBridge();
+    const { needsFreshStart } = await buildCcRemoteHttpMcpServers(
+      { host: HOST, sessionId: 's1', workingDir: '/remote/repo' },
+      {
+        ensureBridgeStarted: async () => ({
+          port: 38080,
+          serverNames: ['cindy_orca', 'orca_worker_bridge'],
+          bridge,
+        }),
+        ensureForward: vi.fn(async () => 47921),
+        getBridgeToken: async () => 'persistent-test-token',
+      },
+    );
+    expect(needsFreshStart).toBeFalsy();
+  });
+
   it('injects only whitelisted servers with the persistent token and ?session= routing', async () => {
     const { bridge, registered } = fakeBridge();
     const { servers } = await buildCcRemoteHttpMcpServers(
