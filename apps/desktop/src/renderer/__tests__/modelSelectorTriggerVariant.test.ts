@@ -18,6 +18,7 @@ vi.mock('react-i18next', async (importOriginal) => ({
         source?: string;
         value?: string;
         model?: string;
+        agent?: string;
         effort?: string;
         price?: string;
         percent?: string;
@@ -28,6 +29,8 @@ vi.mock('react-i18next', async (importOriginal) => ({
         'effortLevels.xhigh': '超高',
         'settings.providers.anthropic.title': 'Anthropic',
         'newChat.modelSelector.trigger.placeholder': '选择模型',
+        'newChat.modelSelector.trigger.agent.claudeCode': 'Claude Code',
+        'newChat.modelSelector.trigger.agent.codex': 'Codex',
         'newChat.modelSelector.pricing.free': '限时免费',
         'newChat.modelSelector.source.disconnected': '已断开',
       };
@@ -45,6 +48,15 @@ vi.mock('react-i18next', async (importOriginal) => ({
       }
       if (key === 'newChat.modelSelector.trigger.ariaWithEffort') {
         return `Select model. Current: ${options?.model}, effort: ${options?.effort}`;
+      }
+      if (key === 'newChat.modelSelector.trigger.agent.pending') {
+        return `Next: ${options?.agent}`;
+      }
+      if (key === 'newChat.modelSelector.trigger.pendingAria') {
+        return `Select model. Next message: ${options?.agent} · ${options?.model}`;
+      }
+      if (key === 'newChat.modelSelector.trigger.pendingAriaWithEffort') {
+        return `Select model. Next message: ${options?.agent} · ${options?.model}, effort: ${options?.effort}`;
       }
       if (key === 'newChat.modelSelector.pricing.discount') {
         return `立省 ${options?.percent}%`;
@@ -352,6 +364,7 @@ import {
   ModelSelectorContent,
   modelEffortLabel,
   modelListMaxHeightForRows,
+  resolveModelSelectorAgentIdentity,
 } from '@/components/new-chat/ModelSelector';
 import { makerChatStore } from '@/lib/makerChatStore';
 
@@ -444,6 +457,91 @@ describe('ModelSelector trigger variants', () => {
     expect(trigger.getAttribute('aria-label')).toContain('超高');
   });
 
+  it('keeps the session Agent explicit when Claude Code uses an OpenAI-branded model', () => {
+    const model = {
+      id: 'chatgpt/gpt-5.6-terra',
+      displayName: 'GPT-5.6-Terra',
+      contextWindow: 400000,
+      efforts: ['low', 'medium', 'high'],
+      defaultEffort: 'medium',
+    };
+    visibleModelsRef.models = [model];
+    providersRef.providers = [
+      {
+        id: 'openai',
+        name: 'OpenAI',
+        source: 'builtin',
+        agents: ['claude-code'],
+        auth: { method: 'oauth' },
+        routing: { 'claude-code': {} },
+        connected: true,
+        models: {
+          'claude-code': [
+            {
+              id: model.id,
+              name: model.displayName,
+              contextWindow: model.contextWindow,
+              efforts: model.efforts,
+              defaultEffort: model.defaultEffort,
+            },
+          ],
+        },
+      },
+    ];
+
+    try {
+      const props = {
+        modelId: model.id,
+        effort: 'medium' as Effort,
+        onModelChange: vi.fn(),
+        onEffortChange: vi.fn(),
+        vendorKey: 'cc' as const,
+        currentProviderId: 'openai',
+        agentIdentity: { vendorKey: 'cc' as const, state: 'current' as const },
+      };
+      const view = render(React.createElement(ModelSelector, props));
+
+      let trigger = screen.getByRole('button', {
+        name: /Current: Claude Code · GPT-5\.6-Terra, effort: medium/,
+      });
+      expect(trigger.textContent).toContain('Claude Code');
+      expect(trigger.textContent).toContain('GPT-5.6-Terra');
+      expect(trigger.getAttribute('title')).toBe('Claude Code · GPT-5.6-Terra');
+
+      view.rerender(
+        React.createElement(ModelSelector, {
+          ...props,
+          compactToolbar: true,
+        }),
+      );
+      trigger = screen.getByRole('button', {
+        name: /Current: Claude Code · GPT-5\.6-Terra, effort: medium/,
+      });
+      expect(trigger.textContent).not.toContain('Claude Code');
+      expect(trigger.getAttribute('aria-label')).toContain('Claude Code');
+    } finally {
+      visibleModelsRef.models = null;
+      providersRef.providers = providersRef.DEFAULT_PROVIDERS;
+    }
+  });
+
+  it('does not infer a current Agent from the fallback vendor before session identity loads', () => {
+    render(
+      React.createElement(ModelSelector, {
+        modelId: 'claude-opus-4-8',
+        effort: 'high' as Effort,
+        onModelChange: vi.fn(),
+        onEffortChange: vi.fn(),
+        vendorKey: 'cc',
+        agentIdentity: resolveModelSelectorAgentIdentity(null, null),
+      }),
+    );
+
+    const trigger = screen.getByRole('button', { name: /Current: Opus 4\.8/ });
+    expect(trigger.textContent).not.toContain('Claude Code');
+    expect(trigger.getAttribute('aria-label')).not.toContain('Claude Code');
+  });
+
   it('keeps the disconnected status in the compact trigger title', () => {
     render(
       React.createElement(ModelSelector, {
@@ -523,6 +621,8 @@ describe('ModelSelector trigger variants', () => {
         onModelChange: vi.fn(),
         onEffortChange: vi.fn(),
         vendorKey: displayAgent === 'codex' ? 'codex' : 'cc',
+        // 稳态来自已加载的真实 runtime；intent 是下一条消息的明确目标，不能写成 Current。
+        agentIdentity: resolveModelSelectorAgentIdentity('claude-code', intent?.target),
         currentProviderId: intent?.providerId ?? null,
         onProviderChange: vi.fn(),
         onNavigateToProviders: vi.fn(),
@@ -531,6 +631,11 @@ describe('ModelSelector trigger variants', () => {
 
     const view = render(React.createElement(IntentTrigger, { refresh: 0 }));
     try {
+      let trigger = screen.getByRole('button', {
+        name: /Current: Claude Code · Opus 4\.8/,
+      });
+      expect(trigger.textContent).toContain('Claude Code');
+
       act(() => {
         makerChatStore.noteAgentSwitchIntent(sessionId, 'codex', {
           model: 'gpt-5.5',
@@ -540,8 +645,19 @@ describe('ModelSelector trigger variants', () => {
       });
       view.rerender(React.createElement(IntentTrigger, { refresh: 1 }));
 
-      const trigger = screen.getByRole('button', { name: /Current: GPT-5\.5/ });
+      trigger = screen.getByRole('button', {
+        name: /Next message: Codex · GPT-5\.5, effort: medium/,
+      });
       expect(trigger.textContent).toContain('GPT-5.5');
+      expect(trigger.textContent).toContain('Next: Codex');
+      expect(trigger.getAttribute('aria-label')).not.toContain('Current');
+      // 切换失败时 intent 会保留供重试；重复渲染仍明确标成“下条消息”，不会隐藏身份。
+      view.rerender(React.createElement(IntentTrigger, { refresh: 2 }));
+      expect(
+        screen.getByRole('button', {
+          name: /Next message: Codex · GPT-5\.5, effort: medium/,
+        }),
+      ).toBeTruthy();
       // providerId=null 仍应按目标模型的默认可连来源解析 icon。
       expect(trigger.textContent).toContain('Z');
       expect(trigger.textContent).not.toContain('newChat.modelSelector.source.connect');

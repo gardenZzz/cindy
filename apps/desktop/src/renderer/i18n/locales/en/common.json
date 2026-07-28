@@ -4029,7 +4029,14 @@
       "trigger": {
         "placeholder": "Select model",
         "aria": "Select model. Current: {{model}}",
-        "ariaWithEffort": "Select model. Current: {{model}}, effort: {{effort}}"
+        "ariaWithEffort": "Select model. Current: {{model}}, effort: {{effort}}",
+        "pendingAria": "Select model. Next message: {{agent}} · {{model}}",
+        "pendingAriaWithEffort": "Select model. Next message: {{agent}} · {{model}}, effort: {{effort}}",
+        "agent": {
+          "claudeCode": "Claude Code",
+          "codex": "Codex",
+          "pending": "Next: {{agent}}"
+        }
       },
       "category": {
         "anthropic": "Anthropic",
