@@ -61,3 +61,22 @@ export function setRemoteCcTurnSettledHandler(fn: RemoteCcTurnSettledHandler): v
 export function getRemoteCcTurnSettledHandler(): RemoteCcTurnSettledHandler | null {
   return ccTurnSettledHandler;
 }
+
+/**
+ * 远端 CC session 是否被显式 invalidate (staleInvalidatedCcSessions 成员,
+ * maker-host 装配)。live SEND 路径在直发前查询:命中必须先 detach 走
+ * lazy-resume (forceFresh), 否则 invalidate 的 fire-and-forget detach 与
+ * 用户立即发送形成竞态 — 消息会进带旧 MCP URL 的活跃 query
+ * (codex-connector R23 P2)。
+ */
+export type RemoteCcStaleQuery = (sessionId: string) => boolean;
+
+let ccStaleQuery: RemoteCcStaleQuery | null = null;
+
+export function setRemoteCcStaleQuery(fn: RemoteCcStaleQuery): void {
+  ccStaleQuery = fn;
+}
+
+export function getRemoteCcStaleQuery(): RemoteCcStaleQuery | null {
+  return ccStaleQuery;
+}

@@ -103,20 +103,23 @@ export function invalidateRemoteCcQueriesForMcpGenerationChange(
 
 export interface RemoteCcTurnSettledDeps {
   getSession: (sessionId: string) => RemoteCcSessionLike | null;
-  /** 该 session 的 fresh 标记是否仍有效 (无效 = 代际已变 / 本进程未 fresh)。 */
-  hasFreshMark: (sessionId: string) => boolean;
+  /** 该 session 是否被显式 invalidate 过 (staleInvalidatedCcSessions 成员)。 */
+  hasStaleMark: (sessionId: string) => boolean;
   log: { warn: (msg: string, meta?: Record<string, unknown>) => void };
 }
 
 /**
- * turn 收口时对远端 CC session 的补偿判定:fresh 标记已失效 (bridge 重建 /
- * 端口重绑时已删) 且当前无 turn → detach,让下次 send 走 factory 重新注入
- * 并 forceFresh (kill 已 idle 的旧 query);标记有效则 no-op。
+ * turn 收口时对远端 CC session 的补偿判定:仅当被显式 invalidate 过
+ * (bridge 重建 / 端口重绑 / bridge shutdown 时记 stale) 且当前无 turn 才
+ * detach,让下次 send 走 factory 重新注入并 forceFresh。
+ * 不得按「无 fresh 标记」判定 (codex-connector R23 P2):collab 禁用 /
+ * bridge 不可用的健康 session 从未 fresh 过, 每个 turn 结束都拆它们的
+ * idle query 会制造无谓的 lazy-resume 竞态。
  */
 export function maybeDetachStaleRemoteCcQuery(deps: RemoteCcTurnSettledDeps, sessionId: string): void {
   const s = deps.getSession(sessionId);
   if (!s || !s.remoteHostId) return;
-  if (deps.hasFreshMark(sessionId)) return;
+  if (!deps.hasStaleMark(sessionId)) return;
   if (s.isTurnRunning()) return;
   void s.detach().catch((err) => {
     deps.log.warn('remote CC stale query detach on turn settled failed', {

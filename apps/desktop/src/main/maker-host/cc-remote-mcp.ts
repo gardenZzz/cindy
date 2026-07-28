@@ -13,6 +13,11 @@
  * 端口, 与 codex daemon 共用同一条) 与 codex 路径完全一致。
  */
 
+import { createHash } from 'node:crypto';
+import fs from 'node:fs';
+import path from 'node:path';
+
+import { app } from 'electron';
 import type { RemoteHost } from '@cindy/maker-remote-ssh';
 
 import type { CodexHttpBridge } from '../mcp-integrations/codexHttpBridge.js';
@@ -119,6 +124,14 @@ export async function buildCcRemoteHttpMcpServers(
    * fail-closed (codex-connector R21 P2)。
    */
   needsFreshStart?: boolean;
+  /**
+   * 本次注入 (或禁用) 的代际指纹 — 调用方在 open 成功后经
+   * writeCcAppliedFingerprint 落盘;下次 open 前与 readCcAppliedFingerprint
+   * 比对, 不一致说明存活 query 的 MCP 配置属旧代际, 应 forceFresh
+   * (codex-connector R23 P2)。bridge 不在 / token 缺失时为 undefined
+   * (不驱动 drift)。
+   */
+  fingerprint?: string;
 }> {
   const empty: { servers: Record<string, CcRemoteHttpMcpServerConfig>; cleanup: () => void; needsFreshStart?: boolean } = {
     servers: {},
@@ -132,7 +145,12 @@ export async function buildCcRemoteHttpMcpServers(
   const names = collabEnabled
     ? started.serverNames.filter((n) => CC_REMOTE_HTTP_MCP_SERVER_NAMES.has(n))
     : [];
-  if (names.length === 0) return empty;
+  if (names.length === 0) {
+    // 无注入也是一代 (collab 禁用 / 白名单空):指纹常量 'disabled',
+    // 开→关的重启后 drift 判定成立 (R23 P2);不含 instanceId, 一直禁用
+    // 的健康 query 不被误判。
+    return { ...empty, fingerprint: CC_MCP_DISABLED_FINGERPRINT };
+  }
   const remotePort = await deps.ensureForward(args.host, started.port);
   // token 可用性必须在 register 之前确认:null 时下发出 "Bearer null" 还
   // 保留已注册 ctx (注册后失败无任何 cleanup 可达, 见 race review P1)。
@@ -167,10 +185,91 @@ export async function buildCcRemoteHttpMcpServers(
     return {
       servers,
       cleanup: () => started.bridge.unregisterSessionCtx(args.sessionId, ctx),
+      fingerprint: computeCcRemoteMcpFingerprint({
+        token: bridgeToken,
+        bridgeInstanceId: started.bridge.instanceId,
+        remotePort,
+      }),
     };
   } catch (err) {
     // 注册后失败必须回滚,否则调用方拿不到 cleanup,ctx 永久残留。
     started.bridge.unregisterSessionCtx(args.sessionId, ctx);
     throw err;
   }
+}
+
+// ── per-session 注入代际指纹持久化 (R23 P2:跨 app 重启的 stale 判定) ─────────
+
+/**
+ * 远端 CC query 的注入代际指纹。与 codex daemon 的 appliedFingerprint 同
+ * 思想 (daemon env/config 一致性必须是持久事实, 不能靠进程内存集合):
+ * cc 的注入虽是 per-query startParams, 但「这条 query 是用哪一代 MCP 配置
+ * 建的」同样是跨重启必须可判的事实 — collab 开→关 + app 重启后, 进程内
+ * stale 集合清空, 没有它 factory 会 attach 回带旧 collab URL 的 query
+ * (codex-connector R23 P2)。
+ *
+ * 成分:token|bridgeInstanceId|remotePort (注入代际);无注入代际用常量
+ * 'disabled' (collab 禁用 / 白名单为空) — 不含 instanceId, 避免「collab
+ * 一直禁用」的健康 query 在每次 bridge 重建后被误判 drift 白杀。
+ * bridge 不在 (shutdown) 时不产指纹 — 判定方跳过 (forceFresh 也无 bridge
+ * 可用, 恢复由 lazy 重建路径负责)。
+ */
+
+const CC_DISABLED_GENERATION = 'disabled';
+
+export function computeCcRemoteMcpFingerprint(opts: {
+  token: string;
+  bridgeInstanceId: string;
+  remotePort: number;
+}): string {
+  return createHash('sha256')
+    .update(`${opts.token}|${opts.bridgeInstanceId}|${opts.remotePort}`, 'utf8')
+    .digest('hex')
+    .slice(0, 12);
+}
+
+export const CC_MCP_DISABLED_FINGERPRINT = CC_DISABLED_GENERATION;
+
+type CcFreshPrefs = Record<string, string>;
+
+function ccFreshPrefsPath(): string {
+  return path.join(app.getPath('userData'), 'remote-cc-mcp-fresh.json');
+}
+
+let ccFreshPrefsCache: CcFreshPrefs | null = null;
+
+function readCcFreshPrefs(): CcFreshPrefs {
+  if (ccFreshPrefsCache) return ccFreshPrefsCache;
+  const file = ccFreshPrefsPath();
+  try {
+    if (fs.existsSync(file)) {
+      const raw = JSON.parse(fs.readFileSync(file, 'utf-8')) as unknown;
+      const out: CcFreshPrefs = {};
+      if (raw && typeof raw === 'object') {
+        for (const [sessionId, fp] of Object.entries(raw as Record<string, unknown>)) {
+          if (typeof fp === 'string' && fp.length > 0) out[sessionId] = fp;
+        }
+      }
+      ccFreshPrefsCache = out;
+      return out;
+    }
+  } catch {
+    // 读失败按空处理 (下次写入覆盖)。
+  }
+  ccFreshPrefsCache = {};
+  return ccFreshPrefsCache;
+}
+
+export function readCcAppliedFingerprint(sessionId: string): string | null {
+  return readCcFreshPrefs()[sessionId] ?? null;
+}
+
+export function writeCcAppliedFingerprint(sessionId: string, fingerprint: string): void {
+  const next = { ...readCcFreshPrefs(), [sessionId]: fingerprint };
+  const file = ccFreshPrefsPath();
+  const tmp = `${file}.tmp`;
+  fs.mkdirSync(path.dirname(file), { recursive: true });
+  fs.writeFileSync(tmp, JSON.stringify(next, null, 2), 'utf-8');
+  fs.renameSync(tmp, file);
+  ccFreshPrefsCache = next;
 }

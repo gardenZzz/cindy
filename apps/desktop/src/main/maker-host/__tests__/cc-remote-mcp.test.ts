@@ -108,6 +108,58 @@ describe('buildCcRemoteHttpMcpServers', () => {
     expect(needsFreshStart).toBeFalsy();
   });
 
+  it('returns a generation fingerprint on successful injection, and the disabled constant when gated off (R23 P2)', async () => {
+    const { bridge } = fakeBridge();
+    const injected = await buildCcRemoteHttpMcpServers(
+      { host: HOST, sessionId: 's1', workingDir: '/remote/repo' },
+      {
+        ensureBridgeStarted: async () => ({
+          port: 38080,
+          serverNames: ['cindy_orca', 'orca_worker_bridge'],
+          bridge,
+        }),
+        ensureForward: vi.fn(async () => 47921),
+        getBridgeToken: async () => 'persistent-test-token',
+      },
+    );
+    expect(typeof injected.fingerprint).toBe('string');
+    expect(injected.fingerprint!.length).toBeGreaterThan(0);
+
+    const gated = await buildCcRemoteHttpMcpServers(
+      { host: HOST, sessionId: 's2', workingDir: '/remote/repo' },
+      {
+        ensureBridgeStarted: async () => ({
+          port: 38080,
+          serverNames: ['cindy_orca', 'orca_worker_bridge'],
+          bridge,
+        }),
+        ensureForward: vi.fn(async () => 47921),
+        getBridgeToken: async () => 'persistent-test-token',
+        isCollabEnabled: () => false,
+      },
+    );
+    expect(gated.servers).toEqual({});
+    expect(gated.fingerprint).toBe('disabled');
+  });
+
+  it('returns no fingerprint when the bridge token is unavailable (drift stays idle)', async () => {
+    const { bridge } = fakeBridge();
+    const { fingerprint, needsFreshStart } = await buildCcRemoteHttpMcpServers(
+      { host: HOST, sessionId: 's1', workingDir: '/remote/repo' },
+      {
+        ensureBridgeStarted: async () => ({
+          port: 38080,
+          serverNames: ['cindy_orca', 'orca_worker_bridge'],
+          bridge,
+        }),
+        ensureForward: vi.fn(async () => 47921),
+        getBridgeToken: async () => null,
+      },
+    );
+    expect(fingerprint).toBeUndefined();
+    expect(needsFreshStart).toBe(true);
+  });
+
   it('injects only whitelisted servers with the persistent token and ?session= routing', async () => {
     const { bridge, registered } = fakeBridge();
     const { servers } = await buildCcRemoteHttpMcpServers(
