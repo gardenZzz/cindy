@@ -2249,18 +2249,28 @@ export class CodexAgent extends BaseAgent {
       throw error;
     }
     if (initResp.codexHome) this.codexHome = initResp.codexHome;
+    // reviewer 路由的凭证模式判定: 远程 daemon 用的是 auth sync 推过去的
+    // 同一份订阅凭证, reviewer 调用发生在 daemon 本地 — 订阅下走 daemon →
+    // chatgpt.com 直连, 与本地订阅同构 (远端出网由用户网络或 agent-proxy
+    // 隧道保障)。resolveAgentCredentialMode 只看 providerId/model, 远程同样
+    // 可判; 远程订阅与本地订阅同等启用 (#667 的远程一律回退是隧道方案
+    // 缺位时的保守, 隧道落地后放开)。
     const sessionCredentialMode = opts.remoteHostId
-      ? undefined
+      ? resolveAgentCredentialMode({
+          agentKind: 'codex',
+          providerId: opts.providerId,
+          model: opts.model,
+        })
       : credentialMode ?? this.hostEffectiveCredentialModes.get(currentHostKey);
     const approvalsReviewerProtocolSupported =
       supportsCodexApprovalsReviewerProtocol(initResp.userAgent);
     // Codex's built-in reviewer currently selects the hidden `codex-auto-review`
     // model through the session's model provider. Cindy's gateway, third-party
-    // providers, and remote daemons do not have a verified route for that model.
-    // Keep Auto usable on those routes by falling back to Codex's native
-    // `untrusted` policy instead of letting the first write fail in the reviewer.
-    const approvalsReviewerRouteSupported =
-      !opts.remoteHostId && sessionCredentialMode === 'oauth-bearer';
+    // providers, and other non-subscription credentials do not have a verified
+    // route for that model. Keep Auto usable on those routes by falling back to
+    // Codex's native `untrusted` policy instead of letting the first write fail
+    // in the reviewer.
+    const approvalsReviewerRouteSupported = sessionCredentialMode === 'oauth-bearer';
     const approvalsReviewerSupported =
       approvalsReviewerProtocolSupported && approvalsReviewerRouteSupported;
     const readonlyReferenceDirsSupported = supportsCodexReadonlyReferenceDirs(initResp.userAgent);
