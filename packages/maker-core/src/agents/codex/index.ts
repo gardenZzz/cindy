@@ -2239,7 +2239,10 @@ export class CodexAgent extends BaseAgent {
     let initResp: Awaited<ReturnType<AppServerHost['ensureStarted']>>;
     try {
       assertCurrentHost('initialize');
-      initResp = await host.ensureStarted();
+      // 直调也必须有上界 (codex R13 P1): 冷启动 / transport 重建时
+      // bootstrap 挂死 (远端 daemon 无响应 / SSH 通道死) 会让 startSession
+      // 永不返回, UI 无限卡初始化 — 与 request() 的 startup deadline 同款。
+      initResp = await host.ensureStartedWithTimeout(CRITICAL_THREAD_RPC_TIMEOUT_MS, 'startSession initialize');
       assertCurrentHost('initialize');
     } catch (error) {
       releaseHostBindingLeaseIfNeeded();
@@ -3857,7 +3860,13 @@ export class CodexAgent extends BaseAgent {
       if (!turnId) return true;
       if (terminalErroredTurnIds.has(turnId) || completedTurnIds.has(turnId)) return false;
       if (!bufferedOrphanTurnIds.has(turnId)) return true;
-      return waitForBufferedTurnReconcile(turnId);
+      // 挂起到对账; waiter 恢复前复查墓碑 (codex R13 P2): 对账先 settle(true)
+      // 再同步重放队列, 队列里若有终态会把该 turn 当场收口 — waiter 在
+      // microtask 里恢复时 turn 已死, 此时再上 UI 就是为一个刚收口的 turn
+      // 批审批。微任务时机保证这次复查一定看到重放后的最终状态。
+      return waitForBufferedTurnReconcile(turnId).then(
+        (valid) => valid && !terminalErroredTurnIds.has(turnId) && !completedTurnIds.has(turnId),
+      );
     };
 
     const stopActiveRolloutPlanFallback = (): void => {

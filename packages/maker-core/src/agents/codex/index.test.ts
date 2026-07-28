@@ -368,6 +368,9 @@ function installFakeHost(
   const getRemoteCompactionProviderId = vi.fn(() => opts.remoteCompactionProviderId ?? null);
   const host = {
     ensureStarted,
+    // startSession 的 initialize 直调走限时变体 (codex R13 P1): fake 里
+    // 直接委托 ensureStarted (超时语义由 host.test.ts 的真 transport 覆盖)。
+    ensureStartedWithTimeout: vi.fn(async (_timeoutMs: number, _label: string) => ensureStarted()),
     request,
     subscribeThread,
     unsubscribeThread,
@@ -6946,6 +6949,87 @@ describe('CodexAgent turn lifecycle', () => {
     await send2;
     await expect(inputPromise).resolves.toEqual({ answers: {} });
     expect(interactionResolver).not.toHaveBeenCalled();
+    await handle.close();
+  });
+
+  it('rejects a held server request when the accepted turn was tombstoned by a replayed terminal event (codex R13 P2)', async () => {
+    // 合法 buffered turn 的 server request 挂起到对账, 但队列里还有该 turn
+    // 的 turnCompleted: 对账先 settle(true) 再重放 — 重放把 turn 当场收口,
+    // waiter 恢复时必须复查墓碑, 拒绝为一个刚死的 turn 上 UI。
+    const firstStart = deferred<unknown>();
+    const secondStart = deferred<unknown>();
+    let attempt = 0;
+    const agent = new CodexAgent(createDeps());
+    const host = installFakeHost(agent, (method) => {
+      if (method === Method.TurnStart) {
+        attempt += 1;
+        if (attempt === 1) return firstStart.promise;
+        return secondStart.promise;
+      }
+      return undefined;
+    });
+    const handle = await agent.startSession({
+      sessionId: 'session-buffered-request-tombstoned',
+      model: 'gpt-5.4',
+      workingDir: '/repo',
+    });
+    const subscribeCalls = host.subscribeThread.mock.calls as unknown as Array<[string, ThreadEventHandlers]>;
+    const handlers = subscribeCalls[0]?.[1];
+    const iterator = handle.events()[Symbol.asyncIterator]();
+    const interactionResolver = vi.fn(() => new Promise<never>(() => {}));
+    handle.setInteractionResolver(interactionResolver);
+
+    const send1 = handle.send({ type: 'user', content: 'first' });
+    for (let i = 0; i < 5; i += 1) {
+      if (host.request.mock.calls.some(([method]) => method === Method.TurnStart)) break;
+      await Promise.resolve();
+    }
+    firstStart.reject(new Error('codex app-server turn/start timed out after 60000ms'));
+    await send1;
+    expect(await nextEvent(iterator)).toMatchObject({ type: 'status', data: { isRunning: true } });
+    expect(await nextEvent(iterator)).toMatchObject({ type: 'error', data: { isTerminal: true } });
+    expect(await nextEvent(iterator)).toMatchObject({
+      type: 'status',
+      data: { status: 'Done', isRunning: false },
+    });
+
+    const send2 = handle.send({ type: 'user', content: 'second' });
+    for (let i = 0; i < 5; i += 1) {
+      if (host.request.mock.calls.filter(([method]) => method === Method.TurnStart).length >= 2) break;
+      await Promise.resolve();
+    }
+    expect(await nextEvent(iterator)).toMatchObject({ type: 'status', data: { isRunning: true } });
+    handlers.turnStarted?.({ threadId: 'start-thread-id', turn: { id: 'turn-2' } });
+    const inputPromise = handlers.requestUserInput?.(
+      {
+        threadId: 'start-thread-id',
+        turnId: 'turn-2',
+        itemId: 'item-1',
+        questions: [{
+          id: 'q1',
+          header: 'Mode',
+          question: 'Which mode should Codex use?',
+          isOther: false,
+          isSecret: false,
+          options: [{ label: 'Fast', description: 'Move quickly' }],
+        }],
+      },
+      { requestId: 'req-tombstoned' },
+    );
+    // 同一 turn 的 completed 也进缓冲 — 对账时重放会把 turn 收口。
+    handlers.turnCompleted?.({ threadId: 'start-thread-id', turn: { id: 'turn-2', status: 'completed' } });
+
+    // 对账: 激活 → settle(true) → 重放 completed (turn 收口) → waiter 恢复
+    // 复查墓碑 → 空响应拒绝, UI 不上; send 被重放的 completed 正常收口。
+    secondStart.resolve({ turn: { id: 'turn-2' } });
+    await send2;
+    await expect(inputPromise).resolves.toEqual({ answers: {} });
+    expect(interactionResolver).not.toHaveBeenCalled();
+    expect(await nextEvent(iterator)).toMatchObject({
+      type: 'status',
+      data: { status: 'Done', isRunning: false },
+    });
+    expect(handle.isTurnRunning?.()).toBe(false);
     await handle.close();
   });
 
