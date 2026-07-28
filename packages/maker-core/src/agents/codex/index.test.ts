@@ -4313,6 +4313,53 @@ describe('CodexAgent MCP thread context hooks', () => {
     await handle.close();
   });
 
+  it('enables the built-in reviewer for remote OAuth-subscription sessions (Auto)', async () => {
+    // 远程 daemon 用的是 auth sync 推过去的同一份订阅凭证, reviewer 调用
+    // 发生在 daemon 本地 — 订阅下与本地同构, 不再一律回退 untrusted。
+    const agent = new CodexAgent(createDeps());
+    const host = installFakeHost(agent);
+    const handle = await agent.startSession({
+      sessionId: 'session-remote-oauth-auto',
+      model: 'gpt-5.4',
+      providerId: 'openai',
+      workingDir: '/repo',
+      permissionMode: 'auto',
+      remoteHostId: 'gpu-box',
+    });
+
+    const startParams = host.request.mock.calls.find(([method]) => method === Method.ThreadStart)?.[1] as {
+      approvalPolicy?: string;
+      approvalsReviewer?: string;
+    };
+    expect(startParams).toMatchObject({
+      approvalPolicy: 'on-request',
+      approvalsReviewer: 'auto_review',
+    });
+    await handle.close();
+  });
+
+  it('falls back to untrusted for remote non-subscription sessions (Auto)', async () => {
+    // gateway / 第三方 provider 的 reviewer 模型路由仍未验证 — 远程同样回退。
+    const agent = new CodexAgent(createDeps());
+    const host = installFakeHost(agent);
+    const handle = await agent.startSession({
+      sessionId: 'session-remote-gateway-auto',
+      model: 'codex/gpt-5.5',
+      providerId: 'xd',
+      workingDir: '/repo',
+      permissionMode: 'auto',
+      remoteHostId: 'gpu-box',
+    });
+
+    const startParams = host.request.mock.calls.find(([method]) => method === Method.ThreadStart)?.[1] as {
+      approvalPolicy?: string;
+      approvalsReviewer?: string;
+    };
+    expect(startParams.approvalPolicy).toBe('untrusted');
+    expect(startParams).not.toHaveProperty('approvalsReviewer');
+    await handle.close();
+  });
+
   it('maps auto permission mode to Codex built-in automatic approval review', async () => {
     const agent = new CodexAgent(createDeps());
     const host = installFakeHost(agent, (method) => {
