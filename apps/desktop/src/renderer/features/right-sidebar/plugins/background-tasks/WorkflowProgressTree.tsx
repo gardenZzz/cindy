@@ -71,9 +71,9 @@ function isSpinning(state: string): boolean {
 
 export function WorkflowProgressTree({ model }: WorkflowProgressTreeProps) {
   const { t } = useTranslation();
-  const agentRowCount = model.groups.reduce((n, g) => n + g.agents.length, 0);
-  // 没有任何可展示的行(agent 行与 logs 都空)时不渲染,交给上层决定占位。
-  if (agentRowCount === 0 && model.logs.length === 0) return null;
+  // agent 行与 logs 都空(刚启动 / 未 spawn agent 就结束的 workflow)也照渲染:
+  // 聚合行至少有 status,不能返回 null —— 上层按 model 有无选组件,这里再空手
+  // 而归会让详情正文整个空白。
 
   const { aggregate } = model;
   const metaParts: string[] = [];

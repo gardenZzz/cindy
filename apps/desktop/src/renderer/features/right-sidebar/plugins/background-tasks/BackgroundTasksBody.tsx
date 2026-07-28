@@ -154,6 +154,19 @@ function fallbackTitleKey(kind: SessionTaskItem['kind']): string {
   return 'chat.agentTask.emptyTitle';
 }
 
+/**
+ * wf 文件顶层 status(done/failed/stopped/killed 等文件词表)→ 任务状态词表。
+ * 未收口(running/queued)与未知词返回 null:不覆盖消息推导的状态。
+ */
+function fileStatusToTaskStatus(
+  status: string | undefined,
+): AgentTaskUpdate['status'] | null {
+  if (status === 'done' || status === 'completed') return 'completed';
+  if (status === 'failed' || status === 'error') return 'failed';
+  if (status === 'stopped' || status === 'killed') return 'stopped';
+  return null;
+}
+
 /** status → 状态图标(running 由 Spinner 负责旋转)。 */
 function statusIcon(status: string): LucideIcon {
   if (status === 'completed') return CheckCircle2;
@@ -471,6 +484,14 @@ export function BackgroundTasksBody({
 
   const inputs = useSessionTaskInputs(sessionId, !visible);
 
+  // 消息水合:独立侧栏窗口(SidebarWindowLayout)里没有会话视图替本面板调
+  // ensureInitialMessages,store 的 messages 恒空 → 历史扫描源(Completed 区)
+  // 整段缺失。该函数幂等(historyLoaded / in-flight 双守卫),主窗口场景是 no-op。
+  useEffect(() => {
+    if (!sessionId) return;
+    makerChatStore.ensureInitialMessages(sessionId);
+  }, [sessionId]);
+
   // 快照水合:挂载 / 切会话时拉一次存量后台任务(订阅前已启动 / 重载清空
   // taskUpdates 后事件流看不到的任务)。listSessionBackgroundTasksFor 按会话来源
   // 路由 —— 本机走本地 IPC,device-link 远程隧道到被控端(任务真身在被控端,
@@ -509,16 +530,61 @@ export function BackgroundTasksBody({
     [inputs],
   );
 
+  // 历史 workflow 行的终态修正:workflow 的 tool_result 是启动回执(失败也存在),
+  // 重载后 update 清空时消息推导只能给出 completed —— failed/stopped 会被涂绿。
+  // 对无 update 但有 taskId 的终态 workflow 行 best-effort 读一次 wf 记录文件,
+  // 用文件终态覆盖行状态;文件缺失 / 未收口保持推导现状。按 taskId 记忆,面板
+  // 生命周期内每任务至多请求一次,不轮询;切会话清空重来。
+  const [fileStatusByTaskId, setFileStatusByTaskId] = useState<
+    ReadonlyMap<string, AgentTaskUpdate['status']>
+  >(() => new Map());
+  const fileStatusRequestedRef = useRef<Set<string>>(new Set());
+  useEffect(() => {
+    fileStatusRequestedRef.current = new Set();
+    setFileStatusByTaskId(new Map());
+  }, [sessionId]);
+  useEffect(() => {
+    if (!sessionId) return;
+    for (const it of completed) {
+      if (it.kind !== 'workflow' || it.update || !it.taskId) continue;
+      const taskId = it.taskId;
+      if (fileStatusRequestedRef.current.has(taskId)) continue;
+      fileStatusRequestedRef.current.add(taskId);
+      void getWorkflowProgressFor(sessionId, taskId)
+        .then((progress) => {
+          const mapped = fileStatusToTaskStatus(progress?.status);
+          if (!mapped) return;
+          setFileStatusByTaskId((prev) => {
+            if (prev.get(taskId) === mapped) return prev;
+            const next = new Map(prev);
+            next.set(taskId, mapped);
+            return next;
+          });
+        })
+        .catch(() => {
+          // 静默:与 wf 文件辅源的其余读取同口径,保持推导状态。
+        });
+    }
+  }, [sessionId, completed]);
+  const completedResolved = useMemo(() => {
+    if (fileStatusByTaskId.size === 0) return completed;
+    return completed.map((it) => {
+      if (it.kind !== 'workflow' || it.update || !it.taskId) return it;
+      const fileStatus = fileStatusByTaskId.get(it.taskId);
+      return fileStatus && fileStatus !== it.status ? { ...it, status: fileStatus } : it;
+    });
+  }, [completed, fileStatusByTaskId]);
+
   // 详情选中:存 item.key(跨状态翻转稳定);条目消失时自动回列表视图。
   const [selectedKey, setSelectedKey] = useState<string | null>(null);
   const selectedItem = useMemo(() => {
     if (!selectedKey) return null;
     return (
       running.find((it) => it.key === selectedKey) ??
-      completed.find((it) => it.key === selectedKey) ??
+      completedResolved.find((it) => it.key === selectedKey) ??
       null
     );
-  }, [selectedKey, running, completed]);
+  }, [selectedKey, running, completedResolved]);
 
   // focusTaskId(tab state)消费:对应 workflow 任务出现后直接进详情并清空请求
   // (数据可能晚于挂载到达,依赖列表变化重试;消费即清,避免跨重启反复弹详情)。
@@ -527,11 +593,11 @@ export function BackgroundTasksBody({
     if (!focusTaskId) return;
     const target =
       running.find((it) => it.kind === 'workflow' && it.taskId === focusTaskId) ??
-      completed.find((it) => it.kind === 'workflow' && it.taskId === focusTaskId);
+      completedResolved.find((it) => it.kind === 'workflow' && it.taskId === focusTaskId);
     if (!target) return;
     setSelectedKey(target.key);
     ctx.patchState({ focusTaskId: null });
-  }, [focusTaskId, running, completed, ctx]);
+  }, [focusTaskId, running, completedResolved, ctx]);
 
   const handleOpenWorkflow = useCallback((key: string) => {
     setSelectedKey(key);
@@ -553,7 +619,7 @@ export function BackgroundTasksBody({
     );
   }
 
-  if (running.length === 0 && completed.length === 0) {
+  if (running.length === 0 && completedResolved.length === 0) {
     return (
       <div className="flex min-h-0 flex-1 flex-col items-center justify-center gap-2 px-6 text-center">
         <ListTodo size={20} className="text-[var(--text-tertiary)]" aria-hidden="true" />
@@ -579,10 +645,10 @@ export function BackgroundTasksBody({
           ))}
         </>
       )}
-      {completed.length > 0 && (
+      {completedResolved.length > 0 && (
         <>
           <SectionHeader label={t('rightSidebar.backgroundTasks.completed')} />
-          {completed.map((item) => (
+          {completedResolved.map((item) => (
             <TaskRow
               key={item.key}
               item={item}

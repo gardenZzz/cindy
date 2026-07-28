@@ -218,7 +218,13 @@ export function AgentTaskCard({ toolCall, update, result, subagentModel, session
   }, [duration, providerLabel, status, t, update?.usage?.totalTokens, update?.usage?.toolUses]);
 
   return (
-    <div className="flex w-full justify-start">
+    // data-message-client-id:MessageStream 的消息级 focus(后台任务面板行点击 /
+    // 搜索跳转)靠该锚点滚动定位 —— 普通消息行有,任务卡也必须有,否则面板点
+    // Agent/Bash 行会静默无反应。
+    <div
+      className="flex w-full justify-start"
+      {...(toolCall?.clientId ? { 'data-message-client-id': toolCall.clientId } : {})}
+    >
       <div className="w-full rounded-[12px] border border-[var(--border-default)] bg-[var(--surface-elevated)] px-3 py-2">
         {/* 头部按钮:普通卡 = 展开 toggle;workflow 卡 = 打开后台任务面板入口。
             button 不能嵌套,停止按钮以兄弟节点挂在右侧(仅 running 时出现)。 */}

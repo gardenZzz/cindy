@@ -297,7 +297,10 @@ export function listSessionTasks(input: {
 
     const taskId = update?.taskId ?? derivedTaskId;
     items.push({
-      key: update?.taskId ?? toolUseId ?? msg.clientId,
+      // key 用统一 taskId 链(含 derivedTaskId):恢复行先出现、快照水合后 update
+      // 才到时 key 不得从 toolUseId 翻成 taskId —— 详情视图按 key 选中,翻 key 会
+      // 把正打开的详情弹回列表。
+      key: taskId ?? toolUseId ?? msg.clientId,
       ...(taskId ? { taskId } : {}),
       kind,
       title: deriveTitle(kind, update, toolInput),
