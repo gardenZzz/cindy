@@ -3322,6 +3322,7 @@
         "browser": "浏览器",
         "terminal": "终端",
         "review": "审查",
+        "backgroundTasks": "后台任务",
         "collaboration": "协同",
         "unknown": "未知标签页",
         "ghostPanel": "插件面板"
@@ -3345,6 +3346,8 @@
         "fileSub": "Files",
         "openReview": "打开审查",
         "reviewSub": "Review",
+        "openBackgroundTasks": "打开后台任务",
+        "backgroundTasksSub": "Background tasks",
         "openBrowser": "打开浏览器",
         "browserSub": "Browser",
         "openTerminal": "打开终端",
@@ -3706,6 +3709,16 @@
       "touchCountAria_other": "已修改 {{count}} 次",
       "expandAllAria": "展开所有文件",
       "collapseAllAria": "收起所有文件"
+    },
+    "backgroundTasks": {
+      "running": "运行中",
+      "completed": "已完成",
+      "empty": "本对话暂无后台任务",
+      "stop": "停止",
+      "back": "返回",
+      "progressSummary": "{{done}}/{{total}} Agent",
+      "tokens": "{{value}} tokens",
+      "noProgress": "暂无进度详情"
     }
   },
   "update": {
@@ -4430,6 +4443,9 @@
         "stopped": "已停止"
       },
       "stop": "停止该任务",
+      "openInPanel": "在后台任务面板中打开",
+      "workflowProgressLine": "{{phase}} · {{done}}/{{total}} Agent",
+      "workflowProgressCount": "{{done}}/{{total}} Agent",
       "tokens": "{{count}} tokens",
       "toolUses_one": "{{count}} 次工具调用",
       "toolUses_other": "{{count}} 次工具调用",
@@ -4976,13 +4992,19 @@
     "workflowTree": {
       "agentsCount": "{{count}} 个 Agent",
       "attempt": "第 {{count}} 次尝试",
+      "endedEarly": "未完成即结束",
       "state": {
         "queued": "排队中",
+        "pending": "排队中",
+        "start": "启动中",
         "running": "运行中",
+        "progress": "运行中",
         "done": "完成",
         "completed": "完成",
         "failed": "失败",
-        "stopped": "已停止"
+        "error": "失败",
+        "stopped": "已停止",
+        "killed": "已终止"
       }
     },
     "credentialSwitchWait": {
@@ -7267,11 +7289,6 @@
       "learnButton": "学习此技能"
     }
   },
-  "workflows": {
-    "toast": {
-      "none": "当前对话没有正在运行的 Workflow"
-    }
-  },
   "planMode": {
     "menuItem": "计划模式",
     "indicator": {
@@ -7384,7 +7401,6 @@
         "cancelFailed": "取消订阅失败，请稍后重试。"
       },
       "topupCard": {
-
         "action": "购买点数"
       }
     },

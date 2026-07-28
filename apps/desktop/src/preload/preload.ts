@@ -296,7 +296,6 @@ const fanOutComputerPermissionGuideStatusChanged = createIpcFanOut(
 const fanOutAppUpdateProgress = createIpcFanOut('app-update-progress');
 const fanOutAuthStateChange = createIpcFanOut('auth:state-change');
 const fanOutAuthSessionExpired = createIpcFanOut('auth:session-expired');
-const fanOutTapdbDailyActive = createIpcFanOut('tapdb:daily-active');
 // 使用统计(TapDB)的同意状态 / 开关变化;renderer 据此即时 init 或 opt-out
 const fanOutAnalyticsSettingsChange = createIpcFanOut(ANALYTICS_SETTINGS_CHANGE_CHANNEL);
 const fanOutFullscreenChange = createIpcFanOut('fullscreen-change');
@@ -1345,16 +1344,6 @@ contextBridge.exposeInMainWorld('electronAPI', {
   }): Promise<{ ok: true }> => ipcRenderer.invoke('profile:update', params),
   onAuthStateChange: fanOutAuthStateChange,
   onAuthSessionExpired: fanOutAuthSessionExpired,
-  onTapdbDailyActive: (callback: (payload: { date: string }) => void): (() => void) =>
-    fanOutTapdbDailyActive((payload) => {
-      if (
-        payload &&
-        typeof payload === 'object' &&
-        typeof (payload as { date?: unknown }).date === 'string'
-      ) {
-        callback(payload as { date: string });
-      }
-    }),
 
   // ── 使用统计(TapDB)同意闸 ──
   // 真相在 main(<userData>/analytics-settings.json);renderer 只读结论、只提交

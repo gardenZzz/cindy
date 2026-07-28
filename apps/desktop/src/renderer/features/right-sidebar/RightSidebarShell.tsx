@@ -473,6 +473,7 @@ export function RightSidebarShell({
           <EmptyState
             onAddFileTab={() => handleAdd('file-browser')}
             onAddReviewTab={() => handleAdd('review')}
+            onAddBackgroundTasksTab={() => handleAdd('background-tasks')}
             onAddBrowserTab={() => handleAdd('web-browser')}
             onAddTerminalTab={() => handleAdd('terminal')}
             ghostTabMetas={ghostTabMetas}
