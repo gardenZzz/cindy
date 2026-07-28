@@ -229,19 +229,22 @@ export async function readWorkflowProgressForSession(
   if (exact) return exact;
   const projectDir = deriveProjectDir(homeDir, workingDir);
   const homePath = homePathModule(homeDir);
-  let sessionDirs: string[];
+  let projectEntries: import('node:fs').Dirent[];
   try {
-    sessionDirs = await fs.readdir(projectDir);
+    projectEntries = await fs.readdir(projectDir, { withFileTypes: true });
   } catch {
     return null;
   }
   let scanned = 0;
-  for (const name of sessionDirs) {
-    if (name === sdkSessionId) continue; // 精确目录已查过
+  for (const ent of projectEntries) {
+    // project 根同时存放 <sdkSessionId>.jsonl 转录文件:上限只对 session 目录
+    // 计数,否则大项目里普通文件先把配额吃光,老 workflow 目录根本轮不到。
+    if (!ent.isDirectory()) continue;
+    if (ent.name === sdkSessionId) continue; // 精确目录已查过
     if (scanned >= CROSS_SESSION_SCAN_MAX_DIRS) break;
     scanned += 1;
     const progress = await readWorkflowProgressByTaskId(
-      homePath.join(projectDir, name, 'workflows'),
+      homePath.join(projectDir, ent.name, 'workflows'),
       taskId,
     );
     if (progress) return progress;

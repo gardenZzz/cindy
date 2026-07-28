@@ -354,6 +354,42 @@ describe('buildWorkflowTreeModel', () => {
     expect(rows.find((r) => r.key === 'a2')!.state).toBe('error');
   });
 
+  it('taskStatus 停在 running 而文件已终态(掉线丢终态通知)→ 同样触发回填与终态修正', () => {
+    // 终态判定必须与 aggregate.status 同源:否则头部显示 done,行却永远转圈。
+    const entries: WorkflowProgressEntry[] = [
+      phaseEntry(0, 'P'),
+      agentEntry(1, { agentId: 'a1', label: 'alpha', phaseTitle: 'P', state: 'progress' }),
+      agentEntry(2, { agentId: 'a2', label: 'beta', phaseTitle: 'P', state: 'running' }),
+    ];
+    const file = fileProgress({
+      status: 'completed',
+      agents: [
+        fileAgent({ label: 'alpha', phaseTitle: 'P', state: 'done', resultPreview: 'ok' }),
+        fileAgent({ label: 'beta', phaseTitle: 'P', state: 'running' }),
+      ],
+    });
+    const model = buildWorkflowTreeModel({ entries, fileProgress: file, taskStatus: 'running' })!;
+    expect(model.aggregate.status).toBe('completed');
+    const rows = model.groups[0].agents;
+    expect(rows.find((r) => r.key === 'a1')).toMatchObject({ state: 'done', resultPreview: 'ok' });
+    expect(rows.find((r) => r.key === 'a2')!.state).toBe('error');
+  });
+
+  it('只带 phaseIndex 的 agent 经 workflow_phase 的 index→title 映射归组,不坠入孤儿区', () => {
+    const entries: WorkflowProgressEntry[] = [
+      phaseEntry(0, 'Scan'),
+      agentEntry(1, { agentId: 'a1', label: 'alpha', phaseIndex: 0, state: 'progress' }),
+      // phaseIndex 对不上任何 phase 条目 → 仍走孤儿区,不误挂
+      agentEntry(2, { agentId: 'a2', label: 'beta', phaseIndex: 9, state: 'progress' }),
+    ];
+    const model = buildWorkflowTreeModel({ entries, taskStatus: 'running' })!;
+    expect(model.groups).toHaveLength(2);
+    expect(model.groups[0]).toMatchObject({ title: 'Scan' });
+    expect(model.groups[0].agents.map((r) => r.key)).toEqual(['a1']);
+    expect(model.groups[1]).toMatchObject({ title: null });
+    expect(model.groups[1].agents.map((r) => r.key)).toEqual(['a2']);
+  });
+
   it('entries 已有终态 state 时文件不覆盖(采纳只发生在事件流停在非终态时)', () => {
     const entries: WorkflowProgressEntry[] = [
       agentEntry(0, { agentId: 'a1', label: 'alpha', phaseTitle: 'P', state: 'error', error: 'boom' }),

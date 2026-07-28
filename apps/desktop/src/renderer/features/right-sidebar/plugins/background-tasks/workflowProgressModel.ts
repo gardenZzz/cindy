@@ -110,7 +110,11 @@ export function buildWorkflowTreeModel(input: {
   // 两源都空 → 没有任何可展示的进度,交给调用方回退到 workflow 级卡片信息。
   if (!hasEntries && !file) return null;
 
-  const isTerminal = TERMINAL_TASK_STATUSES.has(taskStatus);
+  // 终态判定与 aggregate.status 同源:device-link 掉线可能丢终态任务通知
+  // (taskStatus 停在 running),此时文件终态一样要触发回填与终态修正 ——
+  // 否则头部显示 done 而行还在转圈。
+  const isTerminal =
+    TERMINAL_TASK_STATUSES.has(taskStatus) || isTerminalWorkflowFileStatus(file?.status);
   const groups = hasEntries
     ? groupsFromEntries(entries, file, isTerminal)
     : groupsFromFile(file!);
@@ -162,9 +166,12 @@ function groupsFromEntries(
 ): WorkflowTreeGroup[] {
   const detailByTitle = collectPhaseDetails(file);
   const byPhase = new Map<string, WorkflowTreeAgentRow[]>();
+  const titleByPhaseIndex = new Map<number, string>();
   for (const entry of entries) {
-    if (entry.type === 'workflow_phase' && entry.title && !byPhase.has(entry.title)) {
-      byPhase.set(entry.title, []);
+    if (entry.type !== 'workflow_phase' || !entry.title) continue;
+    if (!byPhase.has(entry.title)) byPhase.set(entry.title, []);
+    if (typeof entry.index === 'number' && !titleByPhaseIndex.has(entry.index)) {
+      titleByPhaseIndex.set(entry.index, entry.title);
     }
   }
   const orphans: WorkflowTreeAgentRow[] = [];
@@ -176,11 +183,16 @@ function groupsFromEntries(
     if (entry.type !== 'workflow_agent') continue;
     const row = rowFromEntry(entry, agentOrdinal);
     agentOrdinal += 1;
+    // 归属解析:phaseTitle 直取;只带 phaseIndex 的条目(CLI 两种形态都真实存在)
+    // 经 workflow_phase 的 index→title 映射解析,不得整组坠入孤儿区。
+    const phaseTitle =
+      entry.phaseTitle ??
+      (typeof entry.phaseIndex === 'number' ? titleByPhaseIndex.get(entry.phaseIndex) : undefined);
     // 事件流收尾帧可能缺 resultPreview/durationMs/error(节流或提前断流);任务终态时
     // 按 label+phaseTitle 从文件回填,撞名取首个;只补缺,绝不覆盖 entries 已有值。
-    if (fileAgentIndex) backfillRowFromFile(row, entry.phaseTitle, fileAgentIndex);
-    if (entry.phaseTitle && byPhase.has(entry.phaseTitle)) {
-      byPhase.get(entry.phaseTitle)!.push(row);
+    if (fileAgentIndex) backfillRowFromFile(row, phaseTitle, fileAgentIndex);
+    if (phaseTitle && byPhase.has(phaseTitle)) {
+      byPhase.get(phaseTitle)!.push(row);
     } else {
       orphans.push(row);
     }

@@ -307,4 +307,19 @@ describe('readWorkflowProgressForSession(跨 sdkSessionId 换代兜底)', () => 
     expect(await readWorkflowProgressForSession(home, workingDir, 'sdk-new', 'missing')).toBeNull();
     expect(await readWorkflowProgressForSession(home, '/no/such/proj', 'sdk-x', 't1')).toBeNull();
   });
+
+  it('project 根的 <sdkSessionId>.jsonl 转录文件不消耗扫描配额', async () => {
+    // 长寿项目根目录里普通文件远多于 session 目录:配额只对目录计数,
+    // 否则 readdir 顺序里文件排前时老 workflow 目录根本轮不到。
+    const projectDir = path.join(home, '.claude', 'projects', slug);
+    await fs.mkdir(projectDir, { recursive: true });
+    await Promise.all(
+      Array.from({ length: 210 }, (_, i) =>
+        fs.writeFile(path.join(projectDir, `aaa-transcript-${String(i).padStart(3, '0')}.jsonl`), ''),
+      ),
+    );
+    await writeRecord('zzz-sdk-old', { runId: 'wf_old', taskId: 't1', workflowProgress: [] });
+    const p = await readWorkflowProgressForSession(home, workingDir, 'sdk-new', 't1');
+    expect(p?.runId).toBe('wf_old');
+  });
 });
