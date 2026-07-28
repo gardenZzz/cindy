@@ -494,7 +494,33 @@ export class AppServerHost {
     params?: unknown,
     opts?: { timeoutMs?: number },
   ): Promise<R> {
-    await this.ensureStarted();
+    // 冷启动 / transport 重建时 ensureStarted 本身也可能永不返回 (远端 daemon
+    // bootstrap 挂死 / SSH 通道无响应) — 调用方显式给 timeoutMs 时同样给它
+    // 上界, 否则「关键 RPC 加超时」在启动路径上形同虚设 (greptile R6 P1)。
+    const started = this.ensureStarted();
+    if (opts?.timeoutMs != null) {
+      let timer: NodeJS.Timeout | null = null;
+      try {
+        await Promise.race([
+          started,
+          new Promise<never>((_, reject) => {
+            timer = setTimeout(() => {
+              reject(new Error(`app-server startup (for ${method}) timed out after ${opts.timeoutMs}ms`));
+            }, opts.timeoutMs);
+            timer.unref?.();
+          }),
+        ]);
+      } catch (err) {
+        // 超时后 started 仍在后台继续 (下次 request 可直接复用) — 挂一个
+        // swallow catch 防它迟到 reject 时变成 unhandled rejection。
+        started.catch(() => { /* late startup failure swallowed after timeout */ });
+        throw err;
+      } finally {
+        if (timer) clearTimeout(timer);
+      }
+    } else {
+      await started;
+    }
     if (!this.client) throw new Error('AppServerHost: client missing after ensureStarted (unreachable)');
     return this.client.request<R>(method, params, opts);
   }

@@ -6323,6 +6323,73 @@ describe('CodexAgent turn lifecycle', () => {
     await handle.close();
   });
 
+  it('clears an accepted started-before-resp turn when turn/start later fails (greptile R6 P1)', async () => {
+    // started-before-resp 是协议允许的乱序: turnStarted 先于响应到达并被接受
+    // (currentTurnId/isTurnInFlight 置位) — 随后 turn/start RPC 失败时, 失败收口
+    // 必须把这个活跃 turn 一起收掉, 否则 UI 已 Done 但 isTurnRunning() 永真,
+    // 下一条 send 被 in-flight guard 挡死。
+    const turnStart = deferred<unknown>();
+    let failTurnStart = true;
+    const agent = new CodexAgent(createDeps());
+    const host = installFakeHost(agent, (method) => {
+      if (method === Method.TurnStart) {
+        if (failTurnStart) return turnStart.promise;
+        return { turn: { id: 'turn-2' } };
+      }
+      return undefined;
+    });
+    const handle = await agent.startSession({
+      sessionId: 'session-started-before-resp-failure',
+      model: 'gpt-5.4',
+      workingDir: '/repo',
+    });
+    const subscribeCalls = host.subscribeThread.mock.calls as unknown as Array<[string, ThreadEventHandlers]>;
+    const handlers = subscribeCalls[0]?.[1];
+    const iterator = handle.events()[Symbol.asyncIterator]();
+
+    const sendPromise = handle.send({ type: 'user', content: 'hello' });
+    for (let i = 0; i < 5; i += 1) {
+      if (host.request.mock.calls.some(([method]) => method === Method.TurnStart)) break;
+      await Promise.resolve();
+    }
+    expect(host.request.mock.calls.filter(([method]) => method === Method.TurnStart)).toHaveLength(1);
+
+    // started-before-resp: turnStarted 先于响应到达并被接受, turn 状态置位。
+    handlers.turnStarted?.({ threadId: 'start-thread-id', turn: { id: 'early-turn' } });
+    expect(handle.isTurnRunning?.()).toBe(true);
+    expect(handle.getCurrentTurnId?.()).toBe('early-turn');
+
+    // turn/start 随后失败 → 失败收口把活跃 turn 一起收掉: 清状态 + 补 interrupt。
+    turnStart.reject(new Error('codex app-server turn/start timed out after 60000ms'));
+    await sendPromise;
+
+    expect(await nextEvent(iterator)).toMatchObject({ type: 'status', data: { isRunning: true } });
+    expect(await nextEvent(iterator)).toMatchObject({ type: 'error', data: { isTerminal: true } });
+    expect(await nextEvent(iterator)).toMatchObject({
+      type: 'status',
+      data: { status: 'Done', isRunning: false },
+    });
+    expect(handle.isTurnRunning?.()).toBe(false);
+    expect(handle.getCurrentTurnId?.()).toBeNull();
+    await vi.waitFor(() => {
+      expect(host.request).toHaveBeenCalledWith(
+        Method.TurnInterrupt,
+        expect.objectContaining({ threadId: 'start-thread-id', turnId: 'early-turn' }),
+      );
+    });
+
+    // 该 turn 已立墓碑: 迟到的 turnCompleted 被挡, 不产生 UI 事件。
+    handlers.turnCompleted?.({ threadId: 'start-thread-id', turn: { id: 'early-turn', status: 'completed' } });
+    await expect(nextEvent(iterator)).rejects.toThrow('timed out waiting for event');
+
+    // 下一条 send 不被 in-flight guard 挡死, turn 正常激活。
+    failTurnStart = false;
+    await handle.send({ type: 'user', content: 'again' });
+    expect(handle.isTurnRunning?.()).toBe(true);
+    expect(handle.getCurrentTurnId?.()).toBe('turn-2');
+    await handle.close();
+  });
+
   it('clears running state and emits done status after terminal error notification', async () => {
     const agent = new CodexAgent(createDeps());
     const host = installFakeHost(agent);

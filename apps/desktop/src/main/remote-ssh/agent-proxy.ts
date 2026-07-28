@@ -252,19 +252,41 @@ async function writeRemoteMarker(host: RemoteHost, content: string | null): Prom
 export async function killRemoteCodexDaemon(
   host: RemoteHost,
 ): Promise<{ ok: true } | { ok: false; reason: 'pkill_failed'; detail?: string }> {
+  // TERM 后必须等到进程真正消失 (review: PR #715 greptile R6): pkill 只保证
+  // 信号送达 — 旧 daemon 若在 dying 窗口里响应 daemon version 探活,
+  // transport 会复用它 (旧 env), marker 变更静默落空。先 TERM + 轮询 5s,
+  // 没死透再 KILL + 轮询 2s; 仍活着按失败上报 (调用方走降级提示)。
+  // pgrep 不会匹配自身; bash 包装进程 cmdline 里的 pattern 文本经 [c]odex
+  // trick 处理后同样不命中 (与 pkill 的自排除同理)。
   const killScript = `
 USER_NAME=$(id -un 2>/dev/null)
 if [ -z "$USER_NAME" ]; then echo "id -un returned empty" >&2; exit 2; fi
-pkill -u "$USER_NAME" -f '\\.xdt-server.*codex-home.*[c]odex app-server'
+PAT='\\.xdt-server.*codex-home.*[c]odex app-server'
+pkill -u "$USER_NAME" -f "$PAT"
 rc=$?
 case "$rc" in
-  0|1) exit 0 ;;
+  0) ;;
+  1) exit 0 ;;
   *) echo "pkill rc=$rc" >&2; exit "$rc" ;;
 esac
+i=0
+while [ $i -lt 5 ]; do
+  pgrep -u "$USER_NAME" -f "$PAT" >/dev/null 2>&1 || exit 0
+  i=$((i+1)); sleep 1
+done
+pkill -9 -u "$USER_NAME" -f "$PAT" 2>/dev/null || true
+i=0
+while [ $i -lt 2 ]; do
+  pgrep -u "$USER_NAME" -f "$PAT" >/dev/null 2>&1 || exit 0
+  i=$((i+1)); sleep 1
+done
+echo "daemon still alive after TERM(5s)+KILL(2s)" >&2
+exit 3
 `;
   try {
     const result = await host.exec(`bash -c ${shellQuote(killScript)}`, {
-      timeoutMs: 5_000,
+      // 脚本最坏路径: TERM 轮询 5s + KILL 轮询 2s + ssh/exec 开销 — 给 15s。
+      timeoutMs: 15_000,
       label: 'kill-codex-daemon',
     });
     if (result.exitCode !== 0) {
