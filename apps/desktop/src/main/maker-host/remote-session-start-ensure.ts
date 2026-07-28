@@ -27,3 +27,20 @@ export function setRemoteSessionStartEnsure(fn: RemoteSessionStartEnsure): void 
 export function getRemoteSessionStartEnsure(): RemoteSessionStartEnsure | null {
   return impl;
 }
+
+/**
+ * codex 远端 host 的 live-turn 判定 (register.ts 的 coordinator 真源)。
+ * bridge 重建后的恢复遍历 (remote-codex-mcp-recovery) 经它决定 bootstrap
+ * 是否推迟;未装配时恢复遍历整体不触发 (宁可不补刀, 不误杀 turn)。
+ */
+export type RemoteCodexLiveTurnChecker = (hostId: string) => boolean;
+
+let liveTurnChecker: RemoteCodexLiveTurnChecker | null = null;
+
+export function setRemoteCodexLiveTurnChecker(fn: RemoteCodexLiveTurnChecker): void {
+  liveTurnChecker = fn;
+}
+
+export function getRemoteCodexLiveTurnChecker(): RemoteCodexLiveTurnChecker | null {
+  return liveTurnChecker;
+}

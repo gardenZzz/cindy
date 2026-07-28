@@ -317,6 +317,13 @@ function codexDaemonCmd(subArgs: string[], opts?: { envFromStdin?: boolean }): s
     codexHomePrefix(DEFAULT_INSTALL_ROOT),
     'CODEX="$CODEX_HOME/packages/standalone/current/codex"',
     'if [ ! -x "$CODEX" ]; then exit 127; fi',
+    // proxy env marker 存在则 source (与 codex-remote-transport.ts 的 codexCmd
+    // wrapper 同语义):daemon 的两条启动路径 (transport bootstrap / 本模块
+    // MCP bootstrap) 必须产出一致的 env — 本路径不 source 的话, MCP 注入 /
+    // token 轮换 / 代际漂移触发的重启会让 daemon 丢 proxy env, 而远端
+    // marker 内容未变, proxy reconcile 走 fast path 不再重启, 远端流量
+    // 永久旁路用户 proxy (codex-connector R18 P1)。
+    'if [ -f "$INSTALL_ROOT/agent-proxy.env" ]; then . "$INSTALL_ROOT/agent-proxy.env"; fi',
     // secret 不进 argv (远端 `ps` 可见):经 stdin 的 KEY=value 块传入, 空行
     // 终止, 与 remote-ssh/index.ts oneShotCommand 的 stdin 协议一致。
     ...(opts?.envFromStdin
