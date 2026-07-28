@@ -390,6 +390,26 @@ describe('buildWorkflowTreeModel', () => {
     expect(model.groups[1].agents.map((r) => r.key)).toEqual(['a2']);
   });
 
+  it('同 phase 同 label 的多 agent 按 agentId 精确回填,不再撞名共享首条', () => {
+    // parallel 同 prompt 编队的 label 天然相同 —— agentId 才是行身份。
+    const entries: WorkflowProgressEntry[] = [
+      phaseEntry(0, 'P'),
+      agentEntry(1, { agentId: 'a1', label: 'verify', phaseTitle: 'P', state: 'done' }),
+      agentEntry(2, { agentId: 'a2', label: 'verify', phaseTitle: 'P', state: 'done' }),
+    ];
+    const file = fileProgress({
+      status: 'completed',
+      agents: [
+        fileAgent({ agentId: 'a1', label: 'verify', phaseTitle: 'P', state: 'done', resultPreview: 'first ok', durationMs: 100 }),
+        fileAgent({ agentId: 'a2', label: 'verify', phaseTitle: 'P', state: 'done', resultPreview: 'second ok', durationMs: 200 }),
+      ],
+    });
+    const model = buildWorkflowTreeModel({ entries, fileProgress: file, taskStatus: 'completed' })!;
+    const rows = model.groups[0].agents;
+    expect(rows.find((r) => r.key === 'a1')).toMatchObject({ resultPreview: 'first ok', durationMs: 100 });
+    expect(rows.find((r) => r.key === 'a2')).toMatchObject({ resultPreview: 'second ok', durationMs: 200 });
+  });
+
   it('entries 已有终态 state 时文件不覆盖(采纳只发生在事件流停在非终态时)', () => {
     const entries: WorkflowProgressEntry[] = [
       agentEntry(0, { agentId: 'a1', label: 'alpha', phaseTitle: 'P', state: 'error', error: 'boom' }),
