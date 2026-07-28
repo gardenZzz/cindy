@@ -556,6 +556,58 @@ const stripGpt54Mini: ModelStripHandler = (body) => {
   return next;
 };
 
+/**
+ * 纯文本模型的 tool_result 图像降级(#794)。
+ *
+ * 实测(z-ai/glm-5.2,Anthropic 兼容直通):tool_result 里的 image block 原样发给
+ * 上游,上游静默丢弃且不报错——模型把工具结果当成空,反复重读或直接臆造图片内容
+ * (实测单任务空转 66 分钟并编造译文)。把 image block 替换为说明性占位文本:
+ * 明确告知有图但当前模型收不到、禁止臆测、引导贴文本或换视觉模型。
+ *
+ * 只处理 tool_result 内嵌图像;user 消息图像走各桥接的 input_image 路径,不归这里。
+ */
+const TOOL_RESULT_IMAGE_OMITTED_TEXT =
+  '[image omitted: this tool returned an image, but the current model is text-only, '
+  + 'so the image could not be delivered. Do NOT guess or fabricate what the image '
+  + 'contains. Tell the user the image could not be delivered to the current model, '
+  + 'and ask them to paste the relevant content as text or switch to a vision-capable '
+  + 'model.]';
+
+function replaceToolResultImagesWithNotice(
+  body: Record<string, unknown>,
+): Record<string, unknown> | null {
+  const messages = body.messages;
+  if (!Array.isArray(messages)) return null;
+
+  let replaced = 0;
+  const nextMessages = messages.map((msg) => {
+    if (!isPlainObject(msg) || !Array.isArray(msg.content)) return msg;
+    let msgChanged = false;
+    const nextContent = msg.content.map((block) => {
+      if (!isPlainObject(block) || block.type !== 'tool_result' || !Array.isArray(block.content)) {
+        return block;
+      }
+      let blockChanged = false;
+      const nextInner = block.content.map((inner) => {
+        if (!isPlainObject(inner) || inner.type !== 'image') return inner;
+        replaced += 1;
+        blockChanged = true;
+        return { type: 'text', text: TOOL_RESULT_IMAGE_OMITTED_TEXT };
+      });
+      if (!blockChanged) return block;
+      msgChanged = true;
+      return { ...block, content: nextInner };
+    });
+    return msgChanged ? { ...msg, content: nextContent } : msg;
+  });
+
+  if (replaced === 0) return null; // cache 安全契约:无改动 → null → 字节透传
+  return { ...body, messages: nextMessages };
+}
+
+/** glm-5.2 (智谱,官方仅文本/代码模态) —— 直通与网关两条路由同一 model id。 */
+const stripGlm52: ModelStripHandler = (body) => replaceToolResultImagesWithNotice(body);
+
 // ───────────────────────────────────────────────────────────────────────────
 // 分发表
 // ───────────────────────────────────────────────────────────────────────────
@@ -570,6 +622,13 @@ const STRIP_HANDLERS: Readonly<Record<string, ModelStripHandler>> = {
   // 「折扣GPT」低价路由 —— 与 gpt-5.4 打同一个 Azure 后端, 同样会因 output_config 报 400,
   // 镜像 gpt-5.4 的 strip 行为 (复用同一 handler)。codex/gpt-5.5 暂不加, 与 gpt-5.5 一致。
   'codex/gpt-5.4': stripGpt54,
+  // 纯文本模型 tool_result 图像会被上游静默吞掉 (#794) —— 带/不带命名空间前缀,
+  // 以及 claude-code SDK 按目录 1M 窗口追加 [1m] 后缀 (toSdkModelString) 的形态
+  // 都登记 (直通路由 body.model 可能保留 z-ai/ 前缀与 [1m] 后缀)。
+  'glm-5.2': stripGlm52,
+  'z-ai/glm-5.2': stripGlm52,
+  'glm-5.2[1m]': stripGlm52,
+  'z-ai/glm-5.2[1m]': stripGlm52,
 };
 
 /**
