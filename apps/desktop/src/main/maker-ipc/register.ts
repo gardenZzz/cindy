@@ -166,6 +166,7 @@ import { t } from '../i18n.js';
 import { createLogger } from '../logger.js';
 import { desktopClaudeAuthAdapter, desktopCodexAuthAdapter, readClaudeApiKey } from '../maker-host/auth-adapters.js';
 import { prepareSharedProjectSkillLinks } from '../maker-host/shared-global-skills.js';
+import { setRemoteSessionStartEnsure } from '../maker-host/remote-session-start-ensure.js';
 import { syncExternalCodexSessionFromDesktop } from '../maker-host/codex-local-sessions.js';
 import { getCodexProxyAuthInjection, getCodexProxyAuthInjectionState } from '../maker-host/codex-proxy-host.js';
 import {
@@ -4385,6 +4386,11 @@ export function registerMakerIpc(maker: Maker, options: RegisterMakerIpcOptions)
       }
     }
   }
+
+  // 暴露给 maker-host 的 orca bridge deps:bridge rehydrate remote session 时
+  // 直调 core createSession 不经 IPC 层, 经 holder 回调本函数补齐 preflight
+  // (review: PR #778 codex-connector R17 P1)。
+  setRemoteSessionStartEnsure(ensureRemoteReadyForSessionStart);
 
   const makerSessionRegistry = createElectronIpcHandlerRegistry();
   registerMakerSessionCreateHandler(

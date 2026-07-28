@@ -119,6 +119,7 @@ import {
 import type { CodexHttpBridge } from '../mcp-integrations/codexHttpBridge.js';
 import { ensureRemoteMcpForward } from '../remote-ssh/codex-remote-mcp.js';
 import { buildCcRemoteHttpMcpServers } from './cc-remote-mcp.js';
+import { getRemoteSessionStartEnsure } from './remote-session-start-ensure.js';
 import { CODEX_DISABLED_BUILTIN_PLUGIN_IDS_KEY } from '../mcp-integrations/codexBuiltinToolPolicy.js';
 import { buildCodexProxySpawnArgs, CODEX_OPENAI_COMPACT_PROVIDER_ID } from './codex-gateway-config.js';
 import {
@@ -426,6 +427,19 @@ export function getMaker(): Maker {
       wireSession: wireSessionToIpc,
       hydrateSessionRoute: (sessionId: string, providerId: string | null) =>
         hydrateSessionProvider(sessionId, providerId),
+      // bridge rehydrate remote lead/worker 时经 holder 调 register.ts 的
+      // ensureRemoteReadyForSessionStart (SSH 重连 / agent install / codex
+      // MCP 注入) — 与 IPC create/send 路径同一 preflight。holder 在 IPC
+      // 注册时填入 (晚于本 deps 构造, 早于任何 bridge 回调)。
+      ensureRemoteSessionStart: async (params) => {
+        await getRemoteSessionStartEnsure()?.({
+          createOpts: {
+            id: params.sessionId,
+            agentKind: params.agentKind,
+            remoteHostId: params.remoteHostId,
+          },
+        });
+      },
       orcaTeamStore: orcaTeamStoreAdapter,
       dispatchInterAgentMessage,
     } satisfies OrcaBridgeMcpDeps;
