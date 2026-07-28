@@ -26,7 +26,6 @@
  *   - success returns an exact-copy Uint8Array (no pooled-slab spillover).
  */
 
-import type { Stats } from 'node:fs';
 import * as nodePath from 'node:path';
 
 import { throwIpcError } from './utils/ipcValidate.js';
@@ -34,9 +33,23 @@ import { throwIpcError } from './utils/ipcValidate.js';
 /** Hard ceiling regardless of the caller-requested maxSize. */
 export const READ_FILE_BYTES_CAP = 30 * 1024 * 1024;
 
+/**
+ * The stat fields this module needs. `dev`/`ino`/`size` are bigint because the
+ * identity check below is only sound on bigint stats: the default numeric
+ * `Stats` rounds 64-bit file ids past 2^53 (large NTFS volumes), which would let
+ * two different files on one device compare equal. Callers therefore inject
+ * `stat(p, { bigint: true })` / `handle.stat({ bigint: true })`.
+ */
+export interface FileIdentityStat {
+  dev: bigint;
+  ino: bigint;
+  size: bigint;
+  isFile(): boolean;
+}
+
 /** The subset of fs.promises.FileHandle this module uses (injectable for tests). */
 export interface FileHandleLike {
-  stat: () => Promise<Stats>;
+  stat: () => Promise<FileIdentityStat>;
   read: (
     buffer: Buffer,
     offset: number,
@@ -50,8 +63,20 @@ export interface ReadFileBytesDeps {
   isPathAllowed: (filePath: string) => boolean;
   realpath: (filePath: string) => Promise<string>;
   /** stat of the (symlink-free) realpath, for the expected dev/ino identity. */
-  stat: (filePath: string) => Promise<Stats>;
+  stat: (filePath: string) => Promise<FileIdentityStat>;
   open: (filePath: string) => Promise<FileHandleLike>;
+}
+
+/**
+ * `dev + ino` is the stable identity between the policy-checked path and the
+ * opened descriptor. A 0 inode means the platform / filesystem does not report
+ * one (some Windows and network filesystems), i.e. the identity is UNAVAILABLE
+ * — fail closed rather than let `0 === 0` silently satisfy the swap guard in
+ * exactly the cases it exists to catch. Same rule as `isSameFileObject` in
+ * chatAttachmentSave.ts.
+ */
+function isSameFileObject(expected: FileIdentityStat, actual: FileIdentityStat): boolean {
+  return expected.ino !== 0n && expected.dev === actual.dev && expected.ino === actual.ino;
 }
 
 export async function readFileBytesForPreview(
@@ -120,21 +145,25 @@ export async function readFileBytesForPreview(
     }
     // Descriptor-identity revalidation: the opened fd must be the very inode the
     // policy-checked realpath resolved to (guards the ancestor-symlink swap).
-    if (st.dev !== expected.dev || st.ino !== expected.ino) {
+    // Fails closed when the identity is unavailable — see isSameFileObject.
+    if (!isSameFileObject(expected, st)) {
       throwIpcError('PRECONDITION_FAILED', 'file changed during read');
     }
-    if (st.size > maxSize) {
+    // Down to Number only after the identity check: the size ceiling is a plain
+    // number and a 30MB cap is far below Number.MAX_SAFE_INTEGER.
+    const size = Number(st.size);
+    if (size > maxSize) {
       throwIpcError('PRECONDITION_FAILED', 'file exceeds the preview size limit');
     }
     // Bound the buffer to the fstat'd size of THIS descriptor (≤ maxSize): even
     // if the file grows or is replaced after the check, we never read more than
     // this into main-process memory. Loop over short reads; stop early on EOF
     // (file shrank) and return exactly what was read.
-    const buffer = Buffer.alloc(st.size);
+    const buffer = Buffer.alloc(size);
     let offset = 0;
-    while (offset < st.size) {
+    while (offset < size) {
       const { bytesRead } = await handle
-        .read(buffer, offset, st.size - offset, offset)
+        .read(buffer, offset, size - offset, offset)
         .catch(() => throwIpcError('INTERNAL', 'failed to read file'));
       if (bytesRead === 0) break;
       offset += bytesRead;
