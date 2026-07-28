@@ -3322,6 +3322,7 @@
         "browser": "브라우저",
         "terminal": "터미널",
         "review": "리뷰",
+        "backgroundTasks": "백그라운드 작업",
         "collaboration": "협업",
         "unknown": "알 수 없는 탭",
         "ghostPanel": "플러그인 패널"
@@ -3345,6 +3346,8 @@
         "fileSub": "Files",
         "openReview": "리뷰 열기",
         "reviewSub": "Review",
+        "openBackgroundTasks": "백그라운드 작업 열기",
+        "backgroundTasksSub": "Background tasks",
         "openBrowser": "브라우저 열기",
         "browserSub": "Browser",
         "openTerminal": "터미널 열기",
@@ -3706,6 +3709,16 @@
       "touchCountAria_other": "{{count}}회 편집됨",
       "expandAllAria": "모든 파일 펼치기",
       "collapseAllAria": "모든 파일 접기"
+    },
+    "backgroundTasks": {
+      "running": "실행 중",
+      "completed": "완료",
+      "empty": "이 세션에는 아직 백그라운드 작업이 없습니다",
+      "stop": "중지",
+      "back": "뒤로",
+      "progressSummary": "{{done}}/{{total}} Agent",
+      "tokens": "{{value}} tokens",
+      "noProgress": "진행 상황 정보가 아직 없습니다"
     }
   },
   "update": {
@@ -4430,6 +4443,9 @@
         "stopped": "중지됨"
       },
       "stop": "이 작업 중지",
+      "openInPanel": "백그라운드 작업 패널에서 열기",
+      "workflowProgressLine": "{{phase}} · {{done}}/{{total}} Agent",
+      "workflowProgressCount": "{{done}}/{{total}} Agent",
       "tokens": "{{count}} tokens",
       "toolUses_one": "도구 호출 {{count}}회",
       "toolUses_other": "도구 호출 {{count}}회",
@@ -4976,13 +4992,19 @@
     "workflowTree": {
       "agentsCount": "에이전트 {{count}}개",
       "attempt": "{{count}}번째 시도",
+      "endedEarly": "완료 전에 종료됨",
       "state": {
         "queued": "대기 중",
+        "pending": "대기 중",
+        "start": "시작 중",
         "running": "실행 중",
+        "progress": "실행 중",
         "done": "완료",
         "completed": "완료",
         "failed": "실패",
-        "stopped": "중지됨"
+        "error": "실패",
+        "stopped": "중지됨",
+        "killed": "강제 종료됨"
       }
     },
     "credentialSwitchWait": {
@@ -7265,11 +7287,6 @@
     },
     "hub": {
       "learnButton": "이 스킬 학습하기"
-    }
-  },
-  "workflows": {
-    "toast": {
-      "none": "이 세션에서 실행 중인 워크플로우가 없습니다"
     }
   },
   "planMode": {
