@@ -1342,7 +1342,7 @@ export const hookGroupMessages = sqliteTable(
     createdAt: integer('created_at').notNull(),
   },
   (t) => ({
-    /** 同一条消息(重放/重连)幂等 upsert 的键。 */
+    /** 同一条消息(重放/重连)幂等去重的键(冲突即忽略, 不更新)。 */
     byMessage: uniqueIndex('hook_group_messages_msg_idx').on(
       t.provider,
       t.chatId,
