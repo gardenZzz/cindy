@@ -4741,6 +4741,27 @@ export class CodexAgent extends BaseAgent {
           // turn/start 只是响应没回来。立孤儿守卫: 之后迟到的 turnStarted 不得
           // 重新激活会话 (greptile P1: 已报终态错误的会话又回到 generating)。
           turnStartFailedWithoutTurnId = true;
+          // turnStarted 也可能已先于响应到达并被接受 (started-before-resp 是
+          // 协议允许的乱序) — 此时 currentTurnId/isTurnInFlight 已置位, 失败
+          // 收口必须把这个活跃 turn 一起收掉: 立墓碑挡后续事件 + 清 turn 状态 +
+          // 补 interrupt (daemon 侧该 turn 还在跑)。否则 UI 已 Done 但
+          // handle.isTurnRunning() 永真, 下一条 send 被 in-flight guard 挡死
+          // (greptile R6 P1)。
+          if (currentTurnId) {
+            const orphanTurnId = currentTurnId;
+            terminalErroredTurnIds.add(orphanTurnId);
+            if (threadId) {
+              host.request(Method.TurnInterrupt, { threadId, turnId: orphanTurnId }).catch((e2: unknown) => {
+                log.warn('turn/start-failure orphan interrupt failed (best-effort)', {
+                  turnId: orphanTurnId,
+                  error: e2 instanceof Error ? e2.message : String(e2),
+                });
+              });
+            }
+            currentTurnId = null;
+            isTurnInFlight = false;
+            currentTurnPlanModeActive = false;
+          }
           log.error('turn/start failed', { error: String(finalErr) });
           eventQueue.push({
             type: 'error',

@@ -47,6 +47,7 @@ import {
   buildAgentProxyEnvUppercase,
   buildAgentProxyMarkerContent,
   ensureAgentProxyTunnel,
+  killRemoteCodexDaemon,
   reconcileCodexAgentProxyEnv,
 } from '../agent-proxy';
 import {
@@ -214,6 +215,38 @@ describe('reconcileCodexAgentProxyEnv', () => {
     const result = await reconcileCodexAgentProxyEnv(host);
     expect(result).toEqual({ markerChanged: false, daemonRestarted: false });
     expect(state.pkillCount).toBe(0);
+  });
+});
+
+describe('killRemoteCodexDaemon', () => {
+  it('waits for the daemon to actually exit after TERM before returning (greptile R6 P2)', async () => {
+    // pkill 只保证信号送达 — 脚本必须 TERM 后轮询等进程消失, 没死透再 KILL,
+    // 防旧 daemon 在 dying 窗口里响应探活被复用 (旧 env, marker 变更静默落空)。
+    const { host, state } = makeFakeHost();
+    const result = await killRemoteCodexDaemon(host);
+    expect(result).toEqual({ ok: true });
+    expect(state.pkillCount).toBe(1);
+    const script = state.execCalls.find((c) => c.cmd.includes('pkill'))?.cmd ?? '';
+    expect(script).toContain('pgrep');
+    expect(script).toContain('pkill -9');
+  });
+
+  it('reports pkill_failed when the daemon survives TERM+KILL', async () => {
+    const { host } = makeFakeHost();
+    const baseExec = host.exec.bind(host);
+    host.exec = async (cmd: string, execOpts?: { input?: string }) => {
+      if (cmd.includes('pkill')) {
+        return {
+          stdout: '',
+          stderr: 'daemon still alive after TERM(5s)+KILL(2s)',
+          exitCode: 3,
+          signal: null,
+        };
+      }
+      return baseExec(cmd, execOpts);
+    };
+    const result = await killRemoteCodexDaemon(host);
+    expect(result).toMatchObject({ ok: false, reason: 'pkill_failed' });
   });
 });
 
