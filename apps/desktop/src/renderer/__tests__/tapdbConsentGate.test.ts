@@ -41,6 +41,16 @@ let authListener: ((state: unknown) => void) | null = null;
 let getAnalyticsSettings: () => Promise<SettingsPayload>;
 /** 本文件内注册过的 visibilitychange 回调(见 hidePage)。 */
 const visibilityHandlers: Array<() => void> = [];
+/**
+ * tapdbClient 挂在 window 上的交互监听(focus / keydown / pointerdown)。
+ * 与 visibilityHandlers 同理,每个 importClient 都会重新注册,这里按事件类型
+ * 只保留最新一个,fireWindowEvent 只打本用例的监听器。
+ */
+const windowHandlers = new Map<string, () => void>();
+
+function fireWindowEvent(type: 'focus' | 'keydown' | 'pointerdown'): void {
+  windowHandlers.get(type)?.();
+}
 
 function installElectronApi(initial: SettingsPayload): void {
   getAnalyticsSettings = vi.fn(async () => initial);
@@ -60,7 +70,6 @@ function installElectronApi(initial: SettingsPayload): void {
         authListener = null;
       };
     },
-    onTapdbDailyActive: () => () => {},
   };
 }
 
@@ -103,6 +112,7 @@ beforeEach(() => {
   settingsListener = null;
   authListener = null;
   visibilityHandlers.length = 0;
+  windowHandlers.clear();
   Object.values(tapdb).forEach((fn) => fn.mockReset());
   vi.spyOn(document, 'addEventListener').mockImplementation(((
     type: string,
@@ -112,6 +122,14 @@ beforeEach(() => {
       visibilityHandlers.push(() => handler(new Event('visibilitychange')));
     }
   }) as typeof document.addEventListener);
+  vi.spyOn(window, 'addEventListener').mockImplementation(((
+    type: string,
+    handler: EventListenerOrEventListenerObject,
+  ) => {
+    if (typeof handler === 'function') {
+      windowHandlers.set(type, () => handler(new Event(type)));
+    }
+  }) as typeof window.addEventListener);
 });
 
 afterEach(() => {
@@ -355,5 +373,123 @@ describe('TapDB consent gate', () => {
     await flush();
 
     expect(tapdb.init).not.toHaveBeenCalled();
+  });
+});
+
+// ── 交互驱动的活跃上报 ───────────────────────────────────────────────────────
+//
+// 活跃事件只由真实交互(focus / keydown / pointerdown)触发,10 分钟节流;没有
+// 定时器,0 点不会有任何自发上报。历史背景见 tapdbClient.ts 头部「活跃口径」。
+
+describe('engagement-driven activity reporting', () => {
+  beforeEach(() => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date(2026, 6, 28, 12, 0, 0));
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  async function initAllowed() {
+    installElectronApi(ALLOWED);
+    const client = await importClient();
+    client.initTapdb();
+    await flush();
+    return client;
+  }
+
+  it('app_start consumes the throttle window — input right after startup does not double-report', async () => {
+    await initAllowed();
+    expect(tapdb.pvEvent).toHaveBeenCalledTimes(1); // app_start
+
+    fireWindowEvent('keydown');
+
+    expect(tapdb.pvEvent).toHaveBeenCalledTimes(1);
+  });
+
+  it('reports app_engaged at most once per throttle window across rapid inputs', async () => {
+    await initAllowed();
+
+    vi.advanceTimersByTime(10 * 60 * 1000);
+    fireWindowEvent('keydown');
+    fireWindowEvent('keydown');
+    fireWindowEvent('pointerdown');
+
+    expect(tapdb.pvEvent).toHaveBeenCalledTimes(2); // app_start + 1 × app_engaged
+    expect(tapdb.pvEvent).toHaveBeenLastCalledWith({ '#tag': 'app_engaged' });
+
+    vi.advanceTimersByTime(10 * 60 * 1000);
+    fireWindowEvent('focus');
+
+    expect(tapdb.pvEvent).toHaveBeenCalledTimes(3);
+  });
+
+  it('each of focus / keydown / pointerdown can trigger a report', async () => {
+    await initAllowed();
+
+    for (const type of ['focus', 'keydown', 'pointerdown'] as const) {
+      vi.advanceTimersByTime(10 * 60 * 1000);
+      const before = tapdb.pvEvent.mock.calls.length;
+      fireWindowEvent(type);
+      expect(tapdb.pvEvent.mock.calls.length).toBe(before + 1);
+    }
+  });
+
+  it('sends nothing at local midnight without user input', async () => {
+    // 本次改造的核心断言:过夜挂机不再产生活跃事件,0 点尖峰结构性消失。
+    vi.setSystemTime(new Date(2026, 6, 28, 23, 59, 0));
+    await initAllowed();
+    tapdb.pvEvent.mockClear();
+    tapdb.setUser.mockClear();
+
+    vi.advanceTimersByTime(2 * 60 * 1000); // 23:59 → 次日 00:01,期间无交互
+
+    expect(tapdb.pvEvent).not.toHaveBeenCalled();
+    expect(tapdb.setUser).not.toHaveBeenCalled();
+  });
+
+  it('first engagement of a new day re-binds the account, later windows do not', async () => {
+    await initAllowed();
+    authListener?.({ isAuthenticated: true, user: { id: 'user-1' } });
+    expect(tapdb.setUser).toHaveBeenCalledTimes(1); // 当天登录时绑定
+
+    // 次日 09:00 用户回来:首条交互既发 app_engaged,也重新 setUser(账号 DAU)。
+    vi.setSystemTime(new Date(2026, 6, 29, 9, 0, 0));
+    fireWindowEvent('pointerdown');
+
+    expect(tapdb.pvEvent).toHaveBeenLastCalledWith({ '#tag': 'app_engaged' });
+    expect(tapdb.setUser).toHaveBeenCalledTimes(2);
+
+    // 同日后续窗口只发 pvEvent,不重复 setUser。
+    vi.advanceTimersByTime(10 * 60 * 1000);
+    fireWindowEvent('keydown');
+
+    expect(tapdb.setUser).toHaveBeenCalledTimes(2);
+  });
+
+  it('ignores input while unconsented, then reports normally after consent', async () => {
+    installElectronApi(DENIED);
+    const client = await importClient();
+    client.initTapdb();
+    await flush();
+
+    fireWindowEvent('keydown');
+    expect(tapdb.pvEvent).not.toHaveBeenCalled();
+
+    // 未放行期间的交互不消耗节流窗口:同意后立刻能发 app_start。
+    settingsListener?.(ALLOWED);
+    expect(tapdb.pvEvent).toHaveBeenCalledWith({ '#tag': 'app_start' });
+  });
+
+  it('stops engagement reports immediately after opt-out', async () => {
+    await initAllowed();
+    settingsListener?.({ privacyConsentAccepted: true, analyticsEnabled: false, allowed: false });
+    tapdb.pvEvent.mockClear();
+
+    vi.advanceTimersByTime(10 * 60 * 1000);
+    fireWindowEvent('keydown');
+
+    expect(tapdb.pvEvent).not.toHaveBeenCalled();
   });
 });
