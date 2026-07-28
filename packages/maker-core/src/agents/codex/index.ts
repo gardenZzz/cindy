@@ -3893,6 +3893,14 @@ export class CodexAgent extends BaseAgent {
     const gateServerRequestTurn = (turnId: string | null | undefined): boolean | Promise<boolean> => {
       if (!turnId) return true;
       if (terminalErroredTurnIds.has(turnId) || completedTurnIds.has(turnId)) return false;
+      // idle 孤儿 (greptile R16 P1): 无 RPC 在飞时未知 id 的请求只可能来自
+      // 失败 RPC 的孤儿 turn — 直接拒, 不得放行上 UI (用户响应会发往旧
+      // turn, interrupt 输掉竞态时操作会真实执行)。与 notification 的
+      // idle 孤儿闸同款判定, 立墓碑让后续事件一并拦。
+      if (isIdleOrphanTurnId(turnId)) {
+        terminalErroredTurnIds.add(turnId);
+        return false;
+      }
       if (!bufferedOrphanTurnIds.has(turnId)) {
         // 与 enqueueIfBufferedTurn 同款预缓冲 (codex R15 P1): 孤儿 turn 的
         // server request 同样可以比它的 turnStarted 先到 — id 未入 buffer

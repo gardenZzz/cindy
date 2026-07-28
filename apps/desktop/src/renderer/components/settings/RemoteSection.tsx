@@ -584,7 +584,7 @@ function HostForm({ mode, initial, busy, onSubmit, onCancel }: HostFormProps) {
               {t('settings.remote.add.agentProxyHint')}
             </span>
             {form.agentProxyAddr.trim() && !parseProxyAddrInput(form.agentProxyAddr) && (
-              <span className="text-11" style={{ color: 'var(--error-fg, #dc2626)' }}>
+              <span className="text-11" style={{ color: 'var(--error-fg)' }}>
                 {t('settings.remote.add.agentProxyAddrInvalid')}
               </span>
             )}

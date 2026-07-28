@@ -7290,6 +7290,55 @@ describe('CodexAgent turn lifecycle', () => {
     await handle.close();
   });
 
+  it('rejects an idle orphan server request after a failed turn/start (greptile R16 P1)', async () => {
+    // 守卫立 + 无新 send (idle: 无 pending, currentTurnId===null): 孤儿 turn
+    // 的审批请求到达 — 没有 RPC 在飞可等对账, 直接拒 (不挂起), 不上 UI;
+    // 用户响应若放行会发往旧 turn, interrupt 输竞态时操作真实执行。
+    const firstStart = deferred<unknown>();
+    const agent = new CodexAgent(createDeps());
+    const host = installFakeHost(agent, (method) => {
+      if (method === Method.TurnStart) return firstStart.promise;
+      return undefined;
+    });
+    const handle = await agent.startSession({
+      sessionId: 'session-idle-orphan-request',
+      model: 'gpt-5.4',
+      workingDir: '/repo',
+    });
+    const subscribeCalls = host.subscribeThread.mock.calls as unknown as Array<[string, ThreadEventHandlers]>;
+    const handlers = subscribeCalls[0]?.[1];
+    const iterator = handle.events()[Symbol.asyncIterator]();
+    const interactionResolver = vi.fn(() => new Promise<never>(() => {}));
+    handle.setInteractionResolver(interactionResolver);
+
+    const send1 = handle.send({ type: 'user', content: 'first' });
+    for (let i = 0; i < 5; i += 1) {
+      if (host.request.mock.calls.some(([method]) => method === Method.TurnStart)) break;
+      await Promise.resolve();
+    }
+    firstStart.reject(new Error('codex app-server turn/start timed out after 60000ms'));
+    await send1;
+    expect(await nextEvent(iterator)).toMatchObject({ type: 'status', data: { isRunning: true } });
+    expect(await nextEvent(iterator)).toMatchObject({ type: 'error', data: { isTerminal: true } });
+    expect(await nextEvent(iterator)).toMatchObject({
+      type: 'status',
+      data: { status: 'Done', isRunning: false },
+    });
+
+    // idle: 孤儿 approval 到达 → 直接 decline, UI 未被调。
+    await expect(
+      handlers.commandExecutionApproval?.({
+        threadId: 'start-thread-id',
+        turnId: 'orphan-turn',
+        itemId: 'o-item',
+        command: 'rm -rf /tmp/x',
+        cwd: '/repo',
+      }),
+    ).resolves.toEqual({ decision: 'decline' });
+    expect(interactionResolver).not.toHaveBeenCalled();
+    await handle.close();
+  });
+
   it('does not escalate rate-limit backoff retries to a terminal backend-unreachable error (codex R12 P2)', async () => {
     // 429 / usage-limit 的 willRetry 是 provider 退避窗口, daemon 会在窗口后
     // 自己成功 — 不得计入 retry 升级, 否则可恢复的限流被误杀成「后端不可达」。
