@@ -217,11 +217,25 @@ describe('extractWorkflowProgress', () => {
       runId: 'wf_x',
       status: 'running',
       workflowProgress: [
-        { type: 'workflow_agent', label: 'no-id' }, // 缺 agentId/state → skip
+        { type: 'workflow_agent', label: 'no-state' }, // 缺 state → skip
+        { type: 'workflow_agent', state: 'queued' }, // label 与 agentId 双缺 → skip
         { type: 'workflow_agent', agentId: 'a1', state: 'done' }, // label 缺 → 回退 agentId
       ],
     });
     expect(p!.agents).toEqual([{ label: 'a1', agentId: 'a1', state: 'done' }]);
+  });
+
+  it('keeps agents that have a label but no assigned agentId yet (queued rows)', () => {
+    // 排队中的 agent 尚未分配 id(事件流侧同形态):不得丢行,否则重载后的树
+    // 比 live 少行。
+    const p = extractWorkflowProgress({
+      runId: 'wf_x',
+      status: 'running',
+      workflowProgress: [
+        { type: 'workflow_agent', label: 'verify:auth', state: 'queued', phaseIndex: 0 },
+      ],
+    });
+    expect(p!.agents).toEqual([{ label: 'verify:auth', state: 'queued' }]);
   });
 
   it('returns null when runId is missing or input is not an object', () => {
