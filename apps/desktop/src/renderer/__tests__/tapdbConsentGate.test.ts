@@ -470,6 +470,23 @@ describe('engagement-driven activity reporting', () => {
     expect(tapdb.setUser).toHaveBeenCalledTimes(2);
   });
 
+  it('seeds identity via authInitialize so a secondary window does not misread refresh as login', async () => {
+    // 登录后才打开的二级窗口错过初始广播:补种身份后,半夜 token 刷新广播的
+    // 同一账号不得被当成「身份变化」触发 setUser。
+    installElectronApi(ALLOWED);
+    (window as unknown as { electronAPI: Record<string, unknown> }).electronAPI.authInitialize =
+      vi.fn(async () => ({ isAuthenticated: true, user: { id: 'user-1' } }));
+    const client = await importClient();
+    client.initTapdb();
+    await flush();
+    tapdb.setUser.mockClear();
+
+    vi.setSystemTime(new Date(2026, 6, 29, 3, 0, 0));
+    authListener?.({ isAuthenticated: true, user: { id: 'user-1' } });
+
+    expect(tapdb.setUser).not.toHaveBeenCalled();
+  });
+
   it('a token-refresh auth broadcast on a new day does not emit setUser (no interaction)', async () => {
     // auth:state-change 也由定时 token 刷新广播:挂机过夜的机器不得凭空产生
     // 当日账号活跃 —— 跨天重绑只走交互路径(reportActive)。

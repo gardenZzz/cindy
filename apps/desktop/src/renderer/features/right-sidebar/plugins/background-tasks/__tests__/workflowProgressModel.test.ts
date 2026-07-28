@@ -410,6 +410,21 @@ describe('buildWorkflowTreeModel', () => {
     expect(rows.find((r) => r.key === 'a2')).toMatchObject({ resultPreview: 'second ok', durationMs: 200 });
   });
 
+  it('file-only 路径:只带 phaseIndex 的文件行经顶层 phases[] 反查归组,不坠孤儿区', () => {
+    const file = fileProgress({
+      phases: [{ index: 0, title: 'Scan' }],
+      agents: [
+        fileAgent({ label: 'queued-one', agentId: '', state: 'queued', phaseIndex: 0 }),
+        fileAgent({ label: 'lost', agentId: '', state: 'queued', phaseIndex: 9 }),
+      ],
+    });
+    const model = buildWorkflowTreeModel({ fileProgress: file, taskStatus: 'running' })!;
+    expect(model.groups[0]).toMatchObject({ title: 'Scan' });
+    expect(model.groups[0].agents.map((r) => r.label)).toEqual(['queued-one']);
+    expect(model.groups[1]).toMatchObject({ title: null });
+    expect(model.groups[1].agents.map((r) => r.label)).toEqual(['lost']);
+  });
+
   it('entries 已有终态 state 时文件不覆盖(采纳只发生在事件流停在非终态时)', () => {
     const entries: WorkflowProgressEntry[] = [
       agentEntry(0, { agentId: 'a1', label: 'alpha', phaseTitle: 'P', state: 'error', error: 'boom' }),

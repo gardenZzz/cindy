@@ -191,7 +191,7 @@ function groupsFromEntries(
   const orphans: WorkflowTreeAgentRow[] = [];
   // 回填索引一次性预建:条目上限 2000,逐行线性扫 file.agents 是 O(n²),大编队
   // 打开详情会卡帧。
-  const fileAgentIndex = backfillTerminal && file ? indexFileAgents(file.agents) : null;
+  const fileAgentIndex = backfillTerminal && file ? indexFileAgents(file) : null;
   let agentOrdinal = 0;
   for (const entry of entries) {
     if (entry.type !== 'workflow_agent') continue;
@@ -214,9 +214,30 @@ function groupsFromEntries(
   return assembleGroups(byPhase, orphans, detailByTitle);
 }
 
+/** 文件 agent 的有效 phase 标题:phaseTitle 直取;只带 phaseIndex 的排队行
+ *  (与事件流同形态)经顶层 phases[] 的 index→title 反查,不坠入孤儿区。 */
+function resolveFilePhaseTitle(
+  agent: WorkflowAgentProgress,
+  titleByIndex: ReadonlyMap<number, string>,
+): string | undefined {
+  return (
+    agent.phaseTitle ??
+    (typeof agent.phaseIndex === 'number' ? titleByIndex.get(agent.phaseIndex) : undefined)
+  );
+}
+
+function collectFilePhaseTitlesByIndex(file: WorkflowProgress): Map<number, string> {
+  const titleByIndex = new Map<number, string>();
+  for (const phase of file.phases) {
+    if (!titleByIndex.has(phase.index)) titleByIndex.set(phase.index, phase.title);
+  }
+  return titleByIndex;
+}
+
 /** entries 缺失(重载后)整树退回 wf 文件;文件 state 词表原样保留。 */
 function groupsFromFile(file: WorkflowProgress): WorkflowTreeGroup[] {
   const detailByTitle = collectPhaseDetails(file);
+  const titleByIndex = collectFilePhaseTitlesByIndex(file);
   const byPhase = new Map<string, WorkflowTreeAgentRow[]>();
   for (const phase of file.phases) {
     if (!byPhase.has(phase.title)) byPhase.set(phase.title, []);
@@ -224,8 +245,9 @@ function groupsFromFile(file: WorkflowProgress): WorkflowTreeGroup[] {
   const orphans: WorkflowTreeAgentRow[] = [];
   file.agents.forEach((agent, index) => {
     const row = rowFromFileAgent(agent, index);
-    if (agent.phaseTitle && byPhase.has(agent.phaseTitle)) {
-      byPhase.get(agent.phaseTitle)!.push(row);
+    const phaseTitle = resolveFilePhaseTitle(agent, titleByIndex);
+    if (phaseTitle && byPhase.has(phaseTitle)) {
+      byPhase.get(phaseTitle)!.push(row);
     } else {
       orphans.push(row);
     }
@@ -306,12 +328,15 @@ interface FileAgentIndex {
   byLabelPhase: Map<string, WorkflowAgentProgress>;
 }
 
-function indexFileAgents(fileAgents: readonly WorkflowAgentProgress[]): FileAgentIndex {
+function indexFileAgents(file: WorkflowProgress): FileAgentIndex {
   const byAgentId = new Map<string, WorkflowAgentProgress>();
   const byLabelPhase = new Map<string, WorkflowAgentProgress>();
-  for (const agent of fileAgents) {
+  // label 键用**解析后的**有效 title(phaseIndex 反查),与事件行解析口径对齐 ——
+  // 否则文件里只带 phaseIndex 的行 key 落空串,永远匹配不上事件行。
+  const titleByIndex = collectFilePhaseTitlesByIndex(file);
+  for (const agent of file.agents) {
     if (agent.agentId && !byAgentId.has(agent.agentId)) byAgentId.set(agent.agentId, agent);
-    const key = fileAgentKey(agent.label, agent.phaseTitle);
+    const key = fileAgentKey(agent.label, resolveFilePhaseTitle(agent, titleByIndex));
     if (!byLabelPhase.has(key)) byLabelPhase.set(key, agent);
   }
   return { byAgentId, byLabelPhase };

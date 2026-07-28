@@ -182,6 +182,26 @@ export function initTapdb(): void {
     log.error('onAuthStateChange subscription failed (non-fatal)', err);
   }
 
+  // 身份补种:登录**之后**才打开的二级窗口(独立侧栏等)错过了 auth:state-change
+  // 的初始广播,currentUserId 停在 null —— 半夜定时 token 刷新的广播会被误判成
+  // 「身份变化」触发非交互 setUser(假 DAU)。挂完订阅后主动读一次当前身份;
+  // 只在仍未从广播学到身份时写入,不与并发广播竞争,也不触发任何上报。
+  try {
+    const seed = window.electronAPI.authInitialize?.();
+    if (seed) {
+      void seed
+        .then((state) => {
+          if (currentUserId !== null) return;
+          if (state?.isAuthenticated && state.user?.id) currentUserId = state.user.id;
+        })
+        .catch(() => {
+          // 静默:读不到就维持广播驱动的原行为。
+        });
+    }
+  } catch (err) {
+    log.error('auth identity seed failed (non-fatal)', err);
+  }
+
   // 交互驱动的活跃信号(见文件头「活跃口径」)。capture 挂在 window 捕获阶段,
   // 业务代码的 stopPropagation 挡不住;onEngagedSignal 自带节流与同意闸。
   try {

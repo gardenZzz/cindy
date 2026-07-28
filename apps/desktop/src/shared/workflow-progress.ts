@@ -18,6 +18,8 @@ export interface WorkflowAgentProgress {
   state: string;
   /** 所属 phase 标题。 */
   phaseTitle?: string;
+  /** 所属 phase 序号(条目可能只带 index 不带 title,经顶层 phases[] 反查)。 */
+  phaseIndex?: number;
   /** 重试次数(≥1)。 */
   attempt?: number;
   /** 最近一次工具调用的工具名(如 "Read")。 */
