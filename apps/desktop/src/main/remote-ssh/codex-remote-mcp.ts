@@ -33,19 +33,15 @@ import path from 'node:path';
 import type { RemoteHost } from '@cindy/maker-remote-ssh';
 
 import { createLogger } from '../logger.js';
+import { REMOTE_COLLAB_SERVER_NAMES } from '../mcp-integrations/codexHttpBridge.js';
 import { getRemoteMcpBridgeToken } from '../mcp-integrations/remoteMcpBridgeToken.js';
 
 const log = createLogger('codex-remote-mcp');
 
 const TOKEN_ENV = 'LIZI_MCP_TOKEN';
-/**
- * 远端允许经 remote-forward 暴露的 server 白名单 — 与 cc 侧
- * CC_REMOTE_HTTP_MCP_SERVER_NAMES (maker-host/cc-remote-mcp.ts) 同意同值:
- * 只放协同必需的 cindy_orca / orca_worker_bridge;bridge 上的其余
- * in-process server (cindy_memory / cindy_ssh 等) 不注入远端 daemon
- * config, 维持"远端不可用"现状, 收窄影响面。两侧改动必须同步。
- */
-const CODEX_REMOTE_MCP_SERVER_NAMES = new Set(['cindy_orca', 'orca_worker_bridge']);
+// 远端注入白名单的唯一真源在 codexHttpBridge.ts (bridge 鉴权层也用它
+// scope persistent token) — 这里取别名保持本文件既有引用点不变。
+const CODEX_REMOTE_MCP_SERVER_NAMES = REMOTE_COLLAB_SERVER_NAMES;
 const MANAGED_BEGIN = '# >>> cindy-remote-mcp (managed, do not edit) >>>';
 const MANAGED_END = '# <<< cindy-remote-mcp <<<';
 /**
@@ -63,6 +59,12 @@ export interface RemoteMcpBridgeEndpoint {
   port: number;
   /** bridge 上实际挂出的 server 名 (如 cindy_orca / orca_worker_bridge)。 */
   serverNames: string[];
+  /**
+   * bridge 实例代际 id (CodexHttpBridge.instanceId)。bridge 重建后旧实例
+   * 签发的 mcp-session-id 全部失效,但常驻 daemon 无感知 — 代际进漂移
+   * 指纹, 让重建也触发 re-bootstrap (codex-connector P2)。
+   */
+  bridgeInstanceId: string;
 }
 
 export interface EnsureRemoteCodexMcpResult {
@@ -261,7 +263,15 @@ export function mergeManagedMcpBlock(
     kept.push(line);
   }
   const trimmed = kept.join('\n').replace(/\s+$/, '');
-  const next = (trimmed.length > 0 ? `${trimmed}\n\n${block}\n` : `${block}\n`);
+  // block='' (清理路径, 见 doEnsure 空白名单分支):只剥除受管段, 不重建。
+  const next =
+    block === ''
+      ? trimmed.length > 0
+        ? `${trimmed}\n`
+        : ''
+      : trimmed.length > 0
+        ? `${trimmed}\n\n${block}\n`
+        : `${block}\n`;
   return { next, changed: next !== existing, strippedUserServers: [...stripped] };
 }
 
@@ -482,28 +492,37 @@ async function doEnsureRemoteCodexMcpBridge(
     // (cindy_memory / cindy_ssh 等), 全量写进远端 daemon config 会让远端
     // session 获得本机 MCP 能力, 越出协同边界 (与 cc 侧白名单同语义)。
     const serverNames = bridge.serverNames.filter((n) => CODEX_REMOTE_MCP_SERVER_NAMES.has(n));
-    if (serverNames.length === 0) {
-      // collab plugin 被禁用等场景:cindy_orca 不在 bridge 上,没有可注入的
-      // server。视为成功 (无需注入),daemon config 也不写管理段。
-      return { ok: true };
-    }
     const token = getRemoteMcpBridgeToken();
-    if (!token) {
+    if (serverNames.length > 0 && !token) {
       log.warn('remote MCP injection skipped: persistent token unavailable (safeStorage?)', {
         host: host.id,
       });
       return { ok: false, reason: 'token-unavailable' };
     }
+    // 清理路径 (白名单为空, collab 被禁用等) 不强求 token:剥除受管段不需要
+    // 指纹, bootstrap 传空 token — daemon 不再持有有效 token 正是清理目标。
+    const effectiveToken = token ?? '';
 
     const remotePort = await ensureRemotePort(host, bridge.port);
 
-    const tokenFingerprint = createHash('sha256').update(token, 'utf8').digest('hex').slice(0, 12);
+    // token 与 bridge 代际一起进指纹:token 轮换 (账号切换) 与 bridge 重建
+    // (旧 mcp-session-id 全失效, codex-connector P2) 都构成 config 漂移,
+    // 走既有路径重启 daemon 拿到新 env / 新连接。
+    const tokenFingerprint = createHash('sha256')
+      .update(`${effectiveToken}|${bridge.bridgeInstanceId}`, 'utf8')
+      .digest('hex')
+      .slice(0, 12);
     const existing = await readRemoteConfig(host);
-    const block = renderManagedMcpBlock({
-      remotePort,
-      serverNames,
-      tokenFingerprint,
-    });
+    // serverNames 为空时 block='':merge 只剥不建 — 清掉上一次注入留下的
+    // 受管段 (不能早退, 否则 daemon 永远持旧 token env 与死配置,
+    // codex-connector P2);本来就没注入过 → changed=false → no-op。
+    const block = serverNames.length > 0
+      ? renderManagedMcpBlock({
+          remotePort,
+          serverNames,
+          tokenFingerprint,
+        })
+      : '';
     const { next, changed, strippedUserServers } = mergeManagedMcpBlock(existing, block, {
       serverNames,
     });
@@ -536,14 +555,16 @@ async function doEnsureRemoteCodexMcpBridge(
       // 否则 config 已写入 (changed=false) + 旧 daemon 存活 (daemonRunning)
       // 的组合会让 daemon 永远持旧 env, 远端请求 401 且不自愈。
       pendingBootstrapHosts.add(host.id);
-      await bootstrapDaemon(host, token);
+      await bootstrapDaemon(host, effectiveToken);
       // 防御:bootstrap 若覆盖了 config.toml (managed_install 行为未文档化),
       // 管理段丢失时补写一次并再次 bootstrap。最多两轮,避免无限循环。
+      // 仅注入路径 (serverNames 非空):清理路径本来就要管理段不存在,
+      // 不得把它当"丢失"补写回去。
       const after = await readRemoteConfig(host);
-      if (!after.includes(MANAGED_BEGIN)) {
+      if (serverNames.length > 0 && !after.includes(MANAGED_BEGIN)) {
         log.warn('managed mcp block lost after bootstrap — rewriting once', { host: host.id });
         await writeRemoteConfig(host, next);
-        await bootstrapDaemon(host, token);
+        await bootstrapDaemon(host, effectiveToken);
       }
       pendingBootstrapHosts.delete(host.id);
       log.info('remote codex daemon (re)bootstrapped with MCP bridge env', {

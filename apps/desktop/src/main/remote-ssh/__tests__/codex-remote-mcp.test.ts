@@ -46,12 +46,13 @@ function fakeHost(hostId: string, configContent: string) {
 /**
  * 从 write 命令里解出写入的 config 内容。依赖 writeConfigCmd 的
  * `printf '%s' '<base64>'` 形态 (base64 无单引号):取命令里最长的类
- * base64 token 解码。
+ * base64 token 解码。下限 16:清理后的小 config (如只剩一行 model) base64
+ * 也只有二十余字符;命令里其余 token 均被符号断开, 不会更长的误匹配。
  */
 function decodeWrittenConfig(execCmds: string[]): string | null {
   for (const cmd of execCmds) {
     if (!cmd.includes('base64 -d')) continue;
-    const tokens = cmd.match(/[A-Za-z0-9+/=]{80,}/g) ?? [];
+    const tokens = cmd.match(/[A-Za-z0-9+/=]{16,}/g) ?? [];
     const b64 = tokens.sort((a, b) => b.length - a.length)[0];
     if (b64) return Buffer.from(b64, 'base64').toString('utf-8');
   }
@@ -350,7 +351,7 @@ describe('ensureRemoteCodexMcpBridge per-host serialization', () => {
 
 describe('ensureRemoteCodexMcpBridge live-turn defer', () => {
   const bridgeDeps = {
-    ensureBridgeStarted: async () => ({ port: 38080, serverNames: SERVERS }),
+    ensureBridgeStarted: async () => ({ port: 38080, serverNames: SERVERS, bridgeInstanceId: 'bridge-1' }),
   };
 
   it('defers config write and daemon restart while a live turn exists on the host', async () => {
@@ -454,7 +455,7 @@ describe('ensureRemoteCodexMcpBridge bootstrap retry', () => {
     } as unknown as RemoteHost;
 
     const deps = {
-      ensureBridgeStarted: async () => ({ port: 38080, serverNames: SERVERS }),
+      ensureBridgeStarted: async () => ({ port: 38080, serverNames: SERVERS, bridgeInstanceId: 'bridge-1' }),
       hasLiveTurnOnHost: () => false,
     };
     const first = await ensureRemoteCodexMcpBridge(host, deps);
@@ -483,6 +484,7 @@ describe('ensureRemoteCodexMcpBridge server whitelist', () => {
       ensureBridgeStarted: async () => ({
         port: 38080,
         serverNames: ['cindy_orca', 'cindy_memory', 'orca_worker_bridge', 'cindy_ssh'],
+        bridgeInstanceId: 'bridge-1',
       }),
       hasLiveTurnOnHost: () => false,
     });
@@ -495,17 +497,69 @@ describe('ensureRemoteCodexMcpBridge server whitelist', () => {
     expect(written).not.toContain('cindy_ssh');
   });
 
-  it('is a no-op success when the bridge exposes no whitelist server', async () => {
-    // collab plugin 禁用 → bridge 上没有 cindy_orca:不写 config, 不重启
-    // daemon, 按"远端无 MCP"放行。
+  it('is a no-op success when the bridge exposes no whitelist server and nothing was ever injected', async () => {
+    // collab plugin 禁用 → bridge 上没有 cindy_orca;远端 config 本来就没
+    // 注入过 → merge('') 无漂移:不写 config, 不重启 daemon。
     const { host, execCmds } = fakeHost('host-no-whitelist', '');
     const result = await ensureRemoteCodexMcpBridge(host, {
-      ensureBridgeStarted: async () => ({ port: 38080, serverNames: ['cindy_memory'] }),
+      ensureBridgeStarted: async () => ({ port: 38080, serverNames: ['cindy_memory'], bridgeInstanceId: 'bridge-1' }),
       hasLiveTurnOnHost: () => false,
     });
     expect(result.ok).toBe(true);
     const joined = execCmds.join('\n');
     expect(joined).not.toContain('base64 -d');
     expect(joined).not.toContain('bootstrap');
+  });
+
+  it('clears a stale managed block and rebootstraps when collab gets disabled after a prior injection', async () => {
+    // review P2 回归:之前注入过的 host 上 collab 被禁用 (白名单为空) 时,
+    // 不能早退 — 旧受管段必须剥除并重启 daemon (清掉 token env 与死配置),
+    // 否则远端 session 继续调用已失效的 MCP endpoint。
+    const stale = renderManagedMcpBlock({ remotePort: 47921, serverNames: SERVERS, tokenFingerprint: 'fp-old' });
+    const existing = `model = "gpt-5.5"\n\n${stale}\n`;
+    const { host, execCmds } = fakeHost('host-cleanup', existing);
+    const result = await ensureRemoteCodexMcpBridge(host, {
+      ensureBridgeStarted: async () => ({ port: 38080, serverNames: ['cindy_memory'], bridgeInstanceId: 'bridge-1' }),
+      hasLiveTurnOnHost: () => false,
+    });
+    expect(result.ok).toBe(true);
+    const joined = execCmds.join('\n');
+    expect(joined).toContain('base64 -d'); // 写了清理后的 config
+    expect(joined).toContain('bootstrap'); // 重启 daemon 清 env
+    const written = decodeWrittenConfig(execCmds);
+    expect(written).not.toBeNull();
+    expect(written).not.toContain('cindy-remote-mcp'); // 受管段已剥除
+    expect(written).toContain('model = "gpt-5.5"'); // 用户配置保留
+  });
+
+  it('rebootstraps when the bridge instance is recreated with the same token and port', async () => {
+    // review P2 回归:bridge 重建后旧 mcp-session-id 全失效, 但 token
+    // (persistent) 与端口 (per-host 固定) 不变 — 代际 id 必须进漂移指纹,
+    // 否则常驻 daemon 持旧 id 打新 bridge 全部 404。
+    const { host: host1, execCmds: execCmds1 } = fakeHost('host-regen', '');
+    const deps = (instanceId: string) => ({
+      ensureBridgeStarted: async () => ({ port: 38080, serverNames: SERVERS, bridgeInstanceId: instanceId }),
+      hasLiveTurnOnHost: () => false,
+    });
+    const first = await ensureRemoteCodexMcpBridge(host1, deps('bridge-1'));
+    expect(first.ok).toBe(true);
+    const writtenFirst = decodeWrittenConfig(execCmds1);
+    expect(writtenFirst).toContain('# cindy-token-fingerprint:');
+
+    // 远端 config 已是 bridge-1 指纹;bridge 重建 (bridge-2) → 指纹漂移 →
+    // 重写 config 并再 bootstrap (daemon 仍存活, changed 是唯一触发)。
+    const { host: host2, execCmds: execCmds2 } = fakeHost('host-regen', writtenFirst ?? '');
+    const second = await ensureRemoteCodexMcpBridge(host2, deps('bridge-2'));
+    expect(second.ok).toBe(true);
+    const joined2 = execCmds2.join('\n');
+    expect(joined2).toContain('base64 -d');
+    expect(joined2).toContain('bootstrap');
+    // 幂等对照:同代际重复 ensure 不触发重写/重启。
+    const { host: host3, execCmds: execCmds3 } = fakeHost('host-regen', decodeWrittenConfig(execCmds2) ?? '');
+    const third = await ensureRemoteCodexMcpBridge(host3, deps('bridge-2'));
+    expect(third.ok).toBe(true);
+    const joined3 = execCmds3.join('\n');
+    expect(joined3).not.toContain('base64 -d');
+    expect(joined3).not.toContain('bootstrap');
   });
 });
