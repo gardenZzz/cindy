@@ -525,13 +525,14 @@ import { registerRemoteCmdIpc } from './commands/remoteCmdIpc.js';
 import {
   resolvePreferredSystemLocale,
   resolveSystemLocale,
-  type SupportedLocale,
 } from '../shared/locale.js';
 import {
   IM_DEFAULT_SETTINGS,
   isImDefaultAgentKind,
   isImDefaultEffort,
+  isImDefaultPermissionMode,
   isImDefaultSettingsChannel,
+  isWechatUnsupportedPermissionMode,
   type ImDefaultAgentKind,
   type ImDefaultAgentSettings,
   type ImDefaultSettingsChannel,
@@ -2537,7 +2538,11 @@ const registerIpcHandlers = () => {
     MAKER_IPC_INVOKE.IM_DEFAULT_SETTINGS_SET,
     async (_e, patch: unknown, rawChannel: unknown) => {
       const channel = parseImDefaultSettingsChannel(rawChannel);
-      writeImDefaultSettingsPatch(parseImDefaultSettingsPatch(patch), channel);
+      const parsedPatch = parseImDefaultSettingsPatch(patch);
+      if (channel === 'wechat' && isWechatUnsupportedPermissionMode(parsedPatch.permissionMode)) {
+        throwIpcError('INVALID_PARAMS', 'personal WeChat does not support this permission mode');
+      }
+      writeImDefaultSettingsPatch(parsedPatch, channel);
       return imDefaultSettingsWire(channel);
     },
   );
@@ -5935,6 +5940,12 @@ function parseImDefaultSettingsPatch(raw: unknown): ImDefaultSettingsPatch {
       throwIpcError('INVALID_PARAMS', 'im default agentKind invalid');
     }
     patch.agentKind = input.agentKind;
+  }
+  if ('permissionMode' in input) {
+    if (!isImDefaultPermissionMode(input.permissionMode)) {
+      throwIpcError('INVALID_PARAMS', 'im default permissionMode invalid');
+    }
+    patch.permissionMode = input.permissionMode;
   }
   if ('agents' in input) {
     if (!input.agents || typeof input.agents !== 'object' || Array.isArray(input.agents)) {
