@@ -54,6 +54,30 @@ describe('getRemoteNewMakerDefaults (device-link 远程草稿镜像)', () => {
     });
   });
 
+  it('cursor vendor 独立槽：不回落 cc/codex', () => {
+    seed({
+      lastByVendor: {
+        cc: { model: 'claude-opus-4-8', effort: 'high' },
+        codex: { model: 'gpt-5.4', effort: 'high' },
+        cursor: { model: 'auto', effort: 'medium', providerId: null },
+      },
+      fastModeByModel: { auto: true },
+      effortByModel: { auto: 'low' },
+    });
+    expect(getRemoteNewMakerDefaults('cursor')).toMatchObject({
+      model: 'auto',
+      effort: 'medium',
+      fastMode: true,
+      providerId: null,
+    });
+    expect(getWorkerDefaultsFromNewMaker('cursor')).toMatchObject({
+      model: 'auto',
+      effort: 'low', // worker 路径优先 effortByModel
+      fastMode: true,
+      providerId: null,
+    });
+  });
+
   it('effort 缺 lastByVendor 值时退回 effortByModel', () => {
     seed({
       lastByVendor: { cc: { model: 'claude-opus-4-8' } },

@@ -1503,7 +1503,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
   syncNewMakerDraft: (snapshot: {
     lastByVendor: Partial<
       Record<
-        'cc' | 'codex',
+        'cc' | 'codex' | 'cursor',
         { model?: string; effort?: string; permissionMode?: string; providerId?: string | null }
       >
     >;

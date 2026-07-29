@@ -192,6 +192,7 @@ import { GLOBAL_PLUGIN_IDS } from '../maker-host/plugins/types.js';
 import { assertCollabProjectEnabled } from './collabProjectPolicy.js';
 import type { GitSnapshotCoordinator } from '../git-snapshot/gitSnapshotCoordinator.js';
 import {
+  buildNewMakerDraftChangedPayload,
   getRemoteNewMakerDefaults,
   getWorkerDefaultsFromNewMaker,
   type NewMakerDraftSnapshot,
@@ -199,6 +200,7 @@ import {
   setNewMakerDraftCache,
   setProviderModelMemoryCache,
 } from '../maker-host/newMakerDefaultsCache.js';
+import { isMakerCoreAgentKind } from '../../shared/agentKindDraftVendor.js';
 import { withRehydrateCloseSuppressed } from '../maker-host/rehydrateCloseSuppression.js';
 import { handleCloseSessionRequest } from './closeSessionRequest.js';
 import {
@@ -3421,8 +3423,8 @@ export function registerMakerIpc(maker: Maker, options: RegisterMakerIpcOptions)
       active?: unknown;
       markModelChoice?: unknown;
     };
-    if (p.agent !== 'claude-code' && p.agent !== 'codex') {
-      throwIpcError('INVALID_PARAMS', 'agent must be claude-code|codex');
+    if (!isMakerCoreAgentKind(p.agent)) {
+      throwIpcError('INVALID_PARAMS', 'agent must be claude-code|codex|cursor');
     }
     if (p.providerId !== undefined && typeof p.providerId !== 'string') {
       throwIpcError('INVALID_PARAMS', 'providerId must be string');
@@ -3469,8 +3471,8 @@ export function registerMakerIpc(maker: Maker, options: RegisterMakerIpcOptions)
     if (typeof p.sessionId !== 'string' || !p.sessionId) {
       throwIpcError('INVALID_PARAMS', 'sessionId required');
     }
-    if (p.agent !== 'claude-code' && p.agent !== 'codex') {
-      throwIpcError('INVALID_PARAMS', 'agent must be claude-code|codex');
+    if (!isMakerCoreAgentKind(p.agent)) {
+      throwIpcError('INVALID_PARAMS', 'agent must be claude-code|codex|cursor');
     }
     if (typeof p.providerId !== 'string' || !p.providerId) {
       throwIpcError('INVALID_PARAMS', 'providerId required');
@@ -3508,7 +3510,7 @@ export function registerMakerIpc(maker: Maker, options: RegisterMakerIpcOptions)
     };
     if (
       typeof p.sessionId !== 'string' || !p.sessionId
-      || (p.agent !== 'claude-code' && p.agent !== 'codex')
+      || !isMakerCoreAgentKind(p.agent)
       || typeof p.providerId !== 'string' || !p.providerId
       || typeof p.model !== 'string' || !p.model
     ) return;
@@ -8082,9 +8084,6 @@ function broadcastNewMakerDraftChanged(): void {
   draftChangedScheduled = true;
   setTimeout(() => {
     draftChangedScheduled = false;
-    tapWindowBroadcast(MAKER_PUSH.NEW_MAKER_DRAFT_CHANGED, {
-      claudeCode: getRemoteNewMakerDefaults('claude-code'),
-      codex: getRemoteNewMakerDefaults('codex'),
-    });
+    tapWindowBroadcast(MAKER_PUSH.NEW_MAKER_DRAFT_CHANGED, buildNewMakerDraftChangedPayload());
   }, 0);
 }

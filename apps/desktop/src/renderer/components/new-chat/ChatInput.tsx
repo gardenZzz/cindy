@@ -162,6 +162,7 @@ import type { Effort, PermissionMode } from '@/lib/userPreferences.types';
 import { getAppShortcutCombos } from '@/lib/appShortcutStore';
 import { getNextPermissionMode } from '@/lib/permissionModeCycle';
 import { matchesKeyboardEvent } from '../../../shared/appShortcuts';
+import { agentKindToDraftVendor } from '../../../shared/agentKindDraftVendor';
 import { createLogger } from '@/lib/logger';
 import { serializeEditorContent, serializeEditorSlice } from './composerContentSerialization';
 import {
@@ -3650,7 +3651,7 @@ export function ChatInput({
       const remoteDeviceId =
         opts.remoteDeviceId ?? getSessionDeviceId(sessionId) ?? deviceLinkDeviceId;
       if (!remoteDeviceId) {
-        const vendor = currentModelAgentKind === 'codex' ? 'codex' : 'cc';
+        const vendor = agentKindToDraftVendor(currentModelAgentKind);
         patchVendorPrefsPreservingModelChoice(vendor, {
           model: modelId,
           providerId: activeProviderId ?? null,
