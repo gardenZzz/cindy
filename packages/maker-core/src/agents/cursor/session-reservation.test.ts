@@ -4,6 +4,9 @@
  */
 
 import { afterEach, describe, expect, it, vi } from 'vitest';
+import { mkdtempSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 
 import { CursorAgent } from './index.js';
 import { Session } from '../../session.js';
@@ -146,10 +149,16 @@ function completePrompt(
 
 async function bootSession(
   transport: FakeTransport,
-): Promise<{ session: Session; handle: Awaited<ReturnType<CursorAgent['startSession']>> }> {
+): Promise<{
+  session: Session;
+  handle: Awaited<ReturnType<CursorAgent['startSession']>>;
+  userDataPath: string;
+  agent: CursorAgent;
+}> {
+  const userDataPath = mkdtempSync(join(tmpdir(), 'cindy-cursor-reserve-'));
   const agent = new CursorAgent({
     auth: authStub(),
-    runtimeConfig: { userDataPath: '/tmp/cindy-cursor-session-reservation-test' },
+    runtimeConfig: { userDataPath },
     binaryPath: '/dev/null/cursor-agent',
     logger: createConsoleLogger('cursor-session-reservation'),
   });
@@ -218,7 +227,7 @@ async function bootSession(
   // Drain events so Session.releaseSendReservationIfObserved 能跑。
   session.onEvent(() => undefined);
 
-  return { session, handle };
+  return { session, handle, userDataPath, agent };
 }
 
 afterEach(() => {
@@ -229,98 +238,106 @@ describe('Cursor × Session reservation + turn generation', () => {
   it('abort releases Session busy so B can run; late A cannot clear B watchdog or accept C', async () => {
     vi.stubEnv('CINDY_CURSOR_TOOL_IDLE_MS', '30000');
     const transport = new FakeTransport();
-    const { session, handle } = await bootSession(transport);
+    const { session, handle, userDataPath, agent } = await bootSession(transport);
+    try {
+      const events: AgentEvent[] = [];
+      session.onEvent((ev) => events.push(ev));
 
-    const events: AgentEvent[] = [];
-    session.onEvent((ev) => events.push(ev));
+      const acceptedA = await session.send('turn-A');
+      expect(acceptedA).toEqual({ accepted: true });
+      await waitForPrompt(transport, 1);
+      expect(session.isTurnRunning()).toBe(true);
 
-    const acceptedA = await session.send('turn-A');
-    expect(acceptedA).toEqual({ accepted: true });
-    await waitForPrompt(transport, 1);
-    expect(session.isTurnRunning()).toBe(true);
+      await session.abort();
+      expect(session.isTurnRunning()).toBe(false);
 
-    await session.abort();
-    expect(session.isTurnRunning()).toBe(false);
+      const acceptedB = await session.send('turn-B');
+      expect(acceptedB).toEqual({ accepted: true });
+      await waitForPrompt(transport, 2);
+      expect(session.isTurnRunning()).toBe(true);
 
-    const acceptedB = await session.send('turn-B');
-    expect(acceptedB).toEqual({ accepted: true });
-    await waitForPrompt(transport, 2);
-    expect(session.isTurnRunning()).toBe(true);
+      emitToolCall(transport, handle.id, 'b-tool');
+      await new Promise((r) => setTimeout(r, 20));
 
-    emitToolCall(transport, handle.id, 'b-tool');
-    await new Promise((r) => setTimeout(r, 20));
-
-    const prompts = transport.findAllRequests(Method.SessionPrompt);
-    expect(prompts.length).toBe(2);
-    const doneBeforeLateA = events.filter((e) => e.type === 'done').length;
-    const idleBeforeLateA = events.filter(
-      (e) => e.type === 'status' && (e.data as { isRunning?: boolean }).isRunning === false,
-    ).length;
-
-    // A 晚到：若无 generation 守卫会清 B 的 toolIdle、发错误 done/status、finally 把 B 标 idle。
-    completePrompt(transport, prompts[0]!.id, 'cancelled');
-    await new Promise((r) => setTimeout(r, 30));
-
-    expect(session.isTurnRunning()).toBe(true);
-    expect(events.filter((e) => e.type === 'done').length).toBe(doneBeforeLateA);
-    expect(
-      events.filter(
+      const prompts = transport.findAllRequests(Method.SessionPrompt);
+      expect(prompts.length).toBe(2);
+      const doneBeforeLateA = events.filter((e) => e.type === 'done').length;
+      const idleBeforeLateA = events.filter(
         (e) => e.type === 'status' && (e.data as { isRunning?: boolean }).isRunning === false,
-      ).length,
-    ).toBe(idleBeforeLateA);
-    await expect(session.send('turn-C')).rejects.toMatchObject({ code: 'SESSION_RUNNING' });
+      ).length;
 
-    // B 仍 busy：完成 B 后应能再发。
-    completePrompt(transport, prompts[1]!.id, 'end_turn');
-    await vi.waitFor(() => expect(session.isTurnRunning()).toBe(false));
-    await expect(session.send('turn-after-B')).resolves.toEqual({ accepted: true });
+      // A 晚到：若无 generation 守卫会清 B 的 toolIdle、发错误 done/status、finally 把 B 标 idle。
+      completePrompt(transport, prompts[0]!.id, 'cancelled');
+      await new Promise((r) => setTimeout(r, 30));
 
-    await session.close();
+      expect(session.isTurnRunning()).toBe(true);
+      expect(events.filter((e) => e.type === 'done').length).toBe(doneBeforeLateA);
+      expect(
+        events.filter(
+          (e) => e.type === 'status' && (e.data as { isRunning?: boolean }).isRunning === false,
+        ).length,
+      ).toBe(idleBeforeLateA);
+      await expect(session.send('turn-C')).rejects.toMatchObject({ code: 'SESSION_RUNNING' });
+
+      // B 仍 busy：完成 B 后应能再发。
+      completePrompt(transport, prompts[1]!.id, 'end_turn');
+      await vi.waitFor(() => expect(session.isTurnRunning()).toBe(false));
+      await expect(session.send('turn-after-B')).resolves.toEqual({ accepted: true });
+
+      await session.close();
+    } finally {
+      await agent.dispose().catch(() => undefined);
+      rmSync(userDataPath, { recursive: true, force: true });
+    }
   });
 
   it('watchdog timeout releases Session busy; late A response does not finalize B', async () => {
     vi.stubEnv('CINDY_CURSOR_TOOL_IDLE_MS', '40');
     const transport = new FakeTransport();
-    const { session, handle } = await bootSession(transport);
+    const { session, handle, userDataPath, agent } = await bootSession(transport);
+    try {
+      const events: AgentEvent[] = [];
+      session.onEvent((ev) => events.push(ev));
 
-    const events: AgentEvent[] = [];
-    session.onEvent((ev) => events.push(ev));
+      await session.send('turn-A');
+      await waitForPrompt(transport, 1);
+      emitToolCall(transport, handle.id, 'hanging-a');
 
-    await session.send('turn-A');
-    await waitForPrompt(transport, 1);
-    emitToolCall(transport, handle.id, 'hanging-a');
+      await vi.waitFor(
+        () => {
+          expect(
+            events.some(
+              (e) =>
+                e.type === 'error' &&
+                (e.data as { reason?: string }).reason === 'tool_call_idle_timeout',
+            ),
+          ).toBe(true);
+        },
+        { timeout: 2000 },
+      );
+      expect(session.isTurnRunning()).toBe(false);
 
-    await vi.waitFor(
-      () => {
-        expect(
-          events.some(
-            (e) =>
-              e.type === 'error' &&
-              (e.data as { reason?: string }).reason === 'tool_call_idle_timeout',
-          ),
-        ).toBe(true);
-      },
-      { timeout: 2000 },
-    );
-    expect(session.isTurnRunning()).toBe(false);
+      await session.send('turn-B');
+      await waitForPrompt(transport, 2);
+      expect(session.isTurnRunning()).toBe(true);
 
-    await session.send('turn-B');
-    await waitForPrompt(transport, 2);
-    expect(session.isTurnRunning()).toBe(true);
+      const prompts = transport.findAllRequests(Method.SessionPrompt);
+      completePrompt(transport, prompts[0]!.id, 'cancelled');
+      await new Promise((r) => setTimeout(r, 30));
 
-    const prompts = transport.findAllRequests(Method.SessionPrompt);
-    completePrompt(transport, prompts[0]!.id, 'cancelled');
-    await new Promise((r) => setTimeout(r, 30));
+      expect(session.isTurnRunning()).toBe(true);
+      await expect(session.send('turn-C')).rejects.toMatchObject({ code: 'SESSION_RUNNING' });
 
-    expect(session.isTurnRunning()).toBe(true);
-    await expect(session.send('turn-C')).rejects.toMatchObject({ code: 'SESSION_RUNNING' });
+      // A 晚到后不应再推一对 cancelled done（B 仍 running）；B 自己收尾才 idle。
+      const doneAfterA = events.filter((e) => e.type === 'done').length;
+      completePrompt(transport, prompts[1]!.id, 'end_turn');
+      await vi.waitFor(() => expect(session.isTurnRunning()).toBe(false));
+      expect(events.filter((e) => e.type === 'done').length).toBeGreaterThanOrEqual(doneAfterA);
 
-    // A 晚到后不应再推一对 cancelled done（B 仍 running）；B 自己收尾才 idle。
-    const doneAfterA = events.filter((e) => e.type === 'done').length;
-    completePrompt(transport, prompts[1]!.id, 'end_turn');
-    await vi.waitFor(() => expect(session.isTurnRunning()).toBe(false));
-    expect(events.filter((e) => e.type === 'done').length).toBeGreaterThanOrEqual(doneAfterA);
-
-    await session.close();
+      await session.close();
+    } finally {
+      await agent.dispose().catch(() => undefined);
+      rmSync(userDataPath, { recursive: true, force: true });
+    }
   });
 });

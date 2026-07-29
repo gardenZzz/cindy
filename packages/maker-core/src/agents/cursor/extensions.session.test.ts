@@ -3,6 +3,9 @@
  */
 
 import { describe, expect, it } from 'vitest';
+import { mkdtempSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 
 import { CursorAgent } from './index.js';
 import { createConsoleLogger } from '../../interfaces/logger.js';
@@ -92,9 +95,10 @@ function authStub(): AuthAdapter {
 }
 
 async function boot(transport: FakeTransport, startOpts: Record<string, unknown> = {}) {
+  const userDataPath = mkdtempSync(join(tmpdir(), 'cindy-cursor-ext-'));
   const agent = new CursorAgent({
     auth: authStub(),
-    runtimeConfig: {},
+    runtimeConfig: { userDataPath },
     binaryPath: '/dev/null/cursor-agent',
     logger: createConsoleLogger('cursor-ext-session'),
   });
@@ -141,13 +145,27 @@ async function boot(transport: FakeTransport, startOpts: Record<string, unknown>
     }
   };
 
-  const handle = await agent.startSession({
-    workingDir: '/tmp',
-    model: 'default',
-    vendorOptions: { createAcpTransport: () => transport },
-    ...startOpts,
-  });
-  return { agent, handle };
+  try {
+    const handle = await agent.startSession({
+      workingDir: '/tmp',
+      model: 'default',
+      vendorOptions: { createAcpTransport: () => transport },
+      ...startOpts,
+    });
+    const prevClose = handle.close.bind(handle);
+    handle.close = async () => {
+      try {
+        await prevClose();
+      } finally {
+        await agent.dispose().catch(() => undefined);
+        rmSync(userDataPath, { recursive: true, force: true });
+      }
+    };
+    return { agent, handle };
+  } catch (err) {
+    rmSync(userDataPath, { recursive: true, force: true });
+    throw err;
+  }
 }
 
 describe('CursorAgent planMode + extensions (FakeTransport)', () => {

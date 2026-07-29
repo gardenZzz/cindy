@@ -149,6 +149,8 @@ function defaultVendorPrefs(vendor: MakerVendor): VendorPrefs {
   }
   if (vendor === 'cursor') {
     return {
+      // 种子默认 Auto 仅供 UI 展示；是否显式选过由 modelChosenByVendor.cursor 区分。
+      // CursorAgent 对未显式选择的 Auto 跟随 ACP current，不发 set_config_option（#8）。
       model: 'auto',
       effort: 'medium',
       permissionMode: 'auto',

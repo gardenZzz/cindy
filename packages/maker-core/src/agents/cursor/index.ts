@@ -38,6 +38,8 @@ import type {
   InteractionResolver,
   UsageSnapshot,
 } from '../../types/events.js';
+import { readFileSync } from 'node:fs';
+import { extname } from 'node:path';
 import type { Effort, PermissionMode, UserContentBlock, UserMessage } from '../../types/common.js';
 import { createAsyncQueue, type AsyncQueue } from '../shared/async-queue.js';
 import { UsageTracker } from '../shared/usage-tracker.js';
@@ -224,6 +226,37 @@ const CAPABILITIES: Capabilities = {
   extraDirs: UNSUPPORTED.extraDirs,
 };
 
+function stripFileUrl(raw: string): string {
+  if (!raw.startsWith('file://')) return raw;
+  try {
+    return decodeURIComponent(raw.slice('file://'.length));
+  } catch {
+    return raw.slice('file://'.length);
+  }
+}
+
+function mimeTypeForImagePath(filePath: string, provided?: string): string {
+  if (provided && provided.trim()) return provided.trim();
+  switch (extname(filePath).toLowerCase()) {
+    case '.jpg':
+    case '.jpeg':
+      return 'image/jpeg';
+    case '.gif':
+      return 'image/gif';
+    case '.webp':
+      return 'image/webp';
+    case '.bmp':
+      return 'image/bmp';
+    case '.png':
+    default:
+      return 'image/png';
+  }
+}
+
+/**
+ * Encode Cindy UserMessage into ACP prompt blocks.
+ * Image blocks become real `ImageContentBlock` (base64 data + mimeType, or http(s) uri).
+ */
 function userMessageToPromptBlocks(message: UserMessage): ContentBlock[] {
   const content = message.content;
   if (typeof content === 'string') {
@@ -236,7 +269,31 @@ function userMessageToPromptBlocks(message: UserMessage): ContentBlock[] {
       continue;
     }
     if (block.type === 'image') {
-      blocks.push({ type: 'text', text: `[image: ${block.path}]` });
+      const raw = block.path;
+      if (raw.startsWith('http://') || raw.startsWith('https://')) {
+        blocks.push({
+          type: 'image',
+          uri: raw,
+          mimeType: mimeTypeForImagePath(raw, block.mimeType),
+        });
+        continue;
+      }
+      const filePath = stripFileUrl(raw);
+      let data: string;
+      try {
+        data = readFileSync(filePath).toString('base64');
+      } catch (err) {
+        throw new Error(
+          `Cursor send: failed to read image at ${filePath}: ${
+            err instanceof Error ? err.message : String(err)
+          }`,
+        );
+      }
+      blocks.push({
+        type: 'image',
+        data,
+        mimeType: mimeTypeForImagePath(filePath, block.mimeType),
+      });
       continue;
     }
     if (block.type === 'mention') {
@@ -424,9 +481,15 @@ export class CursorAgent extends BaseAgent {
     let cursorTodos: CursorTodoItem[] = [];
     let extensionSeq = 0;
 
+    const userDataPath = this.deps.runtimeConfig.userDataPath;
+    if (!userDataPath || !userDataPath.trim()) {
+      throw new Error(
+        'CursorAgent requires runtimeConfig.userDataPath (host must inject; no HOME fallback)',
+      );
+    }
     const isolated = createCursorIsolatedConfigDir(process.env, {
       stableKey: opts.sessionId,
-      userDataPath: this.deps.runtimeConfig.userDataPath,
+      userDataPath,
     });
 
     const pushAll = (events: AgentEvent[]): void => {
@@ -1027,19 +1090,31 @@ export class CursorAgent extends BaseAgent {
     };
 
     const applyInitialModelConfig = async () => {
-      const desiredModel = toCursorProductModelId(opts.model || mutableModel);
-      if (desiredModel !== mutableModel) {
-        const options = await setConfigOption('model', toCursorAcpModelId(desiredModel));
-        mutableModel = desiredModel;
-        await applyConfigEnrichment(mutableModel, options);
-      } else if (desiredModel !== CURSOR_AUTO_MODEL.id) {
-        try {
+      const modelRaw = typeof opts.model === 'string' ? opts.model.trim() : '';
+      const desiredModel = toCursorProductModelId(modelRaw || mutableModel);
+      const modelExplicit = opts.vendorOptions?.cursorModelExplicit === true;
+      // 未选择 / 空白 model / 显式 follow：采用 ACP current，不发 set_config_option。
+      // 种子默认 `auto`（New Maker 未碰 picker）也走 follow；显式选 Auto 需
+      // vendorOptions.cursorModelExplicit === true（#8 / review P1）。
+      const followAcpCurrent =
+        opts.vendorOptions?.followAcpCurrentModel === true ||
+        !modelRaw ||
+        (!modelExplicit && desiredModel === CURSOR_AUTO_MODEL.id);
+
+      if (!followAcpCurrent) {
+        if (desiredModel !== mutableModel) {
           const options = await setConfigOption('model', toCursorAcpModelId(desiredModel));
-          await applyConfigEnrichment(desiredModel, options);
-        } catch (err) {
-          log.warn('cursor refresh model config failed', {
-            message: err instanceof Error ? err.message : String(err),
-          });
+          mutableModel = desiredModel;
+          await applyConfigEnrichment(mutableModel, options);
+        } else if (desiredModel !== CURSOR_AUTO_MODEL.id) {
+          try {
+            const options = await setConfigOption('model', toCursorAcpModelId(desiredModel));
+            await applyConfigEnrichment(desiredModel, options);
+          } catch (err) {
+            log.warn('cursor refresh model config failed', {
+              message: err instanceof Error ? err.message : String(err),
+            });
+          }
         }
       }
 

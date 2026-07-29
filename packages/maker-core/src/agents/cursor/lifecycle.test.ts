@@ -5,6 +5,9 @@
  */
 
 import { describe, expect, it, vi } from 'vitest';
+import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 
 import { CursorAgent } from './index.js';
 import { createConsoleLogger } from '../../interfaces/logger.js';
@@ -122,10 +125,16 @@ async function drainUntil(
 async function bootWithTransport(
   transport: FakeTransport,
   startOpts: Record<string, unknown> = {},
-): Promise<{ agent: CursorAgent; handle: Awaited<ReturnType<CursorAgent['startSession']>> }> {
+  models: { currentModelId: string; availableModels: Array<{ modelId: string; name: string }> } = MODELS,
+): Promise<{
+  agent: CursorAgent;
+  handle: Awaited<ReturnType<CursorAgent['startSession']>>;
+  userDataPath: string;
+}> {
+  const userDataPath = mkdtempSync(join(tmpdir(), 'cindy-cursor-life-'));
   const agent = new CursorAgent({
     auth: authStub(),
-    runtimeConfig: {},
+    runtimeConfig: { userDataPath },
     binaryPath: '/dev/null/cursor-agent',
     logger: createConsoleLogger('cursor-lifecycle-unit'),
   });
@@ -161,7 +170,7 @@ async function bootWithTransport(
         transport.emit({
           jsonrpc: JSONRPC_VERSION,
           id: msg.id,
-          result: { sessionId: 'fresh-session-id', models: MODELS },
+          result: { sessionId: 'fresh-session-id', models },
         }),
       );
       return;
@@ -197,7 +206,7 @@ async function bootWithTransport(
         transport.emit({
           jsonrpc: JSONRPC_VERSION,
           id: msg.id,
-          result: { models: MODELS },
+          result: { models },
         });
       });
       return;
@@ -228,197 +237,306 @@ async function bootWithTransport(
     }
   };
 
-  const handlePromise = agent.startSession({
-    sessionId: 'biz-1',
-    model: 'auto',
-    workingDir: '/tmp',
-    vendorOptions: { createAcpTransport: () => transport },
-    ...startOpts,
-  });
+  try {
+    const { vendorOptions: startVendorOptions, ...restStartOpts } = startOpts;
+    const handle = await agent.startSession({
+      sessionId: 'biz-1',
+      model: 'auto',
+      workingDir: '/tmp',
+      ...restStartOpts,
+      vendorOptions: {
+        createAcpTransport: () => transport,
+        ...(isRecord(startVendorOptions) ? startVendorOptions : {}),
+      },
+    });
+    return { agent, handle, userDataPath };
+  } catch (err) {
+    rmSync(userDataPath, { recursive: true, force: true });
+    throw err;
+  }
+}
 
-  const handle = await handlePromise;
-  return { agent, handle };
+async function withBootedSession(
+  run: (ctx: {
+    transport: FakeTransport;
+    handle: Awaited<ReturnType<CursorAgent['startSession']>>;
+    agent: CursorAgent;
+  }) => Promise<void>,
+  startOpts: Record<string, unknown> = {},
+  models?: { currentModelId: string; availableModels: Array<{ modelId: string; name: string }> },
+): Promise<void> {
+  const transport = new FakeTransport();
+  const { agent, handle, userDataPath } = await bootWithTransport(transport, startOpts, models);
+  try {
+    await run({ transport, handle, agent });
+  } finally {
+    await handle.close().catch(() => undefined);
+    await agent.dispose().catch(() => undefined);
+    rmSync(userDataPath, { recursive: true, force: true });
+  }
 }
 
 describe('CursorAgent lifecycle (FakeTransport)', () => {
   it('resume via session/load skips upstream history replay', async () => {
-    const transport = new FakeTransport();
-    const { handle } = await bootWithTransport(transport, {
-      resumeSessionId: 'resume-me-please',
-    });
+    await withBootedSession(async ({ transport, handle }) => {
+      const load = transport.findRequest(Method.SessionLoad);
+      expect(load).toBeTruthy();
+      expect((load!.params as { sessionId: string }).sessionId).toBe('resume-me-please');
+      expect(handle.id).toBe('resume-me-please');
 
-    const load = transport.findRequest(Method.SessionLoad);
-    expect(load).toBeTruthy();
-    expect((load!.params as { sessionId: string }).sessionId).toBe('resume-me-please');
-    expect(handle.id).toBe('resume-me-please');
+      const early: AgentEvent[] = [];
+      const consume = (async () => {
+        for await (const ev of handle.events()) {
+          early.push(ev);
+          if (early.length > 20) break;
+        }
+      })();
 
-    // Collect any events emitted during load — must NOT contain REPLAYED_HISTORY text.
-    const early: AgentEvent[] = [];
-    const consume = (async () => {
-      for await (const ev of handle.events()) {
-        early.push(ev);
-        if (early.length > 20) break;
-      }
-    })();
+      await new Promise((r) => setTimeout(r, 30));
+      await handle.close();
+      await consume;
 
-    // Give microtasks a tick, then close.
-    await new Promise((r) => setTimeout(r, 30));
-    await handle.close();
-    await consume;
-
-    const textBlobs = early
-      .filter((e) => e.type === 'text')
-      .map((e) => String((e.data as { text?: string }).text ?? ''));
-    expect(textBlobs.join('')).not.toContain('REPLAYED_HISTORY');
+      const textBlobs = early
+        .filter((e) => e.type === 'text')
+        .map((e) => String((e.data as { text?: string }).text ?? ''));
+      expect(textBlobs.join('')).not.toContain('REPLAYED_HISTORY');
+    }, { resumeSessionId: 'resume-me-please' });
   });
 
   it('invalid resume clears via CAS and creates a fresh session with readable hint', async () => {
-    const transport = new FakeTransport();
     const cas = vi.fn(async () => true);
-    const { handle } = await bootWithTransport(transport, {
+    await withBootedSession(async ({ transport, handle }) => {
+      expect(cas).toHaveBeenCalledWith('dead-session');
+      expect(handle.id).toBe('fresh-session-id');
+      expect(transport.findRequest(Method.SessionNew)).toBeTruthy();
+
+      const events: AgentEvent[] = [];
+      const consume = (async () => {
+        for await (const ev of handle.events()) {
+          events.push(ev);
+          if (ev.type === 'session_id') break;
+        }
+      })();
+      await Promise.race([consume, new Promise((r) => setTimeout(r, 500))]);
+
+      const hint = events.find((e) => e.type === 'error');
+      expect(hint).toBeTruthy();
+      expect(String((hint!.data as { message?: string }).message)).toContain('无法恢复');
+      expect((hint!.data as { isTerminal?: boolean }).isTerminal).toBe(false);
+    }, {
       resumeSessionId: 'dead-session',
       onInvalidResumeSession: cas,
     });
-
-    expect(cas).toHaveBeenCalledWith('dead-session');
-    expect(handle.id).toBe('fresh-session-id');
-    expect(transport.findRequest(Method.SessionNew)).toBeTruthy();
-
-    const events: AgentEvent[] = [];
-    const consume = (async () => {
-      for await (const ev of handle.events()) {
-        events.push(ev);
-        if (ev.type === 'session_id') break;
-      }
-    })();
-    await Promise.race([consume, new Promise((r) => setTimeout(r, 500))]);
-    await handle.close();
-
-    const hint = events.find((e) => e.type === 'error');
-    expect(hint).toBeTruthy();
-    expect(String((hint!.data as { message?: string }).message)).toContain('无法恢复');
-    expect((hint!.data as { isTerminal?: boolean }).isTerminal).toBe(false);
   });
 
   it('abort sends session/cancel and immediately returns UI to idle', async () => {
-    const transport = new FakeTransport();
-    const { handle } = await bootWithTransport(transport);
+    await withBootedSession(async ({ transport, handle }) => {
+      const events: AgentEvent[] = [];
+      const consume = (async () => {
+        for await (const ev of handle.events()) {
+          events.push(ev);
+        }
+      })();
 
-    const events: AgentEvent[] = [];
-    const consume = (async () => {
-      for await (const ev of handle.events()) {
-        events.push(ev);
+      const sendPromise = handle.send({ type: 'user', content: 'hello' });
+      const deadline = Date.now() + 1000;
+      while (Date.now() < deadline && !transport.findRequest(Method.SessionPrompt)) {
+        await new Promise((r) => setTimeout(r, 10));
       }
-    })();
+      expect(transport.findRequest(Method.SessionPrompt)).toBeTruthy();
 
-    const sendPromise = handle.send({ type: 'user', content: 'hello' });
-    // Wait until SessionPrompt is written.
-    const deadline = Date.now() + 1000;
-    while (Date.now() < deadline && !transport.findRequest(Method.SessionPrompt)) {
-      await new Promise((r) => setTimeout(r, 10));
-    }
-    expect(transport.findRequest(Method.SessionPrompt)).toBeTruthy();
+      await handle.abort();
 
-    await handle.abort();
+      const idle = await drainUntil(
+        (async function* () {
+          for (const ev of events) yield ev;
+          for await (const ev of handle.events()) yield ev;
+        })(),
+        (ev) => ev.type === 'status' && (ev.data as { isRunning?: boolean }).isRunning === false,
+        500,
+      ).catch(() => events);
 
-    // Immediate idle — before prompt RPC returns.
-    const idle = await drainUntil(
-      (async function* () {
-        for (const ev of events) yield ev;
-        for await (const ev of handle.events()) yield ev;
-      })(),
-      (ev) => ev.type === 'status' && (ev.data as { isRunning?: boolean }).isRunning === false,
-      500,
-    ).catch(() => events);
+      const sawCancelledStatus = events.some(
+        (e) =>
+          e.type === 'status' &&
+          (e.data as { isRunning?: boolean; text?: string }).isRunning === false,
+      );
+      expect(sawCancelledStatus).toBe(true);
+      expect(transport.findNotifications(Method.SessionCancel).length).toBeGreaterThan(0);
 
-    const sawCancelledStatus = events.some(
-      (e) =>
-        e.type === 'status' &&
-        (e.data as { isRunning?: boolean; text?: string }).isRunning === false,
-    );
-    expect(sawCancelledStatus).toBe(true);
-    expect(transport.findNotifications(Method.SessionCancel).length).toBeGreaterThan(0);
-
-    // Complete the hanging prompt so send() can finish.
-    const prompt = transport.findRequest(Method.SessionPrompt)!;
-    transport.emit({
-      jsonrpc: JSONRPC_VERSION,
-      id: prompt.id,
-      result: { stopReason: 'cancelled' },
+      const prompt = transport.findRequest(Method.SessionPrompt)!;
+      transport.emit({
+        jsonrpc: JSONRPC_VERSION,
+        id: prompt.id,
+        result: { stopReason: 'cancelled' },
+      });
+      await sendPromise;
+      await handle.close();
+      await consume;
+      void idle;
     });
-    await sendPromise;
-    await handle.close();
-    await consume;
-    void idle;
   });
 
   it('tool-call idle watchdog cancels with readable timeout message', async () => {
     vi.stubEnv('CINDY_CURSOR_TOOL_IDLE_MS', '50');
-    const transport = new FakeTransport();
-    const { handle } = await bootWithTransport(transport);
+    try {
+      await withBootedSession(async ({ transport, handle }) => {
+        const events: AgentEvent[] = [];
+        const consume = (async () => {
+          for await (const ev of handle.events()) {
+            events.push(ev);
+          }
+        })();
 
-    const events: AgentEvent[] = [];
-    const consume = (async () => {
-      for await (const ev of handle.events()) {
-        events.push(ev);
-      }
-    })();
+        const sendPromise = handle.send({ type: 'user', content: 'use a tool' });
+        const deadline = Date.now() + 1000;
+        while (Date.now() < deadline && !transport.findRequest(Method.SessionPrompt)) {
+          await new Promise((r) => setTimeout(r, 10));
+        }
 
-    const sendPromise = handle.send({ type: 'user', content: 'use a tool' });
-    const deadline = Date.now() + 1000;
-    while (Date.now() < deadline && !transport.findRequest(Method.SessionPrompt)) {
-      await new Promise((r) => setTimeout(r, 10));
-    }
+        transport.emit({
+          jsonrpc: JSONRPC_VERSION,
+          method: Method.SessionUpdate,
+          params: {
+            sessionId: handle.id,
+            update: {
+              sessionUpdate: 'tool_call',
+              toolCallId: 'hanging-tool',
+              title: 'Shell',
+              kind: 'execute',
+              status: 'in_progress',
+            },
+          },
+        });
 
-    transport.emit({
-      jsonrpc: JSONRPC_VERSION,
-      method: Method.SessionUpdate,
-      params: {
-        sessionId: handle.id,
-        update: {
-          sessionUpdate: 'tool_call',
-          toolCallId: 'hanging-tool',
-          title: 'Shell',
-          kind: 'execute',
-          status: 'in_progress',
-        },
-      },
-    });
+        const timeoutDeadline = Date.now() + 2000;
+        while (Date.now() < timeoutDeadline) {
+          if (
+            events.some(
+              (e) =>
+                e.type === 'error' &&
+                String((e.data as { reason?: string }).reason) === 'tool_call_idle_timeout',
+            )
+          ) {
+            break;
+          }
+          await new Promise((r) => setTimeout(r, 20));
+        }
 
-    // Wait for watchdog.
-    const timeoutDeadline = Date.now() + 2000;
-    while (Date.now() < timeoutDeadline) {
-      if (
-        events.some(
+        const errEv = events.find(
           (e) =>
             e.type === 'error' &&
-            String((e.data as { reason?: string }).reason) === 'tool_call_idle_timeout',
-        )
-      ) {
-        break;
-      }
-      await new Promise((r) => setTimeout(r, 20));
+            (e.data as { reason?: string }).reason === 'tool_call_idle_timeout',
+        );
+        expect(errEv).toBeTruthy();
+        expect(String((errEv!.data as { message?: string }).message)).toContain('无活动');
+        expect(transport.findNotifications(Method.SessionCancel).length).toBeGreaterThan(0);
+
+        const prompt = transport.findRequest(Method.SessionPrompt)!;
+        transport.emit({
+          jsonrpc: JSONRPC_VERSION,
+          id: prompt.id,
+          result: { stopReason: 'cancelled' },
+        });
+        await sendPromise;
+        await handle.close();
+        await consume;
+      });
+    } finally {
+      vi.unstubAllEnvs();
     }
+  });
 
-    const errEv = events.find(
-      (e) =>
-        e.type === 'error' &&
-        (e.data as { reason?: string }).reason === 'tool_call_idle_timeout',
+  it('does not force Auto when ACP current differs and user never chose a model', async () => {
+    const opusModels = {
+      currentModelId: 'claude-opus-4-8',
+      availableModels: [
+        { modelId: 'default', name: 'Auto' },
+        { modelId: 'claude-opus-4-8', name: 'Opus' },
+      ],
+    };
+    await withBootedSession(
+      async ({ transport, handle }) => {
+        expect(handle.model).toBe('claude-opus-4-8');
+        const setModelCalls = transport.written.filter((msg) => {
+          if (!isRecord(msg) || msg.method !== Method.SessionSetConfigOption) return false;
+          const params = msg.params as { configId?: string } | undefined;
+          return params?.configId === 'model';
+        });
+        expect(setModelCalls).toEqual([]);
+      },
+      { model: 'auto' },
+      opusModels,
     );
-    expect(errEv).toBeTruthy();
-    expect(String((errEv!.data as { message?: string }).message)).toContain('无活动');
-    expect(transport.findNotifications(Method.SessionCancel).length).toBeGreaterThan(0);
+  });
 
-    const prompt = transport.findRequest(Method.SessionPrompt)!;
-    transport.emit({
-      jsonrpc: JSONRPC_VERSION,
-      id: prompt.id,
-      result: { stopReason: 'cancelled' },
-    });
-    await sendPromise;
-    await handle.close();
-    await consume;
-    vi.unstubAllEnvs();
+  it('applies Auto when cursorModelExplicit is set', async () => {
+    const opusModels = {
+      currentModelId: 'claude-opus-4-8',
+      availableModels: [
+        { modelId: 'default', name: 'Auto' },
+        { modelId: 'claude-opus-4-8', name: 'Opus' },
+      ],
+    };
+    await withBootedSession(
+      async ({ transport, handle }) => {
+        expect(handle.model).toBe('auto');
+        const setModel = transport.written.find((msg) => {
+          if (!isRecord(msg) || msg.method !== Method.SessionSetConfigOption) return false;
+          const params = msg.params as { configId?: string; value?: string } | undefined;
+          return params?.configId === 'model' && params.value === 'default';
+        });
+        expect(setModel).toBeTruthy();
+      },
+      {
+        model: 'auto',
+        vendorOptions: { cursorModelExplicit: true },
+      },
+      opusModels,
+    );
+  });
+
+  it('encodes local image files as ACP ImageContentBlock on session/prompt', async () => {
+    const imageDir = mkdtempSync(join(tmpdir(), 'cindy-cursor-img-'));
+    const imagePath = join(imageDir, 'pic.png');
+    // Minimal PNG header bytes are enough for base64 round-trip assertion.
+    writeFileSync(imagePath, Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]));
+    try {
+      await withBootedSession(async ({ transport, handle }) => {
+        const sendPromise = handle.send({
+          type: 'user',
+          content: [
+            { type: 'text', text: 'describe this' },
+            { type: 'image', path: imagePath, mimeType: 'image/png' },
+          ],
+        });
+        const deadline = Date.now() + 1000;
+        while (Date.now() < deadline && !transport.findRequest(Method.SessionPrompt)) {
+          await new Promise((r) => setTimeout(r, 10));
+        }
+        const prompt = transport.findRequest(Method.SessionPrompt);
+        expect(prompt).toBeTruthy();
+        const params = prompt!.params as {
+          prompt: Array<{ type: string; text?: string; data?: string; mimeType?: string }>;
+        };
+        expect(params.prompt).toEqual([
+          { type: 'text', text: 'describe this' },
+          {
+            type: 'image',
+            data: Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]).toString('base64'),
+            mimeType: 'image/png',
+          },
+        ]);
+        transport.emit({
+          jsonrpc: JSONRPC_VERSION,
+          id: prompt!.id,
+          result: { stopReason: 'end_turn' },
+        });
+        await sendPromise;
+      });
+    } finally {
+      rmSync(imageDir, { recursive: true, force: true });
+    }
   });
 
   it('startSession throws AgentNotAuthenticatedError when auth is missing', async () => {
@@ -437,6 +555,7 @@ describe('CursorAgent lifecycle (FakeTransport)', () => {
     await expect(
       agent.startSession({
         workingDir: '/tmp',
+        model: 'auto',
         vendorOptions: {
           createAcpTransport: () => {
             throw new Error('should not spawn when unauthenticated');
