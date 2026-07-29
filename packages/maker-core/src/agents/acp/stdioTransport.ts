@@ -186,13 +186,13 @@ export function createAcpStdioTransport(opts: AcpStdioTransportOptions): Transpo
     try { child.kill(signal); } catch { /* swallow */ }
   };
 
-  /** 组内还有活着的成员吗——直系子进程已退出但孙进程仍在时为 true。 */
-  const treeAlive = (): boolean => {
+  /**
+   * 组内还有活着的成员吗——直系子进程已退出但孙进程仍在时为 true。
+   * **仅 POSIX**：Windows 没有进程组语义，close() 的 win32 分支不走这里。
+   */
+  const processGroupAlive = (): boolean => {
     const pid = child.pid;
     if (typeof pid !== 'number') return false;
-    if (!useProcessGroup) {
-      return child.exitCode === null && child.signalCode === null;
-    }
     try {
       process.kill(-pid, 0);
       return true;
@@ -200,6 +200,10 @@ export function createAcpStdioTransport(opts: AcpStdioTransportOptions): Transpo
       return false;
     }
   };
+
+  /** 直系子进程是否还活着（Windows 没有进程组可探，只能看它）。 */
+  const childAlive = (): boolean =>
+    child.exitCode === null && child.signalCode === null;
 
   child.stdout.setEncoding('utf8');
   const rl: Interface = createInterface({
@@ -299,7 +303,7 @@ export function createAcpStdioTransport(opts: AcpStdioTransportOptions): Transpo
           // 孙进程还活着，短路会漏掉后者。
           killTree('SIGTERM');
           await waitForChildExit(child, sigtermGraceMs);
-          if (treeAlive()) {
+          if (processGroupAlive()) {
             killTree('SIGKILL');
             await waitForChildExit(child, sigkillWaitMs);
           }
@@ -309,12 +313,20 @@ export function createAcpStdioTransport(opts: AcpStdioTransportOptions): Transpo
           // 直系 kill。
           //
           // 之所以不能沿用上面的两段式：那样第一次已经发了带 /F 的 taskkill，
-          // grace 内 direct child 的 exit 若还没到，treeAlive() 仍为 true，就会
+          // grace 内 direct child 的 exit 若还没到，存活探测仍为 true，就会
           // 再 spawn 一个 taskkill 与前一个并发操作同一 PID 树；第二个若因竞态
           // 失败还会直接 kill leader，在第一个尚未收割完后代时打掉锚点，反而可能
           // 重新留下 worker-server。
           killTree('SIGKILL');
           await waitForChildExit(child, sigtermGraceMs + sigkillWaitMs);
+          // taskkill **挂住**（既不 exit 也不 error）时，killWindowsTree 内部的
+          // 两个回落条件一个都不触发，close() 会在等满后照常 fireClose，调用方
+          // 以为已关而进程仍在——这是「伪成功」的第三个入口。超时按同一条回落
+          // 处理：不是重试 taskkill，而是把 timeout 也算作它失败。
+          if (childAlive()) {
+            try { child.kill('SIGKILL'); } catch { /* swallow */ }
+            await waitForChildExit(child, sigkillWaitMs);
+          }
         }
 
         fireClose(reason);
