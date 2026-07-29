@@ -272,10 +272,26 @@ describe('discoverSubagentDefinitions', () => {
   it('悬空软链跳过,不影响同目录其它定义', async () => {
     const agents = path.join(root, 'repo', '.claude', 'agents');
     await writeAgent(agents, 'ok.md', 'name: ok\nmodel: opus');
+    if (process.platform === 'win32') {
+      // 未开启 Developer Mode 时不能可靠创建文件软链，而 junction 对悬空目标的要求也因
+      // Windows / Node 版本而异。直接覆盖生产代码使用的 follow-stat 失败分支。
+      const link = path.join(agents, 'dead.md');
+      const kind = await classifySubagentEntry(symbolicLinkDirent, link, async () => {
+        throw Object.assign(new Error('missing target'), { code: 'ENOENT' });
+      });
+      expect(kind).toBeUndefined();
+
+      const found = await discoverSubagentDefinitions({
+        workingDir: path.join(root, 'repo'),
+        env: { CLAUDE_CONFIG_DIR: path.join(root, 'empty-home') },
+      });
+      expect(found.map((f) => f.name)).toEqual(['ok']);
+      return;
+    }
+
     await fs.symlink(
       path.join(root, 'gone', 'nothing.md'),
       path.join(agents, 'dead.md'),
-      directoryLinkType,
     );
 
     const found = await discoverSubagentDefinitions({
