@@ -68,7 +68,7 @@ describe('mobile session Agent switch contract', () => {
     expect(mobileAgentShortLabel('cursor')).toBe('Cursor');
   });
 
-  it('requires host capability and excludes SSH / Orca / Cursor sessions', () => {
+  it('requires host capability and excludes SSH / Orca / Cursor-source sessions', () => {
     const supported: MobileAgentCapabilities = {
       availableModels: [],
       effortLevels: [],
@@ -85,7 +85,7 @@ describe('mobile session Agent switch contract', () => {
       { ...supported, supportsSessionAgentSwitch: false },
     )).toBe(false);
     expect(supportsMobileSessionAgentSwitch({ remoteHostId: null, orcaRole: null, agentKind: 'cc' }, null)).toBe(false);
-    // Cursor 一期不做会话内引擎切换。
+    // 从 Cursor 会话切走仍不支持；切「到」Cursor 由新 desktop handler 承接。
     expect(supportsMobileSessionAgentSwitch(
       { remoteHostId: null, orcaRole: null, agentKind: 'cursor' },
       supported,

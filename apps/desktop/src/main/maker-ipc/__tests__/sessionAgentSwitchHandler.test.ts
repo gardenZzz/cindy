@@ -172,6 +172,80 @@ describe('performSessionAgentSwitch', () => {
     await expect(performSessionAgentSwitch(orca.deps, validParams)).rejects.toThrow(/UNSUPPORTED_CAPABILITY/);
   });
 
+  it('从 Cursor 会话切走抛可读 UNSUPPORTED_CAPABILITY', async () => {
+    const { deps } = makeDeps({
+      getSessionRow: vi.fn(async () => makeRow({ agentKind: 'cursor', model: 'auto' })),
+    });
+    await expect(
+      performSessionAgentSwitch(deps, {
+        sessionId: 's1',
+        targetAgentKind: 'codex',
+        model: 'gpt-5.5',
+      }),
+    ).rejects.toThrow(/UNSUPPORTED_CAPABILITY/);
+    await expect(
+      performSessionAgentSwitch(deps, {
+        sessionId: 's1',
+        targetAgentKind: 'codex',
+        model: 'gpt-5.5',
+      }),
+    ).rejects.toThrow(/switching away from Cursor/);
+  });
+
+  it('新 desktop：cc → cursor 切换成功（DB cursor 映射 + bootstrap）', async () => {
+    const { deps, calls } = makeDeps();
+    const result = await performSessionAgentSwitch(deps, {
+      sessionId: 's1',
+      targetAgentKind: 'cursor',
+      model: 'auto',
+      providerId: null,
+    });
+    expect(result).toEqual({
+      switched: true,
+      agentKind: 'cursor',
+      model: 'auto',
+      engineReady: true,
+    });
+    expect(calls).toEqual(['close', 'db', 'provider', 'boundary', 'pending', 'bootstrap']);
+    expect(deps.applyAgentSwitchToDb).toHaveBeenCalledWith('s1', {
+      agentKind: 'cursor',
+      model: 'auto',
+      providerId: null,
+      sdkSessionId: null,
+    });
+    const boundary = vi.mocked(deps.insertBoundaryMessage).mock.calls[0][1];
+    expect(boundary.fromAgentKind).toBe('cc');
+    expect(boundary.toAgentKind).toBe('cursor');
+    expect(boundary.toModel).toBe('auto');
+  });
+
+  it('cursor 目标可登记 deferred 意图（mobile → 新 desktop）', async () => {
+    const store = new Map<string, PendingAgentSwitchIntent>();
+    const { deps } = makeDeps({
+      pendingSwitches: {
+        set: (id, intent) => void store.set(id, intent),
+        get: (id) => store.get(id),
+        clear: (id) => void store.delete(id),
+      },
+    });
+    const result = await performSessionAgentSwitch(deps, {
+      sessionId: 's1',
+      targetAgentKind: 'cursor',
+      model: 'auto',
+      applyNow: false,
+    });
+    expect(result).toMatchObject({
+      switched: false,
+      deferred: true,
+      agentKind: 'cursor',
+      model: 'auto',
+    });
+    expect(store.get('s1')).toMatchObject({
+      targetAgentKind: 'cursor',
+      model: 'auto',
+    });
+  });
+
   it('同引擎目标 = no-op 成功,不发生任何状态变更', async () => {
     const { deps, calls } = makeDeps();
     const result = await performSessionAgentSwitch(deps, {
