@@ -2962,7 +2962,7 @@ export function ChatInput({
       // workingDir 是被控端路径(SSH remoteHostId 才置 null 关扫描)。desktop 命令始终本地。
       loadAllCommands(
         paletteAgentKind,
-        isRemoteSession ? null : (workingDir ?? null),
+        isRemoteSession ? null : workingDir,
         opts,
         deviceLinkDeviceId,
       )
