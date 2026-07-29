@@ -188,6 +188,15 @@ export const MAKER_INVOKE = {
    * 派生模型列表时复用同一套可见性过滤(两端列表口径一致)。fire-and-forget,不落盘。
    */
   MODEL_VISIBILITY_SYNC: 'maker:model-visibility:sync',
+  /**
+   * 「模型 / 供应商停用」override 写入(model-disable-store,main 侧持久化真源)。
+   * 入参 = { kind:'model', providerId, modelIds: string[], disabled: boolean }
+   *      | { kind:'provider', providerId, disabled: boolean }。
+   * 成功后广播 PROVIDER_CHANGED,renderer / device-link 经 PROVIDER_LIST 拿到烘焙了
+   * suspended / model.disabled 标志的新视图。设置类写操作:仅本机主页面可调,
+   * **不进 device-link allowlist**(远程改被控端全局设置越权,见 allowlist.ts 准入判据)。
+   */
+  MODEL_DISABLE_SET: 'maker:model-disable:set',
   // 附加只读引用目录 — 走 closure 推送; DB 持久化由 renderer 同步调
   // local-db:sessions:update (跟 SET_MODEL / sessionService.update 双 IPC 协调先例一致)
   SET_EXTRA_DIRS: 'maker:set-extra-dirs',

@@ -42,13 +42,14 @@ import type {
 } from '@cindy/maker-core';
 import {
   effectiveSourceIdForModel,
-  isModelVisible,
   type ProviderView,
   visibleModelUnion,
 } from '@cindy/model-providers';
 
 import { tapWindowBroadcast } from '../device-link/broadcast-tap.js';
 import { getMaker } from '../maker-host/index.js';
+import { resolveLenientRoute } from '../maker-host/model-route-guard.js';
+import { resolveLenientSessionRoute } from '../maker-host/model-route-guard-live.js';
 import {
   wireSessionToIpc,
   isSessionInTurn,
@@ -84,7 +85,6 @@ import { worktreeStore, WorktreeManager } from '../worktree/index.js';
 import { readImDefaultSettings } from '../im/defaultSettingsStore.js';
 import { getWorkspaceProviderSource } from './workspaceProviderSourceStore.js';
 import { getDesktopProviderService } from '../maker-host/createDesktopProviderService.js';
-import { getModelVisibilityOverride } from '../maker-host/model-visibility-mirror.js';
 import {
   createTurnActivity,
   markActivityWriting,
@@ -134,14 +134,13 @@ async function resolveNewSessionConfig(
   const resolved = resolveHookSessionConfig(
     {
       readDefaults: () => readImDefaultSettings(sourceIm === 'slack' ? 'slack' : undefined),
+      // 可执行清单按**启用**口径,不叠加「显示 / 隐藏」偏好:隐藏只是陈列过滤
+      // (选择器不列),被 IM 显式点名或兜底选中仍然合法;停用的模型与供应商已由
+      // visibleModelUnion 内建的准入过滤(model.disabled / suspended)剔除,点名
+      // 会走 defaults.ts 的降级 + warn 路径(2026-07 启用/显示双轴拆分)。
       getModels: (agentKind) =>
         providers
-          ? visibleModelUnion(providers, agentKind, (providerId, model) =>
-              isModelVisible(
-                getModelVisibilityOverride(agentKind, providerId, model.id),
-                model.defaultEnabled,
-              ),
-            )
+          ? visibleModelUnion(providers, agentKind, () => true)
           : getMaker().getCapabilities(agentKind).availableModels,
       getPermissionModes: (agentKind) =>
         getMaker()
@@ -172,7 +171,26 @@ async function resolveNewSessionConfig(
   const providerId = providers
     ? effectiveSourceIdForModel(providers, preferredProviderId, resolved.model, resolved.agentKind)
     : resolved.providerId;
-  return { ...resolved, providerId };
+  // 停用收口(PR #744 review 第十、十四轮):两条路径都必须经宽松降级裁决 ——
+  //   · 目录读取失败:冻结的 availableModels 不带停用标志、saved provider 未经校验,
+  //     live 壳的目录故障分支 = override-only 保守裁决(只凭本地 override 文件判);
+  //   · 目录读取成功但该 agent 的启用模型集为空:上方 getModels 过滤后
+  //     resolveHookSessionConfig 会回退到 raw saved desktop model(未准入),
+  //     effectiveSourceIdForModel 解析为 null 后若直接返回,后续 createSession 仍以
+  //     停用模型 + 隐式来源直建付费会话。
+  // 命中即逐级丢弃;模型判死抛错交给 hook 既有失败路径。
+  const lenient = providers
+    ? resolveLenientRoute(providers, resolved.agentKind, resolved.model, providerId ?? null)
+    : await resolveLenientSessionRoute(resolved.agentKind, resolved.model, providerId ?? null);
+  if (!lenient.model) {
+    throw new Error('hook session route unavailable: model disabled in settings');
+  }
+  if (lenient.degraded) {
+    log.warn(
+      `hook saved route degraded (disabled in settings): model=${resolved.model} providerId=${providerId ?? 'null'} catalog=${providers ? 'ok' : 'outage'}`,
+    );
+  }
+  return { ...resolved, model: lenient.model, providerId: lenient.providerId };
 }
 
 /** 后台 subagent 事件静默兜底(同 scheduler BG_TASK_IDLE_FALLBACK_MS 语义)。 */

@@ -1175,7 +1175,8 @@
       "title": "모델 제공자",
       "subtitle": "모델을 선택할 때의 소스입니다. 각 소스는 지원하는 모델과 과금 방식을 제공하며, 대화별로 전환할 수 있습니다.",
       "pill": {
-        "connected": "연결됨"
+        "connected": "연결됨",
+        "suspended": "비활성화됨"
       },
       "button": {
         "authorize": "인증",
@@ -1184,7 +1185,8 @@
         "disconnect": "연결 해제",
         "cancel": "취소",
         "retry": "모델 목록 다시 가져오기",
-        "retrying": "다시 가져오는 중…"
+        "retrying": "다시 가져오는 중…",
+        "enableProvider": "제공자 활성화"
       },
       "anthropic": {
         "title": "Anthropic",
@@ -1352,9 +1354,8 @@
       },
       "models": {
         "search": "모델 검색",
-        "available": "모델 선택기에 표시",
+        "available": "모델 선택에 표시",
         "modelCount_other": "모델 {{count}}개",
-        "agentEnabledCount": "{{agent}} {{on}}/{{total}}",
         "enableAll": "모두 표시",
         "disableAll": "모두 숨기기",
         "subscription": "구독",
@@ -1370,7 +1371,13 @@
         "refreshDone": "모델 목록을 새로고침했습니다",
         "refreshAdded": "새 모델 {{count}}개를 발견했습니다",
         "refreshNoNew": "모델 목록이 최신 상태입니다. 새 항목이 없습니다",
-        "refreshFailed": "모델 목록을 새로고침하지 못했습니다. 잠시 후 다시 시도해 주세요"
+        "refreshFailed": "모델 목록을 새로고침하지 못했습니다. 잠시 후 다시 시도해 주세요",
+        "disableModel": "이 모델 비활성화",
+        "enableModel": "이 모델 활성화",
+        "capabilityGroupHint": "대화 모델 선택에는 표시되지 않으며, 이미지 생성 등 기능에서만 사용됩니다.",
+        "accessWriteFailed": "변경 사항을 저장하지 못했습니다. 다시 시도해 주세요.",
+        "disabledGroup": "비활성화됨",
+        "enableAllModels": "모두 활성화"
       },
       "genericOAuth": {
         "subtitle": "구독 인증 로그인 (OAuth)",
@@ -1412,7 +1419,9 @@
           "forbidden": "이 제공자가 요청을 거부했습니다. 아래는 마지막으로 가져온 모델 목록입니다. 프록시나 VPN을 사용 중이라면 출구를 바꾼 후 다시 시도하세요.",
           "rejected": "이 제공자가 요청을 거부했습니다. 아래는 마지막으로 가져온 목록입니다. 잠시 후 다시 시도하거나 다른 제공자를 사용하세요.",
           "empty": "이번에는 이 제공자가 사용 가능한 모델을 반환하지 않았습니다. 아래는 마지막으로 가져온 목록입니다. 계정 권한을 확인한 후 다시 시도하세요."
-        }
+        },
+        "suspendedBanner": "이 제공자는 비활성화되어 있습니다. 자격 증명은 유지되며, 활성화하면 모델을 다시 사용할 수 있습니다.",
+        "moreActionsAria": "추가 작업"
       },
       "detect": {
         "groupLabel": "이 기기에서 감지됨",
@@ -1479,6 +1488,10 @@
         "badge": "추천",
         "desc": "Cindy에 로그인하면 공식 Cindy AI 서비스가 활성화됩니다. 모든 모델을 바로 사용할 수 있으며 키 관리가 필요 없습니다.",
         "cta": "Cindy 로그인"
+      },
+      "menu": {
+        "disableProvider": "이 제공자 비활성화",
+        "enableProvider": "이 제공자 활성화"
       }
     },
     "experimental": {

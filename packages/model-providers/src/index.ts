@@ -63,6 +63,7 @@ export {
   connectedProvidersForAgent,
   nativeDefaultSourceId,
   effectiveSourceIdForModel,
+  actualSourceIdForModel,
   providerOffersModel,
   getModel,
   sourcesForModel,
@@ -78,6 +79,13 @@ export type {
   ProviderView,
   ResolvedRoute,
 } from './registry.js';
+
+export {
+  modelDisableKey,
+  isModelDisabled,
+  isProviderDisabled,
+} from './disableOverrides.js';
+export type { ModelDisableOverrides } from './disableOverrides.js';
 
 export { isModelVisible, buildProviderSections, visibleModelUnion, resolveModelIconKind } from './sections.js';
 export type { SectionModel, ProviderSection, ModelIconKind } from './sections.js';
@@ -113,6 +121,7 @@ export {
   CATEGORY_ORDER,
   categorize,
   groupOf,
+  isAgentSelectableModel,
   groupModelsForDisplay,
   isBudgetModel,
   modelBadges,

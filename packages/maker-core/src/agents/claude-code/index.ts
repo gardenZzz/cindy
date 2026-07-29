@@ -814,8 +814,17 @@ export class ClaudeCodeAgent extends BaseAgent {
     // prompt 缓存(见 docs/dev-rules/maker-core-and-agent-behavior.md §3.1)。
     // 诊断只落日志与 host 回调,**不进模型上下文**(理由见 subagent-model-default.ts 模块头)。
     // 扫描失败(含触发 IO 预算)一律降级成「照旧设 env」= 本改动前的行为,绝不阻断会话启动。
+    //
+    // 候选默认值从路由感知入口取:子代理请求跑在父会话来源上,覆写在**该来源**下不可
+    // 路由(被停用)时 host 返回 undefined = 不注入(PR #744 review 第十九/二十轮)。
+    // 缺席 subagentModelForRoute 时退回静态 subagentModel(旧 host / CLI 行为不变)。
+    const configuredSubagentDefault =
+      (this.deps.runtimeConfig.subagentModelForRoute
+        ? this.deps.runtimeConfig.subagentModelForRoute(opts.providerId ?? null, credentialMode)
+        : this.deps.runtimeConfig.subagentModel
+      )?.trim() || undefined;
     let subagentDefault: ResolveSubagentModelDefaultResult = {
-      envSubagentModel: this.deps.runtimeConfig.subagentModel?.trim() || undefined,
+      envSubagentModel: configuredSubagentDefault,
       diagnostics: [],
     };
     // 远端(SSH)会话**不做**本地扫描:opts.workingDir 是远端机器上的路径(本地不存在),
@@ -830,7 +839,7 @@ export class ClaudeCodeAgent extends BaseAgent {
           env,
         });
         subagentDefault = resolveSubagentModelDefault({
-          configuredDefault: this.deps.runtimeConfig.subagentModel,
+          configuredDefault: configuredSubagentDefault,
           discovered,
           // 校验 agent 声明的 model 是否真的可用 —— 清单就是 host 从目录派生的那份。
           availableModelIds: this.capabilities.availableModels.map((m) => m.id),
@@ -859,7 +868,7 @@ export class ClaudeCodeAgent extends BaseAgent {
           credentialMode,
           mode: 'remote',
           modelContextWindows: providerRoutedModels,
-          // 远端不做本地扫描(见上),这里的值就是设置原值 —— 保持改动前的 env 强制覆盖语义。
+          // 远端不做本地扫描(见上),这里的值就是路由感知后的设置值 —— 保持 env 强制覆盖语义。
           subagentModel: subagentDefault.envSubagentModel ?? null,
         })
       : null;

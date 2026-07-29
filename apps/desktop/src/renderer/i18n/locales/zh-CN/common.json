@@ -1175,7 +1175,8 @@
       "title": "模型供应商",
       "subtitle": "选择模型时的来源。每个来源提供它支持的模型与计费方式，可按对话分别切换。",
       "pill": {
-        "connected": "已连接"
+        "connected": "已连接",
+        "suspended": "已停用"
       },
       "button": {
         "authorize": "授权",
@@ -1184,7 +1185,8 @@
         "disconnect": "断开",
         "cancel": "取消",
         "retry": "重新获取模型列表",
-        "retrying": "正在重新获取…"
+        "retrying": "正在重新获取…",
+        "enableProvider": "启用供应商"
       },
       "anthropic": {
         "title": "Anthropic",
@@ -1352,9 +1354,8 @@
       },
       "models": {
         "search": "搜索模型",
-        "available": "在选择器中显示",
+        "available": "在模型选择中显示",
         "modelCount_other": "{{count}} 个模型",
-        "agentEnabledCount": "{{agent}} {{on}}/{{total}}",
         "enableAll": "全部显示",
         "disableAll": "全部隐藏",
         "subscription": "订阅",
@@ -1370,7 +1371,13 @@
         "refreshDone": "模型列表已刷新",
         "refreshAdded": "已发现 {{count}} 个新模型",
         "refreshNoNew": "模型列表已是最新，无新增",
-        "refreshFailed": "模型列表刷新失败，请稍后再试"
+        "refreshFailed": "模型列表刷新失败，请稍后再试",
+        "disableModel": "停用此模型",
+        "enableModel": "启用此模型",
+        "capabilityGroupHint": "不会出现在对话模型选择中，仅供图像生成等功能使用",
+        "accessWriteFailed": "停用设置未能保存，请重试",
+        "disabledGroup": "已停用",
+        "enableAllModels": "全部启用"
       },
       "genericOAuth": {
         "subtitle": "订阅授权登录（OAuth）",
@@ -1412,7 +1419,9 @@
           "forbidden": "该供应商拒绝了这次请求，下面是上次获取的模型列表。若你正在使用 Proxy 或 VPN，请更换出口后重试。",
           "rejected": "该供应商拒绝了这次请求，下面是上次获取的模型列表。请稍后重试或改用其它供应商。",
           "empty": "该供应商这次没有返回任何可用模型，下面是上次获取的列表。请确认账号权限后重试。"
-        }
+        },
+        "suspendedBanner": "该供应商已停用，凭证已保留；启用后其模型才会重新可用",
+        "moreActionsAria": "更多操作"
       },
       "detect": {
         "groupLabel": "检测到本机 CLI",
@@ -1479,6 +1488,10 @@
         "badge": "推荐",
         "desc": "登录 Cindy 即可开通官方 Cindy AI 服务，全部模型开箱即用，无需管理任何 Key。",
         "cta": "登录 Cindy"
+      },
+      "menu": {
+        "disableProvider": "停用此供应商",
+        "enableProvider": "启用此供应商"
       }
     },
     "experimental": {

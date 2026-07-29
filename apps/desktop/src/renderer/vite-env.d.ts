@@ -3704,6 +3704,17 @@ interface ElectronAPI {
      * 让 IM /model 在 main 侧复用同一套可见性过滤,与应用内模型列表逐模型一致。fire-and-forget。
      */
     syncModelVisibility: (map: Record<string, boolean>) => Promise<void>;
+    /**
+     * 「模型 / 供应商停用」override 写入(main 侧 model-disable-store);成功后 main 广播
+     * PROVIDER_CHANGED,useProviders 快照刷新后 UI 拿到新的 suspended / disabled 标志。
+     */
+    setModelDisable: (
+      input:
+        | { kind: 'model'; providerId: string; modelIds: string[]; disabled: boolean }
+        | { kind: 'provider'; providerId: string; disabled: boolean }
+        // reset = 恢复默认:删除该供应商整组停用 override(含指向已下架模型的陈旧条目)。
+        | { kind: 'reset'; providerId: string },
+    ) => Promise<{ ok: true }>;
 
     // 「在新窗口打开」会话多开
     openSessionInNewWindow: (sessionId: string) => Promise<void>;

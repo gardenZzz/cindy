@@ -66,6 +66,21 @@ export interface AgentRuntimeConfig {
   subagentModel?: string;
 
   /**
+   * 路由感知版 subagent 覆写(优先于 subagentModel):env-builder 传入本次 spawn 的
+   * 会话来源(显式 providerId,null = 隐式默认),host 据此判定覆写在**该来源**下是否
+   * 仍可路由(子代理跑在父会话来源上;停用轴按 (来源, 模型) 记账,只看「任一来源可用」
+   * 会让父会话来源下被停用的拷贝继续被子代理付费使用,PR #744 review 第十九轮)。
+   * `credentialMode` 是本次 spawn 已解析的凭证形态:providerId 为 null(隐式默认)
+   * 时 host 据它映射实际落点(gateway-key = XD 网关 / oauth-bearer = Anthropic 直连),
+   * 不再静态猜测(PR #744 review 第二十轮)。
+   * 返回 undefined = 不注入覆写,回退 CLI 原生 subagent 选择。缺席时退回 subagentModel。
+   */
+  subagentModelForRoute?: (
+    providerId: string | null,
+    credentialMode?: string,
+  ) => string | undefined;
+
+  /**
    * Claude Code 自动上下文压缩阈值百分比。
    *
    * - undefined: host 不接管自动压缩 (保持 agent 默认行为)

@@ -50,6 +50,7 @@ import {
   refreshAnthropicModelsFromHttp,
 } from './model-discovery/anthropic.js';
 import { createProviderService, type ProviderService } from './provider-service.js';
+import { readModelDisableOverrides } from './model-disable-store.js';
 import { listCustomProviders } from './custom-provider-store.js';
 import { setCustomProviderKeyReader, setOAuthTokenReader, setProviderOAuthTokenReader } from './provider-route.js';
 import { setDiagnosticsKeyReader, setDiagnosticsOAuthTokenReader } from './provider-diagnostics.js';
@@ -504,6 +505,9 @@ export function getDesktopProviderService(): ProviderService {
     // 同步的 `security` 子进程，同一次 listProviders 不该为此阻塞主线程两回（PR #548 review）。
     modelDiscoveryFailure: (providerId, connected) =>
       providerId === 'anthropic' ? getAnthropicModelDiscoveryFailure(connected) : null,
+    // 「模型 / 供应商停用」override:main 侧持久化真源,烘焙进 ProviderView 后
+    // renderer / IM / Orca / device-link 全部消费同一份准入事实。
+    getModelAccess: readModelDisableOverrides,
   });
   return singleton;
 }

@@ -20,7 +20,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
-import { Check, Pencil, Plus, RefreshCw, Trash2 } from 'lucide-react';
+import { Check, MoreHorizontal, Pencil, Plus, RefreshCw, Trash2 } from 'lucide-react';
 
 import { cn } from '@/lib/utils';
 import { useProviders } from '@/hooks/useProviders';
@@ -43,6 +43,12 @@ import {
   customProviderSubtitleForDisplay,
   providerSubtitleForDisplay,
 } from '@/lib/providerSubtitle';
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from '@/components/ui/dropdown-menu';
 import { CustomProviderDialog } from './CustomProviderDialog';
 import { AddProviderWizard, type WizardEntry } from './AddProviderWizard';
 import { OAuthDeviceCodeCard } from './OAuthDeviceCodeCard';
@@ -61,7 +67,25 @@ import type { CustomProviderConfig, ProviderView } from '@cindy/model-providers'
 // ---------------------------------------------------------------------------
 
 function providerHasModels(provider: ProviderView): boolean {
-  return provider.agents.some((a) => (provider.models[a]?.length ?? 0) > 0);
+  // 专属媒体清单(imageModels/videoModels)也算「有模型」:XD 动态对话目录不可用时
+  // 内置的图像/视频模型仍可用且可被停用管理,UnifiedModelList 的 buildUnionRows
+  // 会为它们合成能力行 —— 只看 models[agent] 会让整个列表不渲染
+  // (PR #744 review 第十五轮)。
+  return (
+    provider.agents.some((a) => (provider.models[a]?.length ?? 0) > 0) ||
+    (provider.imageModels?.length ?? 0) > 0 ||
+    (provider.videoModels?.length ?? 0) > 0
+  );
+}
+
+/**
+ * 写供应商级停用 override(model-disable-store)。成功后由 main 广播
+ * PROVIDER_CHANGED 驱动快照刷新,这里不 refetch;失败走统一错误提示。
+ */
+function writeProviderDisabled(providerId: string, disabled: boolean, errorText: string): void {
+  void window.electronAPI.maker
+    .setModelDisable({ kind: 'provider', providerId, disabled })
+    .catch(() => toast.error(errorText));
 }
 
 /** 供应商行图标(内置品牌 mark / 首字母 monogram)。 */
@@ -259,6 +283,9 @@ function DetailHeader({
                 })}
               />
             )}
+            {provider?.suspended && (
+              <CustomTag label={t('settings.providers.pill.suspended')} />
+            )}
             {badge}
           </div>
           <span
@@ -271,6 +298,39 @@ function DetailHeader({
         </div>
 
         {trailing}
+        {/* 供应商级低频动作(停用/启用):所有供应商详情头统一入口。停用 = 保留凭证、
+            整体不可路由(model-disable-store);恢复入口在菜单与下方的已停用条带都有。 */}
+        {provider && (
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <button
+                type="button"
+                aria-label={t('settings.providers.detail.moreActionsAria')}
+                className="flex h-7 w-7 shrink-0 items-center justify-center rounded-md transition-colors hover:bg-[var(--surface-hover)]"
+                style={{ color: 'var(--text-tertiary)' }}
+              >
+                <MoreHorizontal size={15} />
+              </button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="end">
+              <DropdownMenuItem
+                onClick={() =>
+                  writeProviderDisabled(
+                    provider.id,
+                    !provider.suspended,
+                    t('settings.providers.models.accessWriteFailed'),
+                  )
+                }
+              >
+                {t(
+                  provider.suspended
+                    ? 'settings.providers.menu.enableProvider'
+                    : 'settings.providers.menu.disableProvider',
+                )}
+              </DropdownMenuItem>
+            </DropdownMenuContent>
+          </DropdownMenu>
+        )}
       </div>
 
       {detail}
@@ -1034,21 +1094,31 @@ function ListRow({
       </div>
       <span
         className="min-w-0 flex-1 truncate text-13 font-medium"
-        style={{ color: 'var(--settings-section-title)' }}
+        style={{
+          color: provider.suspended ? 'var(--text-tertiary)' : 'var(--settings-section-title)',
+        }}
       >
         {title}
       </span>
-      {modelCount !== null && (
-        <span className="shrink-0 text-11 tabular-nums" style={{ color: 'var(--text-tertiary)' }}>
-          {t('settings.providers.models.modelCount', { count: modelCount })}
+      {provider.suspended ? (
+        // 已停用比模型数更要紧:窄栏(224px)只放得下一个注记,停用时以状态取代计数。
+        <span className="shrink-0 select-none text-11" style={{ color: 'var(--text-tertiary)' }}>
+          {t('settings.providers.pill.suspended')}
         </span>
+      ) : (
+        modelCount !== null && (
+          <span className="shrink-0 text-11 tabular-nums" style={{ color: 'var(--text-tertiary)' }}>
+            {t('settings.providers.models.modelCount', { count: modelCount })}
+          </span>
+        )
       )}
       <span
         className="h-1.5 w-1.5 shrink-0 rounded-full"
         style={{
-          backgroundColor: provider.connected
-            ? 'var(--remote-status-ready)'
-            : 'var(--border-default)',
+          backgroundColor:
+            provider.connected && !provider.suspended
+              ? 'var(--remote-status-ready)'
+              : 'var(--border-default)',
         }}
       />
     </button>
@@ -1175,6 +1245,8 @@ export function ProvidersSection() {
 
   // 左栏行集合:xd 置顶;内置/通用 OAuth 渠道只在已连接后占行(未连接的入口在向导
   // 目录 + 检测建议);自定义供应商保持既有过滤(有模型或 OAuth 形态)。
+  // 停用的供应商**沉底**(稳定分区,组内保持既有顺序)——「停用的东西往下沉、变灰、
+  // 离开活跃区」是本页的统一隐喻,与右栏模型列表的「已停用」分区同构。
   const listProviders = useMemo(() => {
     const rows: ProviderView[] = [];
     const xd = byId.get('xd');
@@ -1193,7 +1265,7 @@ export function ProvidersSection() {
         rows.push(p);
       }
     }
-    return rows;
+    return [...rows.filter((p) => !p.suspended), ...rows.filter((p) => p.suspended)];
   }, [providers, byId, openaiReconnectRequired]);
 
   // 检测建议:CLI 已安装 + 对应渠道存在于目录 + 未连接,且**未以任何形态占行**
@@ -1524,12 +1596,37 @@ export function ProvidersSection() {
             ) : effectiveSelected ? (
               <>
                 {renderDetailHeader(effectiveSelected)}
+                {/* 供应商已停用:条带讲清「发生了什么 + 下一步」并就地给恢复入口。整个
+                    模型区随之收起(2026-07-28 用户反馈:停用了就别再列模型)——停用是
+                    盖在上面的一层,凭证与逐模型配置不丢,启用即原样回来。 */}
+                {effectiveSelected.suspended && (
+                  <div
+                    className="flex shrink-0 flex-wrap items-center justify-between gap-3 border-t px-5 py-3 text-13"
+                    style={{ borderColor: 'var(--settings-theme-card-border)' }}
+                  >
+                    <span style={{ color: 'var(--text-tertiary)' }}>
+                      {t('settings.providers.detail.suspendedBanner')}
+                    </span>
+                    <PillButton
+                      label={t('settings.providers.button.enableProvider')}
+                      onClick={() =>
+                        writeProviderDisabled(
+                          effectiveSelected.id,
+                          false,
+                          t('settings.providers.models.accessWriteFailed'),
+                        )
+                      }
+                    />
+                  </div>
+                )}
                 {/* 发现失败与「有没有模型」是正交的:失败时刻意保留上次成功的清单(它是陈旧
                     但可溯源的真数据),于是老用户清单照常显示 —— 若把提示只放进空态分支,他
                     就完全看不到「这份清单已经不代表当前状态」,还以为供应商一切正常
                     (DESIGN.md「Errors = what happened + what to do」)。有清单时以条带形式
                     置于列表上方,无清单时走下面的空态居中版。 */}
-                {effectiveSelected.modelDiscoveryFailure && providerHasModels(effectiveSelected) && (
+                {!effectiveSelected.suspended &&
+                  effectiveSelected.modelDiscoveryFailure &&
+                  providerHasModels(effectiveSelected) && (
                   <div
                     className="flex shrink-0 flex-wrap items-center justify-between gap-3 border-t px-5 py-3 text-13"
                     style={{ borderColor: 'var(--settings-theme-card-border)' }}
@@ -1554,9 +1651,10 @@ export function ProvidersSection() {
                     />
                   </div>
                 )}
-                {(providerHasModels(effectiveSelected) ||
-                  (isBuiltinRefreshableProviderId(effectiveSelected.id) &&
-                    !effectiveSelected.modelDiscoveryFailure)) && (
+                {!effectiveSelected.suspended &&
+                  (providerHasModels(effectiveSelected) ||
+                    (isBuiltinRefreshableProviderId(effectiveSelected.id) &&
+                      !effectiveSelected.modelDiscoveryFailure)) && (
                   <>
                     <div
                       className="border-t"
@@ -1587,7 +1685,8 @@ export function ProvidersSection() {
                     />
                   </>
                 )}
-                {!providerHasModels(effectiveSelected) &&
+                {!effectiveSelected.suspended &&
+                  !providerHasModels(effectiveSelected) &&
                   (Boolean(effectiveSelected.modelDiscoveryFailure) ||
                     !isBuiltinRefreshableProviderId(effectiveSelected.id)) && (
                   <div className="flex flex-1 flex-col items-center justify-center gap-3 px-8 text-center text-13">
