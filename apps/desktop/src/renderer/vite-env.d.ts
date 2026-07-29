@@ -2,8 +2,10 @@
 
 interface ImportMetaEnv {
   readonly VITE_CINDY_AUTH_REGION: 'cn' | 'global' | 'dev';
-  /** 端点清单自举基址(唯一烘焙远程 URL);业务端点走 electronAPI.clientEndpoints。 */
+  /** 当前构建区域的端点清单自举基址；业务端点走 electronAPI.clientEndpoints。 */
   readonly VITE_ENDPOINT_MANIFEST_BASE_URL: string;
+  /** 另一物理区域的受信任端点清单自举基址。 */
+  readonly VITE_ENDPOINT_MANIFEST_PEER_BASE_URL: string;
 }
 
 interface ImportMeta {
@@ -44,10 +46,14 @@ interface EnvCheckResult {
 // surface and the core package's contract in sync. `VoiceInputShortcut` is
 // renderer-only (defined in voice-input/shortcut.ts) so it stays inline.
 // HostSnapshot 来自 transport-only package; desktop main 端 wrap 时附加
-// autoConnect 偏好字段 (本地 prefs, 不写入 ~/.ssh/config), 渲染层统一用
+// autoConnect / agentProxy 偏好字段 (本地 prefs, 不写入 ~/.ssh/config), 渲染层统一用
 // 这个扩展类型即可一次拿到完整信息, 不必再为单个字段单独 IPC。
 type RemoteHostSnapshot = import('@cindy/maker-remote-ssh').HostSnapshot & {
   autoConnect: boolean;
+  /** Agent 流量经 SSH 隧道走本地 Proxy 的 per-host 配置; 未开启 → null。 */
+  agentProxy: { enabled: boolean; localHost: string; localPort: number } | null;
+  /** 隧道实时状态 (main 进程内存态); 无记录 → null。 */
+  agentProxyTunnel: { active: boolean; remotePort?: number; lastError?: string } | null;
 };
 /** 设备互联:REST 设备视图(同 shared/deviceLinkIpc.ts DeviceLinkDeviceView) */
 interface DeviceLinkDeviceInfo {
@@ -373,6 +379,31 @@ type DiscordBotTransportStatus =
   | { kind: 'connected'; appId: string }
   | { kind: 'conflict'; appId: string }
   | { kind: 'error'; reason: string };
+
+type WechatBotPhase =
+  | 'disconnected'
+  | 'authorizing'
+  | 'waiting_confirmation'
+  | 'connected'
+  | 'reconnecting'
+  | 'needs_reauth'
+  | 'disabled_by_policy'
+  | 'error';
+
+interface WechatBotState {
+  phase: WechatBotPhase;
+  bound: boolean;
+  connectedAt?: number;
+  lastInboundAt?: number;
+  queuedTasks: number;
+  errorCode?: string;
+}
+
+interface WechatChannelSettingsState {
+  version: 1;
+  workingDir: string | null;
+  workingDirAvailable: boolean;
+}
 
 type DiscordBotSessionAuthCheckResult = {
   ok: boolean;
@@ -1551,7 +1582,6 @@ interface ElectronAPI {
   authConsumeAccountDeletionRestoredNotice: () => Promise<boolean>;
   onAuthStateChange: (callback: (state: AuthStateChangePayload) => void) => () => void;
   onAuthSessionExpired: (callback: (state: AuthSessionExpiredPayload) => void) => () => void;
-  onTapdbDailyActive: (callback: (payload: { date: string }) => void) => () => void;
 
   // ── 使用统计(TapDB)同意闸 ──
   getAnalyticsSettings: () => Promise<AnalyticsSettingsPayload>;
@@ -1636,6 +1666,21 @@ interface ElectronAPI {
         status: DiscordBotTransportStatus;
       }) => void,
     ) => () => void;
+  };
+
+  // ── Personal WeChat (Settings → IM Bot → Personal) ──
+  wechatBot: {
+    getState: () => Promise<WechatBotState>;
+    authorize: () => Promise<{ started: true }>;
+    cancelAuthorization: () => Promise<{ ok: true }>;
+    unbind: () => Promise<{ ok: true }>;
+    getChannelSettings: () => Promise<WechatChannelSettingsState>;
+    chooseWorkingDirectory: () => Promise<{
+      canceled: boolean;
+      state: WechatChannelSettingsState;
+    }>;
+    resetWorkingDirectory: () => Promise<WechatChannelSettingsState>;
+    onStateChange: (callback: (state: WechatBotState) => void) => () => void;
   };
 
   /**
@@ -2168,6 +2213,13 @@ interface ElectronAPI {
     size: number;
     truncated?: boolean;
   }>;
+
+  /** Raw-bytes sibling of readFileForAttachment (PDF preview → pdf.js data).
+   *  Rejects with an IpcError on failure (no partial payload). */
+  readFileBytes: (params: {
+    filePath: string;
+    maxSize?: number;
+  }) => Promise<{ bytes: Uint8Array; size: number }>;
 
   // ── File header peek IPC (F-FI-8 fallback inference) ──
   /**
@@ -2765,6 +2817,8 @@ interface ElectronAPI {
       user: string;
       authMethod?: 'agent' | 'key';
       identityFile?: string;
+      /** 「Agent 流量走本地 Proxy」pref; null = 关闭, 缺省 = 不动。 */
+      agentProxy?: { enabled: boolean; localHost: string; localPort: number } | null;
     }) => Promise<{ host: RemoteHostSnapshot }>;
     update: (host: {
       id: string;
@@ -2773,6 +2827,7 @@ interface ElectronAPI {
       user: string;
       authMethod?: 'agent' | 'key';
       identityFile?: string;
+      agentProxy?: { enabled: boolean; localHost: string; localPort: number } | null;
     }) => Promise<{ host: RemoteHostSnapshot }>;
     remove: (id: string) => Promise<{ ok: true }>;
     connect: (id: string) => Promise<{ host: RemoteHostSnapshot | null }>;
@@ -3493,6 +3548,14 @@ interface ElectronAPI {
 
     // 模型供应商目录（只读）—— 内置目录元数据 + 各供应商实时连接状态。
     listProviders: () => Promise<{ providers: import('@cindy/model-providers').ProviderView[] }>;
+    /** 复用各内置供应商既有真源刷新模型清单。 */
+    refreshBuiltinProviderModels: (
+      providerId: import('../shared/providerModelRefresh').BuiltinRefreshableProviderId,
+    ) => Promise<import('../shared/providerModelRefresh').ProviderModelRefreshResult>;
+    /** 静默请求 Main 在冷却允许时刷新已连接内置供应商。 */
+    requestProviderModelsAutoRefresh: (
+      trigger: import('../shared/providerModelRefresh').ProviderModelAutoRefreshRendererTrigger,
+    ) => Promise<import('../shared/providerModelRefresh').ProviderModelAutoRefreshResult>;
 
     // 自定义供应商配置 CRUD（配置与 runtime 密钥均由 main 原子排队）。
     createCustomProvider: (
@@ -3641,6 +3704,17 @@ interface ElectronAPI {
      * 让 IM /model 在 main 侧复用同一套可见性过滤,与应用内模型列表逐模型一致。fire-and-forget。
      */
     syncModelVisibility: (map: Record<string, boolean>) => Promise<void>;
+    /**
+     * 「模型 / 供应商停用」override 写入(main 侧 model-disable-store);成功后 main 广播
+     * PROVIDER_CHANGED,useProviders 快照刷新后 UI 拿到新的 suspended / disabled 标志。
+     */
+    setModelDisable: (
+      input:
+        | { kind: 'model'; providerId: string; modelIds: string[]; disabled: boolean }
+        | { kind: 'provider'; providerId: string; disabled: boolean }
+        // reset = 恢复默认:删除该供应商整组停用 override(含指向已下架模型的陈旧条目)。
+        | { kind: 'reset'; providerId: string },
+    ) => Promise<{ ok: true }>;
 
     // 「在新窗口打开」会话多开
     openSessionInNewWindow: (sessionId: string) => Promise<void>;
@@ -4316,6 +4390,10 @@ interface ElectronAPI {
         cachedTokens?: number;
       }>;
       getAccount: (agentKind: 'claude-code' | 'codex') => Promise<unknown | null>;
+      /** Codex app-server authoritative windows and banked reset-credit metadata. */
+      getCodexRateLimits: () => Promise<
+        import('@cindy/maker-shared/device-link-contract').MobileCodexRateLimitsResult
+      >;
       /** provider-scoped 模型单价表；XD 价格与 model-access /models 同快照更新。 */
       getModelPricing: () => Promise<
         import('../shared/regionalMoney').ModelPricingCatalog | null

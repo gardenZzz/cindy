@@ -87,6 +87,7 @@ import {
   clearDraftAndNotify as clearComposerDraftAndNotify,
   getDraft as getComposerDraft,
   plainTextToTiptapDoc,
+  quickStartTextToTiptapDoc,
   saveDraft as saveComposerDraft,
 } from '@/lib/composerDraftStore';
 import type { JSONContent } from '@tiptap/core';
@@ -140,7 +141,6 @@ import {
   type AgentCapabilities,
 } from '@/hooks/useAgentCapabilities';
 import { useProviders } from '@/hooks/useProviders';
-import { isModelEnabled, useModelVisibilityVersion } from '@/state/modelVisibilityPrefs';
 import {
   useDeviceProviders,
   evictDeviceProviders,
@@ -156,7 +156,7 @@ import {
   deriveModelsFromProviders,
   filterChatBridgedCodexProviders,
 } from '@/lib/providerModels';
-import { effectiveSourceIdForModel, getModel, providerOffersModel, sessionModelSupportsFastMode, connectedProvidersForAgent, type ProviderView } from '@cindy/model-providers';
+import { effectiveSourceIdForModel, getModel, isAgentSelectableModel, providerOffersModel, sessionModelSupportsFastMode, connectedProvidersForAgent, type ProviderView } from '@cindy/model-providers';
 import { isSubscriptionDirectModel } from '../../../shared/subscriptionModels';
 import {
   resolveDeviceLinkDraftDefaults,
@@ -234,10 +234,11 @@ function draftEnableOrcaOptions(
       (p) => p.id === cfg.providerId,
     );
     if (!provider || !providerOffersModel(provider, cfg.model, workerAgent)) return undefined;
+    // 准入按「停用」轴判(model.disabled,buildRegistry 烘焙):停用的 (来源, 模型) 不能
+    // 显式路由过去。「隐藏」不再收窄 —— 隐藏只是陈列过滤,记忆来源被隐藏仍然合法可用
+    // (2026-07 启用/显示双轴拆分)。suspended 供应商已被 connectedProvidersForAgent 剔除。
     const catalogModel = getModel(provider, cfg.model, workerAgent);
-    return catalogModel && isModelEnabled(workerAgent, cfg.providerId, catalogModel)
-      ? cfg.providerId
-      : undefined;
+    return catalogModel && catalogModel.disabled !== true ? cfg.providerId : undefined;
   })();
   return {
     workerAgent,
@@ -553,8 +554,6 @@ export function NewMakerDraftRoute() {
    *     compat-proxy。必须逐模型判,同一供应商可能既有可路由模型又有订阅直连模型。
    * device-link 草稿以被控端镜像为准,整段不校准(被控端跑完整 app,两道排除都不适用)。
    */
-  // 可见性 override 变更要重算校准候选(与 ModelSelector 同一份订阅源)。
-  const modelVisibilityVersion = useModelVisibilityVersion();
   const calibrationProviders = useMemo(() => {
     const base = filterChatBridgedCodexProviders(
       localProviders,
@@ -562,27 +561,25 @@ export function NewMakerDraftRoute() {
       !!effectiveRemoteHostId,
     );
     // 逐模型过滤要落在**候选本身**，而不是只落在「挑哪个模型」那一步：来源解析
-    // (effectiveSourceIdForModel) 吃的是同一份候选，若这里不剔除，被隐藏的条目仍会让它
+    // (effectiveSourceIdForModel) 吃的是同一份候选，若这里不剔除，被排除的条目仍会让它
     // 选中那个来源 —— 于是 providerId 落 null、main 解析到同一个被用户排除的默认来源，
     // effort / fast 也从错误的条目推导(PR #548 review)。
+    // 排除口径按「停用」轴(m.disabled)+ 非 agent 分组的能力模型;「隐藏」不排除 ——
+    // 隐藏只是陈列过滤,兜底路由仍可选中(2026-07 启用/显示双轴拆分,用户裁决)。
     return base
       .map((p) => {
         const models = p.models[capabilityAgentKind] ?? [];
         const kept = models.filter(
           (m) =>
-            isModelEnabled(capabilityAgentKind, p.id, m) &&
+            m.disabled !== true &&
+            isAgentSelectableModel(m, { userProvider: p.source === 'user' }) &&
             !(effectiveRemoteHostId && isSubscriptionDirectModel(m.id)),
         );
         if (kept.length === models.length) return p;
         return { ...p, models: { ...p.models, [capabilityAgentKind]: kept } };
       })
       .filter((p) => (p.models[capabilityAgentKind] ?? []).length > 0);
-  }, [
-    localProviders,
-    capabilityAgentKind,
-    effectiveRemoteHostId,
-    modelVisibilityVersion,
-  ]);
+  }, [localProviders, capabilityAgentKind, effectiveRemoteHostId]);
   /**
    * **自动**选择用的候选:再剔掉清单发现失败的供应商。
    *
@@ -1067,8 +1064,11 @@ export function NewMakerDraftRoute() {
       // bridge 模型(chatgpt/ / xai/)在远程模式不可用(不经本地 compat-proxy),需降级。
       // 非 bridge 模型也必须在已连接的本地来源中存在,否则 SSH 会话首消息会被阻塞。
       const sshConnected = connectedProvidersForAgent(localProviders, capabilityAgentKind);
-      const sshVisibleModels = deriveModelsFromProviders(sshConnected, capabilityAgentKind)
-        .filter((m) => !isSubscriptionDirectModel(m.id));
+      // admissionFiltered:SSH 候选是「挑一个可路由模型」的清单,停用条目与能力模型
+      // 不参与(降级兜底也不能落到停用模型上,PR #744 review)。
+      const sshVisibleModels = deriveModelsFromProviders(sshConnected, capabilityAgentKind, {
+        admissionFiltered: true,
+      }).filter((m) => !isSubscriptionDirectModel(m.id));
       let sshModel = draftInitialModel;
       if (isSubscriptionDirectModel(sshModel) || !sshVisibleModels.some((m) => m.id === sshModel)) {
         if (!sshVisibleModels.length) {
@@ -1659,6 +1659,8 @@ export function NewMakerDraftRoute() {
             // 里, route change 在那次 commit 同时发生,旧的 draft route 直接被 unmount,
             // 不会暴露 cleared 后的视觉状态。clearFiles 仍然在 React 提交 unmount cleanup
             // 之前同步执行,所以 useAttachments 的 cleanup 不会把刚送出去的附件回写到 store。
+            // 保存原始 doc JSON(含 quickStartPill 等 mark),供 worktree 失败恢复时原样还原。
+            const preNavDraftDoc = getComposerDraft(NEW_MAKER_DRAFT_KEY)?.text ?? null;
             navigate(`/cc-agent/${newSession.id}`, { replace: true });
             // clearDraftAndNotify (not bare clear): onSend returned false above
             // so ChatInput never cleared its editor — without notifying it, the
@@ -1676,7 +1678,7 @@ export function NewMakerDraftRoute() {
               let rehomedFiles = files;
               const restoreFirstMessageDraft = () => {
                 saveComposerDraft(newSession.id, {
-                  text: plainTextToTiptapDoc(message),
+                  text: preNavDraftDoc ?? plainTextToTiptapDoc(message),
                   attachments: rehomedFiles ?? [],
                 });
               };
@@ -2202,7 +2204,7 @@ export function NewMakerDraftRoute() {
       const text = t(labelKey);
       const currentDraft = getComposerDraft(NEW_MAKER_DRAFT_KEY);
       saveComposerDraft(NEW_MAKER_DRAFT_KEY, {
-        text: plainTextToTiptapDoc(text),
+        text: quickStartTextToTiptapDoc(text),
         attachments: currentDraft?.attachments ?? attachmentState.attachments,
         quotes: currentDraft?.quotes,
         browserComments: currentDraft?.browserComments,
