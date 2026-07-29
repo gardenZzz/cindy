@@ -16,6 +16,7 @@ import {
   buildRegistry,
   type Catalog,
   type ConnectionState,
+  type ModelDisableOverrides,
   type ModelDiscoveryFailureState,
   type ProviderModelDiscoveryFailure,
   type ProviderView,
@@ -65,6 +66,12 @@ export interface ProviderServiceDeps {
     providerId: string,
     connected: boolean,
   ) => ProviderModelDiscoveryFailure | null;
+  /**
+   * 「模型 / 供应商停用」override(生产 = model-disable-store 的 readModelDisableOverrides)。
+   * buildRegistry 据此烘焙 ProviderView.suspended 与 CatalogModel.disabled,让所有
+   * 消费方(renderer / IM / Orca 路由 / device-link)拿到同一份准入事实。缺省 = 全启用。
+   */
+  getModelAccess?: () => ModelDisableOverrides;
 }
 
 export interface ProviderService {
@@ -126,7 +133,7 @@ export function createProviderService(deps: ProviderServiceDeps): ProviderServic
         if (failure) discoveryFailures[p.id] = failure;
       }
     }
-    return buildRegistry(catalog, connected, discoveryFailures);
+    return buildRegistry(catalog, connected, discoveryFailures, deps.getModelAccess?.());
   }
 
   return { listProviders };

@@ -162,6 +162,8 @@ import {
   storeGhostSecret,
 } from '../secrets/providerSecretStore.js';
 import { getActiveCatalog } from '../maker-host/active-catalog.js';
+import { isModelDisabled, isProviderDisabled } from '@cindy/model-providers';
+import { readModelDisableOverrides } from '../maker-host/model-disable-store.js';
 import { outboundFetch } from '../maker-host/outbound-fetch.js';
 import {
   CINDY_CAPABILITY_KEYS,
@@ -1670,7 +1672,16 @@ export function getGhostPreviewSlot(): GhostPreviewSlot {
  */
 function getCatalogMediaConfig(kind: 'image' | 'video'): CindyMediaCatalogConfig {
   try {
-    return deriveCindyMediaConfig(getActiveCatalog().providers, kind);
+    // 停用过滤:用户在 设置 → 模型供应商 停用的媒体模型 / 供应商不进候选清单
+    // (与对话模型的准入口径同源,见 model-disable-store)。
+    const access = readModelDisableOverrides();
+    return deriveCindyMediaConfig(
+      getActiveCatalog().providers,
+      kind,
+      (providerId, modelId) =>
+        isProviderDisabled(access, providerId) ||
+        isModelDisabled(access, providerId, modelId),
+    );
   } catch (err) {
     // 目录读取异常 = 拿不到可用性证明,同「空清单」处理(不静默顶一份旧名单)。
     log.warn(`read catalog ${kind} config failed, treating capability as unavailable`, {
@@ -1682,6 +1693,22 @@ function getCatalogMediaConfig(kind: 'image' | 'video'): CindyMediaCatalogConfig
 
 const getCatalogImageConfig = (): ReturnType<typeof getCatalogMediaConfig> => getCatalogMediaConfig('image');
 const getCatalogVideoConfig = (): ReturnType<typeof getCatalogMediaConfig> => getCatalogMediaConfig('video');
+
+/**
+ * 派发前重查(PR #744 review 第二十轮):cindySlot 从白名单校验到实际下单之间隔着
+ * 归属查账、参考图准备等长 await,期间该媒体模型 / 供应商可能被用户停用 —— 在
+ * generateImage / editImage / 视频提交边界按**当前** override 重算启用候选再验一次,
+ * 不在册即拒,这次付费请求不发出(与 scheduler 派发前重裁决同语义)。
+ */
+function assertMediaModelStillEnabled(kind: 'image' | 'video', model: string): void {
+  if (!getCatalogMediaConfig(kind).models.some((m) => m.id === model)) {
+    throw new Error(
+      kind === 'image'
+        ? '图像模型已在设置中停用,本次生成已取消'
+        : '视频模型已在设置中停用,本次生成已取消',
+    );
+  }
+}
 
 /**
  * 把图片通道的底层报错翻译成用户可行动的话术(意识交卷失败时 AI 会原样
@@ -1727,6 +1754,8 @@ async function runGhostVideo(params: {
   if (!registry || !registry.hasAny()) {
     throw new Error('视频能力不可用:主机未配置视频通道');
   }
+  // 提交紧前重查(第二十一轮):参考图 data URI 准备是 await,窗口内被停用即拒。
+  assertMediaModelStillEnabled('video', params.alias);
   const r = await submitAndAwaitVideo(registry, params);
   return { buffer: r.buffer, mimeType: r.mimeType };
 }
@@ -1765,6 +1794,7 @@ export function getGhostCindySlot(): GhostCindySlot {
       // 这里收窄类型是安全的。
       generateImage: async ({ prompt, model, aspectRatio }) => {
         try {
+          assertMediaModelStillEnabled('image', model);
           return decodeImageResponse(
             await getCindyProxyMediaService().backend.generateImage({
               model: model as GatewayImageModel,
@@ -1779,6 +1809,7 @@ export function getGhostCindySlot(): GhostCindySlot {
       },
       editImage: async ({ prompt, model, imagePaths }) => {
         try {
+          assertMediaModelStillEnabled('image', model);
           return decodeImageResponse(
             await getCindyProxyMediaService().backend.editImage({ model: model as GatewayImageModel, prompt, imagePaths }),
           );
@@ -1788,6 +1819,7 @@ export function getGhostCindySlot(): GhostCindySlot {
       },
       generateVideo: async ({ prompt, model }) => {
         try {
+          assertMediaModelStillEnabled('video', model);
           return await runGhostVideo({ alias: model, prompt });
         } catch (err) {
           humanizeImageChannelError(err);
@@ -1795,6 +1827,7 @@ export function getGhostCindySlot(): GhostCindySlot {
       },
       editVideo: async ({ prompt, model, imagePaths }) => {
         try {
+          assertMediaModelStillEnabled('video', model);
           const imageDataUris = await Promise.all(imagePaths.map(readImageFileAsDataUri));
           return await runGhostVideo({ alias: model, prompt, imageDataUris });
         } catch (err) {

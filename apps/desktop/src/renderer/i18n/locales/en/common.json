@@ -1175,7 +1175,8 @@
       "title": "Providers",
       "subtitle": "The source used when picking a model. Each source offers its own models and billing, switchable per conversation.",
       "pill": {
-        "connected": "Connected"
+        "connected": "Connected",
+        "suspended": "Disabled"
       },
       "button": {
         "authorize": "Authorize",
@@ -1184,7 +1185,8 @@
         "disconnect": "Disconnect",
         "cancel": "Cancel",
         "retry": "Retry model discovery",
-        "retrying": "Retrying discovery…"
+        "retrying": "Retrying discovery…",
+        "enableProvider": "Enable Provider"
       },
       "anthropic": {
         "title": "Anthropic",
@@ -1355,7 +1357,6 @@
         "available": "Shown in Model Picker",
         "modelCount_one": "{{count}} model",
         "modelCount_other": "{{count}} models",
-        "agentEnabledCount": "{{agent}} {{on}}/{{total}}",
         "enableAll": "Show All",
         "disableAll": "Hide All",
         "subscription": "Subscription",
@@ -1371,7 +1372,13 @@
         "refreshDone": "Model list refreshed",
         "refreshAdded": "Found {{count}} new models",
         "refreshNoNew": "Model list is up to date — nothing new",
-        "refreshFailed": "Model list couldn’t be refreshed — try again later"
+        "refreshFailed": "Model list couldn’t be refreshed — try again later",
+        "disableModel": "Disable This Model",
+        "enableModel": "Enable This Model",
+        "capabilityGroupHint": "Not shown in the chat model picker; used only by features like image generation.",
+        "accessWriteFailed": "Couldn't save the change. Please try again.",
+        "disabledGroup": "Disabled",
+        "enableAllModels": "Enable All"
       },
       "genericOAuth": {
         "subtitle": "Subscription sign-in (OAuth)",
@@ -1413,7 +1420,9 @@
           "forbidden": "This provider refused the request. The list below is from the last successful refresh. If you're on a proxy or VPN, switch exits and retry.",
           "rejected": "This provider refused the request. The list below is from the last successful refresh. Try again later, or use a different provider.",
           "empty": "This provider returned no usable models this time. The list below is from the last successful refresh. Check your account's access, then retry."
-        }
+        },
+        "suspendedBanner": "This provider is disabled. Credentials are kept; enable it to use its models again.",
+        "moreActionsAria": "More Actions"
       },
       "detect": {
         "groupLabel": "Detected on this device",
@@ -1480,6 +1489,10 @@
         "badge": "Recommended",
         "desc": "Sign in to Cindy to enable the official Cindy AI service — all models work out of the box, no keys to manage.",
         "cta": "Sign in to Cindy"
+      },
+      "menu": {
+        "disableProvider": "Disable This Provider",
+        "enableProvider": "Enable This Provider"
       }
     },
     "experimental": {

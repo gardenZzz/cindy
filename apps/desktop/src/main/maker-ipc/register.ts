@@ -177,6 +177,7 @@ import { createGitSnapshotCoordinator } from '../maker-host/git-snapshot-host.js
 import {
   cancelCodexAuthModeChange,
   finalizeCodexAfterAuthModeChange,
+  getMaker,
   getPluginRegistry,
   prepareCodexForAuthModeChange,
   restartCodexAfterAuthModeChange,
@@ -390,7 +391,12 @@ import {
   refreshActiveCatalogFromSource,
   refreshCustomProvidersIntoCatalog,
 } from '../maker-host/createDesktopProviderService.js';
-import { connectedProvidersForAgent, effectiveSourceIdForModel } from '@cindy/model-providers';
+import {
+  connectedProvidersForAgent,
+  effectiveSourceIdForModel,
+  isAgentSelectableModel,
+  type ProviderView,
+} from '@cindy/model-providers';
 import {
   getSessionProvider,
   hydrateSessionProvider,
@@ -438,6 +444,17 @@ import {
   getModelVisibilityMirrorSnapshot,
   syncModelVisibilityMirror,
 } from '../maker-host/model-visibility-mirror.js';
+import {
+  clearProviderDisableOverrides,
+  setModelsDisabled,
+  setProviderDisabled,
+  stageProviderDisableOverridesClear,
+} from '../maker-host/model-disable-store.js';
+import { getCurrentDataOwnerId } from '../authManager.js';
+import {
+  resolveLenientSessionRoute,
+  verdictForModelRoute,
+} from '../maker-host/model-route-guard-live.js';
 import { setClaudeProxySessionIdResolver } from '../maker-host/anthropic-compat-proxy-host.js';
 import {
   clearClaudeSessionBackgroundActivity,
@@ -1759,15 +1776,55 @@ export function cancelPendingAgentSwitchForSession(sessionId: string): void {
  * 另一端 fail-closed 的行为分叉。register 在 service 尚未初始化时必须抛错，不能
  * 假装登记成功后丢失用户选择；其余读取/清理入口保持启动期 no-op 语义。
  */
-export function registerPendingCredentialSwitchForSession(
+export async function registerPendingCredentialSwitchForSession(
   sessionId: string,
   target: { model: string; providerId: string | null },
-): void {
+): Promise<void> {
   const service = pendingCredentialSwitchHolder;
   if (!service) {
     throw new Error('Pending credential switch service is not initialized');
   }
-  service.register(sessionId, target);
+  // 捕获会话 agent:deferred 切换在收口时刻要重过停用裁决(期间目标可能被停用,
+  // PR #744 review 第七轮);读不到(会话行缺失)则登记不带 agentKind = 收口不裁决。
+  const dbAgentKind = getSessionDbAgentKind(sessionId);
+  // 捕获切换前的运行路由:model 用 live handle(热切过未落库时比 DB 权威),来源用
+  // provider store;effort / fast 无 live getter,从 DB 行读 —— renderer 在收到
+  // deferred 结果**之后**才落盘请求值,本函数在 IPC 回包之前执行,此刻行里仍是
+  // 切换前值,无竞态。目标在等待期间被全停且目录无启用兜底时,收口按整套
+  // previousRoute 回滚(model/provider/effort/fast 一致成对,第十六、十八轮)。
+  // deferred 场景会话正在跑 turn,live handle 必在;取不到就不带 = 无从回滚。
+  const live = getMaker().getSession(sessionId);
+  let prevRow: { model: string | null; effort: string | null; fastMode: boolean | null; providerId: string | null } | null = null;
+  try {
+    const [row] = await getDbClient()
+      .drizzle.select({
+        model: sessions.model,
+        effort: sessions.effort,
+        fastMode: sessions.fastMode,
+        providerId: sessions.providerId,
+      })
+      .from(sessions)
+      .where(eq(sessions.id, sessionId))
+      .limit(1);
+    prevRow = row ?? null;
+  } catch {
+    prevRow = null;
+  }
+  const prevModel = live?.model ?? prevRow?.model ?? null;
+  service.register(sessionId, {
+    ...target,
+    ...(dbAgentKind ? { agentKind: dbAgentKind === 'cc' ? 'claude-code' as const : 'codex' as const } : {}),
+    ...(prevModel
+      ? {
+          previousRoute: {
+            model: prevModel,
+            providerId: getSessionProvider(sessionId) ?? prevRow?.providerId ?? null,
+            ...(prevRow?.effort ? { effort: prevRow.effort } : {}),
+            ...(prevRow?.fastMode != null ? { fastMode: prevRow.fastMode } : {}),
+          },
+        }
+      : {}),
+  });
 }
 
 export function clearPendingCredentialSwitchForSession(
@@ -3575,6 +3632,17 @@ export function registerMakerIpc(maker: Maker, options: RegisterMakerIpcOptions)
     refreshBuiltinModels: refreshProviderModelsManually,
     requestModelsAutoRefresh: requestProviderModelAutoRefresh,
     scanLocalCli: () => scanLocalCliAuth(createLocalCliScanDeps()),
+    // 「模型 / 供应商停用」override 写入(main 侧持久化,handler 写后广播 PROVIDER_CHANGED)。
+    setModelsDisabled: (providerId, modelIds, disabled) =>
+      setModelsDisabled(providerId, modelIds, disabled),
+    setProviderDisabled: (providerId, disabled) => setProviderDisabled(providerId, disabled),
+    stageClearProviderDisableOverrides: (providerId) =>
+      stageProviderDisableOverridesClear(providerId),
+    // 「恢复默认」= 删除该供应商整组停用 override(configuration-and-overrides.md §4)。
+    clearProviderDisableOverrides: (providerId) => clearProviderDisableOverrides(providerId),
+    // 停用写入的归属校验:入口捕获 / 持久化前复核,异步窗口内切账号即拒,防 A 的
+    // 点击写进 B 的 owner-scoped 偏好文件(PR #744 review 第七轮)。
+    currentOwnerId: () => getCurrentDataOwnerId(),
     // 通用 OAuth（目录 auth.oauth 描述符驱动）：login 成功后 best-effort 拉动态模型发现
     // (additions-only merge 进 active-catalog) 并广播 PROVIDER_CHANGED 让 UI 刷新连接态。
     oauthLogin: async (providerId, isCurrent) => {
@@ -4033,6 +4101,33 @@ export function registerMakerIpc(maker: Maker, options: RegisterMakerIpcOptions)
    * 已踩过 commit 2e8371c7 的坑（路径 B/C 漏调 markOrcaMcpHydratedIfNeeded
    * 导致 Orca MCP 工具 rehydrate 失败），抽 helper 让"漏调"在编译期不可能发生。
    */
+  /**
+   * 停用轴的边界裁决(判定纯逻辑在 model-route-guard.ts,可单测)。
+   * 返回值 = 需要改路由到的启用来源 id(隐式默认落点被停用而有替代拷贝时),
+   * undefined = 照常;停用语义下不可路由则抛 INVALID_PARAMS。目录读取失败按
+   * 放行处理:目录不可用时历史行为就是回落 capabilities 继续跑,本守卫只执行停用
+   * 语义,不把目录故障升级成会话不可建。allowSideEffects=false —— 这条路径可能由
+   * device-link / renderer 驱动,纯读即可(自愈另有主进程业务入口负责)。
+   */
+  async function assertModelRouteUsable(
+    agent: AgentKind,
+    model: string,
+    providerId: string | null,
+  ): Promise<string | undefined> {
+    const verdict = await verdictForModelRoute(agent, model, providerId);
+    if (verdict.kind === 'reject') {
+      throwIpcError(
+        'INVALID_PARAMS',
+        verdict.reason === 'explicit-source-disabled'
+          ? `provider "${providerId}" is disabled for model "${model}" in settings`
+          : verdict.reason === 'capability-model'
+            ? `model "${model}" is not an agent chat model`
+            : `model "${model}" is disabled in settings`,
+      );
+    }
+    return verdict.kind === 'reroute' ? verdict.providerId : undefined;
+  }
+
   async function bootstrapSession(o: CreateOpts): Promise<{
     session: Awaited<ReturnType<typeof maker.createSession>>;
     didInjectOrcaInstructions: boolean;
@@ -4047,6 +4142,37 @@ export function registerMakerIpc(maker: Maker, options: RegisterMakerIpcOptions)
     }
 
     await hydrateProviderIdBeforeSessionStart(o);
+    // 停用轴准入(PR #744 review):**新建**会话不得路由到用户停用的模型 / 来源。
+    // renderer 选择器已过滤,但 create-session 在 device-link allowlist 内,老控制端
+    // 可直接点名 —— main 必须自己裁决。resume 豁免(运行中的会话不打断)只给
+    // **经核实的原样续跑**:请求路由与本会话 DB 持久化路由一致才算;resumeSessionId
+    // 是调用方可控字段,携带任意非空 id 同时改点停用 model/provider 不能构成绕过
+    // (PR #744 review 第十六轮)。读不到会话行(远端新建等)按非豁免走正常裁决。
+    // 隐式来源的原生默认落点被停用而有启用替代拷贝时,把会话显式改路由过去(下方
+    // persistAndHydrateSessionProvider 会把它落库):实际路由层对隐式来源走原生
+    // 默认、不查停用标志,仅放行等于继续用停用拷贝付费。
+    if (typeof o.model === 'string' && o.model) {
+      let verifiedResume = false;
+      if (o.resumeSessionId && typeof o.id === 'string' && o.id) {
+        try {
+          const [row] = await getDbClient()
+            .drizzle.select({ model: sessions.model, providerId: sessions.providerId })
+            .from(sessions)
+            .where(eq(sessions.id, o.id))
+            .limit(1);
+          verifiedResume =
+            !!row &&
+            row.model === o.model &&
+            (row.providerId ?? null) === (o.providerId ?? null);
+        } catch {
+          verifiedResume = false;
+        }
+      }
+      if (!verifiedResume) {
+        const reroute = await assertModelRouteUsable(o.agentKind, o.model, o.providerId ?? null);
+        if (reroute && !o.providerId) o.providerId = reroute;
+      }
+    }
     const session = await maker.createSession(o);
     await markProjectContextIfNeeded(session.id, didInjectProjectContext);
     wireSessionToIpc(session);
@@ -4292,6 +4418,9 @@ export function registerMakerIpc(maker: Maker, options: RegisterMakerIpcOptions)
   }
 
   const agentSwitchDeps: MakerSessionAgentSwitchHandlerDeps = {
+    // 停用轴边界裁决:目标路由被停用 → 抛错;隐式默认落点被停用 → 返回启用替代来源。
+    assertModelRouteUsable: (agent, model, providerId) =>
+      assertModelRouteUsable(agent, model, providerId),
     getSessionRow: async (sessionId) => {
       const db = getDbClient().drizzle;
       const [row] = await db
@@ -5769,44 +5898,44 @@ export function registerMakerIpc(maker: Maker, options: RegisterMakerIpcOptions)
     getAvailableModels: (agent) => maker.getCapabilities(agent).availableModels,
     getProviderRoutingContext: async () => {
       const views = await getDesktopProviderService().listProviders({ allowSideEffects: true });
-      return {
-        availability: {
-          'claude-code': connectedProvidersForAgent(views, 'claude-code').map((provider) => ({
+      // 准入过滤与 modelList.ts 标准派生同口径:用户停用的模型(disabled,见
+      // model-disable-store)与非 agent 分组的能力模型(图像/音频/视频/向量)不进
+      // 路由可用集 —— MCP create_worker 点名它们会走既有的 INVALID_PARAMS /
+      // NO_PROVIDER 拒绝路径,而不是静默路由过去。停用的供应商已在
+      // connectedProvidersForAgent(suspended)一层出局。
+      const routableModels = (provider: ProviderView, agent: AgentKind) =>
+        (provider.models[agent] ?? []).filter(
+          (model) =>
+            model.disabled !== true &&
+            isAgentSelectableModel(model, { userProvider: provider.source === 'user' }),
+        );
+      const availabilityFor = (agent: AgentKind) =>
+        connectedProvidersForAgent(views, agent).map((provider) => {
+          const models = routableModels(provider, agent);
+          return {
             id: provider.id,
             name: provider.name,
-            models: (provider.models['claude-code'] ?? []).map((model) => model.id),
+            models: models.map((model) => model.id),
             // Fast 能力 per-(provider, model):显式来源的 Fast 判定按该来源自己的条目。
-            fastModels: (provider.models['claude-code'] ?? [])
+            fastModels: models
               .filter((model) => model.supportsFastMode)
               .map((model) => model.id),
             // effort 档位同样 per-(provider, model):供 service 按实际路由来源重归一。
             effortMetaByModel: Object.fromEntries(
-              (provider.models['claude-code'] ?? []).map((model) => [
+              models.map((model) => [
                 model.id,
                 { efforts: model.efforts, defaultEffort: model.defaultEffort },
               ]),
             ),
             requiresExplicitRoute: providerRouteRequiresExplicitSelection(
-              provider.routing['claude-code']?.authStrategy,
+              provider.routing[agent]?.authStrategy,
             ),
-          })),
-          codex: connectedProvidersForAgent(views, 'codex').map((provider) => ({
-            id: provider.id,
-            name: provider.name,
-            models: (provider.models.codex ?? []).map((model) => model.id),
-            fastModels: (provider.models.codex ?? [])
-              .filter((model) => model.supportsFastMode)
-              .map((model) => model.id),
-            effortMetaByModel: Object.fromEntries(
-              (provider.models.codex ?? []).map((model) => [
-                model.id,
-                { efforts: model.efforts, defaultEffort: model.defaultEffort },
-              ]),
-            ),
-            requiresExplicitRoute: providerRouteRequiresExplicitSelection(
-              provider.routing.codex?.authStrategy,
-            ),
-          })),
+          };
+        });
+      return {
+        availability: {
+          'claude-code': availabilityFor('claude-code'),
+          codex: availabilityFor('codex'),
         },
         resolveDefaultProviderIdForModel: (agent, model) => (
           effectiveSourceIdForModel(views, null, model, agent)
@@ -6666,6 +6795,24 @@ export function registerMakerIpc(maker: Maker, options: RegisterMakerIpcOptions)
     onApplied: (sessionId) => {
       inputCoordinator.wakeSession(sessionId, 'pending-credential-switch-applied');
     },
+    // 停用轴:deferred 切换收口前重裁决(SET_MODEL 时刻裁决过,但生效可能在数分钟
+    // 后,期间目标可能被停用;PR #744 review 第七轮,第十四轮换宽松降级形态 ——
+    // 目标全停时连模型一起换到启用兜底)。
+    resolveRoute: resolveLenientSessionRoute,
+    // 裁决改道 / 清空显式来源 / 全停换模型时回写 DB + 广播 patch:renderer 在
+    // deferred 接受时已按请求值落盘,不纠正则下一次懒 resume 按停用路由重建
+    // (PR #744 review 第十、十四轮)。
+    persistRoute: async (sessionId, route) => {
+      const patch: Record<string, unknown> = { providerId: route.providerId };
+      if (route.model) patch.model = route.model;
+      if (route.effort) patch.effort = route.effort;
+      if (route.fastMode !== undefined) patch.fastMode = route.fastMode;
+      await getDbClient()
+        .drizzle.update(sessions)
+        .set(patch)
+        .where(eq(sessions.id, sessionId));
+      broadcastSessionPatched(sessionId, patch);
+    },
     logger: log,
   });
   pendingCredentialSwitchHolder = pendingCredentialSwitchService;
@@ -7267,6 +7414,26 @@ export function registerMakerIpc(maker: Maker, options: RegisterMakerIpcOptions)
     // 后到的 SET_MODEL 才能写 route。否则切换 DB await 恢复后会用旧 provider
     // 覆盖用户刚选的新 route，形成 DB 与进程内路由分叉。
     return withSendToSessionLock(sessionId, async () => {
+      // 停用轴准入(PR #744 review;第十二轮移入锁内):切换模型是一次新的路由选择,
+      // 不得切到用户停用的模型 / 来源(本机选择器已过滤,但本 channel 在 device-link
+      // allowlist 内,老控制端可直接点名)。裁决必须在拿到会话锁**之后**执行 ——
+      // 排队等待期间目标可能刚被停用,而同凭证族的变更即时生效、不经 deferred 收口
+      // 的重裁决,锁前裁决结果可能已过期。会话当前正用着的停用模型不受影响,这里只
+      // 拦「切过去」;隐式来源的原生默认落点被停用而有启用替代拷贝时,以显式来源
+      // 落地(与 bootstrapSession 同语义)。agentKind 读不到(会话行缺失等)时不拦。
+      // DB 存的是 'cc' | 'codex'(messages.agent_kind 口径),目录侧是 AgentKind。
+      let effectiveProviderId = providerId;
+      {
+        const dbAgentKind = getSessionDbAgentKind(sessionId);
+        if (dbAgentKind) {
+          const reroute = await assertModelRouteUsable(
+            dbAgentKind === 'cc' ? 'claude-code' : 'codex',
+            model,
+            typeof providerId === 'string' ? providerId : null,
+          );
+          if (reroute && typeof providerId !== 'string') effectiveProviderId = reroute;
+        }
+      }
       try {
         const result = await applySetModelThenCancelAgentSwitchIntent(
           agentSwitchPending,
@@ -7275,7 +7442,7 @@ export function registerMakerIpc(maker: Maker, options: RegisterMakerIpcOptions)
             maker,
             sessionId,
             model,
-            providerId,
+            providerId: effectiveProviderId,
             isSessionInTurn,
             registerPendingCredentialSwitch: registerPendingCredentialSwitchForSession,
             clearPendingCredentialSwitch: clearPendingCredentialSwitchForSession,

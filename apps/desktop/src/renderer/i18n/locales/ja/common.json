@@ -1175,7 +1175,8 @@
       "title": "モデルプロバイダー",
       "subtitle": "モデルを選ぶときのソースです。各ソースは対応するモデルと課金方式を提供し、会話ごとに切り替えられます。",
       "pill": {
-        "connected": "接続済み"
+        "connected": "接続済み",
+        "suspended": "無効"
       },
       "button": {
         "authorize": "認証",
@@ -1184,7 +1185,8 @@
         "disconnect": "切断",
         "cancel": "キャンセル",
         "retry": "モデル一覧を再取得",
-        "retrying": "再取得中…"
+        "retrying": "再取得中…",
+        "enableProvider": "プロバイダーを有効にする"
       },
       "anthropic": {
         "title": "Anthropic",
@@ -1354,7 +1356,6 @@
         "search": "モデルを検索",
         "available": "モデル選択に表示",
         "modelCount_other": "{{count}} モデル",
-        "agentEnabledCount": "{{agent}} {{on}}/{{total}}",
         "enableAll": "すべて表示",
         "disableAll": "すべて非表示",
         "subscription": "サブスク",
@@ -1370,7 +1371,13 @@
         "refreshDone": "モデル一覧を再読み込みしました",
         "refreshAdded": "新しいモデルを {{count}} 件検出しました",
         "refreshNoNew": "モデル一覧は最新です。新規はありません",
-        "refreshFailed": "モデル一覧を更新できませんでした。しばらくしてから再試行してください"
+        "refreshFailed": "モデル一覧を更新できませんでした。しばらくしてから再試行してください",
+        "disableModel": "このモデルを無効にする",
+        "enableModel": "このモデルを有効にする",
+        "capabilityGroupHint": "チャットのモデル選択には表示されず、画像生成などの機能でのみ使用されます。",
+        "accessWriteFailed": "変更を保存できませんでした。もう一度お試しください。",
+        "disabledGroup": "無効",
+        "enableAllModels": "すべて有効にする"
       },
       "genericOAuth": {
         "subtitle": "サブスクリプション認証（OAuth）",
@@ -1412,7 +1419,9 @@
           "forbidden": "このプロバイダーがリクエストを拒否しました。以下は前回取得したモデル一覧です。プロキシまたは VPN をご利用の場合は、出口を変えてから再試行してください。",
           "rejected": "このプロバイダーがリクエストを拒否しました。以下は前回取得したモデル一覧です。しばらくしてから再試行するか、別のプロバイダーをご利用ください。",
           "empty": "今回このプロバイダーから利用可能なモデルが返されませんでした。以下は前回取得した一覧です。アカウントの権限を確認してから再試行してください。"
-        }
+        },
+        "suspendedBanner": "このプロバイダーは無効になっています。認証情報は保持されており、有効にすると再びモデルを利用できます。",
+        "moreActionsAria": "その他の操作"
       },
       "detect": {
         "groupLabel": "このデバイスで検出",
@@ -1479,6 +1488,10 @@
         "badge": "おすすめ",
         "desc": "Cindy にサインインすると公式 Cindy AI サービスが有効になります。全モデルがすぐ使え、キー管理は不要です。",
         "cta": "Cindy にサインイン"
+      },
+      "menu": {
+        "disableProvider": "このプロバイダーを無効にする",
+        "enableProvider": "このプロバイダーを有効にする"
       }
     },
     "experimental": {

@@ -96,9 +96,11 @@ export function ImDefaultSettingsSection({
   }, [onSummaryChange, settings]);
 
   const modelsByAgent = useMemo<Record<ImDefaultAgentKind, ModelDescriptor[]>>(() => {
+    // 准入口径:IM 默认模型是「从零挑一个」的清单,停用的供应商/模型与能力模型
+    // 不该可选 —— 否则 headless runner 派发时才降级换模型,用户无感(PR #744 review)。
     const fromProviders = {
-      'claude-code': deriveModelsFromProviders(providers, 'claude-code'),
-      codex: deriveModelsFromProviders(providers, 'codex'),
+      'claude-code': deriveModelsFromProviders(providers, 'claude-code', { admissionFiltered: true }),
+      codex: deriveModelsFromProviders(providers, 'codex', { admissionFiltered: true }),
     };
     return {
       'claude-code': fromProviders['claude-code'].length

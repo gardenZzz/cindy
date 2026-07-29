@@ -2240,6 +2240,9 @@ export function CCAgentSessionView({
       // maker:agent:status);本地会话 remoteDeviceId 为 undefined → 走本机检查(行为不变)。
       const { proceed } = await vendorAuthGate.checkAndConfirm(isCodex ? 'codex' : 'cc', {
         deviceId: remoteDeviceId,
+        // 已建会话:suspended 来源计入(停用不打断运行中会话,门禁只看凭证连接态,
+        // PR #744 review 第十七轮)。
+        existingSessionRoute: true,
       });
       if (!proceed) return false;
 

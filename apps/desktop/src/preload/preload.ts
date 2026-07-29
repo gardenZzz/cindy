@@ -3842,6 +3842,19 @@ contextBridge.exposeInMainWorld('electronAPI', {
      */
     syncModelVisibility: (map: Record<string, boolean>): Promise<void> =>
       ipcRenderer.invoke('maker:model-visibility:sync', map),
+    /**
+     * 「模型 / 供应商停用」override 写入(main 侧持久化真源 model-disable-store)。
+     * 成功后 main 广播 PROVIDER_CHANGED,renderer 经 useProviders 快照刷新拿到
+     * 烘焙了 suspended / model.disabled 标志的新视图。
+     */
+    setModelDisable: (
+      input:
+        | { kind: 'model'; providerId: string; modelIds: string[]; disabled: boolean }
+        | { kind: 'provider'; providerId: string; disabled: boolean }
+        // reset = 恢复默认:删除该供应商整组停用 override(含陈旧条目),遵循
+        // configuration-and-overrides.md §4 的「删 override 跟随默认」语义。
+        | { kind: 'reset'; providerId: string },
+    ): Promise<{ ok: true }> => ipcRenderer.invoke('maker:model-disable:set', input),
 
     // 「在新窗口打开」会话多开 —— 新建一个完整窗口定位到该 session。
     openSessionInNewWindow: (sessionId: string): Promise<void> =>
