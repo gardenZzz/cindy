@@ -164,11 +164,14 @@ describe('remoteCcQueryFactory drift override (R27 P1)', () => {
 });
 
 describe('remoteCcQueryFactory missing desired generation (Greptile R29 P1)', () => {
-  it('forces a clean no-MCP query when injection cannot produce a desired fingerprint for a previously injected session', () => {
+  it('forces a clean no-MCP query when injection cannot produce a desired fingerprint', () => {
     expect(source).toContain('CC_MCP_DISABLED_FINGERPRINT');
     expect(source).toContain('const ccMissingDesiredStale =');
     expect(source).toContain('mcpInjectFingerprint === undefined');
     expect(source).toContain('ccAppliedFingerprint !== CC_MCP_DISABLED_FINGERPRINT');
+    expect(source).not.toContain(
+      'mcpInjectFingerprint === undefined &&\n          ccAppliedFingerprint !== null &&',
+    );
 
     const missingDesired = source.indexOf('const ccMissingDesiredStale =');
     const forceFreshAssign = source.indexOf('const forceFreshQuery =', missingDesired);

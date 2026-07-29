@@ -759,14 +759,14 @@ export function getMaker(): Maker {
           mcpInjectFingerprint !== undefined &&
           ccAppliedFingerprint !== null &&
           mcpInjectFingerprint !== ccAppliedFingerprint;
-        // 注入失败 / bridge 不可用时没有 desired 指纹,但若 applied 记录显示
-        // 该 session 上一代确实带过 MCP,attach 旧 alive query 会复用失效
-        // Authorization / URL / mcp-session-id。此时 forceFresh 成无 MCP 的
-        // 干净 query,并在 open 成功后把 applied 收敛为 disabled,避免故障
-        // 期间每次 open 都重复 kill + fresh (Greptile R29 P1)。
+        // 注入失败 / bridge 不可用时没有 desired 指纹,但旧 alive query 可能
+        // 仍带着上一代 MCP 配置 (老版本/首次注入尚无 applied 记录时也成立),
+        // attach 会复用失效 Authorization / URL / mcp-session-id。此时
+        // forceFresh 成无 MCP 的干净 query,并在 open 成功后把 applied 收敛
+        // 为 disabled,避免故障期间每次 open 都重复 kill + fresh
+        // (Greptile R29 P1)。
         const ccMissingDesiredStale =
           mcpInjectFingerprint === undefined &&
-          ccAppliedFingerprint !== null &&
           ccAppliedFingerprint !== CC_MCP_DISABLED_FINGERPRINT;
         // 持久代际 drift (ccGenerationDrift) 不受 fresh 集合豁免:
         // token/bridge/端口变化后 applied 指纹 ≠ desired 时, 已 fresh 过的
