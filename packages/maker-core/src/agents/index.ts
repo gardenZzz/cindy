@@ -5,6 +5,12 @@ export { ClaudeCodeAgent, toSdkModelString, setClaudeSupportedModelsListener } f
 export { CodexAgent } from './codex/index.js';
 export { CursorAgent } from './cursor/index.js';
 export {
+  classifyAcpAutoPermission,
+  isSensitiveAutoPermissionPath,
+  type AutoPermissionClassifyArgs,
+  type AutoPermissionVerdict,
+} from './acp/permissions.js';
+export {
   createCursorIsolatedConfigDir,
   removeCursorIsolatedConfigDir,
   resolveCursorIsolatedConfigDir,

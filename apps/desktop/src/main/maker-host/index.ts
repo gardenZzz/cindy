@@ -15,6 +15,7 @@ import {
   ClaudeCodeAgent,
   CodexAgent,
   CursorAgent,
+  classifyAcpAutoPermission,
   configureDefaultImageResizer,
 } from '@cindy/maker-core';
 import {
@@ -655,6 +656,9 @@ export function getMaker(): Maker {
           runtimeConfig: desktopCursorRuntimeConfig,
           binaryPath: cursorBinary.binaryPath,
           logger: desktopMakerLogger,
+          // Cursor 无 vendor Auto reviewer；注入 Cindy 侧分类器（看 tool 名 + input）。
+          classifyAutoPermission: async (args) => classifyAcpAutoPermission(args),
+          onAutoPermissionClassifierUnavailable: notifyAutoPermissionClassifierUnavailable,
           onCursorLocalModelsListed: (listing) => {
             const maker = _maker;
             if (!maker) return;

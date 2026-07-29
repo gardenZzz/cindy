@@ -19,6 +19,7 @@ export {
 export {
   AcpClient,
   AcpRequestTimeoutError,
+  asIncomingMessage,
   classifyIncomingMessage,
   type AcpClientOptions,
   type IncomingKind,
@@ -72,7 +73,8 @@ export {
 
 export {
   ACP_AUTO_ALLOW_KINDS,
-  autoClassifierAllowsKind,
+  classifyAcpAutoPermission,
+  isSensitiveAutoPermissionPath,
   cancelledPermissionResult,
   findPermissionOption,
   permissionToolCall,
@@ -82,6 +84,8 @@ export {
   toRequestPermissionResult,
   toolInputFromAcpToolCall,
   toolNameFromAcpToolCall,
+  type AutoPermissionClassifyArgs,
+  type AutoPermissionVerdict,
 } from './permissions.js';
 
 export {

@@ -249,6 +249,18 @@ export interface AgentDeps {
   }) => void;
 
   /**
+   * Cursor（及未来无 vendor reviewer 的 agent）Auto 档权限分类器。
+   * 必须看 tool 名与完整 input，不能只看 kind。
+   * 缺省 / undefined → Cursor Auto 对任何动作 Ask，并触发
+   * {@link onAutoPermissionClassifierUnavailable}。
+   */
+  classifyAutoPermission?: (args: {
+    toolName: string;
+    input: Record<string, unknown>;
+    kind?: string | null;
+  }) => Promise<'allow' | 'ask'>;
+
+  /**
    * Codex-only: bind app-server thread ids back to xdt-maker session context
    * for host-owned HTTP MCP bridges. Missing hooks keep the old no-session
    * behavior; implementations should be in-memory and best-effort.
