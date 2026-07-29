@@ -90,6 +90,78 @@ describe('cursor ask_question mapping', () => {
     });
   });
 
+  it('maps single-select freeform text to freeformText (not empty selectedOptionIds)', () => {
+    const response = askQuestionResponseFromDecision(
+      {
+        kind: 'ask_user_question',
+        answers: { 'Which mode?': 'Use PostgreSQL' },
+      },
+      params,
+    );
+    expect(response).toEqual({
+      outcome: {
+        outcome: 'answered',
+        answers: [
+          {
+            questionId: 'q1',
+            selectedOptionIds: [],
+            freeformText: 'Use PostgreSQL',
+          },
+        ],
+      },
+    });
+  });
+
+  it('maps multi-select mix of option labels + freeform into both fields', () => {
+    const response = askQuestionResponseFromDecision(
+      {
+        kind: 'ask_user_question',
+        answers: {
+          'Pick tests': JSON.stringify(['Unit', 'Add one smoke test']),
+        },
+      },
+      params,
+    );
+    expect(response).toEqual({
+      outcome: {
+        outcome: 'answered',
+        answers: [
+          {
+            questionId: 'q2',
+            selectedOptionIds: ['unit'],
+            freeformText: 'Add one smoke test',
+          },
+        ],
+      },
+    });
+  });
+
+  it('maps no-options question freeform into freeformText', () => {
+    const noOpts = parseAskQuestionParams({
+      toolCallId: 'call_free',
+      questions: [{ id: 'q_open', prompt: 'Any notes?', options: [] }],
+    })!;
+    const response = askQuestionResponseFromDecision(
+      {
+        kind: 'ask_user_question',
+        answers: { 'Any notes?': 'Ship behind a flag' },
+      },
+      noOpts,
+    );
+    expect(response).toEqual({
+      outcome: {
+        outcome: 'answered',
+        answers: [
+          {
+            questionId: 'q_open',
+            selectedOptionIds: [],
+            freeformText: 'Ship behind a flag',
+          },
+        ],
+      },
+    });
+  });
+
   it('returns skipped when answers are empty', () => {
     expect(
       askQuestionResponseFromDecision({ kind: 'ask_user_question', answers: {} }, params),
