@@ -107,6 +107,7 @@ function makeManager(
     deviceInfo: () => ({ deviceId: 'dev-1', deviceName: 'TestBox' }),
     agents: ['claude-code', 'codex'],
     notifyStatus: () => {},
+    autoBindDeferMs: 5,
     log: noopLog,
     ...overrides,
   });
@@ -3193,7 +3194,7 @@ describe('多 workspace 绑定(multi-team)', () => {
     });
     manager.armAutoBind();
     sock.send(serializeHookMessage(makeBindState({ bindings: [] })));
-    // 延迟窗(300ms)后发起
+    // 测试注入 5ms 延迟窗后发起；生产默认仍为 300ms。
     const bind = await server.waitFor('bind.start');
     expect(bind.type).toBe('bind.start');
     const authorizeUrl = 'https://slack.example.com/authorize?state=first';
@@ -3246,7 +3247,7 @@ describe('多 workspace 绑定(multi-team)', () => {
     );
     await expect.poll(() => opened, { timeout: 3000 }).toEqual([freshUrl]);
     // 延迟窗过去后也不会再多发一次 bind.start(意图已消费)
-    await new Promise((r) => setTimeout(r, 400));
+    await new Promise((r) => setTimeout(r, 20));
     expect(server.frames.filter((f) => f.type === 'bind.start')).toHaveLength(1);
   });
 
