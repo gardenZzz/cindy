@@ -314,6 +314,24 @@ async function withBootedSession(
 }
 
 describe('CursorAgent lifecycle (FakeTransport)', () => {
+  /**
+   * 退出应用走 Maker.shutdown → agent.dispose()，此时会话通常还活着。其余用例
+   * 一律先 handle.close() 再 dispose，dispose 排空 liveSessionClosers 这条路
+   * 从没被压过——而 #9「退出应用后无残留 cursor-agent 进程」正是它。
+   */
+  it('dispose() closes still-live sessions (app-quit path)', async () => {
+    const transport = new FakeTransport();
+    const { agent, userDataPath } = await bootWithTransport(transport);
+    try {
+      expect(transport.getPid(), 'transport should be live before dispose').toBe(4242);
+      // 故意不调 handle.close()：模拟用户直接退出应用。
+      await agent.dispose();
+      expect(transport.getPid(), 'transport still live after dispose').toBeNull();
+    } finally {
+      rmSync(userDataPath, { recursive: true, force: true });
+    }
+  });
+
   it('resume via session/load skips upstream history replay', async () => {
     await withBootedSession(async ({ transport, handle }) => {
       const load = transport.findRequest(Method.SessionLoad);
