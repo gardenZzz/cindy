@@ -5,14 +5,15 @@
  * Default: skipped (billed). Manual:
  *   CINDY_CURSOR_ACP_E2E=1 pnpm --filter @cindy/maker-core run test -- src/agents/cursor/cursorAcp.e2e.test.ts
  *
- * After the run, verify no orphan ACP processes:
- *   pgrep -lf "cursor-agent.* acp$"
+ * After the run, verify no orphan processes —注意别按 `acp` 关键字过滤，
+ * `cursor-agent acp` fork 出的 worker-server 孙进程命令行里没有这个词:
+ *   ps -ax -o pid=,ppid=,command= | grep '[c]ursor-agent'
  */
 
 import { afterAll, describe, expect, it } from 'vitest';
 import { homedir, tmpdir } from 'node:os';
 import path from 'node:path';
-import { accessSync, constants, existsSync, mkdtempSync } from 'node:fs';
+import { accessSync, constants, existsSync, mkdtempSync, rmSync } from 'node:fs';
 import { execSync } from 'node:child_process';
 
 import { createConsoleLogger } from '../../interfaces/logger.js';
@@ -53,27 +54,63 @@ function createAuthStub(): AuthAdapter {
   };
 }
 
-/** Only count ACP session processes — ignore IDE `cursor-agent -p` jobs. */
-function countCursorAcpProcesses(): number {
+/**
+ * 所有 cursor 相关进程的 pid → 命令行。
+ *
+ * 不按 `acp` 关键字过滤: `cursor-agent acp` 会 fork 出 worker-server，其命令行是
+ * `.../cursor-agent/versions/<v>/node .../index.js worker-server`——没有 `acp`，
+ * 但路径里有 `cursor-agent`。旧版按 `/\bacp\b/` 筛，把真正泄漏的那个漏掉了。
+ *
+ * 同理不用 before/after 计数比大小: 旧孤儿退出、新孤儿产生时计数持平，照样漏判。
+ * 一律用 PID 集合做差集——run 之前就存在的 IDE 长驻进程自动被排除。
+ */
+function cursorProcesses(): Map<number, string> {
+  const found = new Map<number, string>();
   try {
     const out = execSync("ps -ax -o pid=,command= | grep -E '[c]ursor-agent' || true", {
       encoding: 'utf8',
     });
-    return out
-      .split('\n')
-      .map((l) => l.trim())
-      .filter((l) => l.length > 0 && /\bacp\b/.test(l)).length;
+    for (const line of out.split('\n')) {
+      const m = line.trim().match(/^(\d+)\s+(.+)$/);
+      if (m) found.set(Number(m[1]), m[2]);
+    }
   } catch {
-    return -1;
+    /* ps 不可用时留空集合 */
+  }
+  return found;
+}
+
+/**
+ * 嫌疑进程是否属于本 run —— 看它有没有打开本 run 临时根下的文件。
+ *
+ * 本想按 `CURSOR_CONFIG_DIR` 归属判定，但 macOS 上 `ps -E`/`ps eww` 读不到别的
+ * 进程的环境变量（连自己 fork 的子进程都读不到），这条路走不通。改用 lsof：
+ * worker-server 会一直持有 `$CURSOR_CONFIG_DIR/acp-sessions/**` 下的 store.db，
+ * 归属证据比 env 更硬。
+ *
+ * 只在已经发现嫌疑 PID 时才调用（lsof 慢），所以绿色路径零开销。
+ */
+function belongsToThisRun(pid: number): boolean {
+  if (userDataRoots.length === 0) return true;
+  try {
+    const out = execSync(`lsof -p ${pid} 2>/dev/null || true`, { encoding: 'utf8' });
+    return userDataRoots.some((root) => out.includes(root));
+  } catch {
+    return true; // lsof 不可用时 fail-closed，宁可误报也不漏判
   }
 }
 
-function listCursorAcpProcesses(): string {
-  try {
-    return execSync('pgrep -lf "cursor-agent.* acp$" || true', { encoding: 'utf8' }).trim();
-  } catch {
-    return '';
-  }
+/**
+ * run 期间新出现且仍存活的 cursor 进程 = 泄漏。
+ *
+ * 用 PID 集合差集而不是 before/after 比计数：旧孤儿退出、新孤儿产生时计数持平，
+ * 计数法照样漏判。差集里再按归属过滤掉用户 IDE 恰好在 run 期间新起的进程。
+ */
+function leakedSince(before: Map<number, string>): string[] {
+  const suspects = [...cursorProcesses()].filter(([pid]) => !before.has(pid));
+  return suspects
+    .filter(([pid]) => belongsToThisRun(pid))
+    .map(([pid, cmd]) => `  ${pid}  ${cmd}`);
 }
 
 /**
@@ -92,14 +129,17 @@ function createAgent(userDataPath: string): CursorAgent {
   });
 }
 
-/** 每个用例一个隔离根；同一用例内的多个 agent 复用它。 */
+/** 每个用例一个隔离根；同一用例内的多个 agent 复用它。afterAll 统一清掉。 */
+const userDataRoots: string[] = [];
 function createUserDataRoot(): string {
-  return mkdtempSync(path.join(tmpdir(), 'cindy-cursor-e2e-'));
+  const root = mkdtempSync(path.join(tmpdir(), 'cindy-cursor-e2e-'));
+  userDataRoots.push(root);
+  return root;
 }
 
 describe.skipIf(!ENABLED)('Cursor ACP e2e (opt-in, billed)', () => {
   const binaryPath = resolveCursorBinary();
-  const pidsBefore = countCursorAcpProcesses();
+  const pidsBefore = cursorProcesses();
   const closers: Array<() => Promise<void>> = [];
 
   afterAll(async () => {
@@ -111,11 +151,19 @@ describe.skipIf(!ENABLED)('Cursor ACP e2e (opt-in, billed)', () => {
       }
     }
     await new Promise((r) => setTimeout(r, 1500));
-    const pidsAfter = countCursorAcpProcesses();
-    if (pidsBefore >= 0 && pidsAfter > pidsBefore) {
-      throw new Error(
-        `orphan cursor-agent acp processes detected: before=${pidsBefore} after=${pidsAfter}\n${listCursorAcpProcesses()}`,
-      );
+    const leaked = leakedSince(pidsBefore);
+
+    // 先清目录再断言，否则用例失败时 /tmp 会攒下几十个 12MB 的隔离根。
+    for (const root of userDataRoots.splice(0)) {
+      try {
+        rmSync(root, { recursive: true, force: true });
+      } catch {
+        /* best-effort */
+      }
+    }
+
+    if (leaked.length > 0) {
+      throw new Error(`orphan cursor processes detected:\n${leaked.join('\n')}`);
     }
   });
 
@@ -191,7 +239,7 @@ describe.skipIf(!ENABLED)('Cursor ACP e2e (opt-in, billed)', () => {
 
   it('resume after kill continues; cancel aborts; dispose leaves no orphans', async () => {
     expect(binaryPath, 'cursor-agent binary not found').toBeTruthy();
-    const before = countCursorAcpProcesses();
+    const before = cursorProcesses();
     const bizId = `cursor-e2e-resume-${Date.now()}`;
 
     // agent1 / agent2 共用同一 userDataRoot —— resume 的前提就是 CURSOR_CONFIG_DIR 一致。
@@ -308,9 +356,9 @@ describe.skipIf(!ENABLED)('Cursor ACP e2e (opt-in, billed)', () => {
     await consume2;
 
     await new Promise((r) => setTimeout(r, 1500));
-    const after = countCursorAcpProcesses();
-    console.log('[cursor-acp-e2e-lifecycle] acp pids before=', before, 'after=', after);
-    console.log('[cursor-acp-e2e-lifecycle] pgrep:', listCursorAcpProcesses() || '(none)');
-    expect(after).toBeLessThanOrEqual(before);
+    // dispose 之后不该剩任何本 run 新起的 cursor 进程 —— 含 worker-server 孙进程。
+    const leaked = leakedSince(before);
+    console.log('[cursor-acp-e2e-lifecycle] leaked:', leaked.join('\n') || '(none)');
+    expect(leaked, `orphan processes after dispose:\n${leaked.join('\n')}`).toEqual([]);
   }, 240_000);
 });
