@@ -53,6 +53,8 @@ export type RpcErrorCode =
   | 'SESSION_ALREADY_EXISTS'
   /** forceful kill 终止窗口 (inputQueue 已 end, consume loop 未退出) — 可重试。 */
   | 'SESSION_KILL_PENDING'
+  /** kill + close 升级后 consume loop 仍未退出 (daemon 病态) — 需重启 daemon。 */
+  | 'SESSION_KILL_TIMEOUT'
   | 'SDK_ERROR'
   | 'INTERNAL';
 

@@ -73,6 +73,12 @@ const DAEMON_READY_TIMEOUT_MS = 10_000;
  * 卡死 UI 显示 "connecting" 不可恢复。15s 兜底让 user-visible error 快速冒出来。
  */
 const RPC_REQUEST_TIMEOUT_MS = 15_000;
+/**
+ * SESSION_KILL 专用 timeout — daemon 侧 kill 会同步等 consume loop 退出
+ * (10s 看门狗 + close() 升级后再等 5s grace, 见 maker-cc-manager
+ * session-registry.ts), 正常路径最坏 ~15s, 必须显著宽于通用 RPC 超时。
+ */
+const KILL_RPC_TIMEOUT_MS = 30_000;
 /** ssh 启 daemon 命令的最长等待 — 超时 ssh channel 被强关, daemon 已 setsid 独立。 */
 const DAEMON_SPAWN_SSH_TIMEOUT_MS = 5_000;
 /** sock 探活 / 等待循环的轮询间隔。 */
@@ -390,14 +396,14 @@ export async function openCcManagerSession(opts: {
       await client.request(
         METHODS.SESSION_KILL,
         { sessionId: opts.sessionId },
-        { timeoutMs: RPC_REQUEST_TIMEOUT_MS },
+        { timeoutMs: KILL_RPC_TIMEOUT_MS },
       );
-      // registry.kill 对 alive session 是异步终止 (interrupt + inputQueue
-      // .end, consume loop 退出后才从注册表移除, 见 maker-cc-manager
-      // session-registry.ts) — kill 响应返回时 session 往往仍 alive,
-      // 立即 start 同样撞 SESSION_ALREADY_EXISTS (greptile P1)。轮询
-      // list 直到不再 alive:退避 (150ms→1s) 覆盖慢退出 (SSH 大 RTT /
-      // SDK abort 慢), 总预算 30s。
+      // registry.kill 同步等 consume loop 退出才返回 (interrupt 无效时
+      // 升级 query.close() 终止子进程; 仍不退出抛 SESSION_KILL_TIMEOUT
+      // 上抛, 绝不谎报已退出 — greptile confidence 3/5)。此处轮询只是
+      // belt-and-braces (loop 退出到 list 反映之间无间隙, 通常首轮即
+      // break), 保留以兜住 daemon 老版本 (无同步 kill) 的慢退出:
+      // 退避 (150ms→1s), 总预算 30s。
       // 超时只能上抛, 不得降级 attach (greptile R22/R23 P1):kill 已 end
       // 输入队列, AsyncQueue.push 在 end 后静默丢弃 (cc-mgr registry 注释
       // 实锤) — attach 仍在退出中的 query 会吞掉用户消息。慢退出场景由
