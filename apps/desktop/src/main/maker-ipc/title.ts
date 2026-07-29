@@ -22,6 +22,7 @@ import { CURSOR_ONESHOT_DEFAULT_MODEL, type AgentKind } from '@cindy/maker-core'
 
 import { getDbClient } from '../localDb/client/current.js';
 import { sessions } from '../localDb/schema.js';
+import { getMakerIfReady } from '../maker-host/index.js';
 import { getDesktopProviderService } from '../maker-host/createDesktopProviderService.js';
 import { generateTitleViaProvider } from '../maker-host/title-one-shot.js';
 import {
@@ -128,8 +129,6 @@ export async function generateMakerSessionTitle(
 
 async function generateCursorSessionTitle(prompt: string): Promise<string | null> {
   try {
-    // 动态 import：避免 title.ts 静态拉起整个 maker-host（electron mock 不全的单测会炸）。
-    const { getMakerIfReady } = await import('../maker-host/index.js');
     const maker = getMakerIfReady();
     if (!maker || !maker.listAvailableAgents().includes('cursor')) return null;
     const text = await maker.oneShot('cursor', prompt, {
@@ -252,7 +251,7 @@ function parseAutoTitleRequest(raw: unknown): SessionAutoTitleRequest {
   if (typeof text !== 'string') {
     throwIpcError('INVALID_PARAMS', 'invalid text');
   }
-  if (agentKind !== 'claude-code' && agentKind !== 'codex') {
+  if (agentKind !== 'claude-code' && agentKind !== 'codex' && agentKind !== 'cursor') {
     throwIpcError('INVALID_PARAMS', 'invalid agentKind');
   }
   if (isUserText !== undefined && typeof isUserText !== 'boolean') {
