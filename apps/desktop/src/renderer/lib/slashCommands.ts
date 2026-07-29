@@ -109,7 +109,7 @@ export async function loadAllCommands(
       ? (window.electronAPI.deviceLink.invoke(deviceId, 'maker:list-agent-commands', [agentKind]) as Promise<CmdRes>)
       : api.listAgentCommands(agentKind)
   ).catch(() => ({ success: false }));
-  const shouldLoadSkills = !opts?.skipAgentSkills && (agentKind === 'claude-code' || Boolean(workingDir));
+  const shouldLoadSkills = !opts?.skipAgentSkills;
   const skillParams = {
     ...(workingDir ? { workingDir } : {}),
     ...(opts?.forceReload !== undefined ? { forceReload: opts.forceReload } : {}),

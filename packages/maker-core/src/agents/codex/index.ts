@@ -1160,10 +1160,11 @@ export class CodexAgent extends BaseAgent {
    * 只是包成新的 AgentSkillCommand 形状(kind='agent-skill')。
    */
   override async listAgentSkills(opts: ListAgentSkillsOptions): Promise<ListAgentSkillsResult> {
-    // Codex app-server 的 skills/list 需要 cwd；无项目的新对话保持原先的空列表语义。
-    if (!opts.workingDir) return { skills: [] };
+    // Codex app-server 的 skills/list 强制要求 cwd；无项目的新对话用 HOME 作为
+    // 查询上下文，既能发现全局 skills，又不会误带任意项目的 repo skills。
+    const workingDir = opts.workingDir || os.homedir();
     try {
-      const { skills, errors } = await this.listSkillsForCwd(opts.workingDir, opts.forceReload ?? false);
+      const { skills, errors } = await this.listSkillsForCwd(workingDir, opts.forceReload ?? false);
       const out: ListAgentSkillsResult = {
         skills: skills
           .filter((skill) => skill.enabled)
