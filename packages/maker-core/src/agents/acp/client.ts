@@ -52,6 +52,35 @@ function classifyStderrLine(line: string): 'debug' | 'warn' | 'error' {
   return 'debug';
 }
 
+function isJsonRpcRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
+function isJsonRpcId(value: unknown): value is JsonRpcId {
+  return typeof value === 'string' || typeof value === 'number';
+}
+
+function isJsonRpcErrorObject(value: unknown): value is JsonRpcErrorObject {
+  return (
+    isJsonRpcRecord(value) &&
+    typeof value.code === 'number' &&
+    typeof value.message === 'string'
+  );
+}
+
+/**
+ * 严格运行时 record 校验：non-null 非数组对象，并对已出现的
+ * id / method / error 做类型检查。不要求也不依赖 jsonrpc 字段
+ * （ACP 有 `"jsonrpc":"2.0"`，codex app-server 走 jsonrpc_lite 无该字段）。
+ */
+export function asIncomingMessage(value: unknown): IncomingMessage | null {
+  if (!isJsonRpcRecord(value)) return null;
+  if ('id' in value && !isJsonRpcId(value.id)) return null;
+  if ('method' in value && typeof value.method !== 'string') return null;
+  if ('error' in value && !isJsonRpcErrorObject(value.error)) return null;
+  return value as IncomingMessage;
+}
+
 export class AcpRequestTimeoutError extends Error {
   constructor(
     public readonly method: string,
@@ -165,9 +194,13 @@ export class AcpClient {
     this.started = true;
     const transport = this.createTransport();
     this.transport = transport;
-    transport.onLine((line) => this.handleLine(line));
-    transport.onStderr?.((line) => this.handleStderrLine(line));
-    transport.onClose((info) => this.handleTransportClose(info.reason));
+    transport.onLine((line) => this.safeTransportCallback('onLine', () => this.handleLine(line)));
+    transport.onStderr?.((line) =>
+      this.safeTransportCallback('onStderr', () => this.handleStderrLine(line)),
+    );
+    transport.onClose((info) =>
+      this.safeTransportCallback('onClose', () => this.handleTransportClose(info.reason)),
+    );
   }
 
   async initialize(opts?: {
@@ -320,14 +353,25 @@ export class AcpClient {
       return;
     }
 
-    let msg: IncomingMessage;
+    let parsed: unknown;
     try {
-      msg = JSON.parse(line) as IncomingMessage;
+      parsed = JSON.parse(line);
     } catch (e) {
       this.logger.warn('invalid JSON line', {
         message: (e as Error).message,
         preview: line.slice(0, 200),
       });
+      return;
+    }
+
+    const msg = asIncomingMessage(parsed);
+    if (!msg) {
+      const err = new Error('acp invalid incoming message: expected a JSON-RPC record');
+      this.logger.warn('invalid incoming message', {
+        message: err.message,
+        preview: line.slice(0, 200),
+      });
+      this.handleTransportFailure(err);
       return;
     }
 
@@ -347,6 +391,20 @@ export class AcpClient {
         return;
       default:
         this.logger.warn('unrecognized incoming message', { preview: line.slice(0, 200) });
+    }
+  }
+
+  /** 事件回调异常边界：绝不让异常从 transport 回调逃逸。 */
+  private safeTransportCallback(label: string, fn: () => void): void {
+    try {
+      fn();
+    } catch (e) {
+      const err = e instanceof Error ? e : new Error(String(e));
+      this.logger.error('transport callback threw', {
+        label,
+        message: err.message,
+      });
+      this.handleTransportFailure(err);
     }
   }
 

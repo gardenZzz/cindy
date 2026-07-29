@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from 'vitest';
 
 import {
   AcpClient,
+  asIncomingMessage,
   classifyIncomingMessage,
 } from './client.js';
 import { JSONRPC_VERSION } from './protocol.js';
@@ -131,6 +132,68 @@ describe('classifyIncomingMessage (ACP jsonrpc 2.0 four shapes)', () => {
     ).toMatchObject({ kind: 'error_response' });
     expect(classifyIncomingMessage({ method: 'session/update' })).toMatchObject({
       kind: 'notification',
+    });
+  });
+});
+
+describe('asIncomingMessage (runtime record guard)', () => {
+  it('accepts the four well-formed shapes', () => {
+    expect(asIncomingMessage(ACP_FOUR_SHAPES.serverRequest)).not.toBeNull();
+    expect(asIncomingMessage(ACP_FOUR_SHAPES.successResponse)).not.toBeNull();
+    expect(asIncomingMessage(ACP_FOUR_SHAPES.errorResponse)).not.toBeNull();
+    expect(asIncomingMessage(ACP_FOUR_SHAPES.notification)).not.toBeNull();
+  });
+
+  it('rejects non-object JSON values', () => {
+    expect(asIncomingMessage(null)).toBeNull();
+    expect(asIncomingMessage('banner')).toBeNull();
+    expect(asIncomingMessage(42)).toBeNull();
+    expect(asIncomingMessage(true)).toBeNull();
+    expect(asIncomingMessage([])).toBeNull();
+  });
+
+  it('rejects present fields with wrong types', () => {
+    expect(asIncomingMessage({ id: {}, result: {} })).toBeNull();
+    expect(asIncomingMessage({ id: 1, method: 42 })).toBeNull();
+    expect(asIncomingMessage({ id: 1, error: 'oops' })).toBeNull();
+    expect(asIncomingMessage({ id: 1, error: { code: 'x', message: 1 } })).toBeNull();
+  });
+});
+
+describe('AcpClient invalid incoming lines (controlled path)', () => {
+  function startClient() {
+    const transport = new FakeTransport();
+    const onTransportError = vi.fn();
+    const client = new AcpClient({
+      createTransport: () => transport,
+      logger,
+      onTransportError,
+    });
+    client.start();
+    return { transport, client, onTransportError };
+  }
+
+  it.each([
+    ['null', 'null'],
+    ['string', '"banner"'],
+    ['number', '42'],
+    ['boolean', 'true'],
+    ['array', '[]'],
+    ['id object', JSON.stringify({ id: { nested: true }, result: {} })],
+    ['method number', JSON.stringify({ id: 1, method: 99 })],
+    ['bad error', JSON.stringify({ id: 1, error: { code: 'x', message: 1 } })],
+  ] as const)('does not throw on %s and fails transport', (_label, line) => {
+    vi.mocked(logger.warn).mockClear();
+    const { transport, onTransportError } = startClient();
+
+    expect(() => transport.emitLine(line)).not.toThrow();
+    expect(logger.warn).toHaveBeenCalledWith(
+      'invalid incoming message',
+      expect.objectContaining({ preview: expect.any(String) }),
+    );
+    expect(onTransportError).toHaveBeenCalledTimes(1);
+    expect(onTransportError.mock.calls[0]?.[0]).toMatchObject({
+      message: expect.stringContaining('invalid incoming message'),
     });
   });
 });
