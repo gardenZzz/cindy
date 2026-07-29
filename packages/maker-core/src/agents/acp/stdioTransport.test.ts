@@ -202,6 +202,37 @@ describe('createAcpStdioTransport orphan cleanup', () => {
     });
   });
 
+  /**
+   * transport 级（而非直接调 helper）：helper 单次调用内只 spawn 一次是不够的，
+   * close() 若沿用 POSIX 的 TERM→wait→KILL 两段，Windows 上第一次就已发出带 /F
+   * 的 taskkill，grace 内 direct child 未 exit 时会再 spawn 第二个，与前一个并发
+   * 操作同一 PID 树。上面那组 helper 用例完全绕过了这段时序，锁不住。
+   */
+  it('close() spawns taskkill exactly once on Windows, even if it never settles', async () => {
+    let spawnCount = 0;
+    const transport = createAcpStdioTransport({
+      binaryPath: process.execPath,
+      // 子进程故意不退出：制造「grace 跨过但 direct child 仍活」的窗口。
+      args: ['-e', 'setInterval(()=>{},1000)'],
+      sigtermGraceMs: 60,
+      sigkillWaitMs: 60,
+      platformOverride: 'win32',
+      // taskkill 永不发终态（不 exit、不 error）——最坏情况。
+      taskkillSpawner: () => {
+        spawnCount += 1;
+        return { on: () => undefined };
+      },
+    });
+
+    const pid = transport.getPid?.() as number;
+    await transport.close('test windows single taskkill');
+
+    expect(spawnCount, 'Windows close() must issue exactly one taskkill').toBe(1);
+
+    // 兜底清掉这个真实子进程：win32 分支下 killTree 走的是假 spawner，没人真杀它。
+    try { process.kill(pid, 'SIGKILL'); } catch { /* already gone */ }
+  }, 20_000);
+
   it('close() is idempotent', async () => {
     const transport = createAcpStdioTransport({
       binaryPath: process.execPath,

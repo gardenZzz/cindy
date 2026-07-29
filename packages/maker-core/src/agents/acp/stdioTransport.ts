@@ -36,6 +36,13 @@ export interface AcpStdioTransportOptions {
   sigtermGraceMs?: number;
   /** 单测可缩短 SIGKILL 等待。 */
   sigkillWaitMs?: number;
+  /**
+   * 单测用：覆盖平台判定。Windows 终止分支在 macOS 开发机与 ubuntu CI 上都跑不到，
+   * 不给这个缝就只能靠人肉阅读保证它不回归。
+   */
+  platformOverride?: NodeJS.Platform;
+  /** 单测用：注入 taskkill 的 spawn，配合 platformOverride 压 Windows 分支。 */
+  taskkillSpawner?: TaskkillSpawner;
 }
 
 /**
@@ -144,9 +151,9 @@ export function createAcpStdioTransport(opts: AcpStdioTransportOptions): Transpo
    * 树杀 (与 desktop scheduler-host/proc-util 同款结论，实现见 killWindowsTree)。
    * 注意那边必须**第一次就用** taskkill: Windows 上 `child.kill()` 会立刻干掉
    * 父进程，树随即失去锚点，再想按父 pid 找后代就晚了，所以 Windows 分支没有
-   * 「先温和后强制」两段。
+   * 「先温和后强制」两段——close() 按平台分岔，见其中的注释。
    */
-  const useProcessGroup = process.platform !== 'win32';
+  const useProcessGroup = (opts.platformOverride ?? process.platform) !== 'win32';
 
   const child: ChildProcessWithoutNullStreams = spawn(opts.binaryPath, opts.args, {
     cwd: opts.cwd,
@@ -166,9 +173,14 @@ export function createAcpStdioTransport(opts: AcpStdioTransportOptions): Transpo
         return;
       } catch { /* 组已消失，退回单进程 */ }
     } else {
-      killWindowsTree(pid, signal, (s) => {
-        try { child.kill(s); } catch { /* swallow */ }
-      });
+      killWindowsTree(
+        pid,
+        signal,
+        (s) => {
+          try { child.kill(s); } catch { /* swallow */ }
+        },
+        opts.taskkillSpawner,
+      );
       return;
     }
     try { child.kill(signal); } catch { /* swallow */ }
@@ -281,13 +293,28 @@ export function createAcpStdioTransport(opts: AcpStdioTransportOptions): Transpo
       closePromise = (async () => {
         try { child.stdin.end(); } catch { /* swallow */ }
 
-        // 无条件对整组发信号: 直系子进程可能已退出而孙进程还活着，
-        // 按 child.exitCode 短路会漏掉后者。
-        killTree('SIGTERM');
-        await waitForChildExit(child, sigtermGraceMs);
-        if (treeAlive()) {
+        if (useProcessGroup) {
+          // POSIX: 先整组 TERM，再按**组内是否还有成员**决定是否升级 KILL。
+          // 无条件发信号而不按 child.exitCode 短路：直系子进程可能已退出而
+          // 孙进程还活着，短路会漏掉后者。
+          killTree('SIGTERM');
+          await waitForChildExit(child, sigtermGraceMs);
+          if (treeAlive()) {
+            killTree('SIGKILL');
+            await waitForChildExit(child, sigkillWaitMs);
+          }
+        } else {
+          // Windows: `taskkill /T /F` 本身就是强制树杀，不存在「先温和后强制」
+          // 可分的两段，所以只发一次 + 有界等待，失败由 killWindowsTree 内部回落
+          // 直系 kill。
+          //
+          // 之所以不能沿用上面的两段式：那样第一次已经发了带 /F 的 taskkill，
+          // grace 内 direct child 的 exit 若还没到，treeAlive() 仍为 true，就会
+          // 再 spawn 一个 taskkill 与前一个并发操作同一 PID 树；第二个若因竞态
+          // 失败还会直接 kill leader，在第一个尚未收割完后代时打掉锚点，反而可能
+          // 重新留下 worker-server。
           killTree('SIGKILL');
-          await waitForChildExit(child, sigkillWaitMs);
+          await waitForChildExit(child, sigtermGraceMs + sigkillWaitMs);
         }
 
         fireClose(reason);
