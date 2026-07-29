@@ -130,6 +130,18 @@ describe('refreshRemoteCodexMcpAfterBridgeRecreate', () => {
       );
     });
   });
+
+  it('logs and absorbs unexpected ensure rejections', async () => {
+    ensureMock.mockRejectedValue(new Error('ssh closed'));
+    const { deps, warn } = makeDeps({ listRemoteCodexHostIds: () => ['host-a'] });
+    refreshRemoteCodexMcpAfterBridgeRecreate(deps);
+    await vi.waitFor(() => {
+      expect(warn).toHaveBeenCalledWith(
+        'remote MCP recovery after bridge recreate threw',
+        expect.objectContaining({ hostId: 'host-a', reason: 'ssh closed' }),
+      );
+    });
+  });
 });
 
 describe('invalidateRemoteCcQueriesForMcpGenerationChange', () => {

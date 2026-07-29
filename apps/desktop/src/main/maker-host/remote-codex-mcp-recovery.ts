@@ -69,6 +69,11 @@ export function refreshRemoteCodexMcpAfterBridgeRecreate(deps: RemoteCodexMcpRec
       if (result.daemonRebootstrapped && !liveTurnChecker(hostId)) {
         deps.detachRemoteCodexSessionsOnHost(hostId);
       }
+    }).catch((err) => {
+      deps.log.warn('remote MCP recovery after bridge recreate threw', {
+        hostId,
+        reason: err instanceof Error ? err.message : String(err),
+      });
     });
   }
 }
