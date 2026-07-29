@@ -25,6 +25,21 @@ Cindy 把用户附的本地图片送进 Agent 会话时,跨了三层:composer �
 resizer 返回了**替代路径**,MIME 一律从该路径推导;只有它原样返回传入路径
 (低于阈值 / sharp 不可用 / 转换失败降级 / 非普通文件)才可沿用上游声明的 MIME。
 
+> **适用判据**:C1 只对**内联字节**的上游协议成立——即 prompt 里同时带 `data`
+> (base64) 与 `mimeType` 两个字段的。**传路径**的协议天然免疫:字节与格式由上游
+> 自己读文件判定,客户端根本没有"声明"可写错。
+>
+> 三个已接入 Agent 的实际分布:
+> - **Cursor(ACP)**:内联 `ImageContentBlock { data, mimeType }` → **适用**,
+>   本 ADR 的三次缺陷都出在这里。
+> - **Claude Code**:resize 后的路径作为 `@mention` 文件引用传下去(`kind: 'file'`),
+>   不声明 MIME → 不适用。
+> - **Codex**:本地图 `{ type: 'localImage', path }`、远程图 `{ type: 'image', url }`,
+>   均只传路径/URL,server 自己读 → 不适用。
+>
+> 这解释了为什么这个缺陷直到接第三个 Agent 才第一次出现:前两个的上游协议形态
+> 使它不可能发生。接新 Agent 时先按这条判据分类,再决定 C1 要不要落实现与测试。
+
 **C2 · 读取必须异步。** 图片读取与编码发生在 Electron Main 进程,必须走
 `fs.promises`,禁止 `readFileSync`。同一 turn 多图并发缩放,并发上限由 resizer
 内部 semaphore 控制。
@@ -52,6 +67,9 @@ C1 的回归测试必须用**真正触发转换**的 fixture(大于 resizer 的 
 
 - 新接入的 Agent 若上游协议没有结构化 image 通道,按 C3 直接把 capability 置
   false,不做「转成文本描述」这类兼容——那是 1 的原始形态。
+- 本 ADR 是**前瞻要求**(新增或改动任何 Agent 的图片路径都要对齐),不是在宣称
+  现有三个都已逐条落实。按 C1 的适用判据,Claude Code 与 Codex 是**结构上不适用**
+  而非违规;C2 / C4 / C5 三条它们与 Cursor 一致。
 - resizer 未来若改成按源格式选择输出容器(而非统一 WebP),C1 的实现无需改动:
   判据是「是否返回了替代路径」,不是「是不是 WebP」。
 - C2 对 mobile 侧不直接适用(不在 Electron Main),但异步读取仍是默认要求。
