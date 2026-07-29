@@ -7564,6 +7564,7 @@
       "poolDetail": "Used {{used}} · Total {{total}}",
       "remaining": "Remaining",
       "progressLabel": "{{label}} usage",
+      "noPlanCredits": "No subscription credits because there is no active subscription.",
       "historyUnavailable": "Usage history is incomplete. Only the remaining balance is available.",
       "detailsUnavailable": "Usage details are temporarily unavailable. Current balances are shown instead.",
       "promotionalDetails": {
@@ -7607,8 +7608,7 @@
     "catalog": {
       "errorTitle": "Plans are temporarily unavailable",
       "errorDescription": "Check your connection and retry. Local fallback plans will not be used.",
-      "emptyTitle": "No Plans Available",
-      "emptyDescription": "The server has not published any plans yet.",
+      "emptyTitle": "Coming soon. Stay tuned.",
       "currentPlan": "Current Plan",
       "unavailableReasons": {
         "OFFER_COMING_SOON": "Coming Soon",
