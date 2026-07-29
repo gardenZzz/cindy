@@ -7,12 +7,15 @@
  * T4: session/new 模型目录上报 host；effort / fast 经 session/set_config_option。
  * T5: session/load resume（跳过上游历史回放）+ invalid-resume CAS；
  *     session/cancel 真停；tool-call 不活动超时；dispose/close 无孤儿进程。
+ * T6: cursor/create_plan → plan_review；cursor/ask_question → ask_user_question；
+ *     cursor/update_todos → update_plan todo 卡；session/set_mode(plan) ↔ planMode。
  *
  * 按 ADR:
  *  - 不注入任何 Cindy system prompt / makerMemory / userPrompt
  *  - usage 预接 PromptResponse.usage + usage_update, 上游无数据时保持「无数据」
  *  - initialize 声明 `_meta.parameterizedModelPicker: true`
  *  - allow-always 实测为机器级 → 永不下发, 会话记忆留在 Cindy
+ *  - cursor 自身 ask 模式不对外暴露（产品面仅 plan ↔ 普通）
  */
 
 import {
@@ -40,6 +43,7 @@ import {
   autoClassifierAllowsKind,
   cancelledPermissionResult,
   createAcpStdioTransport,
+  CursorMethod,
   finishPromptTurn,
   Method,
   newAcpRuntime,
@@ -64,6 +68,20 @@ import {
 } from '../acp/index.js';
 import { createCursorIsolatedConfigDir } from './isolatedConfig.js';
 import { isCursorResumeSessionNotFound } from './invalidResume.js';
+import {
+  askQuestionResponseFromDecision,
+  createPlanResponseFromDecision,
+  CURSOR_TODOS_TOOL_USE_ID,
+  mergeCursorTodos,
+  parseAskQuestionParams,
+  parseCreatePlanParams,
+  parseUpdateTodosParams,
+  toAskUserQuestionRequest,
+  todosToUpdatePlanEvents,
+  toPlanReviewRequest,
+  updateTodosAcceptedResponse,
+  type CursorTodoItem,
+} from './extensions.js';
 import {
   createToolIdleWatchdog,
   formatCursorInvalidResumeCasConflictMessage,
@@ -98,11 +116,6 @@ const UNSUPPORTED = {
     supported: false as const,
     reason: 'not-implemented' as const,
     message: 'Cursor 同 turn 插话尚未实现',
-  },
-  planMode: {
-    supported: false as const,
-    reason: 'not-implemented' as const,
-    message: 'Cursor plan/ask 模式留给后续票',
   },
   extraDirs: {
     supported: false as const,
@@ -162,7 +175,7 @@ const CAPABILITIES: Capabilities = {
   reasoningDisplay: ['off'],
   permissionModes: CURSOR_PERMISSION_MODES,
   setPermissionModeMidSession: { supported: true },
-  planMode: UNSUPPORTED.planMode,
+  planMode: { supported: true },
   multimodal: {
     text: { supported: true },
     image: { supported: true },
@@ -296,6 +309,10 @@ export class CursorAgent extends BaseAgent {
     let turnFinalizedExternally = false;
     let sessionId = '';
     let mutablePermissionMode = normalizeCursorPermissionMode(opts.permissionMode);
+    /** UI 武装态：send 消耗后熄灭；ACP 侧 sticky plan 另用 acpInPlanMode。 */
+    let mutablePlanMode = opts.planMode === true;
+    /** 上游 session 当前是否处于 plan mode（session/set_mode）。 */
+    let acpInPlanMode = opts.planMode === true;
     let mutableModel = toCursorProductModelId(opts.model || CURSOR_AUTO_MODEL.id);
     let mutableEffort: Effort | undefined = opts.effort;
     let mutableFastMode = opts.fastMode === true;
@@ -304,6 +321,9 @@ export class CursorAgent extends BaseAgent {
     let autoFallbackNotified = false;
     /** session/load 回放历史期间为 true — Cindy 自有存储渲染，跳过上游回放。 */
     let suppressHistoryReplay = false;
+    /** cursor/update_todos merge 用的会话内快照。 */
+    let cursorTodos: CursorTodoItem[] = [];
+    let extensionSeq = 0;
 
     const isolated = createCursorIsolatedConfigDir(process.env, {
       stableKey: opts.sessionId,
@@ -436,7 +456,13 @@ export class CursorAgent extends BaseAgent {
       resolve: (result: RequestPermissionResult) => void;
       settled: boolean;
     }
+    interface PendingExtensionEntry {
+      kind: 'ask_user_question' | 'plan_review';
+      resolve: (result: unknown) => void;
+      settled: boolean;
+    }
     const pendingApprovals = new Map<string, PendingEntry>();
+    const pendingExtensions = new Map<string, PendingExtensionEntry>();
     let permissionSeq = 0;
 
     const sessionSuggestionsFor = (sessionAllowKey: string) =>
@@ -445,48 +471,101 @@ export class CursorAgent extends BaseAgent {
         sessionAllowKey,
       });
 
-    function defaultPermissionDecision(reason: string): InteractionDecision {
+    function defaultInteractionDecision(req: InteractionRequest, reason: string): InteractionDecision {
+      if (req.kind === 'ask_user_question') {
+        return { kind: 'ask_user_question', answers: {} };
+      }
+      if (req.kind === 'plan_review') {
+        return { kind: 'plan_review', behavior: 'deny', reason, dismissed: true };
+      }
       return { kind: 'permission', behavior: 'deny', reason };
     }
 
     async function dispatchInteraction(req: InteractionRequest): Promise<InteractionDecision> {
       if (!interactionResolver) {
-        log.warn('dispatchInteraction without resolver — defaulting to deny', {
+        log.warn('dispatchInteraction without resolver — defaulting to deny/skip', {
           kind: req.kind,
           requestId: req.requestId,
         });
-        return defaultPermissionDecision('no_interaction_resolver');
+        return defaultInteractionDecision(req, 'no_interaction_resolver');
       }
       try {
         return await interactionResolver(req);
       } catch (e) {
-        log.error('interactionResolver threw → deny', {
+        log.error('interactionResolver threw → deny/skip', {
           kind: req.kind,
           message: (e as Error).message,
         });
-        return defaultPermissionDecision('interaction_resolver_error');
+        return defaultInteractionDecision(req, 'interaction_resolver_error');
       }
     }
 
     function dismissAllPending(reason: string, resolveAs: 'allow' | 'deny'): void {
-      if (pendingApprovals.size === 0) return;
-      const entries = Array.from(pendingApprovals.entries());
-      for (const [requestId, entry] of entries) {
-        if (entry.settled) continue;
-        entry.settled = true;
-        pendingApprovals.delete(requestId);
-        const result: RequestPermissionResult =
-          resolveAs === 'allow'
-            ? { outcome: { outcome: 'selected', optionId: 'allow-once' } }
-            : cancelledPermissionResult();
-        entry.resolve(result);
-        eventQueue.push({
-          type: 'interaction_dismissed',
-          data: { requestId, reason, resolvedAs: resolveAs },
-          source: 'cursor',
-        });
+      if (pendingApprovals.size > 0) {
+        const entries = Array.from(pendingApprovals.entries());
+        for (const [requestId, entry] of entries) {
+          if (entry.settled) continue;
+          entry.settled = true;
+          pendingApprovals.delete(requestId);
+          const result: RequestPermissionResult =
+            resolveAs === 'allow'
+              ? { outcome: { outcome: 'selected', optionId: 'allow-once' } }
+              : cancelledPermissionResult();
+          entry.resolve(result);
+          eventQueue.push({
+            type: 'interaction_dismissed',
+            data: { requestId, reason, resolvedAs: resolveAs },
+            source: 'cursor',
+          });
+        }
+      }
+      if (pendingExtensions.size > 0) {
+        const entries = Array.from(pendingExtensions.entries());
+        for (const [requestId, entry] of entries) {
+          if (entry.settled) continue;
+          entry.settled = true;
+          pendingExtensions.delete(requestId);
+          if (entry.kind === 'ask_user_question') {
+            entry.resolve({ outcome: { outcome: 'cancelled' } });
+          } else {
+            entry.resolve({
+              outcome:
+                resolveAs === 'allow'
+                  ? { outcome: 'accepted' }
+                  : { outcome: 'cancelled' },
+            });
+          }
+          eventQueue.push({
+            type: 'interaction_dismissed',
+            data: { requestId, reason, resolvedAs: resolveAs },
+            source: 'cursor',
+          });
+        }
       }
     }
+
+    const applyAcpSessionMode = async (modeId: 'agent' | 'plan'): Promise<void> => {
+      if (!sessionId) return;
+      await client.request(Method.SessionSetMode, { sessionId, modeId });
+      acpInPlanMode = modeId === 'plan';
+    };
+
+    const exitPlanModeAfterApproval = async (): Promise<void> => {
+      if (mutablePlanMode) {
+        mutablePlanMode = false;
+        eventQueue.push({ type: 'plan_mode_changed', data: { enabled: false }, source: 'cursor' });
+      }
+      if (acpInPlanMode) {
+        try {
+          await applyAcpSessionMode('agent');
+        } catch (e) {
+          log.warn('post-plan-approval session/set_mode(agent) failed', {
+            message: e instanceof Error ? e.message : String(e),
+          });
+          acpInPlanMode = false;
+        }
+      }
+    };
 
     const notifyAutoClassifierUnavailable = () => {
       if (autoFallbackNotified) return;
@@ -610,6 +689,109 @@ export class CursorAgent extends BaseAgent {
     };
 
     client.setRequestHandler(Method.SessionRequestPermission, handleRequestPermission);
+
+    const handleAskQuestion = async (
+      params: unknown,
+      meta: { id: string | number; method: string },
+    ): Promise<unknown> => {
+      toolIdle.noteActivity();
+      const parsed = parseAskQuestionParams(params);
+      if (!parsed) {
+        return { outcome: { outcome: 'skipped', reason: 'invalid ask_question params' } };
+      }
+      const requestId = `cursor-ask:${String(meta.id)}:${++extensionSeq}`;
+      const req = toAskUserQuestionRequest(requestId, parsed);
+      return await new Promise<unknown>((resolve) => {
+        const entry: PendingExtensionEntry = {
+          kind: 'ask_user_question',
+          resolve,
+          settled: false,
+        };
+        pendingExtensions.set(requestId, entry);
+        const finalize = (result: unknown) => {
+          if (entry.settled) return;
+          entry.settled = true;
+          pendingExtensions.delete(requestId);
+          resolve(result);
+        };
+        dispatchInteraction(req)
+          .then((decision) => {
+            finalize(askQuestionResponseFromDecision(decision, parsed));
+          })
+          .catch((e) => {
+            log.error('ask_question dispatch failed', {
+              requestId,
+              message: (e as Error).message,
+            });
+            finalize({ outcome: { outcome: 'cancelled' } });
+          });
+      });
+    };
+
+    const handleCreatePlan = async (
+      params: unknown,
+      meta: { id: string | number; method: string },
+    ): Promise<unknown> => {
+      toolIdle.noteActivity();
+      const parsed = parseCreatePlanParams(params);
+      if (!parsed) {
+        return { outcome: { outcome: 'rejected', reason: 'invalid create_plan params' } };
+      }
+      const requestId = `cursor-plan:${String(meta.id)}:${++extensionSeq}`;
+      const req = toPlanReviewRequest(requestId, parsed);
+      return await new Promise<unknown>((resolve) => {
+        const entry: PendingExtensionEntry = {
+          kind: 'plan_review',
+          resolve,
+          settled: false,
+        };
+        pendingExtensions.set(requestId, entry);
+        const finalize = (result: unknown) => {
+          if (entry.settled) return;
+          entry.settled = true;
+          pendingExtensions.delete(requestId);
+          resolve(result);
+        };
+        dispatchInteraction(req)
+          .then(async (decision) => {
+            const response = createPlanResponseFromDecision(decision);
+            if (
+              decision.kind === 'plan_review' &&
+              decision.behavior === 'allow'
+            ) {
+              await exitPlanModeAfterApproval();
+            }
+            finalize(response);
+          })
+          .catch((e) => {
+            log.error('create_plan dispatch failed', {
+              requestId,
+              message: (e as Error).message,
+            });
+            finalize({ outcome: { outcome: 'cancelled' } });
+          });
+      });
+    };
+
+    const handleUpdateTodos = async (params: unknown): Promise<unknown> => {
+      toolIdle.noteActivity();
+      const parsed = parseUpdateTodosParams(params);
+      if (!parsed) {
+        return { outcome: { outcome: 'rejected', reason: 'invalid update_todos params' } };
+      }
+      cursorTodos = mergeCursorTodos(cursorTodos, parsed.todos, parsed.merge);
+      pushAll(
+        todosToUpdatePlanEvents(cursorTodos, {
+          toolCallId: CURSOR_TODOS_TOOL_USE_ID,
+          source: 'cursor',
+        }),
+      );
+      return updateTodosAcceptedResponse(cursorTodos);
+    };
+
+    client.setRequestHandler(CursorMethod.AskQuestion, handleAskQuestion);
+    client.setRequestHandler(CursorMethod.CreatePlan, handleCreatePlan);
+    client.setRequestHandler(CursorMethod.UpdateTodos, handleUpdateTodos);
 
     const pushCancelledIdle = (statusText: string) => {
       pushAll([
@@ -823,9 +1005,20 @@ export class CursorAgent extends BaseAgent {
         sessionId,
         model: mutableModel,
         permissionMode: mutablePermissionMode,
+        planMode: mutablePlanMode,
         listedModels: this.listedModels.length,
         resumed: Boolean(resumeId),
       });
+
+      if (mutablePlanMode) {
+        try {
+          await applyAcpSessionMode('plan');
+        } catch (e) {
+          log.warn('initial session/set_mode(plan) failed', {
+            message: e instanceof Error ? e.message : String(e),
+          });
+        }
+      }
 
       eventQueue.push({
         type: 'session_id',
@@ -883,6 +1076,29 @@ export class CursorAgent extends BaseAgent {
         usageTracker.beginTurn();
         resetAcpTurn(rt);
         toolIdle.clear();
+
+        // 武装态一次性消耗（与 Claude/Codex 同语义）：勾选熄灭，ACP sticky plan 保留到 create_plan 批准。
+        const requestedPlanTurn = sendOpts?.planMode ?? mutablePlanMode;
+        if (requestedPlanTurn) {
+          if (mutablePlanMode && sendOpts?.planMode !== false) {
+            mutablePlanMode = false;
+            eventQueue.push({
+              type: 'plan_mode_changed',
+              data: { enabled: false },
+              source: 'cursor',
+            });
+          }
+          if (!acpInPlanMode) {
+            try {
+              await applyAcpSessionMode('plan');
+            } catch (e) {
+              log.warn('session/set_mode(plan) before prompt failed', {
+                message: e instanceof Error ? e.message : String(e),
+              });
+            }
+          }
+        }
+
         pushAll([
           {
             type: 'status',
@@ -925,7 +1141,9 @@ export class CursorAgent extends BaseAgent {
       },
 
       async abort() {
-        if (closed || (!turnInFlight && pendingApprovals.size === 0)) return;
+        if (closed || (!turnInFlight && pendingApprovals.size === 0 && pendingExtensions.size === 0)) {
+          return;
+        }
         await finalizeTurnCancel({ reason: 'user_abort' });
       },
 
@@ -1011,6 +1229,32 @@ export class CursorAgent extends BaseAgent {
           `permission_mode:${normalized}`,
           normalized === 'bypassPermissions' ? 'allow' : 'deny',
         );
+      },
+
+      async setPlanMode(enabled: boolean) {
+        if (closed) throw new Error('Cursor session is closed');
+        if (mutablePlanMode === enabled) return;
+        mutablePlanMode = enabled;
+        log.debug('setPlanMode', { enabled });
+        // turn 流式中只记账武装态；idle 时立即推 ACP mode。
+        if (turnInFlight) return;
+        const moreOpen =
+          !enabled &&
+          (mutablePermissionMode === 'auto' || mutablePermissionMode === 'bypassPermissions');
+        dismissAllPending(`plan_mode_${enabled ? 'enabled' : 'disabled'}`, moreOpen ? 'allow' : 'deny');
+        try {
+          await applyAcpSessionMode(enabled ? 'plan' : 'agent');
+        } catch (e) {
+          log.warn('session/set_mode failed', {
+            enabled,
+            message: e instanceof Error ? e.message : String(e),
+          });
+          throw e;
+        }
+      },
+
+      getPlanMode() {
+        return mutablePlanMode;
       },
     };
 

@@ -53,6 +53,8 @@ export interface Capabilities {
    *            计划批准后 agent 自动退出计划模式并切回底层权限档。
    *  - Codex:  走 app-server experimental collaborationMode ({ mode:'plan' })，
    *            plan item 产出后由 agent 发起 plan_review，批准后自动发起实施 turn。
+   *  - Cursor: session/set_mode(plan) + cursor/create_plan → plan_review；
+   *            产品面不暴露 ask 模式；批准后 session/set_mode(agent)。
    * optional：device-link 老版本 host 序列化的 capabilities 没有此字段，
    * 消费方用 `capabilities?.planMode?.supported === true` 判定（缺省视为不支持）。
    */

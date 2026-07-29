@@ -3378,7 +3378,7 @@ export function registerMakerIpc(maker: Maker, options: RegisterMakerIpcOptions)
         reasoningDisplay: ['off'],
         permissionModes: [],
         setPermissionModeMidSession: { supported: false as const, reason: 'not-implemented' as const },
-        planMode: { supported: false as const, reason: 'not-implemented' as const },
+        planMode: { supported: true as const },
         multimodal: {
           text: { supported: true as const },
           image: { supported: true as const },
