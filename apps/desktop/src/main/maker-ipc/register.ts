@@ -266,12 +266,13 @@ import {
 import { recordModelMismatchOnMessage } from '../modelMismatchBroadcaster.js';
 import { detectClaudeModelMismatch } from '../../shared/modelMismatch.js';
 import { triggerClaudeAccountUsageRefresh } from '../usage/claudeAccountUsage.js';
-import { getCodexBudgetEffectiveCostMultiplier, getCodexSubscriptionValuePrice, getModelPriceQuote, getModelPricing, getModelPricingForModel, getSubscriptionDirectValuePrice } from '../usage/modelPricing.js';
+import { getCodexSubscriptionValuePrice, getModelPriceQuote, getModelPricing, getModelPricingForModel, getSubscriptionDirectValuePrice } from '../usage/modelPricing.js';
 import { computeModelUsageDeltas, type ModelUsageCumulative, type ModelUsageDeltaEntry } from '../usage/modelUsageDelta.js';
 import { claudeSubscriptionUsageModelKey, codexApiUsageModelKey, codexSubscriptionUsageModelKey } from '../usage/usageHistory.js';
 import { buildClaudeTurnUsageDetails, computePriceQuoteTurnMoney, estimateClaudeSubscriptionTurnValue, isAnthropicModel, normalizeModelIdForPricing, resolveClaudeTurnCostSinks, type BillingRoute } from '../usage/turnCostCalculator.js';
 import { CHATGPT_MODEL_PREFIX, XAI_MODEL_PREFIX, isSubscriptionDirectModel } from '../../shared/subscriptionModels.js';
-import { addRegionalMoney, usdMoney, type RegionalMoney } from '../../shared/regionalMoney.js';
+import { addRegionalMoney, regionalizeUsd, type RegionalMoney } from '../../shared/regionalMoney.js';
+import { CURRENT_CINDY_REGION } from '../../shared/brandRegion.js';
 import { triggerClaudeSubscriptionUsageRefresh, triggerCodexAccountUsageRefresh } from './usage.js';
 import {
   rebroadcastCodexTodayUsage,
@@ -2928,6 +2929,7 @@ export function wireSessionToIpc(session: ReturnType<Maker['getSession']>): void
             {
               providerId: sessionProviderForBilling,
               billingRoute,
+              region: CURRENT_CINDY_REGION,
             },
           );
           // 按模型记账 (首页仪表盘"按模型拆分"): 写归一化裸 id, 与 codex 行 / 价格表对齐。
@@ -2988,11 +2990,18 @@ export function wireSessionToIpc(session: ReturnType<Maker['getSession']>): void
             for (const m of perModel) {
               if (m.source !== 'subscription') continue;
               const quote = getSubscriptionDirectValuePrice(m.model);
-              const value = computePriceQuoteTurnMoney(m.deltas, quote ?? undefined);
+              const value = computePriceQuoteTurnMoney(
+                m.deltas,
+                quote ?? undefined,
+                CURRENT_CINDY_REGION,
+              );
               if (value?.amount) estimatedValues.push(value);
             }
             if (isClaudeSubscriptionSession) {
-              const claudeEstimated = estimateClaudeSubscriptionTurnValue(perModel);
+              const claudeEstimated = estimateClaudeSubscriptionTurnValue(
+                perModel,
+                CURRENT_CINDY_REGION,
+              );
               if (claudeEstimated?.amount) estimatedValues.push(claudeEstimated);
             }
             const turnEstimatedValue =
@@ -3040,9 +3049,7 @@ export function wireSessionToIpc(session: ReturnType<Maker['getSession']>): void
                     ? 'provider-api'
                     : 'unknown';
             if (route === 'subscription' || route === 'xd-gateway') return;
-            const money = usdMoney(
-              rawDelta * getCodexBudgetEffectiveCostMultiplier(resolvedModel),
-            );
+            const money = regionalizeUsd(rawDelta, CURRENT_CINDY_REGION);
             const turnUsageDetails = buildClaudeTurnUsageDetails(doneData?.usage, undefined, resolvedModel);
             recordTurnSpend(money);
             recordSessionTurnSpend(session.id, money);
@@ -3160,6 +3167,7 @@ export function wireSessionToIpc(session: ReturnType<Maker['getSession']>): void
             const money = computePriceQuoteTurnMoney(
               codexUsageToTokens(u),
               price ?? undefined,
+              CURRENT_CINDY_REGION,
             );
             if (!isSubscriptionValue && money) {
               await recordModelTurnUsage({
