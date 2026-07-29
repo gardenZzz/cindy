@@ -1119,11 +1119,15 @@ describe('Scheduler', () => {
     expect(await local.storage.get(sch.id)).toBeNull();
     // caller run 仍在 in-flight(fireOne 还没走完 finally)
     expect(local.scheduler.getInflightCount(sch.id)).toBe(1);
+    // run 行已随 schedule 级联删除,但引擎内存仍报它在跑 —— renderer 的通知抑制标记
+    // 对账靠这份快照区分「查不到 = 跑完了」与「查不到 = 自删除后仍在跑」。
+    expect(local.scheduler.listInflightRunIds()).toContain(callerRunId);
 
     // caller run 自然跑完:fireOne 收尾不抛错,run 走 success 分支
     resolveRunner({ sessionId: 'sess-caller' });
     await tickPromise;
     expect(local.scheduler.getInflightCount(sch.id)).toBe(0);
+    expect(local.scheduler.listInflightRunIds()).not.toContain(callerRunId);
     const run = local.storage.runs.get(callerRunId);
     expect(run?.status).toBe('success');
     // schedule 行已删,fireOne 尾部重排的 storage.update 是 no-op,不会复活 schedule

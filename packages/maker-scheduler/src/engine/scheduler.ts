@@ -1206,6 +1206,21 @@ export class Scheduler extends EventEmitter {
   }
 
   /**
+   * 当前所有 in-flight run 的 runId(跨 schedule)。这是「某个 run 还在不在跑」的**权威
+   * 来源** —— 引擎内存态,不依赖 run 行是否还在库里。
+   *
+   * 为什么需要它:自删除场景下 run 行会先消失、run 却仍在跑。agent 在任务 run 内调
+   * `schedule_delete` 删自己的 schedule 时,`deleteUnlocked` 用 `exemptRunId` 豁免 caller
+   * run 不 abort,该 run 的行随 schedule 级联删除后它继续跑到底(见那里的注释与
+   * `delete with exemptRunId leaves caller run running` 用例)。因此「DB 里查不到这条
+   * run」既可能是「已结束并被清理」,也可能是「正在跑的自删除 run」,只有这份 in-flight
+   * 快照能区分。消费方(renderer 的抑制标记对账)据此决定能不能清标记。
+   */
+  listInflightRunIds(): string[] {
+    return [...this.inflightControllers.keys()];
+  }
+
+  /**
    * 把**指定的单条 in-flight run** 标记为"静默":任务内 agent 确认本轮无需用户
    * 关注(如 PR 巡检无新动态)时,经 MCP 工具传自己这一轮的 runId 调用本方法。
    * 静默的 run 在 success 落库时直接置 readAt(生而已读,小红点天然排除),且
