@@ -83,6 +83,7 @@ import {
 import {
   buildDesktopClaudeRuntimeConfig,
   desktopCodexRuntimeConfig,
+  desktopCursorRuntimeConfig,
 } from './runtime-configs.js';
 import { getClaudeEndpoint, setClaudeProxyGatewayKeyReader, setClaudeProxyOAuthSpawnChecker } from './anthropic-compat-proxy-host.js';
 import { claudeSubagentUsageBridge } from './claude-subagent-usage-bridge.js';
@@ -648,7 +649,7 @@ export function getMaker(): Maker {
     const cursorAgent = cursorBinary.installed
       ? new CursorAgent({
           auth: createCursorAuthStub(),
-          runtimeConfig: {},
+          runtimeConfig: desktopCursorRuntimeConfig,
           binaryPath: cursorBinary.binaryPath,
           logger: desktopMakerLogger,
           onCursorLocalModelsListed: (listing) => {

@@ -1,17 +1,12 @@
 /**
- * Opt-in Cursor ACP seam integration test.
+ * Opt-in Cursor ACP seam + lifecycle integration tests.
  *
- * Spawns a real `cursor-agent acp` subprocess, creates a session, sends a short
- * prompt, and asserts streamed assistant text deltas before a clean close.
- *
- * This incurs a real billed model call. Default: skipped.
- *
- * Manual run:
+ * Spawns a real `cursor-agent acp` subprocess.
+ * Default: skipped (billed). Manual:
  *   CINDY_CURSOR_ACP_E2E=1 pnpm --filter @cindy/maker-core run test -- src/agents/cursor/cursorAcp.e2e.test.ts
  *
- * Requires: cursor-agent on PATH (or ~/.local/bin), already logged in (`agent login`).
  * After the run, verify no orphan ACP processes:
- *   `ps -ax -o pid=,command= | grep -E '[c]ursor-agent' | grep -E '\\bacp\\b'`
+ *   pgrep -lf "cursor-agent.* acp$"
  */
 
 import { afterAll, describe, expect, it } from 'vitest';
@@ -73,25 +68,41 @@ function countCursorAcpProcesses(): number {
   }
 }
 
+function listCursorAcpProcesses(): string {
+  try {
+    return execSync('pgrep -lf "cursor-agent.* acp$" || true', { encoding: 'utf8' }).trim();
+  } catch {
+    return '';
+  }
+}
+
+function createAgent(): CursorAgent {
+  return new CursorAgent({
+    auth: createAuthStub(),
+    runtimeConfig: {},
+    binaryPath: resolveCursorBinary()!,
+    logger: createConsoleLogger('cursor-acp-e2e'),
+  });
+}
+
 describe.skipIf(!ENABLED)('Cursor ACP e2e (opt-in, billed)', () => {
   const binaryPath = resolveCursorBinary();
   const pidsBefore = countCursorAcpProcesses();
-  let handleClose: (() => Promise<void>) | null = null;
+  const closers: Array<() => Promise<void>> = [];
 
   afterAll(async () => {
-    if (handleClose) {
+    for (const close of closers.splice(0)) {
       try {
-        await handleClose();
+        await close();
       } catch {
         /* best-effort */
       }
     }
-    // Give the process a moment to exit after close.
     await new Promise((r) => setTimeout(r, 1500));
     const pidsAfter = countCursorAcpProcesses();
     if (pidsBefore >= 0 && pidsAfter > pidsBefore) {
       throw new Error(
-        `orphan cursor-agent acp processes detected: before=${pidsBefore} after=${pidsAfter}`,
+        `orphan cursor-agent acp processes detected: before=${pidsBefore} after=${pidsAfter}\n${listCursorAcpProcesses()}`,
       );
     }
   });
@@ -99,20 +110,13 @@ describe.skipIf(!ENABLED)('Cursor ACP e2e (opt-in, billed)', () => {
   it('streams assistant text for a short prompt and closes cleanly', async () => {
     expect(binaryPath, 'cursor-agent binary not found').toBeTruthy();
 
-    const agent = new CursorAgent({
-      auth: createAuthStub(),
-      runtimeConfig: {},
-      binaryPath: binaryPath!,
-      logger: createConsoleLogger('cursor-acp-e2e'),
-    });
-
-    const cwd = process.cwd();
+    const agent = createAgent();
     const handle = await agent.startSession({
       sessionId: `cursor-e2e-${Date.now()}`,
       model: 'auto',
-      workingDir: cwd,
+      workingDir: process.cwd(),
     });
-    handleClose = () => handle.close();
+    closers.push(() => handle.close());
 
     const textChunks: string[] = [];
     let finalText = '';
@@ -147,7 +151,7 @@ describe.skipIf(!ENABLED)('Cursor ACP e2e (opt-in, billed)', () => {
     });
 
     await handle.close();
-    handleClose = null;
+    closers.length = 0;
     await consume;
 
     expect(turnError, `unexpected turn error: ${turnError}`).toBeNull();
@@ -161,6 +165,117 @@ describe.skipIf(!ENABLED)('Cursor ACP e2e (opt-in, billed)', () => {
 
     console.log('[cursor-acp-e2e] streamed deltas:', JSON.stringify(streamed));
     console.log('[cursor-acp-e2e] final text:', JSON.stringify(finalText));
-    console.log('[cursor-acp-e2e] delta chunk count:', textChunks.length);
   }, 180_000);
+
+  it('resume after kill continues; cancel aborts; dispose leaves no orphans', async () => {
+    expect(binaryPath, 'cursor-agent binary not found').toBeTruthy();
+    const before = countCursorAcpProcesses();
+    const bizId = `cursor-e2e-resume-${Date.now()}`;
+
+    const agent1 = createAgent();
+    const handle1 = await agent1.startSession({
+      sessionId: bizId,
+      model: 'auto',
+      workingDir: '/tmp',
+    });
+    closers.push(() => handle1.close());
+    const sdkSessionId = handle1.id;
+    expect(sdkSessionId.length).toBeGreaterThan(8);
+
+    const events1: AgentEvent[] = [];
+    const consume1 = (async () => {
+      for await (const ev of handle1.events()) events1.push(ev);
+    })();
+
+    await handle1.send({
+      type: 'user',
+      content: 'Reply with exactly one word: alpha',
+    });
+
+    // Hard-kill the ACP child to simulate crash (leave sdk session id intact).
+    const pid = (handle1 as { _acpPid?: number | null })._acpPid;
+    expect(typeof pid).toBe('number');
+    try {
+      process.kill(pid!, 'SIGKILL');
+    } catch {
+      /* already dead */
+    }
+    await new Promise((r) => setTimeout(r, 500));
+    try {
+      await handle1.close();
+    } catch {
+      /* transport already dead */
+    }
+    closers.length = 0;
+    await consume1;
+
+    // Resume on a fresh process — same Cindy business sessionId → same CURSOR_CONFIG_DIR.
+    const agent2 = createAgent();
+    const handle2 = await agent2.startSession({
+      sessionId: bizId,
+      model: 'auto',
+      workingDir: '/tmp',
+      resumeSessionId: sdkSessionId,
+    });
+    closers.push(() => handle2.close());
+    expect(handle2.id).toBe(sdkSessionId);
+
+    const events2: AgentEvent[] = [];
+    let sawReplayText = false;
+    const consume2 = (async () => {
+      for await (const ev of handle2.events()) {
+        events2.push(ev);
+        if (ev.type === 'text') {
+          const t = String((ev.data as { text?: string }).text ?? '');
+          if (t.toLowerCase().includes('alpha')) sawReplayText = true;
+        }
+      }
+    })();
+
+    // History must be skipped — Cindy renders from its own store.
+    await new Promise((r) => setTimeout(r, 200));
+    expect(sawReplayText).toBe(false);
+
+    const send2 = handle2.send({
+      type: 'user',
+      content: 'Reply with exactly one word: beta',
+    });
+
+    // Mid-turn cancel: UI must return to idle promptly.
+    await new Promise((r) => setTimeout(r, 400));
+    const cancelStarted = Date.now();
+    await handle2.abort();
+    const cancelElapsed = Date.now() - cancelStarted;
+
+    const idleDeadline = Date.now() + 5000;
+    let sawIdle = false;
+    while (Date.now() < idleDeadline) {
+      sawIdle = events2.some(
+        (e) =>
+          e.type === 'status' &&
+          (e.data as { isRunning?: boolean }).isRunning === false,
+      );
+      if (sawIdle) break;
+      await new Promise((r) => setTimeout(r, 50));
+    }
+    expect(sawIdle).toBe(true);
+    expect(cancelElapsed).toBeLessThan(3000);
+
+    try {
+      await send2;
+    } catch {
+      /* abort may reject hanging prompt via close path */
+    }
+
+    await handle2.close();
+    closers.length = 0;
+    await agent2.dispose();
+    await consume2;
+
+    await new Promise((r) => setTimeout(r, 1500));
+    const after = countCursorAcpProcesses();
+    console.log('[cursor-acp-e2e-lifecycle] acp pids before=', before, 'after=', after);
+    console.log('[cursor-acp-e2e-lifecycle] pgrep:', listCursorAcpProcesses() || '(none)');
+    expect(after).toBeLessThanOrEqual(before);
+  }, 240_000);
 });

@@ -3,6 +3,8 @@
  *
  * 与 codex app-server/stdioTransport 同构; args 由调用方注入
  * (Cursor: `['acp']`), 本层不认识任何 vendor 子命令。
+ *
+ * close() 保证: stdin EOF → SIGTERM → 等待 → SIGKILL，避免 PPID=1 孤儿。
  */
 
 import { spawn, type ChildProcessWithoutNullStreams } from 'node:child_process';
@@ -14,6 +16,11 @@ import type {
   Transport,
 } from './transport.js';
 
+/** SIGTERM 后等待子进程退出的上限；超时再 SIGKILL。 */
+export const ACP_STDIO_SIGTERM_GRACE_MS = 2_000;
+/** SIGKILL 后再等一轮，确认进程消失。 */
+export const ACP_STDIO_SIGKILL_WAIT_MS = 1_000;
+
 export interface AcpStdioTransportOptions {
   /** Agent CLI 可执行文件的绝对路径 (host 已发现 / provisioned)。 */
   binaryPath: string;
@@ -23,6 +30,33 @@ export interface AcpStdioTransportOptions {
   cwd?: string;
   /** 子进程 env。 */
   env?: NodeJS.ProcessEnv;
+  /** 单测可缩短 SIGTERM 宽限。 */
+  sigtermGraceMs?: number;
+  /** 单测可缩短 SIGKILL 等待。 */
+  sigkillWaitMs?: number;
+}
+
+function waitForChildExit(
+  child: ChildProcessWithoutNullStreams,
+  timeoutMs: number,
+): Promise<boolean> {
+  if (child.exitCode !== null || child.signalCode !== null) {
+    return Promise.resolve(true);
+  }
+  return new Promise<boolean>((resolve) => {
+    let settled = false;
+    const done = (exited: boolean) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      child.removeListener('exit', onExit);
+      resolve(exited);
+    };
+    const onExit = () => done(true);
+    const timer = setTimeout(() => done(false), timeoutMs);
+    timer.unref?.();
+    child.once('exit', onExit);
+  });
 }
 
 export function createAcpStdioTransport(opts: AcpStdioTransportOptions): Transport {
@@ -32,6 +66,9 @@ export function createAcpStdioTransport(opts: AcpStdioTransportOptions): Transpo
   if (!Array.isArray(opts.args)) {
     throw new Error('createAcpStdioTransport: args is required');
   }
+
+  const sigtermGraceMs = opts.sigtermGraceMs ?? ACP_STDIO_SIGTERM_GRACE_MS;
+  const sigkillWaitMs = opts.sigkillWaitMs ?? ACP_STDIO_SIGKILL_WAIT_MS;
 
   const lineHandlers = new Set<LineHandler>();
   const stderrHandlers = new Set<StderrHandler>();
@@ -43,6 +80,7 @@ export function createAcpStdioTransport(opts: AcpStdioTransportOptions): Transpo
   const lineBuffer: string[] = [];
   let lineHandlerArmed = false;
   let closed = false;
+  let closePromise: Promise<void> | null = null;
 
   const child: ChildProcessWithoutNullStreams = spawn(opts.binaryPath, opts.args, {
     cwd: opts.cwd,
@@ -134,13 +172,28 @@ export function createAcpStdioTransport(opts: AcpStdioTransportOptions): Transpo
       return () => { closeHandlers.delete(handler); };
     },
 
+    getPid(): number | null {
+      if (child.exitCode !== null || child.signalCode !== null) return null;
+      return typeof child.pid === 'number' ? child.pid : null;
+    },
+
     async close(reason = 'AcpStdioTransport.close()'): Promise<void> {
-      if (closed) return;
-      try { child.stdin.end(); } catch { /* swallow */ }
-      if (child.exitCode === null && child.signalCode === null) {
-        try { child.kill('SIGTERM'); } catch { /* swallow */ }
-      }
-      fireClose(reason);
+      if (closePromise) return closePromise;
+      closePromise = (async () => {
+        try { child.stdin.end(); } catch { /* swallow */ }
+
+        if (child.exitCode === null && child.signalCode === null) {
+          try { child.kill('SIGTERM'); } catch { /* swallow */ }
+          const exited = await waitForChildExit(child, sigtermGraceMs);
+          if (!exited && child.exitCode === null && child.signalCode === null) {
+            try { child.kill('SIGKILL'); } catch { /* swallow */ }
+            await waitForChildExit(child, sigkillWaitMs);
+          }
+        }
+
+        fireClose(reason);
+      })();
+      return closePromise;
     },
   };
 }

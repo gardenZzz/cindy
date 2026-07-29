@@ -221,6 +221,11 @@ export class AcpClient {
     }
   }
 
+  /** 本地 stdio 子进程 pid；供孤儿核验。非本地 / 已关则为 null。 */
+  getPid(): number | null {
+    return this.transport?.getPid?.() ?? null;
+  }
+
   /**
    * 发送 JSON-RPC request (带 `"jsonrpc":"2.0"`), 等待对应 id 的 response。
    */

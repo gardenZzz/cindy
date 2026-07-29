@@ -42,7 +42,7 @@ import {
   setOnSessionTurnEndedPersisted,
 } from '../sessionActiveTurn';
 import { rebroadcastAgentSwitchBoundary } from './messages';
-import type { AgentKind } from '@cindy/maker-core';
+import { removeCursorIsolatedConfigDir, type AgentKind } from '@cindy/maker-core';
 
 const log = createLogger('sessions');
 const DEFAULT_DRAFT_SESSION_TITLE = 'New Maker';
@@ -1018,6 +1018,7 @@ export function registerSessionIpc(): void {
     scheduleWorktreeRecycleForStatusChange(sid, p.status);
     notifyGhostSessionStatusChange(sid, p.status, updated.workingDir);
     removeHookAttachmentDir(sid, p.status);
+    removeCursorAcpConfigDir(sid, p.status);
     return updated;
   });
 
@@ -1113,6 +1114,7 @@ export async function patchSessionMetaInDb(
       });
   }
   removeHookAttachmentDir(sessionId, patch.status);
+  removeCursorAcpConfigDir(sessionId, patch.status);
   scheduleWorktreeRecycleForStatusChange(sessionId, patch.status);
   notifyGhostSessionStatusChange(sessionId, patch.status, updated.workingDir);
   // 远程 / MCP 改动绕过 renderer 乐观更新,故主动广播 sessions:patched:
@@ -1250,6 +1252,7 @@ export async function setSessionsStatusInDb(
     scheduleWorktreeRecycleForStatusChange(item.sessionId, item.status);
     notifyGhostSessionStatusChange(item.sessionId, item.status, item.workingDir);
     removeHookAttachmentDir(item.sessionId, item.status);
+    removeCursorAcpConfigDir(item.sessionId, item.status);
   }
   return applied.map((item) => ({
     sessionId: item.sessionId,
@@ -1274,6 +1277,23 @@ function removeHookAttachmentDir(sessionId: string, status: unknown): void {
       err: err instanceof Error ? err.message : String(err),
     });
   });
+}
+
+/**
+ * Cursor ACP 隔离配置目录回收。
+ * 仅 deleted（archived 可恢复并可能 session/load resume，必须保留）。
+ * 路径算法与 maker-core `createCursorIsolatedConfigDir` 同源；close/dispose 不删。
+ */
+function removeCursorAcpConfigDir(sessionId: string, status: unknown): void {
+  if (status !== 'deleted') return;
+  try {
+    removeCursorIsolatedConfigDir(app.getPath('userData'), sessionId);
+  } catch (err) {
+    log.warn('cursor-acp config dir cleanup failed', {
+      sessionId,
+      err: err instanceof Error ? err.message : String(err),
+    });
+  }
 }
 
 /** 单行 SELECT + messages count：LEFT JOIN + GROUP BY 保证 0 条消息时 count 为 0。

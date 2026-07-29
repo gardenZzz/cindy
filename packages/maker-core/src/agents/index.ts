@@ -4,6 +4,15 @@ export * from './base-agent.js';
 export { ClaudeCodeAgent, toSdkModelString, setClaudeSupportedModelsListener } from './claude-code/index.js';
 export { CodexAgent } from './codex/index.js';
 export { CursorAgent } from './cursor/index.js';
+export {
+  createCursorIsolatedConfigDir,
+  removeCursorIsolatedConfigDir,
+  resolveCursorIsolatedConfigDir,
+} from './cursor/isolatedConfig.js';
+export type {
+  CursorIsolatedConfig,
+  CreateCursorIsolatedConfigOptions,
+} from './cursor/isolatedConfig.js';
 export type {
   CursorListedModel,
   CursorModelsListing,

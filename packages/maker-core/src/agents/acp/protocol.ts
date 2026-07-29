@@ -4,10 +4,10 @@
  * 真值参考: agentclientprotocol/agent-client-protocol schema/v1 + docs/protocol/v1。
  * 与 Codex app-server 的关键差异: ACP 消息带标准 `"jsonrpc":"2.0"` 字段。
  *
- * 覆盖: initialize / session/new / session/prompt / session/cancel /
+ * 覆盖: initialize / session/new / session/load / session/prompt / session/cancel /
  * session/update (agent_message_chunk + usage_update + tool_call*) /
  * session/request_permission / session/set_config_option。
- * plan / resume 等留给后续票。
+ * plan 等留给后续票。
  */
 
 export type JsonRpcId = number | string;
@@ -38,6 +38,8 @@ export const Method = {
   Initialize: 'initialize',
   Authenticate: 'authenticate',
   SessionNew: 'session/new',
+  /** 跨进程恢复既有会话；上游可能先回放历史 session/update，客户端应跳过。 */
+  SessionLoad: 'session/load',
   SessionPrompt: 'session/prompt',
   SessionCancel: 'session/cancel',
   SessionUpdate: 'session/update',
@@ -156,6 +158,25 @@ export interface SetConfigOptionResult {
 
 export interface NewSessionResponse {
   sessionId: string;
+  modes?: unknown;
+  configOptions?: AcpConfigOption[] | unknown;
+  models?: AcpModelsState | unknown;
+  [key: string]: unknown;
+}
+
+export interface LoadSessionParams {
+  cwd: string;
+  sessionId: string;
+  mcpServers?: unknown[];
+  additionalDirectories?: string[];
+}
+
+/**
+ * session/load 成功响应。sessionId 在请求里已有；Cursor 实测 result 不含 sessionId，
+ * 形状与 session/new 的其余字段对齐（modes / models / configOptions）。
+ */
+export interface LoadSessionResponse {
+  sessionId?: string;
   modes?: unknown;
   configOptions?: AcpConfigOption[] | unknown;
   models?: AcpModelsState | unknown;
