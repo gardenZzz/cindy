@@ -16,6 +16,7 @@ import { VendorSegmentedSwitcher } from '@/components/new-chat/VendorSegmentedSw
 import { useAgentCapabilities } from '@/hooks/useAgentCapabilities';
 import { useDeviceProviders } from '@/hooks/useDeviceProviders';
 import { useProviders } from '@/hooks/useProviders';
+import { filterChatBridgedCodexProviders } from '@/lib/providerModels';
 import { isSidebarWindow } from '@/lib/sidebarWindow';
 import { cn } from '@/lib/utils';
 import { isModelEnabled, useModelVisibilityVersion } from '@/state/modelVisibilityPrefs';
@@ -184,17 +185,24 @@ export function CreateWorkerPopover({
   // buildRegistry 烘焙的 model.disabled(供应商级 suspended 已被
   // connectedProvidersForAgent 剔除)。「隐藏」不再收窄 —— 隐藏只是陈列过滤,
   // 记忆来源被隐藏仍然合法可路由(2026-07 启用/显示双轴拆分)。device-link 恒 null。
+  const routableProviders = useMemo(
+    () =>
+      filterChatBridgedCodexProviders(
+        connectedProvidersForAgent(providers, agent),
+        agent,
+        sshRemote === true && !deviceId,
+      ),
+    [agent, deviceId, providers, sshRemote],
+  );
   const narrowProviderSource = useCallback(
     (candidate: string | null, modelId: string): string | null => {
       if (!candidate || deviceId) return null;
-      const provider = connectedProvidersForAgent(providers, agent).find(
-        (p) => p.id === candidate,
-      );
+      const provider = routableProviders.find((p) => p.id === candidate);
       if (!provider || !providerOffersModel(provider, modelId, agent)) return null;
       const catalogModel = getModel(provider, modelId, agent);
       return catalogModel && catalogModel.disabled !== true ? candidate : null;
     },
-    [agent, deviceId, providers],
+    [agent, deviceId, routableProviders],
   );
 
   // per-provider Fast 能力:同一 model id 在不同来源下 supportsFastMode 可不同(见
@@ -206,18 +214,17 @@ export function CreateWorkerPopover({
   const providerFastSupported = useCallback(
     (candidate: string | null, modelId: string): boolean => {
       // device-link 面板无来源维度,candidate 恒 null,走默认来源解析。
-      const sourceId = candidate ?? effectiveSourceIdForModel(providers, null, modelId, agent);
+      const sourceId =
+        candidate ?? effectiveSourceIdForModel(routableProviders, null, modelId, agent);
       if (!sourceId) {
         return deviceId
           ? !!activeModels.find((m) => m.id === modelId)?.supportsFastMode
           : false;
       }
-      const provider = connectedProvidersForAgent(providers, agent).find(
-        (p) => p.id === sourceId,
-      );
+      const provider = routableProviders.find((p) => p.id === sourceId);
       return modelSupportsFastMode(provider, modelId, agent);
     },
-    [activeModels, agent, deviceId, providers],
+    [activeModels, agent, deviceId, routableProviders],
   );
   // Fast 判定先对 providerSource 收窄:记忆来源刚失效(断开/掉模型/被隐藏)而收敛
   // effect 尚未把 state 置 null 的同一渲染里,直接用旧值会得到 false 并把记忆的
@@ -239,14 +246,24 @@ export function CreateWorkerPopover({
       const sourceId = deviceId
         ? effectiveSourceIdForModel(providers, null, modelId, agent)
         : narrowProviderSource(providerSource, modelId)
-          ?? effectiveSourceIdForModel(providers, null, modelId, agent);
+          ?? effectiveSourceIdForModel(routableProviders, null, modelId, agent);
       const provider = sourceId
-        ? connectedProvidersForAgent(providers, agent).find((p) => p.id === sourceId)
+        ? (deviceId ? connectedProvidersForAgent(providers, agent) : routableProviders).find(
+            (p) => p.id === sourceId,
+          )
         : undefined;
       const entry = provider ? getModel(provider, modelId, agent) : undefined;
       return entry?.efforts ? entry : flat;
     },
-    [activeModels, agent, deviceId, narrowProviderSource, providerSource, providers],
+    [
+      activeModels,
+      agent,
+      deviceId,
+      narrowProviderSource,
+      providerSource,
+      providers,
+      routableProviders,
+    ],
   );
   const noAvailableLocalModels =
     prefsRestored &&
@@ -382,7 +399,7 @@ export function CreateWorkerPopover({
       // (显式值,未显式时为解析出的默认来源),不能只看模型是否相同。
       const effectiveBefore = deviceId
         ? null
-        : providerSource ?? effectiveSourceIdForModel(providers, null, model, agent);
+        : providerSource ?? effectiveSourceIdForModel(routableProviders, null, model, agent);
       setProviderSource(narrowed);
       if (!modelId) return;
       if (modelId === model && narrowed !== null && narrowed === effectiveBefore) {
@@ -404,9 +421,9 @@ export function CreateWorkerPopover({
       // 未收窄出显式来源时取生效默认来源的条目;来源条目缺失或无档位元数据时
       // 回落拍平条目(device-link 无本地目录,handleProviderChange 本就不接线)。
       const effortSourceId =
-        narrowed ?? effectiveSourceIdForModel(providers, null, modelId, agent);
+        narrowed ?? effectiveSourceIdForModel(routableProviders, null, modelId, agent);
       const effortSourceProvider = effortSourceId
-        ? connectedProvidersForAgent(providers, agent).find((p) => p.id === effortSourceId)
+        ? routableProviders.find((p) => p.id === effortSourceId)
         : undefined;
       const sourceEntry = effortSourceProvider
         ? getModel(effortSourceProvider, modelId, agent)
@@ -459,7 +476,7 @@ export function CreateWorkerPopover({
       narrowProviderSource,
       providerFastSupported,
       providerSource,
-      providers,
+      routableProviders,
     ],
   );
 
@@ -473,7 +490,7 @@ export function CreateWorkerPopover({
   const activeMemorySourceId = deviceId
     ? null
     : narrowProviderSource(providerSource, model)
-      ?? effectiveSourceIdForModel(providers, null, model, agent);
+      ?? effectiveSourceIdForModel(routableProviders, null, model, agent);
   const updateEffort = useCallback(
     (next: Effort) => {
       setEffort(next);
@@ -690,7 +707,13 @@ export function CreateWorkerPopover({
               excludeSubscriptionDirect={sshRemote === true}
               excludeChatBridgedCodex={sshRemote === true}
               popoverSide="bottom"
-              currentProviderId={deviceId ? undefined : providerSource}
+              currentProviderId={
+                deviceId
+                  ? undefined
+                  : sshRemote === true
+                    ? narrowProviderSource(providerSource, model)
+                    : providerSource
+              }
               onProviderChange={deviceId ? undefined : handleProviderChange}
               // providerSource=null 时面板高亮的是**解析出来的生效默认来源**,点它的
               // 语义是「把默认来源钉成显式偏好」,必须照常回调(codex review)——否则
