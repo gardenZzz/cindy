@@ -8,6 +8,26 @@ import {
   parseCursorStatusOutputForTest,
 } from '../cursor-auth-adapter.js';
 
+function hangingLoginChild(opts?: {
+  /** kill 不 emit close */
+  killIgnoresClose?: boolean;
+}): { child: ChildProcess & EventEmitter; kill: ReturnType<typeof vi.fn> } {
+  const child = new EventEmitter() as ChildProcess & EventEmitter;
+  const stdout = new EventEmitter();
+  const stderr = new EventEmitter();
+  (child as { stdout: EventEmitter; stderr: EventEmitter }).stdout = stdout;
+  (child as { stdout: EventEmitter; stderr: EventEmitter }).stderr = stderr;
+  (child as { pid: number }).pid = 4242;
+  const kill = vi.fn(() => {
+    if (!opts?.killIgnoresClose) {
+      queueMicrotask(() => child.emit('close', null, 'SIGTERM'));
+    }
+    return true;
+  });
+  (child as { kill: (signal?: string) => boolean }).kill = kill;
+  return { child, kill };
+}
+
 describe('parseCursorStatusOutputForTest', () => {
   it('parses authenticated JSON without retaining tokens', () => {
     const state = parseCursorStatusOutputForTest(
@@ -90,12 +110,7 @@ describe('DesktopCursorAuthAdapter', () => {
 
   it('triggerLogin sets NO_OPEN_BROWSER and surfaces login URL via onProgress', async () => {
     const progress: string[] = [];
-    const child = new EventEmitter() as ChildProcess & EventEmitter;
-    const stdout = new EventEmitter();
-    const stderr = new EventEmitter();
-    (child as { stdout: EventEmitter; stderr: EventEmitter }).stdout = stdout;
-    (child as { stdout: EventEmitter; stderr: EventEmitter }).stderr = stderr;
-    (child as { kill: (signal?: string) => boolean }).kill = vi.fn(() => true);
+    const { child } = hangingLoginChild();
 
     let statusCalls = 0;
     const adapter = createDesktopCursorAuthAdapter({
@@ -104,7 +119,7 @@ describe('DesktopCursorAuthAdapter', () => {
         expect(args).toEqual(['login']);
         expect(options.env.NO_OPEN_BROWSER).toBe('1');
         queueMicrotask(() => {
-          stdout.emit(
+          child.stdout!.emit(
             'data',
             'Open a browser and navigate to this link: https://authenticator.cursor.sh/?code=fake-not-real\n',
           );
@@ -159,16 +174,7 @@ describe('DesktopCursorAuthAdapter', () => {
   });
 
   it('cancelLogin kills the in-flight login child', async () => {
-    const child = new EventEmitter() as ChildProcess & EventEmitter;
-    const stdout = new EventEmitter();
-    const stderr = new EventEmitter();
-    (child as { stdout: EventEmitter; stderr: EventEmitter }).stdout = stdout;
-    (child as { stdout: EventEmitter; stderr: EventEmitter }).stderr = stderr;
-    const kill = vi.fn(() => {
-      queueMicrotask(() => child.emit('close', null, 'SIGTERM'));
-      return true;
-    });
-    (child as { kill: (signal?: string) => boolean }).kill = kill;
+    const { child, kill } = hangingLoginChild();
 
     const adapter = createDesktopCursorAuthAdapter({
       binaryPath: '/fake/cursor-agent',
@@ -178,6 +184,10 @@ describe('DesktopCursorAuthAdapter', () => {
         stderr: '',
         code: 0,
       }),
+      killProcessTree: (_pid, proc, onSettled) => {
+        proc.kill('SIGKILL');
+        onSettled?.();
+      },
     });
 
     const loginPromise = adapter.triggerLogin();
@@ -187,5 +197,69 @@ describe('DesktopCursorAuthAdapter', () => {
     const state = await loginPromise;
     expect(kill).toHaveBeenCalled();
     expect(state.authenticated).toBe(false);
+  });
+
+  it('login timeout settles even when kill does not emit close', async () => {
+    const { child } = hangingLoginChild({ killIgnoresClose: true });
+    const killTree = vi.fn((_pid: number | undefined, _proc: ChildProcess, onSettled?: () => void) => {
+      onSettled?.();
+    });
+
+    const adapter = createDesktopCursorAuthAdapter({
+      binaryPath: '/fake/cursor-agent',
+      spawnProcess: () => child,
+      runCommand: async () => ({
+        stdout: JSON.stringify({ isAuthenticated: false }),
+        stderr: '',
+        code: 0,
+      }),
+      loginTimeoutMs: 40,
+      forceSettleMs: 10,
+      killProcessTree: killTree,
+    });
+
+    const started = Date.now();
+    const state = await adapter.triggerLogin();
+    expect(state.authenticated).toBe(false);
+    expect(killTree).toHaveBeenCalled();
+    expect(Date.now() - started).toBeLessThan(2_000);
+  });
+
+  it('logout awaits login exit after cancel even when kill does not emit close', async () => {
+    const { child } = hangingLoginChild({ killIgnoresClose: true });
+    const order: string[] = [];
+    const killTree = vi.fn((_pid: number | undefined, _proc: ChildProcess, onSettled?: () => void) => {
+      order.push('kill');
+      onSettled?.();
+    });
+    const runCommand = vi.fn(async (args: string[]) => {
+      if (args[0] === 'logout') {
+        order.push('logout');
+        return { stdout: '', stderr: '', code: 0 };
+      }
+      return {
+        stdout: JSON.stringify({ isAuthenticated: false }),
+        stderr: '',
+        code: 0,
+      };
+    });
+
+    const adapter = createDesktopCursorAuthAdapter({
+      binaryPath: '/fake/cursor-agent',
+      spawnProcess: () => child,
+      runCommand,
+      loginTimeoutMs: 60_000,
+      forceSettleMs: 20,
+      killProcessTree: killTree,
+    });
+
+    const loginPromise = adapter.triggerLogin();
+    await Promise.resolve();
+    await adapter.logout();
+    order.push('logout-done');
+    await loginPromise;
+
+    expect(order).toEqual(['kill', 'logout', 'logout-done']);
+    expect(killTree).toHaveBeenCalled();
   });
 });
