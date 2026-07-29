@@ -4410,13 +4410,18 @@ export function registerMakerIpc(maker: Maker, options: RegisterMakerIpcOptions)
 
   // codex 远端 daemon 的 live-turn 判定 (ensure 与 turn-done 挂钩共用):
   // bootstrap 重启会断同 host 的 live turn, defer/补刀都以此为据。
-  const codexRemoteHasLiveTurn = (hostId: string): boolean =>
-    maker.listActiveSessions().some(
+  // function 声明 (hoisted):const 箭头形态下, 任何早于本行执行的调用路径
+  // (如注册流程中被直线调用的 resume 分支) 都会 TDZ ReferenceError — 用
+  // 声明消除整类风险 (reviewer R27 指出;当前调用点虽均在初始化后, 不
+  // 留隐患)。
+  function codexRemoteHasLiveTurn(hostId: string): boolean {
+    return maker.listActiveSessions().some(
       (s) =>
         s.remoteHostId === hostId &&
         s.agentKind === 'codex' &&
         (agentInputCoordinatorHolder?.hasActiveTurnForRewind(s.id) ?? false),
     );
+  }
   setRemoteCodexLiveTurnChecker(codexRemoteHasLiveTurn);
 
   // turn 结束后补一次远端 MCP ensure (best-effort):live turn 期间被推迟的

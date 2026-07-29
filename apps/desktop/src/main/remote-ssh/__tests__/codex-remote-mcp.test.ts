@@ -1207,3 +1207,59 @@ describe('codex-connector R24 regressions', () => {
     expect(readCmd).not.toContain('|| true');
   });
 });
+
+describe('codex-connector R27 regressions', () => {
+  it('runs cleanup-only strip when the bridge is unavailable but the host was previously injected (R27 P2)', async () => {
+    const stale = renderManagedMcpBlock({ remotePort: 47921, serverNames: SERVERS, tokenFingerprint: 'fp-old' });
+    let configContent = `model = "gpt-5.5"\n\n${stale}\n`;
+    const execCmds: string[] = [];
+    const host = {
+      id: 'host-bridge-down-cleanup',
+      exec: async (cmd: string, opts?: { input?: string }) => {
+        execCmds.push(cmd);
+        if (cmd.includes('cat "$CODEX_HOME/config.toml"')) {
+          return { exitCode: 0, stdout: configContent, stderr: '' };
+        }
+        if (cmd.includes('base64 -d')) {
+          const written = decodeWrittenConfig(opts?.input ? [opts.input] : []);
+          if (written !== null) configContent = written;
+        }
+        return { exitCode: 0, stdout: 'ok', stderr: '' };
+      },
+      ensureRemoteForward: async (spec: { localHost: string; localPort: number; preferredRemotePort?: number }) => ({
+        remotePort: spec.preferredRemotePort ?? 47921,
+        close: async () => {},
+      }),
+      closeRemoteForward: async () => {},
+    } as unknown as RemoteHost;
+
+    expect((await ensureRemoteCodexMcpBridge(host, {
+      ensureBridgeStarted: async () => ({ port: 38080, serverNames: SERVERS, bridgeInstanceId: 'bridge-1' }),
+      hasLiveTurnOnHost: () => false,
+    })).ok).toBe(true);
+    expect(prefsOf('host-bridge-down-cleanup')?.appliedFingerprint).toBeTruthy();
+    execCmds.length = 0;
+
+    const result = await ensureRemoteCodexMcpBridge(host, {
+      ensureBridgeStarted: async () => null,
+      hasLiveTurnOnHost: () => false,
+    });
+    expect(result.ok).toBe(true);
+    const joined = execCmds.join('\n');
+    expect(joined).toContain('base64 -d');
+    expect(joined).toContain('bootstrap');
+    expect(configContent).not.toContain('cindy-remote-mcp');
+    expect(prefsOf('host-bridge-down-cleanup')?.appliedFingerprint).toBeUndefined();
+  });
+
+  it('still returns bridge-unavailable when the bridge is down and there is nothing to clean', async () => {
+    const { host, execCmds } = fakeHost('host-bridge-down-virgin', '');
+    const result = await ensureRemoteCodexMcpBridge(host, {
+      ensureBridgeStarted: async () => null,
+      hasLiveTurnOnHost: () => false,
+    });
+    expect(result.ok).toBe(false);
+    expect(result.reason).toBe('bridge-unavailable');
+    expect(execCmds.join('\n')).not.toContain('bootstrap');
+  });
+});

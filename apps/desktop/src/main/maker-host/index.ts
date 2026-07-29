@@ -754,9 +754,15 @@ export function getMaker(): Maker {
           mcpInjectFingerprint !== undefined &&
           ccAppliedFingerprint !== null &&
           mcpInjectFingerprint !== ccAppliedFingerprint;
+        // 持久代际 drift (ccGenerationDrift) 不受 fresh 集合豁免:
+        // token/bridge/端口变化后 applied 指纹 ≠ desired 时, 已 fresh 过的
+        // session 也必须重新 forceFresh — 否则豁免让 drift 判定只在「从未
+        // fresh 过」时生效, attach 回持旧 Authorization/URL 的 query
+        // (codex-connector R27 P1)。fresh 集合只豁免「同代际的重复注入」。
         const forceFreshQuery =
-          (injectedServerCount > 0 || mcpNeedsFreshStart || staleInvalidatedCcSessions.has(sessionId) || ccGenerationDrift) &&
-          !forcedFreshCcBridgeSessions.has(sessionId);
+          ((injectedServerCount > 0 || mcpNeedsFreshStart || staleInvalidatedCcSessions.has(sessionId)) &&
+            !forcedFreshCcBridgeSessions.has(sessionId)) ||
+          ccGenerationDrift;
 
         // 协同 MCP 已 mutate 进 startParams.mcpServers;这里再把 proxy env 合入
         // 得到最终 startParams (mcpServers 与 env 都带上)。

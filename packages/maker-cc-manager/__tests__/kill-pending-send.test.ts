@@ -61,3 +61,13 @@ describe('kill 终止窗口的 sendMessage 拒绝 (Greptile P1)', () => {
     expect(() => registry.sendMessage('s2', { text: 'hello' })).toThrowError(/SESSION_NOT_FOUND|no longer alive/);
   });
 });
+
+  it('kill resolves only after the consume loop has fully exited (daemon-side settle guarantee)', async () => {
+    // Greptile R27:kill RPC 返回时 session 必然不再 alive — client 不再需要
+    // 用固定期限轮询猜终止状态 (buildBlockingFactory 的 loop 在 end 后还挂
+    // 150ms, 同步等待必须覆盖它)。
+    const registry = new SessionRegistry({ sdkQueryFactory: buildBlockingFactory() });
+    const session = await registry.create({ sessionId: 's3', cwd: '/repo', model: 'm', env: {} });
+    await registry.kill('s3');
+    expect(session.alive).toBe(false);
+  });

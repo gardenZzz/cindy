@@ -577,7 +577,19 @@ export function stripRemoteCodexMcpConfig(
   host: RemoteHost,
   deps?: { hasLiveTurnOnHost?: (hostId: string) => boolean },
 ): Promise<void> {
-  return withHostSerial(host.id, async () => {
+  return withHostSerial(host.id, () => doStripRemoteCodexMcpConfig(host, deps));
+}
+
+/**
+ * stripRemoteCodexMcpConfig 的无锁核心 — 供已持有 per-host 串行锁的
+ * ensure 路径直调 (R27 P2:bridge 不可用的 cleanup-only 分支;锁内再入
+ * withHostSerial 会自死锁)。
+ */
+async function doStripRemoteCodexMcpConfig(
+  host: RemoteHost,
+  deps?: { hasLiveTurnOnHost?: (hostId: string) => boolean },
+): Promise<void> {
+  {
     try {
       if (deps?.hasLiveTurnOnHost?.(host.id)) return;
       const existing = await readRemoteConfig(host);
@@ -605,7 +617,7 @@ export function stripRemoteCodexMcpConfig(
         error: err instanceof Error ? err.message : String(err),
       });
     }
-  });
+  }
 }
 
 /**
@@ -696,6 +708,25 @@ async function doEnsureRemoteCodexMcpBridge(
   try {
     const bridge = await deps.ensureBridgeStarted();
     if (!bridge) {
+      // bridge 起不来时清理场景 (collab 全局禁用 / token 失效 / 曾注入过)
+      // 不需要 bridge — 剥 config / 清 env 都是纯远端操作。直接走 strip
+      // (R21 的无 bridge 变体), 否则 bridge 停机期间旧 config/env 残留,
+      // 远端持续暴露死 MCP (codex-connector R27 P2)。从未注入过且无清理
+      // 对象的维持 bridge-unavailable 早退。
+      const applied = readPortPrefs()[host.id]?.appliedFingerprint;
+      const collabEnabled = deps.isCollabEnabled?.() ?? true;
+      const token = getRemoteMcpBridgeToken();
+      if (applied || !collabEnabled || !token) {
+        log.warn('bridge unavailable — running cleanup-only strip on remote host', {
+          host: host.id,
+          hadAppliedFingerprint: Boolean(applied),
+          collabEnabled,
+          hasToken: Boolean(token),
+        });
+        // 已在 per-host 串行锁内 (ensure 持锁), 直调无锁核心 (R27 P2 自死锁修正)。
+        await doStripRemoteCodexMcpConfig(host, { hasLiveTurnOnHost: deps.hasLiveTurnOnHost });
+        return { ok: true };
+      }
       log.warn('remote MCP injection skipped: http bridge unavailable', { host: host.id });
       return { ok: false, reason: 'bridge-unavailable' };
     }
