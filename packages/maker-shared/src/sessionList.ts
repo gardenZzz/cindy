@@ -907,7 +907,9 @@ function isUnreadRunStatus(status: RemoteScheduleRunStatus): boolean {
 }
 
 function agentLabel(agentKind: RemoteSession['agentKind']): string {
-  return agentKind === 'codex' ? 'Codex' : 'Claude Code';
+  if (agentKind === 'codex') return 'Codex';
+  if (agentKind === 'cursor') return 'Cursor';
+  return 'Claude Code';
 }
 
 function sessionStatusLabel(status: RemoteSession['status']): string {

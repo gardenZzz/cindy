@@ -1,3 +1,4 @@
+import type { AgentKind } from '@cindy/maker-core';
 /**
  * crossAgentConvertService — renderer 侧 IPC 薄层。
  *
@@ -5,7 +6,7 @@
  */
 
 export const crossAgentConvertService = {
-  detect(workingDir: string, agentKind: 'claude-code' | 'codex'): Promise<{ items: CrossAgentMigrationItem[] }> {
+  detect(workingDir: string, agentKind: AgentKind): Promise<{ items: CrossAgentMigrationItem[] }> {
     return window.electronAPI.maker.crossAgent.detect(workingDir, agentKind);
   },
   convert(items: CrossAgentMigrationItem[]): Promise<{

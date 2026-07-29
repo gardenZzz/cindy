@@ -9,6 +9,7 @@ import {
   PendingCredentialSwitchService,
   type PendingCredentialSwitchDeps,
 } from '../pendingCredentialSwitch.js';
+import type { AgentKind } from '@cindy/maker-core';
 
 const touchedSessions = new Set<string>();
 
@@ -26,7 +27,7 @@ function rememberSession(sessionId: string): string {
 
 interface HarnessSession {
   id: string;
-  agentKind: 'claude-code' | 'codex';
+  agentKind: AgentKind;
   remoteHostId?: string | null;
   isTurnRunning?: () => boolean;
 }

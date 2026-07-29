@@ -12,6 +12,7 @@ import {
 import { createAgentHandoffPendingRegistry } from '../agentHandoff';
 import { MAKER_INVOKE } from '../channels';
 import { IpcHarness } from './helpers/ipcHarness';
+import type { AgentKind } from '@cindy/maker-core';
 
 function makeRow(overrides: Partial<AgentSwitchSessionRow> = {}): AgentSwitchSessionRow {
   return {
@@ -238,7 +239,7 @@ describe('deferred switch (turn running)', () => {
     const store = new Map<
       string,
       {
-        targetAgentKind: 'claude-code' | 'codex';
+        targetAgentKind: AgentKind;
         model: string;
         providerId: string | null | undefined;
         effort?: string;

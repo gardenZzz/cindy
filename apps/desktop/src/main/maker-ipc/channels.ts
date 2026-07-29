@@ -1,3 +1,4 @@
+import type { AgentKind } from '@cindy/maker-core';
 /**
  * maker:* IPC channel 名常量。统一收口，禁止 hardcode 字符串。
  *
@@ -124,7 +125,7 @@ export const MAKER_INVOKE = {
    *  - 选中(active=true):额外 patchVendorPrefs 更新 lastByVendor 的激活 effort(被控端 trigger 读源),
    *    fast 经 providerModelMemory 已覆盖 trigger。
    * 变更经既有 SYNC_* 自动 re-mirror + 广播 NEW_MAKER_DRAFT_CHANGED 回控制端镜像。
-   * 入参 = { agent:'claude-code'|'codex', providerId, modelId, effort?, fast?, active? }。
+   * 入参 = { agent:AgentKind, providerId, modelId, effort?, fast?, active? }。
    */
   APPLY_NEW_MAKER_DRAFT_PREF: 'maker:apply-new-maker-draft-pref',
   LIST_AVAILABLE_AGENTS: 'maker:list-available-agents',
@@ -179,7 +180,7 @@ export const MAKER_INVOKE = {
    * 旧控制端的会话模型预设写穿兼容 channel。新控制端统一经 APPLY_NEW_MAKER_DRAFT_PREF 写被控端
    * providerModelMemory 全局预设;旧控制端仍发此 invoke 时,被控端 renderer 也会将其收敛到同一
    * 全局预设,并保留 session scoped 回流供旧控制端显示。入参 =
-   * { sessionId, agent:'claude-code'|'codex', providerId, model, effort?, fast? }。
+   * { sessionId, agent:AgentKind, providerId, model, effort?, fast? }。
    */
   SET_SESSION_MODEL_PREF: 'maker:set-session-model-pref',
   /**
@@ -226,6 +227,17 @@ export const MAKER_INVOKE = {
   AGENT_STATUS: 'maker:agent:status',
   // Agent 二进制 --version 输出 (About 面板用) —— spawn binary, 进程内缓存
   AGENT_BINARY_VERSION: 'maker:agent:binary-version',
+  /**
+   * Cursor 本机 cursor-agent 探测（设置 → 供应商区安装引导）。
+   * 查询型：只回 `{ installed: boolean }`，不回绝对路径；失败降级未安装。
+   * 本地桌面专属，不进 device-link allowlist（Cursor 一期不做 remote / mobile）。
+   */
+  CURSOR_BINARY_STATUS: 'maker:cursor:binary-status',
+  /**
+   * 用户在设置页显式确认后执行官方安装：`curl -fsSL https://cursor.com/install | bash`。
+   * 仅 darwin / linux；未确认不得调用。本地桌面专属，不进 device-link allowlist。
+   */
+  CURSOR_INSTALL: 'maker:cursor:install',
   // Agent 今日累计 (取代老 codex:usage:today) —— 走 host 的 readAgentTodayUsage
   USAGE_TODAY: 'maker:usage:today',
   USAGE_ACCOUNT: 'maker:usage:account',

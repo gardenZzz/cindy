@@ -1397,6 +1397,24 @@
         "hintLoggedIn": "{{cli}}이(가) 이 기기에 로그인되어 있습니다. 인증하여 바로 연결할 수 있습니다",
         "hintInstalled": "이 기기에 {{cli}}이(가) 설치되어 있습니다"
       },
+      "cursor": {
+        "title": "Cursor",
+        "installedDescription": "이 기기에 cursor-agent가 설치되어 있습니다. 사용 가능할 때 Cursor를 선택적 Agent로 쓸 수 있습니다.",
+        "missingDescription": "공식 cursor-agent를 설치하면 Cindy에서 Cursor를 사용할 수 있습니다. 선택 사항이며, 설치하지 않아도 다른 기능에는 영향이 없습니다.",
+        "installedPill": "설치됨",
+        "installCta": "설치",
+        "installing": "설치 중…",
+        "optionalHint": "선택 사항 — 다른 기능은 막히지 않습니다",
+        "refreshAria": "Cursor 설치 상태 다시 확인",
+        "confirmTitle": "Cursor를 설치할까요?",
+        "confirmDescription": "확인하면 Cindy가 이 공식 설치 명령을 실행합니다:\n\n{{command}}\n\n확인하기 전에는 아무것도 실행되지 않습니다.",
+        "confirmInstall": "설치",
+        "confirmCancel": "취소",
+        "installSuccess": "Cursor가 설치되었습니다",
+        "installFailed": "Cursor를 설치할 수 없습니다",
+        "installNotDetected": "설치가 끝났지만 cursor-agent를 찾지 못했습니다. 새로고침하거나 터미널에서 설치해 보세요.",
+        "unsupportedPlatform": "공식 cursor-agent 설치 프로그램은 macOS와 Linux만 지원합니다."
+      },
       "wizard": {
         "title": "제공자 추가",
         "titleWith": "추가 · {{name}}",
@@ -4090,6 +4108,20 @@
           "bypassPermissions": {
             "label": "전체 접근",
             "description": "추가 확인 없이 모든 파일 편집과 네트워크 명령 실행을 허용합니다. 가장 위험하므로 신뢰할 수 있는 작업에서만 사용하세요."
+          }
+        },
+        "cursor": {
+          "ask": {
+            "label": "기본 권한",
+            "description": "승인이 필요한 도구는 실행 전에 확인합니다. 권한 요청은 Cindy 클라이언트에서 처리합니다."
+          },
+          "auto": {
+            "label": "자동 리뷰",
+            "description": "읽기·검색·사고 도구는 자동 허용하고, 편집·실행 등 고위험 도구는 확인합니다."
+          },
+          "bypassPermissions": {
+            "label": "전체 접근",
+            "description": "도구 호출을 확인 없이 허용합니다. 가장 위험하므로 신뢰할 수 있는 작업에서만 사용하세요. Cursor 샌드박스 설정은 변경하지 않습니다."
           }
         }
       }

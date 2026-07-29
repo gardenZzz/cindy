@@ -14,10 +14,11 @@ import { useEffect, useState } from 'react';
 
 import { createLogger } from '@/lib/logger';
 import type { Effort, PermissionMode } from '@/lib/userPreferences.types';
+import type { AgentKind } from '@cindy/maker-core';
 
+export type { AgentKind };
 const log = createLogger('useAgentCapabilities');
 
-export type AgentKind = 'claude-code' | 'codex';
 
 // renderer 视角: id 全部是不透明 string, 渲染只读 displayName。
 // effort 的合法 id 集合 = capabilities.effortLevels 上每个项的 id。
@@ -339,7 +340,7 @@ export function evictDeviceCapabilities(deviceId: string): void {
   deviceGen.set(deviceId, (deviceGen.get(deviceId) ?? 0) + 1);
   // 已挂载 hook 必须同步知道旧快照已失效；否则 provider 新快照先到时会拿旧 capabilities
   // 计算 fallback，并永久覆盖用户原本保存的模型偏好。
-  for (const agentKind of ['claude-code', 'codex'] as const) {
+  for (const agentKind of ['claude-code', 'codex', 'cursor'] as const) {
     notifyRemoteCapabilities(deviceId, agentKind, { status: 'loading' });
   }
 }
@@ -349,18 +350,19 @@ export type LocalCapabilitiesSnapshot = ReadonlyArray<readonly [AgentKind, Agent
 /** 开始一轮本地 capabilities 刷新，并作废所有更早的本地请求。 */
 export function beginLocalCapabilitiesRefresh(): number {
   localGen += 1;
-  for (const agent of ['claude-code', 'codex'] as const) {
+  for (const agent of ['claude-code', 'codex', 'cursor'] as const) {
     inflight.delete(cacheKey(agent));
   }
   return localGen;
 }
 
-/** 读取两种 agent 的完整能力快照；失败向上抛，不触碰现有缓存。 */
+/** 读取 agent 的完整能力快照；失败向上抛，不触碰现有缓存。 */
 export async function loadLocalCapabilitiesSnapshot(): Promise<LocalCapabilitiesSnapshot> {
   const api = getMakerApi();
   if (!api) throw new Error('maker IPC not available');
+  // cursor 可能未注册(二进制未装)—— getCapabilities 回空壳，仍一并拉取以便选择器有 Auto 兜底。
   return Promise.all(
-    (['claude-code', 'codex'] as const).map(
+    (['claude-code', 'codex', 'cursor'] as const).map(
       async (agent) => [agent, await api.getCapabilities(agent)] as const,
     ),
   );

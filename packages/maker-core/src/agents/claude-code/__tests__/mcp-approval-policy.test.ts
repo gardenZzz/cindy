@@ -403,7 +403,8 @@ describe('prompt-each-time never turns into a persisted grant', () => {
     // 让 canUseTool 跑到 dispatchInteraction 并登记 pending。
     await new Promise((resolve) => setImmediate(resolve));
 
-    await handle.setPermissionMode('bypassPermissions');
+    expect(handle.setPermissionMode).toBeTypeOf('function');
+    await handle.setPermissionMode!('bypassPermissions');
 
     // 切到 Full access 也不能替用户批准这一次高风险调用。
     expect((await pending).behavior).toBe('deny');
@@ -420,7 +421,8 @@ describe('prompt-each-time never turns into a persisted grant', () => {
     });
     await new Promise((resolve) => setImmediate(resolve));
 
-    await handle.setPermissionMode('bypassPermissions');
+    expect(handle.setPermissionMode).toBeTypeOf('function');
+    await handle.setPermissionMode!('bypassPermissions');
 
     expect((await pending).behavior).toBe('allow');
     await handle.close();

@@ -77,7 +77,7 @@ export function RunHistoryPane({
   // ScheduleRun 没存 agentKind，但每条 run 关联一个 session（run.sessionId），
   // session 上有 agentKind。这里拉 'all' 桶（含 archived）建 sessionId → AgentKind 映射，
   // session 已被删 / 桶未加载完 时 fallback 到 schedule 当前 agentKind。
-  // Session.agentKind 是 'cc'|'codex'，scheduler 侧是 'claude-code'|'codex'，需要映射。
+  // Session.agentKind 是 'cc'|'codex'，scheduler 侧是 AgentKind，需要映射。
   const { sessions: allSessions } = useCCSessions({ includeArchived: 'all' });
   const runSessionIds = useMemo(
     () => runs.flatMap((run) => (run.sessionId ? [run.sessionId] : [])),

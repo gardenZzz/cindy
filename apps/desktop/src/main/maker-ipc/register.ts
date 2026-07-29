@@ -369,6 +369,7 @@ import {
   applySetModelThenCancelAgentSwitchIntent,
   createPendingAgentSwitchRegistry,
   registerMakerSessionAgentSwitchHandler,
+  toMakerAgentKind,
   type MakerSessionAgentSwitchHandlerDeps,
 } from './sessionAgentSwitchHandler.js';
 import { prependHandoffToUserMessage } from './agentHandoff.js';
@@ -1040,7 +1041,7 @@ export function stopOrcaIdleWatcher(): void {
 }
 
 function requireAgentKind(value: unknown): AgentKind {
-  if (value === 'claude-code' || value === 'codex') return value;
+  if (value === 'claude-code' || value === 'codex' || value === 'cursor') return value;
   throwIpcError('INVALID_PARAMS', 'agentKind required');
 }
 
@@ -2375,7 +2376,10 @@ export function wireSessionToIpc(session: ReturnType<Maker['getSession']>): void
 
   // session-agent-switch:登记本会话当前引擎,broadcaster / user 行落库据此逐行
   // stamp messages.agent_kind(切换后历史行的 agent_meta 必须按写入时引擎解析)。
-  noteSessionAgentKind(session.id, session.agentKind === 'codex' ? 'codex' : 'cc');
+  noteSessionAgentKind(
+    session.id,
+    session.agentKind === 'codex' ? 'codex' : session.agentKind === 'cursor' ? 'cursor' : 'cc',
+  );
 
   // 订阅槽①旁听 tap(独立监听,叠加在主转发之外互不干扰):AgentEvent →
   // did-turn-*。资格(用户主会话)与自动化轮次过滤都在 tap 内部,这里零逻辑。
@@ -3348,11 +3352,50 @@ export function registerMakerIpc(maker: Maker, options: RegisterMakerIpcOptions)
   );
 
   ipcMain.handle(MAKER_INVOKE.GET_CAPABILITIES, (_e, agentKind: unknown) => {
+    const kind = requireAgentKind(agentKind);
+    // Cursor 未探测到二进制时不注册；UI 仍可能短暂查询 —— 回空壳 capability，不抛错。
+    if (kind === 'cursor' && !maker.listAvailableAgents().includes('cursor')) {
+      return {
+        switchModel: { supported: true as const },
+        availableModels: [
+          {
+            id: 'auto',
+            displayName: 'Auto',
+            contextWindow: 200_000,
+            efforts: [],
+            defaultEffort: null,
+          },
+        ],
+        hasFastMode: true,
+        effort: { supported: true as const },
+        effortLevels: [
+          { id: 'low', displayName: 'Low' },
+          { id: 'medium', displayName: 'Medium' },
+          { id: 'high', displayName: 'High' },
+          { id: 'xhigh', displayName: 'Extra High' },
+          { id: 'max', displayName: 'Max' },
+        ],
+        reasoningDisplay: ['off'],
+        permissionModes: [],
+        setPermissionModeMidSession: { supported: false as const, reason: 'not-implemented' as const },
+        planMode: { supported: false as const, reason: 'not-implemented' as const },
+        multimodal: {
+          text: { supported: true as const },
+          image: { supported: true as const },
+          file: { supported: false as const, reason: 'not-implemented' as const },
+        },
+        fork: { supported: false as const, reason: 'sdk-missing' as const },
+        rewind: { supported: false as const, reason: 'sdk-missing' as const },
+        abort: { supported: true as const },
+        sameTurnSteer: { supported: false as const, reason: 'not-implemented' as const },
+        memory: { supported: { supported: false as const, reason: 'sdk-missing' as const } },
+        extraDirs: { supported: false as const, reason: 'not-implemented' as const },
+        supportsSessionAgentSwitch: false,
+      };
+    }
     return {
-      ...maker.getCapabilities(requireAgentKind(agentKind)),
-      // host 级 optional 能力；旧 desktop 缺省为 false。两个 agent 查询都带回，
-      // 手机读取当前 agent 快照即可决定是否展示切换入口。
-      supportsSessionAgentSwitch: true,
+      ...maker.getCapabilities(kind),
+      supportsSessionAgentSwitch: kind !== 'cursor',
     };
   });
 
@@ -4096,7 +4139,7 @@ export function registerMakerIpc(maker: Maker, options: RegisterMakerIpcOptions)
     const extraDirs = await readSessionExtraDirsFromDb(target.sessionId);
     const opts = buildCreateOptsWithStderr({
       id: row.id,
-      agentKind: row.agentKind === 'codex' ? 'codex' : 'claude-code',
+      agentKind: row.agentKind === 'codex' ? 'codex' : row.agentKind === 'cursor' ? 'cursor' : 'claude-code',
       workingDir: row.workingDir ?? '',
       model: row.model,
       effort: row.effort as CreateOpts['effort'],
@@ -4136,16 +4179,23 @@ export function registerMakerIpc(maker: Maker, options: RegisterMakerIpcOptions)
     }
 
     await ensureRemoteHostReady(remoteHostIdToEnsure);
-    const ensureAgentKind: 'claude-code' | 'codex' | null =
-      session?.agentKind === 'codex' || session?.agentKind === 'claude-code'
+    const ensureAgentKind: AgentKind | null =
+      session?.agentKind === 'codex' ||
+      session?.agentKind === 'claude-code' ||
+      session?.agentKind === 'cursor'
         ? session.agentKind
         : createOpts && typeof createOpts === 'object'
           ? (() => {
               const ak = (createOpts as { agentKind?: unknown }).agentKind;
-              return ak === 'codex' || ak === 'claude-code' ? ak : null;
+              return ak === 'codex' || ak === 'claude-code' || ak === 'cursor' ? ak : null;
             })()
           : null;
     if (!ensureAgentKind) return;
+
+    // Cursor 一期不做 remote-ssh（ADR）。
+    if (ensureAgentKind === 'cursor') {
+      throwIpcError('UNSUPPORTED_CAPABILITY', 'Cursor sessions do not support remote SSH');
+    }
 
     // claude-code 远端走 cc-mgr.mjs daemon。首次 /context 也必须像 send 一样
     // 触发 cc-manager 安装/升级, 否则 query/getContextUsage 可能因旧 bundle 不存在而失败。
@@ -4220,7 +4270,7 @@ export function registerMakerIpc(maker: Maker, options: RegisterMakerIpcOptions)
         .where(eq(sessions.id, sessionId))
         .limit(1);
       if (!row) return;
-      const dbMakerKind = row.agentKind === 'codex' ? 'codex' : 'claude-code';
+      const dbMakerKind = toMakerAgentKind(row.agentKind);
       if (co.agentKind !== dbMakerKind) {
         log.warn('lazy-create: createOpts agentKind drifted from DB (agent switch); reconciling', {
           sessionId,
@@ -4295,7 +4345,7 @@ export function registerMakerIpc(maker: Maker, options: RegisterMakerIpcOptions)
       }
       const co = buildCreateOptsWithStderr({
         id: sessionId,
-        agentKind: row.agentKind === 'codex' ? 'codex' : 'claude-code',
+        agentKind: toMakerAgentKind(row.agentKind),
         workingDir: row.workingDir,
         model: row.model ?? undefined,
         providerId: row.providerId ?? undefined,
@@ -5721,6 +5771,8 @@ export function registerMakerIpc(maker: Maker, options: RegisterMakerIpcOptions)
               provider.routing.codex?.authStrategy,
             ),
           })),
+          // Type-slot only (#5): cursor agent is not registered yet — empty availability.
+          cursor: [],
         },
         resolveDefaultProviderIdForModel: (agent, model) => (
           effectiveSourceIdForModel(views, null, model, agent)
@@ -6728,7 +6780,7 @@ export function registerMakerIpc(maker: Maker, options: RegisterMakerIpcOptions)
     if (!msg.createOpts || typeof msg.createOpts !== 'object') {
       throwIpcError('INVALID_PARAMS', 'queued.createOpts required');
     }
-    if (msg.createOpts.agentKind !== 'claude-code' && msg.createOpts.agentKind !== 'codex') {
+    if (msg.createOpts.agentKind !== 'claude-code' && msg.createOpts.agentKind !== 'codex' && msg.createOpts.agentKind !== 'cursor') {
       throwIpcError('INVALID_PARAMS', 'queued.createOpts.agentKind invalid');
     }
     const normalized: AgentInputQueuedMessage = { ...msg };

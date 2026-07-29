@@ -4,6 +4,7 @@
  * AgentKind 翻译：
  *   maker-core 'claude-code' ⇄ db 'cc'
  *   maker-core 'codex'       ⇄ db 'codex'
+ *   maker-core 'cursor'      ⇄ db 'cursor'
  *
  * 注意：本轮 (stage-1) 是新链路独立写入，不会影响老链路 ('local-db:sessions:*' IPC) 的查询/读取。
  * 两边读同一张表，新链路默认 source='desktop'；自动化 runner 会在创建后把
@@ -25,14 +26,18 @@ import { normalizeRemoteHostId } from '../localDb/mapper.js';
 import { DESKTOP_VISIBLE_SESSION_SOURCES } from '../../shared/sessionSource.js';
 import { normalizeWorkingDirForStorage } from '../../shared/workingDir.js';
 
-type DbAgentKind = 'cc' | 'codex';
+type DbAgentKind = 'cc' | 'codex' | 'cursor';
 
 function toDbKind(k: AgentKind): DbAgentKind {
-  return k === 'claude-code' ? 'cc' : 'codex';
+  if (k === 'claude-code') return 'cc';
+  if (k === 'cursor') return 'cursor';
+  return 'codex';
 }
 
 function fromDbKind(k: string): AgentKind {
-  return k === 'codex' ? 'codex' : 'claude-code';
+  if (k === 'codex') return 'codex';
+  if (k === 'cursor') return 'cursor';
+  return 'claude-code';
 }
 
 function normalizeWorkspaceKind(value: unknown): WorkspaceKind {

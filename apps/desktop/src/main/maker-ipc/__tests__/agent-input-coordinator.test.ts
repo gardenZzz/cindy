@@ -13,6 +13,7 @@ import {
   CONTINUE_AFTER_APP_EXIT_PROMPT,
   CONTINUE_AFTER_ERROR_PROMPT,
 } from '../../../shared/interruptedTurn.js';
+import type { AgentKind } from '@cindy/maker-core';
 
 const mocks = vi.hoisted(() => {
   const logger = {
@@ -156,7 +157,7 @@ function sessionRunningError(): Error & { code: string } {
 function createHarness() {
   let running = false;
   let pendingInteraction = false;
-  let agentKind: 'claude-code' | 'codex' | null = 'claude-code';
+  let agentKind: AgentKind | null = 'claude-code';
   const projections: AgentInputProjection[] = [];
 
   const sendToAgent = vi.fn<AgentInputCoordinatorDeps['sendToAgent']>(async (sessionId, _message, _createOpts, sendOpts) => {
@@ -249,7 +250,7 @@ function createHarness() {
     setPendingInteraction(value: boolean) {
       pendingInteraction = value;
     },
-    setAgentKind(value: 'claude-code' | 'codex' | null) {
+    setAgentKind(value: AgentKind | null) {
       agentKind = value;
     },
     setHasPendingCredentialSwitch(fn: (() => boolean) | null) {

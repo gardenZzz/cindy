@@ -12,6 +12,7 @@
 
 import type { WorkspaceKind } from '@/lib/ccAgent.types';
 import type { Effort, PermissionMode } from '@/lib/userPreferences.types';
+import type { AgentKind } from '@cindy/maker-core';
 
 export interface DeviceLinkCreateParams {
   /** 草稿 vendor 形态:'cc' | 'codex'(persistedAgentKind)。 */
@@ -44,7 +45,7 @@ export interface DeviceLinkCreateParams {
 }
 
 export interface DeviceLinkCreateArgs {
-  agentKind: 'claude-code' | 'codex';
+  agentKind: AgentKind;
   /** 仅远程 worktree 流程出现(与 worktree:create 登记的绑定同 id)。 */
   id?: string;
   workingDir: string;

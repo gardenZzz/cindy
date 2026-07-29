@@ -463,7 +463,7 @@ interface ChatInputProps {
    * M35: Vendor lock — when provided, ModelSelector only shows models
    * belonging to this vendor ('cc' for Claude, 'codex' for OpenAI Codex).
    */
-  vendorKey?: 'cc' | 'codex';
+  vendorKey?: 'cc' | 'codex' | 'cursor';
   /**
    * Optional override for the composerDraftStore key used to persist editor
    * content (and via attachmentState, attachments) across mount/unmount.
@@ -563,9 +563,10 @@ interface ChatInputProps {
   };
 }
 
-function vendorKeyToAgentKind(v?: 'cc' | 'codex'): AgentKind | null {
+function vendorKeyToAgentKind(v?: 'cc' | 'codex' | 'cursor'): AgentKind | null {
   if (v === 'cc') return 'claude-code';
   if (v === 'codex') return 'codex';
+  if (v === 'cursor') return 'cursor';
   return null;
 }
 
@@ -1121,7 +1122,9 @@ export function ChatInput({
   // initialModel/initialEffort 缺失的瞬态(会话快照未加载)兜底:读本地草稿 lastByVendor
   // (localStorage,按 agent 分槽、sanitize 恒有种子值)。默认模型/档位偏好已全量本地化,
   // 不再依赖服务端 UserPreferences(登录态失效/离线时模型与档位选择必须照常工作)。
-  const localVendorDefaults = getDraft().lastByVendor[vendorKey === 'codex' ? 'codex' : 'cc'];
+  const localVendorDefaults = getDraft().lastByVendor[
+    vendorKey === 'codex' ? 'codex' : vendorKey === 'cursor' ? 'cursor' : 'cc'
+  ];
   // session-agent-switch 意图制:意图期内 chip / 选择器显示用户选择的目标
   // (model/effort/provider/fast),props(镜像 DB)仍是旧引擎值——真切换在下一条
   // 消息发送时刻 apply,patched 回流后意图清除、显示交回 props。意图存放在
@@ -1183,6 +1186,7 @@ export function ChatInput({
   // device-link 远程会话:能力(模型 / fast / effort)从被控端读;本地会话 deviceLinkDeviceId undefined → 本地。
   const ccCaps = useAgentCapabilities('claude-code', deviceLinkDeviceId);
   const codexCaps = useAgentCapabilities('codex', deviceLinkDeviceId);
+  const cursorCaps = useAgentCapabilities('cursor', deviceLinkDeviceId);
 
   // cycle-permission-mode 快捷键 (默认 Shift+Tab) 的轮切候选 —— 与
   // PermissionSelector 用同一份 capabilities.permissionModes 列表, 键盘轮切
@@ -1190,10 +1194,12 @@ export function ChatInput({
   // 默认取 cc。editorProps.handleKeyDown 是稳定闭包, 走 ref 取值。
   const permissionCycleOptions = useMemo(
     () =>
-      ((agentKind ?? 'claude-code') === 'codex'
+      (agentKind === 'codex'
         ? codexCaps.capabilities?.permissionModes
-        : ccCaps.capabilities?.permissionModes) ?? [],
-    [agentKind, ccCaps.capabilities, codexCaps.capabilities],
+        : agentKind === 'cursor'
+          ? cursorCaps.capabilities?.permissionModes
+          : ccCaps.capabilities?.permissionModes) ?? [],
+    [agentKind, ccCaps.capabilities, codexCaps.capabilities, cursorCaps.capabilities],
   );
   const permissionCycleOptionsRef = useRef(permissionCycleOptions);
   permissionCycleOptionsRef.current = permissionCycleOptions;
@@ -1206,7 +1212,12 @@ export function ChatInput({
 
   // 计划模式入口门控:agent capability(device-link 老被控端无此字段 → 隐藏)+ 父组件接线。
   const planModeSupported =
-    (vendorKey === 'codex' ? codexCaps : ccCaps).capabilities?.planMode?.supported === true;
+    (vendorKey === 'codex'
+      ? codexCaps
+      : vendorKey === 'cursor'
+        ? cursorCaps
+        : ccCaps
+    ).capabilities?.planMode?.supported === true;
   const planModeEntry =
     planModeSupported && onPlanModeChange
       ? { enabled: planModeEnabled, onToggle: (next: boolean) => void onPlanModeChange(next) }
@@ -1245,7 +1256,9 @@ export function ChatInput({
     activeModel,
   );
   const hasConnectedSendSource = currentModelAgentKind
-    ? sourcesForModel(sendProviders, activeModel, currentModelAgentKind, { onlyConnected: true }).length > 0
+    ? currentModelAgentKind === 'cursor' ||
+      sourcesForModel(sendProviders, activeModel, currentModelAgentKind, { onlyConnected: true })
+        .length > 0
     : false;
   const noConnectedSource = !!currentModelAgentKind && !providersLoading && !hasConnectedSendSource;
 
@@ -3340,7 +3353,8 @@ export function ChatInput({
       // 供应商无需改这里。判定数据来自本地 IPC(useProviders),无网络往返、~ms 级。
       // 只有「确实零已连接来源」才拦截;≥1 个直接放行(无弹窗)。currentModelAgentKind
       // 解析不出(罕见:capabilities 未就绪)时不拦,交给下游处理,不误伤。
-      if (currentModelAgentKind) {
+      // Cursor 用本机 cursor_login，不走 Cindy provider 目录。
+      if (currentModelAgentKind && currentModelAgentKind !== 'cursor') {
         const connectedSources = sourcesForModel(providers, activeModel, currentModelAgentKind, {
           onlyConnected: true,
         });
@@ -3830,7 +3844,7 @@ export function ChatInput({
   );
   const performAgentSwitch = useCallback(
     async (
-      targetAgentKind: 'claude-code' | 'codex',
+      targetAgentKind: AgentKind,
       newModelId: string,
       providerId: string | null = null,
       // 意图期内的档位/Fast 改动经此显式覆盖(用户手选优先于记忆/默认解析)。
@@ -5279,7 +5293,12 @@ export function ChatInput({
                     // Claude/Codex 分段,先选 Agent 再选模型)。草稿(无 sessionId)与
                     // device-link / SSH 远程会话不传(v1 不支持切换)。
                     agentSwitch={
-                      sessionId && vendorKey && !deviceLinkDeviceId && !remoteHostId
+                      // Cursor 一期不做会话内引擎切换(仅 New Maker 可选)。
+                      sessionId &&
+                      vendorKey &&
+                      vendorKey !== 'cursor' &&
+                      !deviceLinkDeviceId &&
+                      !remoteHostId
                         ? {
                             currentVendor: vendorKey,
                             confirmBrowseSwitch: confirmAgentBrowseSwitch,

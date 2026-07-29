@@ -390,14 +390,14 @@ export function registerScheduleHandlers(getMaker?: () => Maker | null): void {
     const maker = getMaker?.();
     if (!maker) throwIpcError('INTERNAL', 'maker not ready for hook script generation');
     const workingDir = await resolveHookWorkingDir(body);
-    const requestedAgentKind: AgentKind | undefined = body.agentKind === 'codex' || body.agentKind === 'claude-code'
+    const requestedAgentKind: AgentKind | undefined = body.agentKind === 'codex' || body.agentKind === 'claude-code' || body.agentKind === 'cursor'
       ? body.agentKind
       : undefined;
     const targetSessionId = typeof body.targetSessionId === 'string' && body.targetSessionId.trim()
       ? body.targetSessionId.trim()
       : undefined;
     let providerId = typeof body.providerId === 'string' ? body.providerId : undefined;
-    let agentKind = requestedAgentKind;
+    let agentKind: AgentKind | undefined = requestedAgentKind;
     let model = typeof body.model === 'string' ? body.model : undefined;
     if (targetSessionId && shouldResolveBoundSessionGenerationRoute({ targetSessionId, providerId, model })) {
       const session = await maker.getSessionMeta(targetSessionId).catch(() => null);

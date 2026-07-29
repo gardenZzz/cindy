@@ -47,6 +47,7 @@ import { CustomProviderDialog } from './CustomProviderDialog';
 import { AddProviderWizard, type WizardEntry } from './AddProviderWizard';
 import { OAuthDeviceCodeCard } from './OAuthDeviceCodeCard';
 import { buildUnionRows, UnifiedModelList } from './UnifiedModelList';
+import { CursorAgentCard } from './CursorAgentCard';
 import { AnthropicMark } from '@/components/icons/AnthropicMark';
 import { OpenAIMark } from '@/components/icons/OpenAIMark';
 import { XDIncMark } from '@/components/icons/XDIncMark';
@@ -1661,6 +1662,9 @@ export function ProvidersSection() {
           }}
         />
       )}
+
+      {/* Cursor 本机 agent：探测已装 / 未装时的官方安装引导（确认后才执行）。 */}
+      <CursorAgentCard />
     </div>
   );
 }

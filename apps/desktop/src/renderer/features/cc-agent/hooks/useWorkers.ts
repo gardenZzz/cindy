@@ -6,6 +6,7 @@ import { useCallback, useEffect, useRef, useState, type Dispatch, type SetStateA
 import { createLogger } from '@/lib/logger';
 import { orcaWorkflowsFor, subscribeOrcaWorkerChanged } from '@/lib/makerTransport';
 import { isActiveWorkerStatus, type OrcaWorkerStatus } from '../../../../shared/orca-worker-status';
+import type { AgentKind } from '@cindy/maker-core';
 
 const log = createLogger('useWorkers');
 
@@ -13,7 +14,7 @@ export interface WorkerInfo {
   workerId: string;
   sessionId: string;
   role: string;
-  agent: 'claude-code' | 'codex';
+  agent: AgentKind;
   model: string;
   effort: string | null;
   label: string | null;

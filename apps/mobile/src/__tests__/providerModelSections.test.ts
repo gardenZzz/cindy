@@ -19,6 +19,7 @@ import {
   resolveRowSelection,
   type ProviderModelRow,
 } from '@/session/providerModelSections';
+import type { AgentKind } from '@cindy/maker-shared';
 
 function model(id: string, patch: Partial<{ defaultEnabled: boolean; efforts: string[]; defaultEffort: string | null }> = {}) {
   return {
@@ -33,7 +34,7 @@ function model(id: string, patch: Partial<{ defaultEnabled: boolean; efforts: st
 
 function provider(
   id: string,
-  opts: { connected?: boolean; agents?: Array<'claude-code' | 'codex'>; codex?: unknown[]; cc?: unknown[] },
+  opts: { connected?: boolean; agents?: Array<AgentKind>; codex?: unknown[]; cc?: unknown[] },
 ): ProviderView {
   return {
     id,

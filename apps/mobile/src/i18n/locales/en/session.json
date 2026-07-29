@@ -32,6 +32,7 @@
     "createFailedTitle": "Session Creation Failed",
     "createFailedDefault": "Session creation failed.",
     "createFailedNotice": "Session creation failed: {{message}}",
+    "cursorUnsupportedOnDesktop": "This computer doesn't support Cursor yet. Update Cindy on the computer and try again.",
     "backToEdit": "Back to Edit",
     "retry": "Retry",
     "firstMessageNotSent": "The first message wasn't sent; its content has been restored to the input box.",

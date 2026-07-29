@@ -17,6 +17,7 @@ import { describe, it, expect } from 'vitest';
 import type { CatalogModel, Provider, ProviderView } from '@cindy/model-providers';
 
 import { shouldFallbackVendorModel } from '@/features/cc-agent/lib/vendorModelFallback';
+import type { AgentKind } from '@cindy/maker-core';
 
 /** 造一个最小 CatalogModel(只填 providerOffersModel 关心的 id + 类型必填字段)。 */
 function model(id: string): CatalogModel {
@@ -27,9 +28,9 @@ function model(id: string): CatalogModel {
 function provider(
   id: string,
   source: Provider['source'],
-  models: Partial<Record<'claude-code' | 'codex', string[]>>,
+  models: Partial<Record<AgentKind, string[]>>,
 ): ProviderView {
-  const agents = Object.keys(models) as Array<'claude-code' | 'codex'>;
+  const agents = Object.keys(models) as Array<AgentKind>;
   return {
     id,
     name: id,

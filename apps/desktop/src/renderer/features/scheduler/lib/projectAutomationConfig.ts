@@ -4,6 +4,7 @@ import { buildPreRunHook } from './scheduleFormLogic';
 import type { ScheduleFormState } from '../hooks/useScheduleForm';
 import { stripTrailingPathSeparators } from '../../../../shared/pathText';
 import { PROJECT_AUTOMATION_REL_SEGMENTS } from '../../../../shared/projectAutomationPaths';
+import type { AgentKind } from '@cindy/maker-core';
 
 export interface ProjectScheduleConfig {
   id: string;
@@ -14,7 +15,7 @@ export interface ProjectScheduleConfig {
   recurring?: boolean;
   manual?: boolean;
   intervalMs?: number;
-  agentKind?: 'claude-code' | 'codex';
+  agentKind?: AgentKind;
   model?: string;
   effort?: string;
   /** Codex Fast 模式开关，仅 Codex 有意义。详见 Schedule.fastMode。 */

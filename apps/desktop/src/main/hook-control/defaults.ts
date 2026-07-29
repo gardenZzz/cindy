@@ -30,29 +30,30 @@
  * 纯函数 + 注入依赖(规则 14), Electron / maker 绑定在 session-runner 组装。
  */
 
-import type { Effort } from '@cindy/maker-core';
+import type { Effort, AgentKind } from '@cindy/maker-core';
+import type { ImDefaultAgentKind } from '../../shared/imDefaultSettings.js';
 
 /** 依赖注入面: IM 默认值 + 各 agent 当前可用模型清单。 */
 export interface HookDefaultsDeps {
   readDefaults: () => {
-    agentKind: 'claude-code' | 'codex';
+    agentKind: ImDefaultAgentKind;
     agents: Record<
-      'claude-code' | 'codex',
+      ImDefaultAgentKind,
       { providerId: string | null; model: string; effort: string }
     >;
   };
-  getModels: (agentKind: 'claude-code' | 'codex') => Array<{
+  getModels: (agentKind: AgentKind) => Array<{
     id: string;
     efforts: readonly string[];
     defaultEffort: string | null;
   }>;
   /** 该 agent 支持的权限档 id 清单(capabilities.permissionModes)。 */
-  getPermissionModes: (agentKind: 'claude-code' | 'codex') => readonly string[];
+  getPermissionModes: (agentKind: AgentKind) => readonly string[];
   log: { warn(msg: string): void };
 }
 
 export interface ResolvedHookSessionConfig {
-  agentKind: 'claude-code' | 'codex';
+  agentKind: AgentKind;
   model: string;
   effort: Effort | undefined;
   permissionMode: string;
@@ -64,7 +65,7 @@ export interface ResolvedHookSessionConfig {
   providerId: string | null;
 }
 
-const AGENT_KINDS = new Set(['claude-code', 'codex']);
+const AGENT_KINDS = new Set<string>(['claude-code', 'codex']);
 
 /**
  * 合成新 hook 会话的 agent/model/effort。
@@ -81,10 +82,10 @@ export function resolveHookSessionConfig(
 ): ResolvedHookSessionConfig {
   const defaults = deps.readDefaults();
 
-  // 1. agent: 显式合法值 > 草稿默认
-  const agentKind: 'claude-code' | 'codex' =
+  // 1. agent: 显式合法值 > 草稿默认（IM 默认面不含 cursor，#5）
+  const agentKind: ImDefaultAgentKind =
     overrides.agentKind !== null && AGENT_KINDS.has(overrides.agentKind)
-      ? (overrides.agentKind as 'claude-code' | 'codex')
+      ? (overrides.agentKind as ImDefaultAgentKind)
       : defaults.agentKind;
 
   const models = deps.getModels(agentKind);
@@ -144,7 +145,7 @@ export function resolveHookSessionConfig(
   //    (如 Claude 的 acceptEdits / plan 在 Codex 上不存在)时若回落 bypassPermissions,
   //    等于用户选了更严的档反而被静默放宽成完全访问 —— 而这是无人值守的 IM 派发链路,
   //    没有人在旁边确认。capabilities 的 permissionModes 一律按**从严到宽**声明
-  //    (claude-code: ask/acceptEdits/auto/bypassPermissions; codex: ask/auto/
+  //    (claude-code: ask/acceptEdits/auto/bypassPermissions; codex/cursor: ask/auto/
   //    bypassPermissions), 故取 [0] 即最严档。
   //    只有「从未填过显式档」才走 bypass 历史默认, 该行为保持不变。
   let permissionMode = 'bypassPermissions';

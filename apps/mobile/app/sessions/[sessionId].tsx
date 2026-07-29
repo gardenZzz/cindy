@@ -68,6 +68,7 @@ import { useDeviceLink } from '@/device-link/DeviceLinkContext';
 import { useRevokedDevices } from '@/device-link/revokedDevicesStore';
 import { useUnresponsiveDevices } from '@/device-link/unresponsiveDevicesStore';
 import {
+  describeCursorHostError,
   describeRemoteError,
   formatRemoteError,
   humanizeRemoteError,
@@ -215,6 +216,7 @@ import { confirmMobileSessionAgentSwitch } from '@/session/sessionAgentSwitchCon
 import {
   mobileAgentLabel,
   normalizeSessionAgentSwitchIntent,
+  sessionAgentKind as resolveSessionAgentKind,
   supportsMobileSessionAgentSwitch,
   type MobileSessionAgentKind,
 } from '@/session/sessionAgentSwitch';
@@ -1408,16 +1410,13 @@ export default function SessionScreen() {
   const canStopCurrentRun = (remoteSessionRunning || currentTurnStreaming)
     && !inputProjection.queueAbortPending;
   const canStopComposer = canStopQueue || canStopCurrentRun;
-  const sessionAgentKind: MobileSessionAgentKind = currentSession?.agentKind === 'codex'
-    ? 'codex'
+  const sessionAgentKind: MobileSessionAgentKind = currentSession
+    ? resolveSessionAgentKind(currentSession)
     : 'claude-code';
   const agentSwitchIntent = currentSession?.agentSwitchIntent ?? null;
   const sessionAgentSwitchSupported = !!currentSession
     && supportsMobileSessionAgentSwitch(currentSession, capabilities);
-  const alternateAgentKind: MobileSessionAgentKind = sessionAgentKind === 'codex'
-    ? 'claude-code'
-    : 'codex';
-  const resolvedAlternateCapabilities = alternateCapabilitiesAgentKind === alternateAgentKind
+  const resolvedAlternateCapabilities = alternateCapabilitiesAgentKind === modelSheetAgentKind
     ? alternateCapabilities
     : null;
   const runtimeOptions = useMemo(
@@ -1436,8 +1435,11 @@ export default function SessionScreen() {
       fastMode: agentSwitchIntent.fastMode ?? false,
     };
   }, [agentSwitchIntent, currentSession]);
-  const composerDisplayCapabilities = agentSwitchIntent?.targetAgentKind === alternateAgentKind
-    ? resolvedAlternateCapabilities
+  const composerDisplayCapabilities = agentSwitchIntent
+    && agentSwitchIntent.targetAgentKind !== sessionAgentKind
+    ? (alternateCapabilitiesAgentKind === agentSwitchIntent.targetAgentKind
+      ? alternateCapabilities
+      : null)
     : capabilities;
   const composerDisplayRuntimeOptions = useMemo(
     () => composerDisplaySession
@@ -1457,13 +1459,18 @@ export default function SessionScreen() {
     () => currentSession
       ? buildMobileModelSections({
           providers: composerDeviceProviders.providers,
-          agentKind: currentSession.agentKind === 'codex' ? 'codex' : 'claude-code',
+          agentKind: sessionAgentKind,
           selectedModelId: currentSession.model,
           selectedProviderId: currentSession.providerId ?? null,
           visibilityOverrides: composerDeviceProviders.modelVisibilityOverrides,
         })
       : null,
-    [composerDeviceProviders.providers, composerDeviceProviders.modelVisibilityOverrides, currentSession],
+    [
+      composerDeviceProviders.providers,
+      composerDeviceProviders.modelVisibilityOverrides,
+      currentSession,
+      sessionAgentKind,
+    ],
   );
   // 模型列表元信息(单价 / 折扣版 key presence)—— 与新建会话页同一套隧道缓存 hook。
   const deviceModelPricing = useDeviceModelPricing(deviceId || undefined);
@@ -2516,7 +2523,7 @@ export default function SessionScreen() {
   }, [agentSwitchIntent, capabilities, currentSession, deviceId, sessionId]);
 
   useEffect(() => {
-    if (!deviceId || !sessionAgentSwitchSupported) {
+    if (!deviceId || !sessionAgentSwitchSupported || modelSheetAgentKind === sessionAgentKind) {
       alternateCapabilitiesLoadSeqRef.current += 1;
       setAlternateCapabilities(null);
       setAlternateCapabilitiesAgentKind(null);
@@ -2524,7 +2531,7 @@ export default function SessionScreen() {
       setAlternateCapabilitiesError(null);
       return;
     }
-    const targetAgentKind = alternateAgentKind;
+    const targetAgentKind = modelSheetAgentKind;
     const seq = ++alternateCapabilitiesLoadSeqRef.current;
     let cancelled = false;
     setAlternateCapabilitiesAgentKind(targetAgentKind);
@@ -2567,7 +2574,10 @@ export default function SessionScreen() {
         if (alternateCapabilitiesLoadSeqRef.current !== seq) return;
         if (!isAgentCapabilitiesGenerationCurrent(deviceId, generation)) return;
         if (!cached) setAlternateCapabilities(null);
-        setAlternateCapabilitiesError(formatRemoteError(err));
+        setAlternateCapabilitiesError(
+          describeCursorHostError(formatRemoteError(err), targetAgentKind)
+            ?? formatRemoteError(err),
+        );
       })
       .finally(() => {
         if (
@@ -2579,7 +2589,7 @@ export default function SessionScreen() {
       cancelled = true;
       unsubscribe();
     };
-  }, [alternateAgentKind, deviceId, maker, openLink, sessionAgentSwitchSupported]);
+  }, [deviceId, maker, modelSheetAgentKind, openLink, sessionAgentKind, sessionAgentSwitchSupported, t]);
 
   useEffect(() => {
     if (!deviceId || !sessionAgentSwitchSupported) {
@@ -5419,7 +5429,10 @@ export default function SessionScreen() {
           remoteSessionStore.applySessionPatch(deviceId, sessionId, {
             agentSwitchIntent: authoritative,
           });
-          setError(formatRemoteError(err));
+          setError(
+            describeCursorHostError(formatRemoteError(err), nextIntent.targetAgentKind)
+              ?? formatRemoteError(err),
+          );
         }
       }
       return false;
@@ -6873,11 +6886,19 @@ export default function SessionScreen() {
                     onCopyMessageLink={copyMessageLink}
                     onAddMessageToComposer={canUseComposer ? addMessageToComposer : undefined}
                     onDeleteMessage={collaborationReadOnlyReason ? undefined : deleteMessage}
-                    onForkMessage={collaborationReadOnlyReason ? undefined : forkAtMessage}
+                    onForkMessage={
+                      collaborationReadOnlyReason || sessionAgentKind === 'cursor'
+                        ? undefined
+                        : forkAtMessage
+                    }
                     onLoadEarlier={loadEarlierMessages}
                     onOpenForkOrigin={forkOrigin ? openForkOrigin : undefined}
                     onOpenSessionLink={openSessionLink}
-                    onPreviewRewind={collaborationReadOnlyReason ? undefined : previewRewindAtMessage}
+                    onPreviewRewind={
+                      collaborationReadOnlyReason || sessionAgentKind === 'cursor'
+                        ? undefined
+                        : previewRewindAtMessage
+                    }
                     // chat-text-quote:选中消息文字 → 引用进本会话草稿(截断后写
                     // chatQuoteStore,composer 胶囊即时刷新)。Composer 不可用态不启用;
                     // 回调已 memoize,保持 SelectionQuoteContext value 稳定。

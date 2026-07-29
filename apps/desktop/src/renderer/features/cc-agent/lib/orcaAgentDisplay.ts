@@ -1,4 +1,5 @@
-export type OrcaDisplayAgentKind = 'claude-code' | 'codex';
+import type { AgentKind } from '@cindy/maker-core';
+export type OrcaDisplayAgentKind = AgentKind;
 export type OrcaDisplayVendor = 'cc' | 'codex';
 
 export function normalizeOrcaDisplayAgentKind(agentKind: unknown): OrcaDisplayAgentKind {

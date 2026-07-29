@@ -98,7 +98,6 @@ describe('NewMakerDraftRoute CREATE AGENT visual contract', () => {
       'onEffortDidChange={handleEffortDidChange}',
       'onPermissionModeDidChange={handlePermissionModeDidChange}',
       'onProviderDidChange={handleProviderDidChange}',
-      'vendorKey={draft.vendor ===',
       'attachmentState={attachmentState}',
       'draftKey={NEW_MAKER_DRAFT_KEY}',
       'extraDirs={effectiveExtraDirs}',
@@ -112,6 +111,8 @@ describe('NewMakerDraftRoute CREATE AGENT visual contract', () => {
     ]) {
       expect(chatInputBlock).toContain(invariant);
     }
+    // vendorKey 必须接在 draft.vendor 上(T2 起含 cursor 的跨行三元);接到别的源时必须失败。
+    expect(chatInputBlock).toMatch(/vendorKey=\{\s*draft\.vendor\s*===/);
   });
 
   it('uses the R2 quick-start icon mapping and avoids page-level shadows', () => {

@@ -1398,6 +1398,24 @@
         "hintLoggedIn": "{{cli}} is signed in on this device — authorize to connect",
         "hintInstalled": "{{cli}} is installed on this device"
       },
+      "cursor": {
+        "title": "Cursor",
+        "installedDescription": "cursor-agent is installed on this device. You can use Cursor as an optional agent when available.",
+        "missingDescription": "Install the official cursor-agent to use Cursor in Cindy. Optional — other features keep working without it.",
+        "installedPill": "Installed",
+        "installCta": "Install",
+        "installing": "Installing…",
+        "optionalHint": "Optional — nothing else is blocked",
+        "refreshAria": "Recheck Cursor installation",
+        "confirmTitle": "Install Cursor?",
+        "confirmDescription": "Cindy will run this official install command on your machine:\n\n{{command}}\n\nNothing runs until you confirm.",
+        "confirmInstall": "Install",
+        "confirmCancel": "Cancel",
+        "installSuccess": "Cursor installed",
+        "installFailed": "Couldn't install Cursor",
+        "installNotDetected": "Install finished, but cursor-agent wasn't found. Try refreshing, or install from a terminal.",
+        "unsupportedPlatform": "The official cursor-agent installer supports macOS and Linux only."
+      },
       "wizard": {
         "title": "Add provider",
         "titleWith": "Add · {{name}}",
@@ -4091,6 +4109,20 @@
           "bypassPermissions": {
             "label": "Full access",
             "description": "Allows editing any file and running networked commands without another confirmation. Highest risk; use only for trusted tasks."
+          }
+        },
+        "cursor": {
+          "ask": {
+            "label": "Default permissions",
+            "description": "Asks before running tools that need approval. Cindy handles each permission prompt in the client."
+          },
+          "auto": {
+            "label": "Auto-review",
+            "description": "Automatically allows read, search, and think tools. Edit, execute, and other higher-risk tools still ask for confirmation."
+          },
+          "bypassPermissions": {
+            "label": "Full access",
+            "description": "Allows tool calls without prompting. Highest risk; use only for trusted tasks. Does not change your Cursor sandbox settings."
           }
         }
       }

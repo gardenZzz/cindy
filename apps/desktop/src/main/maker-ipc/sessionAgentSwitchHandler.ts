@@ -50,18 +50,24 @@ export interface ParkedEngineSessionRef {
   watermarkRowid: number;
 }
 
-/** DB 'cc'/'codex' ↔ maker-core 'claude-code'/'codex' 映射(与 register.ts 各处内联口径一致)。 */
+/** DB 'cc'/'codex'/'cursor' ↔ maker-core AgentKind 映射(与 register.ts 各处内联口径一致)。 */
 export function toDbAgentKind(kind: AgentKind): DbAgentKind {
-  return kind === 'codex' ? 'codex' : 'cc';
+  if (kind === 'codex') return 'codex';
+  if (kind === 'cursor') return 'cursor';
+  return 'cc';
 }
 
 export function toMakerAgentKind(dbKind: string): AgentKind {
-  return dbKind === 'codex' ? 'codex' : 'claude-code';
+  if (dbKind === 'codex') return 'codex';
+  if (dbKind === 'cursor') return 'cursor';
+  return 'claude-code';
 }
 
 /** 交接 framing 与边界卡展示用的引擎名。 */
 export function agentEngineLabel(dbKind: DbAgentKind): string {
-  return dbKind === 'codex' ? 'Codex' : 'Claude Code';
+  if (dbKind === 'codex') return 'Codex';
+  if (dbKind === 'cursor') return 'Cursor';
+  return 'Claude Code';
 }
 
 /** role='agent_switch' 边界行的 content 结构(与 renderer AgentSwitchContent 对齐)。 */
@@ -336,8 +342,13 @@ export async function performSessionAgentSwitch(
     // Orca lead/worker:协同运行时对 agent 形态有独立契约(docs/dev-rules/orca-team-architecture.md),不掺和。
     throwIpcError('UNSUPPORTED_CAPABILITY', 'agent switch is not supported for Orca sessions');
   }
+  if (row.agentKind === 'cursor') {
+    // Cursor 一期不做会话内引擎切换(T2 仅新建会话)。
+    throwIpcError('UNSUPPORTED_CAPABILITY', 'agent switch is not supported for Cursor sessions');
+  }
 
   const fromDbKind: DbAgentKind = row.agentKind === 'codex' ? 'codex' : 'cc';
+  // targetAgentKind 已在上方收窄为 claude-code | codex。
   const toDbKind: DbAgentKind = targetAgentKind === 'codex' ? 'codex' : 'cc';
   if (fromDbKind === toDbKind) {
     // 同引擎 = 纯模型切换,调用方应走 SET_MODEL;这里按 no-op 成功返回。

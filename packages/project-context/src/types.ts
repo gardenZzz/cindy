@@ -65,7 +65,7 @@ export interface ConfigFile {
    */
   module_ignore?: string[];
   small_diff_threshold: SmallDiffThreshold;
-  agent: 'claude-code' | 'codex' | 'custom';
+  agent: 'claude-code' | 'codex' | 'cursor' | 'custom';
   agent_options?: {
     model?: string;
     /** Per-call timeout for the diff-driven `update` path, in seconds. */

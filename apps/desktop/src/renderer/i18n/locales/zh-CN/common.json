@@ -1397,6 +1397,24 @@
         "hintLoggedIn": "检测到 {{cli}} 已登录，可直接授权接入",
         "hintInstalled": "检测到本机已安装 {{cli}}"
       },
+      "cursor": {
+        "title": "Cursor",
+        "installedDescription": "本机已安装 cursor-agent。可用时可选用 Cursor 作为 Agent。",
+        "missingDescription": "安装官方 cursor-agent 后即可在 Cindy 中使用 Cursor。可选——不装也不影响其它功能。",
+        "installedPill": "已安装",
+        "installCta": "安装",
+        "installing": "正在安装…",
+        "optionalHint": "可选——不阻塞其它功能",
+        "refreshAria": "重新检测 Cursor 安装状态",
+        "confirmTitle": "安装 Cursor？",
+        "confirmDescription": "确认后，Cindy 将在本机执行官方安装命令：\n\n{{command}}\n\n未确认前不会执行任何安装。",
+        "confirmInstall": "安装",
+        "confirmCancel": "取消",
+        "installSuccess": "Cursor 已安装",
+        "installFailed": "无法安装 Cursor",
+        "installNotDetected": "安装已结束，但仍未检测到 cursor-agent。请刷新，或在终端自行安装。",
+        "unsupportedPlatform": "官方 cursor-agent 安装程序仅支持 macOS 与 Linux。"
+      },
       "wizard": {
         "title": "添加供应商",
         "titleWith": "添加 · {{name}}",
@@ -4090,6 +4108,20 @@
           "bypassPermissions": {
             "label": "完全访问",
             "description": "允许修改任意文件并运行联网命令，无需再次确认。风险最高，只适合可信任务。"
+          }
+        },
+        "cursor": {
+          "ask": {
+            "label": "默认权限",
+            "description": "需要审批的工具调用会先询问。由 Cindy 在客户端处理每一次权限请求。"
+          },
+          "auto": {
+            "label": "自动审批",
+            "description": "自动放行读、搜索与思考类工具；编辑、执行等更高风险工具仍会询问。"
+          },
+          "bypassPermissions": {
+            "label": "完全访问",
+            "description": "工具调用不再询问。风险最高，只适合可信任务。不会改动你的 Cursor 沙箱设置。"
           }
         }
       }

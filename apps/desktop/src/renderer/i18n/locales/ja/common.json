@@ -1397,6 +1397,24 @@
         "hintLoggedIn": "{{cli}} はこのデバイスでログイン済みです。認証してすぐに接続できます",
         "hintInstalled": "このデバイスに {{cli}} がインストールされています"
       },
+      "cursor": {
+        "title": "Cursor",
+        "installedDescription": "このデバイスに cursor-agent がインストールされています。利用可能なら Cursor をオプションの Agent として使えます。",
+        "missingDescription": "公式の cursor-agent をインストールすると、Cindy で Cursor を使えます。任意です。未インストールでも他の機能には影響しません。",
+        "installedPill": "インストール済み",
+        "installCta": "インストール",
+        "installing": "インストール中…",
+        "optionalHint": "任意 — 他の機能はブロックされません",
+        "refreshAria": "Cursor のインストール状態を再確認",
+        "confirmTitle": "Cursor をインストールしますか？",
+        "confirmDescription": "確認後、Cindy はこの公式インストールコマンドを実行します：\n\n{{command}}\n\n確認するまで何も実行されません。",
+        "confirmInstall": "インストール",
+        "confirmCancel": "キャンセル",
+        "installSuccess": "Cursor をインストールしました",
+        "installFailed": "Cursor をインストールできませんでした",
+        "installNotDetected": "インストールは完了しましたが、cursor-agent が見つかりません。更新するか、ターミナルからインストールしてください。",
+        "unsupportedPlatform": "公式の cursor-agent インストーラーは macOS と Linux のみをサポートします。"
+      },
       "wizard": {
         "title": "プロバイダーを追加",
         "titleWith": "追加 · {{name}}",
@@ -4090,6 +4108,20 @@
           "bypassPermissions": {
             "label": "フルアクセス",
             "description": "追加確認なしで任意のファイル編集とネットワークコマンド実行を許可します。最もリスクが高いため、信頼できるタスクでのみ使用してください。"
+          }
+        },
+        "cursor": {
+          "ask": {
+            "label": "デフォルト権限",
+            "description": "承認が必要なツールは実行前に確認します。権限プロンプトは Cindy クライアント側で処理します。"
+          },
+          "auto": {
+            "label": "自動レビュー",
+            "description": "読み取り・検索・思考系ツールは自動許可し、編集・実行など高リスクなツールは確認します。"
+          },
+          "bypassPermissions": {
+            "label": "フルアクセス",
+            "description": "ツール呼び出しを確認なしで許可します。最もリスクが高いため、信頼できるタスクでのみ使用してください。Cursor のサンドボックス設定は変更しません。"
           }
         }
       }

@@ -14,10 +14,13 @@ import {
   Maker,
   ClaudeCodeAgent,
   CodexAgent,
+  CursorAgent,
   configureDefaultImageResizer,
 } from '@cindy/maker-core';
+import type { AuthAdapter } from '@cindy/maker-core';
 import {
   getActiveCatalog,
+  getActiveCatalogRevision,
   setActiveCatalogChangedListener,
   setDiscoveredCodexModels,
 } from './active-catalog.js';
@@ -46,6 +49,7 @@ import { tapWindowBroadcast } from '../device-link/broadcast-tap.js';
 import { remoteInvoke } from '../device-link/index.js';
 import { WorktreePool } from '../worktree/index.js';
 import { getReadyBinaryPath, getCachedBinaryStatus } from '../agent-binaries/index.js';
+import { discoverCursorAgentBinarySync } from './cursor-binary-discovery.js';
 import {
   desktopClaudeAuthAdapter,
   desktopCodexAuthAdapter,
@@ -128,6 +132,7 @@ import {
   getDesktopMcpToolApprovalPolicy,
 } from './mcp-tool-approval-policy.js';
 import { mapCodexAppServerModelsToCatalog } from './codex-model-discovery.js';
+import { mapCursorAcpModelsToDescriptors } from './cursor-model-discovery.js';
 import { prepareSharedProjectSkillLinks } from './shared-global-skills.js';
 export { withRehydrateCloseSuppressed };
 
@@ -637,6 +642,35 @@ export function getMaker(): Maker {
     // API 模式切换 / api_key 变更时 dispose 重建 app-server (单例进程, 配置 spawn 冻入)。
     _codexAgent = codexAgent;
 
+    // Cursor:用户自装二进制,探测不到就不注册(全程可选,不影响既有 agent)。
+    // auth 走本机 cursor_login(T7);T2 stub 恒 authenticated,不挡 session/new。
+    const cursorBinary = discoverCursorAgentBinarySync();
+    const cursorAgent = cursorBinary.installed
+      ? new CursorAgent({
+          auth: createCursorAuthStub(),
+          runtimeConfig: {},
+          binaryPath: cursorBinary.binaryPath,
+          logger: desktopMakerLogger,
+          onCursorLocalModelsListed: (listing) => {
+            const maker = _maker;
+            if (!maker) return;
+            const mapped = mapCursorAcpModelsToDescriptors(listing);
+            // 空目录不覆盖兜底 Auto，避免选择器被清空卡住新建。
+            if (mapped.length === 0) return;
+            const availableModels = maker.getCapabilities('cursor').availableModels;
+            availableModels.splice(0, availableModels.length, ...mapped);
+            // 复用 PROVIDER_CHANGED 收口，让 renderer 原子刷新 capabilities（含 cursor）。
+            refreshSelectableModelsAndBroadcast({
+              revision: getActiveCatalogRevision(),
+              cursorModels: true,
+            });
+          },
+        })
+      : null;
+    if (!cursorAgent) {
+      desktopMakerLogger.info('cursor-agent binary not found; Cursor agent not registered');
+    }
+
     // 用户自定义 MCP:把两个 agent 的 mcpProviders 数组注册进 registry，并立即尝试一次 refresh。
     // localDb onReady 可能在 Maker 构造前就已触发（此时 registry 无数组，refresh 空跑）；
     // 在此补一次 refresh，若 DB 尚未就绪则 refreshCustomMcpProviders 内部 catch 后静默跳过。
@@ -648,6 +682,7 @@ export function getMaker(): Maker {
     attachAgentsToMakerMemory(makerMemoryManager, {
       'claude-code': claudeAgent,
       codex: codexAgent,
+      ...(cursorAgent ? { cursor: cursorAgent } : {}),
     });
     if (makerMemoryManager.isEnabled()) {
       void makerMemoryManager.enable();
@@ -729,6 +764,7 @@ export function getMaker(): Maker {
       agents: {
         'claude-code': claudeAgent,
         codex: codexAgent,
+        ...(cursorAgent ? { cursor: cursorAgent } : {}),
       },
       storage: desktopSessionStorage,
       logger: desktopMakerLogger,
@@ -1056,6 +1092,16 @@ export async function softCloseCcSessionsForHost(
 export async function shutdownLspServerPool(): Promise<void> {
   await lspPool?.shutdown();
   lspPool = null;
+}
+
+/** T2: Cursor 登录属 T7；session/new 复用本机 cursor_login，stub 不挡最小回路。 */
+function createCursorAuthStub(): AuthAdapter {
+  return {
+    getState: async () => ({ authenticated: true }),
+    triggerLogin: async () => ({ authenticated: true }),
+    logout: async () => undefined,
+    getAuthEnv: async () => ({}),
+  };
 }
 
 // re-exports for IPC layer

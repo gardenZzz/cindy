@@ -36,6 +36,7 @@ import {
   matchCodexBucketForModel,
   nextCodexBucketStaleAtMs,
 } from '@cindy/maker-shared/codex-usage-buckets';
+import type { AgentKind } from '@cindy/maker-core';
 
 export {
   CODEX_DEFAULT_LIMIT_BUCKET,
@@ -132,14 +133,14 @@ function selectCodexSlot(
 }
 
 function readUsageApi(): {
-  getAccount?: (agentKind: 'claude-code' | 'codex') => Promise<unknown | null>;
+  getAccount?: (agentKind: AgentKind) => Promise<unknown | null>;
   onCodexAccountChanged?: (cb: (payload: unknown) => void) => () => void;
 } | undefined {
   return (window as unknown as {
     electronAPI?: {
       maker?: {
         usage?: {
-          getAccount?: (agentKind: 'claude-code' | 'codex') => Promise<unknown | null>;
+          getAccount?: (agentKind: AgentKind) => Promise<unknown | null>;
           onCodexAccountChanged?: (cb: (payload: unknown) => void) => () => void;
         };
       };

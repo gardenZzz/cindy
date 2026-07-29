@@ -2141,7 +2141,11 @@ function buildBoundSessionOptions(
 }
 
 function formatSessionOptionMeta(session: RemoteSession): string {
-  const agent = session.agentKind === 'codex' ? 'Codex' : 'Claude';
+  const agent = session.agentKind === 'codex'
+    ? 'Codex'
+    : session.agentKind === 'cursor'
+      ? 'Cursor'
+      : 'Claude';
   const workspace = session.workingDir ? lastPathSegment(session.workingDir) : 'Dialogue';
   return `${agent} · ${workspace} · ${session.id.slice(0, 8)}`;
 }

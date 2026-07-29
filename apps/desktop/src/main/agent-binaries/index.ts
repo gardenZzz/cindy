@@ -45,14 +45,13 @@ import type {
   VendorKey,
   VendorRuntimeState,
 } from './types.js';
+import type { AgentKind } from '@cindy/maker-core';
 
 // ── kind 配置表 ──────────────────────────────────────────────────────────────
 //
-// agent-binaries 的 kind 直接复用 maker-core AgentKind 字面量 ('claude-code' | 'codex'),
-// 跟 maker-core 保持同步; vendorKey 字段是给底层 createBinaryProvisioner 用的内部 enum,
-// 历史叫 'claude' / 'codex' (factory 内部硬约定, 不改)。
-
-export type AgentBinaryKind = 'claude-code' | 'codex';
+// agent-binaries 的 kind 复用 maker-core AgentKind，但 cursor 不随包分发二进制
+// (#5 type-slot only)——安装面仍只覆盖已注册的两个 runtime。
+export type AgentBinaryKind = Exclude<AgentKind, 'cursor'>;
 
 interface AgentBinaryConfig {
   vendorKey: VendorKey;            // 底层 createBinaryProvisioner 接受的内部 key

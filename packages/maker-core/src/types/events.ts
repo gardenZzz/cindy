@@ -1,3 +1,4 @@
+import type { AgentKind } from './common.js';
 /**
  * Agent 事件流类型。
  *
@@ -55,7 +56,7 @@ export interface AgentTaskUsage {
 }
 
 export interface AgentTaskUpdateEventData {
-  provider: 'claude-code' | 'codex';
+  provider: AgentKind;
   /** Provider task id when available; falls back to the parent tool call id. */
   taskId: string;
   /** The tool_use id that launched or controls this subagent task. */
@@ -106,7 +107,7 @@ export interface AgentEvent {
   type: AgentEventType;
   data: unknown;
   /** 事件来源标识，便于调试 */
-  source?: 'claude-code' | 'codex';
+  source?: AgentKind;
   /**
    * 本事件所属 turn 的发起来源,由 Session 在事件 fan-out 前打标(见 session.ts
    * 的 currentTurnOrigin)。turn 结束(isTerminalTurnEvent)后清空,不污染下一轮。

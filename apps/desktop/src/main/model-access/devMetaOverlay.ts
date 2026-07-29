@@ -32,8 +32,9 @@ import type {
   ModelAccessAgentOverride,
   ModelAccessGatewayModel,
 } from '../../shared/modelAccess.js';
+import type { AgentKind } from '@cindy/maker-core';
 
-type Agent = 'claude-code' | 'codex';
+type Agent = AgentKind;
 
 const VALID_AGENTS: ReadonlySet<string> = new Set(['claude-code', 'codex']);
 /** 与服务端 modelMetadataSource / active-catalog 同一套 effort 口径。 */

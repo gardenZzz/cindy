@@ -98,6 +98,7 @@ import type {
   DesktopLoginActionResult,
 } from '../shared/authIpc';
 import { BILLING_INVOKE, type BillingRendererApi } from '../shared/billing';
+import type { AgentKind } from '@cindy/maker-core';
 
 // Codex 元 IPC 全部升级到 maker.* (agentKind 参数化), preload 不再 import vendor/codex/ipcChannels。
 //   auth      → maker:auth:*(agentKind)
@@ -219,7 +220,7 @@ type VoiceInputModelSelectionPatchWire = {
 type DiscordBotSessionAuthCheckWire = {
   ok: boolean;
   missing: 'gateway-key' | 'agent-oauth' | 'provider-key' | 'provider-disconnected' | null;
-  agentKind: 'claude-code' | 'codex';
+  agentKind: AgentKind;
   model: string;
   providerId: string | null;
   providerLabel: string | null;
@@ -1525,7 +1526,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
    */
   syncSessionModelPref: (pref: {
     sessionId: string;
-    agent: 'claude-code' | 'codex';
+    agent: AgentKind;
     providerId: string;
     model: string;
     effort?: string;
@@ -1835,7 +1836,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
     workingDir: string;
     cap?: number;
     query?: string;
-    agentKind?: 'claude-code' | 'codex';
+    agentKind?: AgentKind;
   }): Promise<{
     success: boolean;
     error?: string;
@@ -2933,9 +2934,9 @@ contextBridge.exposeInMainWorld('electronAPI', {
     onStatusChanged: fanOutRemoteSshStatus,
 
     // ── Phase B: agent on remote ──────────────────────────────────────────
-    probeAgent: (id: string, agentKind: 'claude-code' | 'codex'): Promise<{
+    probeAgent: (id: string, agentKind: AgentKind): Promise<{
       probe: {
-        agentKind: 'claude-code' | 'codex';
+        agentKind: AgentKind;
         nodeReady: boolean;
         nodeVersion: string | null;
         installed: boolean;
@@ -2946,9 +2947,9 @@ contextBridge.exposeInMainWorld('electronAPI', {
       };
     }> => ipcRenderer.invoke('maker:remote-ssh:probe-agent', { id, agentKind }),
 
-    installAgent: (id: string, agentKind: 'claude-code' | 'codex'): Promise<{
+    installAgent: (id: string, agentKind: AgentKind): Promise<{
       result: {
-        agentKind: 'claude-code' | 'codex';
+        agentKind: AgentKind;
         ready: boolean;
         installed: boolean;
         installedVersion: string | null;
@@ -2959,12 +2960,12 @@ contextBridge.exposeInMainWorld('electronAPI', {
       };
     }> => ipcRenderer.invoke('maker:remote-ssh:install-agent', { id, agentKind }),
 
-    uninstallAgent: (id: string, agentKind: 'claude-code' | 'codex'): Promise<{ ok: true }> =>
+    uninstallAgent: (id: string, agentKind: AgentKind): Promise<{ ok: true }> =>
       ipcRenderer.invoke('maker:remote-ssh:uninstall-agent', { id, agentKind }),
 
     runAgentOneShot: (
       id: string,
-      agentKind: 'claude-code' | 'codex',
+      agentKind: AgentKind,
       prompt: string,
     ): Promise<{
       result: {
@@ -3621,9 +3622,9 @@ contextBridge.exposeInMainWorld('electronAPI', {
   // ─── Maker Core IPC ─────────────────────────────────────────────────────
   // renderer 通过统一 maker API 按 agentKind 调用 Claude Code / Codex。
   maker: {
-    listAvailableAgents: (): Promise<Array<'claude-code' | 'codex'>> =>
+    listAvailableAgents: (): Promise<Array<AgentKind>> =>
       ipcRenderer.invoke('maker:list-available-agents'),
-    getCapabilities: (agentKind: 'claude-code' | 'codex'): Promise<unknown> =>
+    getCapabilities: (agentKind: AgentKind): Promise<unknown> =>
       ipcRenderer.invoke('maker:get-capabilities', agentKind),
 
     // workflow 逐 agent 进度树(只读)。读不到 / 解析失败返回 null,由 renderer 回退到
@@ -3651,12 +3652,12 @@ contextBridge.exposeInMainWorld('electronAPI', {
     // 自定义供应商配置 CRUD（配置与 runtime 密钥均由 main 原子排队）。
     createCustomProvider: (
       config: import('@cindy/model-providers').CustomProviderConfig,
-      keys: Partial<Record<'claude-code' | 'codex', string>>,
+      keys: Partial<Record<AgentKind, string>>,
     ): Promise<{ ok: true }> =>
       ipcRenderer.invoke('maker:provider:custom:create', config, keys),
     updateCustomProvider: (
       config: import('@cindy/model-providers').CustomProviderConfig,
-      keys: Partial<Record<'claude-code' | 'codex', string>>,
+      keys: Partial<Record<AgentKind, string>>,
     ): Promise<{ ok: true }> => ipcRenderer.invoke('maker:provider:custom:update', config, keys),
     deleteCustomProvider: (providerId: string): Promise<{ ok: true }> =>
       ipcRenderer.invoke('maker:provider:custom:delete', providerId),
@@ -3669,11 +3670,11 @@ contextBridge.exposeInMainWorld('electronAPI', {
      */
     testProviderConnection: (
       input:
-        | { kind: 'saved'; providerId: string; agent: 'claude-code' | 'codex' }
+        | { kind: 'saved'; providerId: string; agent: AgentKind }
         | {
             kind: 'adhoc';
             spec: {
-              agent: 'claude-code' | 'codex';
+              agent: AgentKind;
               baseUrl: string;
               modelId: string;
               authMethod: 'apiKey' | 'oauth' | 'none';
@@ -3695,7 +3696,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
      * 结构化结果：ok=true 带 models；失败 code 走 providerError.* i18n。
      */
     fetchProviderModels: (input: {
-      agent: 'claude-code' | 'codex';
+      agent: AgentKind;
       baseUrl: string;
       authMethod: 'apiKey' | 'oauth' | 'none';
       modelsUrl?: string | null;
@@ -3813,7 +3814,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
       ipcRenderer.invoke('maker:execute-desktop-command', name, ctx),
 
     listAgentCommands: (
-      agentKind: 'claude-code' | 'codex',
+      agentKind: AgentKind,
     ): Promise<{
       success: boolean;
       error?: string;
@@ -3821,7 +3822,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
     }> => ipcRenderer.invoke('maker:list-agent-commands', agentKind),
 
     listAgentSkills: (
-      agentKind: 'claude-code' | 'codex',
+      agentKind: AgentKind,
       params: { workingDir: string; forceReload?: boolean },
     ): Promise<{
       success: boolean;
@@ -3914,7 +3915,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
     onGoalStatusChanged: fanOutGoalStatusChanged,
 
     scanAtResources: (
-      agentKind: 'claude-code' | 'codex',
+      agentKind: AgentKind,
       params: { workingDir: string; cap?: number; query?: string },
     ): Promise<{
       success: boolean;
@@ -3930,7 +3931,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
     createSession: (opts: {
       /** 可选: 复用外部 sessionId(本端 chat 用 local-db:sessions:create 拿到的 id) */
       id?: string;
-      agentKind: 'claude-code' | 'codex';
+      agentKind: AgentKind;
       workingDir: string;
       model: string;
       title?: string;
@@ -3978,7 +3979,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
     enableOrca: (
       leadSessionId: string,
       opts: {
-        workerAgent: 'claude-code' | 'codex';
+        workerAgent: AgentKind;
         delegateTask?: string;
         role?: string;
         label?: string;
@@ -4008,7 +4009,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
       sessionId: string,
       message: string | { type: 'user'; content: string | Array<{ type: string; [k: string]: unknown }> },
       createOpts?: {
-        agentKind: 'claude-code' | 'codex';
+        agentKind: AgentKind;
         workingDir: string;
         model: string;
         orcaRole?: 'lead' | 'worker' | null;
@@ -4052,7 +4053,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
     getContextUsage: (
       sessionId: string,
       createOpts?: {
-        agentKind: 'claude-code' | 'codex';
+        agentKind: AgentKind;
         workingDir: string;
         model: string;
         orcaRole?: 'lead' | 'worker' | null;
@@ -4089,7 +4090,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
 
     listActive: (): Promise<Array<{
       sessionId: string;
-      agentKind: 'claude-code' | 'codex';
+      agentKind: AgentKind;
       workDir: string;
       capabilities: unknown;
       isTurnRunning: boolean;
@@ -4137,12 +4138,12 @@ contextBridge.exposeInMainWorld('electronAPI', {
     // switched=false 且无 deferred = 同引擎 no-op(用户选回当前引擎,意图已清)。
     switchSessionAgent: (
       sessionId: string,
-      targetAgentKind: 'claude-code' | 'codex',
+      targetAgentKind: AgentKind,
       model: string,
       providerId?: string | null,
       effort?: string,
       fastMode?: boolean,
-    ): Promise<{ switched: boolean; agentKind: 'claude-code' | 'codex'; model: string; engineReady: boolean; deferred?: boolean }> =>
+    ): Promise<{ switched: boolean; agentKind: AgentKind; model: string; engineReady: boolean; deferred?: boolean }> =>
       ipcRenderer.invoke('maker:switch-session-agent', sessionId, targetAgentKind, model, providerId, effort, fastMode),
     // effort/mode 透传 string —— 合法值由 maker capabilities 在运行时校验,
     // preload 不重复枚举 (避免 capabilities 加新值时这里也要改)。
@@ -4164,13 +4165,13 @@ contextBridge.exposeInMainWorld('electronAPI', {
 
     // Memory 控制 (Personalization → Memory section)。
     // 由 BaseAgent 子类落地; UI 层负责 Reset 前 confirm dialog。
-    memoryGet: (agentKind: 'claude-code' | 'codex'): Promise<{
+    memoryGet: (agentKind: AgentKind): Promise<{
       enabled: boolean;
       source: 'agent-default' | 'host-runtime' | 'user-config';
       stats?: { entryCount?: number; sizeBytes?: number; storagePath?: string };
     }> => ipcRenderer.invoke('maker:memory:get', agentKind),
     memorySet: (
-      agentKind: 'claude-code' | 'codex',
+      agentKind: AgentKind,
       enabled: boolean,
     ): Promise<{
       effective: 'immediate' | 'next-session';
@@ -4179,7 +4180,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
       defaults: { maker: boolean; claudeCode: boolean; codex: boolean };
     }> =>
       ipcRenderer.invoke('maker:memory:set', agentKind, enabled),
-    memoryReset: (agentKind: 'claude-code' | 'codex'): Promise<{
+    memoryReset: (agentKind: AgentKind): Promise<{
       removedEntries?: number;
       removedBytes?: number;
     }> => ipcRenderer.invoke('maker:memory:reset', agentKind),
@@ -4491,7 +4492,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
     },
 
     // Stage 2 C1: chat utility (前身 cc-agent:generate-title / cc-agent:plan-file-write)
-    generateTitle: (message: string, agentKind: 'claude-code' | 'codex', sessionId?: string): Promise<{ title: string | null }> =>
+    generateTitle: (message: string, agentKind: AgentKind, sessionId?: string): Promise<{ title: string | null }> =>
       ipcRenderer.invoke('maker:generate-title', { message, agentKind, sessionId }),
     // 重命名输入框 Magic 按钮:按会话最新对话内容重新生成标题(素材由 main 读 DB)
     regenerateSessionTitle: (sessionId: string): Promise<{ title: string | null }> =>
@@ -4500,7 +4501,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
     autoTitle: (request: {
       sessionId: string;
       text: string;
-      agentKind: 'claude-code' | 'codex';
+      agentKind: AgentKind;
       isUserText?: boolean;
     }): Promise<{ applied: boolean; done: boolean }> =>
       ipcRenderer.invoke('maker:auto-title', request),
@@ -4544,19 +4545,19 @@ contextBridge.exposeInMainWorld('electronAPI', {
 
     // ── Agent 鉴权 (取代老 electronAPI.codex.auth.*) ────────────────────────
     auth: {
-      getState: (agentKind: 'claude-code' | 'codex'): Promise<unknown> =>
+      getState: (agentKind: AgentKind): Promise<unknown> =>
         ipcRenderer.invoke('maker:auth:get-state', agentKind),
       triggerLogin: (
-        agentKind: 'claude-code' | 'codex',
+        agentKind: AgentKind,
         options?: { mode?: 'browser' | 'device-code'; ownerId?: string },
       ): Promise<unknown> =>
         ipcRenderer.invoke('maker:auth:trigger-login', agentKind, options),
       cancelLogin: (
-        agentKind: 'claude-code' | 'codex',
+        agentKind: AgentKind,
         options?: { releaseOwner?: boolean; ownerId?: string },
       ): Promise<void> =>
         ipcRenderer.invoke('maker:auth:cancel-login', agentKind, options),
-      logout: (agentKind: 'claude-code' | 'codex'): Promise<void> =>
+      logout: (agentKind: AgentKind): Promise<void> =>
         ipcRenderer.invoke('maker:auth:logout', agentKind),
       onStateChanged: fanOutMakerAuthStateChanged,
       onLoginProgress: fanOutMakerAuthLoginProgress,
@@ -4564,22 +4565,33 @@ contextBridge.exposeInMainWorld('electronAPI', {
 
     // ── Agent 联合状态 (取代老 electronAPI.codex.binary.getStatus) ──────────
     agent: {
-      getStatus: (agentKind: 'claude-code' | 'codex'): Promise<unknown> =>
+      getStatus: (agentKind: AgentKind): Promise<unknown> =>
         ipcRenderer.invoke('maker:agent:status', agentKind),
       /** spawn 当前应用使用的 binary `--version`, 进程内缓存。About 面板用。 */
-      getBinaryVersion: (agentKind: 'claude-code' | 'codex'): Promise<{
-        kind: 'claude-code' | 'codex';
+      getBinaryVersion: (agentKind: AgentKind): Promise<{
+        kind: AgentKind;
         binaryPath: string | null;
         version: string | null;
         error?: string;
       }> => ipcRenderer.invoke('maker:agent:binary-version', agentKind),
+      /**
+       * Cursor 本机 cursor-agent 是否已装（设置页安装引导用）。
+       * 只回 installed，不回绝对路径。
+       */
+      getCursorBinaryStatus: (): Promise<{ installed: boolean }> =>
+        ipcRenderer.invoke('maker:cursor:binary-status'),
+      /**
+       * 用户确认后执行官方安装脚本。未确认不得调用。
+       */
+      installCursorAgent: (): Promise<{ installed: boolean }> =>
+        ipcRenderer.invoke('maker:cursor:install'),
     },
 
     // ── Agent 今日累计 (取代老 electronAPI.codex.usage.* + electronAPI.onUsageTodaySpendChanged) ─
     usage: {
-      getToday: (agentKind: 'claude-code' | 'codex'): Promise<unknown> =>
+      getToday: (agentKind: AgentKind): Promise<unknown> =>
         ipcRenderer.invoke('maker:usage:today', agentKind),
-      getAccount: (agentKind: 'claude-code' | 'codex'): Promise<unknown> =>
+      getAccount: (agentKind: AgentKind): Promise<unknown> =>
         ipcRenderer.invoke('maker:usage:account', agentKind),
       /** Claude 订阅账号余量 (5h/周/分模型窗口, cached-first, main 侧按需后台刷新)。 */
       getClaudeSubscription: (): Promise<unknown | null> =>
@@ -4666,7 +4678,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
         scheduleName?: string;
         workingDir?: string;
         providerId?: string;
-        agentKind?: 'claude-code' | 'codex';
+        agentKind?: AgentKind;
         model?: string;
         /** 绑定会话任务:workingDir 空时 main 按会话 meta.workDir 解析落盘/自测目录。 */
         targetSessionId?: string;
@@ -4746,7 +4758,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
     crossAgent: {
       detect: (
         workingDir: string,
-        agentKind: 'claude-code' | 'codex',
+        agentKind: AgentKind,
       ): Promise<{ items: CrossAgentMigrationItem[] }> =>
         ipcRenderer.invoke('maker:cross-agent:detect', workingDir, agentKind),
       convert: (

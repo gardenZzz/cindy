@@ -1,8 +1,11 @@
+import type { AgentKind } from '@cindy/maker-core';
 /**
  * cross-agent-convert / shared types
  *
  * detector / converter / IPC / renderer 之间共享的契约。改动需同步更新 vite-env.d.ts。
  */
+
+export type { AgentKind };
 
 /** 当前 4 项迁移种类（双向对称）。Skill 通过共享链接复用，不做格式转换。 */
 export type MigrationItemKind =
@@ -16,7 +19,6 @@ export type MigrationDirection = 'to-claude' | 'to-codex';
 
 export type MigrationStepStatus = 'pending' | 'running' | 'success' | 'skipped' | 'failed';
 
-export type AgentKind = 'claude-code' | 'codex';
 
 /** 一个迁移项 = 检测器认为"可做"的一个工作单元。 */
 export interface MigrationItem {

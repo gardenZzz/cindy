@@ -86,6 +86,26 @@ describe('pickMostRecentSessionRuntime', () => {
     expect(runtime?.agentKind).toBe('claude-code');
   });
 
+  it('maps cursor agentKind without falling back to Claude Code', () => {
+    const runtime = pickMostRecentSessionRuntime([
+      remoteSession('c1', { agentKind: 'cursor', model: 'auto', userSendAt: '2026-05-05T00:00:00.000Z' }),
+    ]);
+    expect(runtime).toEqual({ agentKind: 'cursor', model: 'auto', effort: 'medium' });
+    expect(sessionFromCreateResult(
+      { sessionId: 'new-cursor' },
+      {
+        agentKind: 'cursor',
+        workspaceKind: 'project',
+        model: 'auto',
+        effort: 'medium',
+        permissionMode: 'auto',
+        fastMode: false,
+        workingDir: '/repo',
+      },
+      new Date('2026-01-01T00:00:00.000Z'),
+    ).agentKind).toBe('cursor');
+  });
+
   it('sorts by activity time = userSendAt ?? updatedAt ?? createdAt (desc)', () => {
     const runtime = pickMostRecentSessionRuntime([
       remoteSession('viaUpdated', { model: 'm-updated', userSendAt: null, updatedAt: '2026-01-03T00:00:00.000Z' }),

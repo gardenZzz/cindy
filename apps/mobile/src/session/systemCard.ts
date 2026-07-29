@@ -101,7 +101,11 @@ export function formatMobileSystemCard(
  * 这里仅保留为 formatMobileSystemCard 在该 union 分支上的类型完备兜底。
  */
 function formatAgentSwitchCard(data: Record<string, unknown> | undefined): SystemCardPresentation {
-  const engineLabel = (kind: unknown): string => (kind === 'codex' ? 'Codex' : 'Claude Code');
+  const engineLabel = (kind: unknown): string => {
+    if (kind === 'codex') return 'Codex';
+    if (kind === 'cursor') return 'Cursor';
+    return 'Claude Code';
+  };
   const from = engineLabel(data?.fromAgentKind);
   const to = engineLabel(data?.toAgentKind);
   const toModel = typeof data?.toModel === 'string' ? data.toModel : '';

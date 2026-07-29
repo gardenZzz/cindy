@@ -8,12 +8,13 @@ import { createLogger } from '../logger.js';
 import { throwIpcError } from '../utils/ipcValidate.js';
 import { tapWindowBroadcast } from '../device-link/broadcast-tap.js';
 import { notifyAgentIslandSessionPatch } from './agentIslandSessionPatch.js';
+import type { AgentKind } from '@cindy/maker-core';
 
 const log = createLogger('orca-team-store');
 
 export type OrcaRole = 'lead' | 'worker';
 export type OrcaTeamStatus = 'active' | 'completed' | 'cancelled' | 'failed';
-export type MakerAgentKind = 'claude-code' | 'codex';
+export type MakerAgentKind = AgentKind;
 
 // Worker 状态枚举与 "占用槽位" 判定下沉到 renderer-safe 模块,
 // 让 main (本文件) 与 renderer (useWorkers) 共享同一份算法, 避免 F6 那种
@@ -594,6 +595,7 @@ function workerToRecord(
 }
 
 function fromDbAgentKind(agentKind: string): MakerAgentKind {
+  // #13 (T9): DB enum 仍是 claude-code|codex；cursor 映射留给后续票。
   return agentKind === 'codex' ? 'codex' : 'claude-code';
 }
 

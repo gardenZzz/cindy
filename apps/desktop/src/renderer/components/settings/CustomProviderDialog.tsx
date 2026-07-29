@@ -73,6 +73,12 @@ const TAB_META: Record<AgentKind, { Mark: typeof ClaudeMark; labelKey: string; h
       labelKey: 'settings.providers.custom.protocol.codex',
       helpKey: 'settings.providers.custom.protocol.codexDesc',
     },
+    // Type-slot only (#5); not in VISIBLE_AGENTS — Mark/keys unused until cursor is registered.
+    cursor: {
+      Mark: ClaudeMark,
+      labelKey: 'settings.providers.custom.protocol.claude',
+      helpKey: 'settings.providers.custom.protocol.claudeDesc',
+    },
   };
 
 interface CustomProviderDialogProps {
@@ -124,6 +130,7 @@ function initRuntimes(initial?: CustomProviderConfig): Record<AgentKind, Runtime
   const out: Record<AgentKind, RuntimeFields> = {
     'claude-code': emptyRuntime('claude-code'),
     codex: emptyRuntime('codex'),
+    cursor: emptyRuntime('cursor'),
   };
   if (initial) {
     for (const a of AGENTS) {
@@ -301,6 +308,7 @@ export function CustomProviderDialog({
   const [hasKey, setHasKey] = useState<Record<AgentKind, boolean>>({
     'claude-code': false,
     codex: false,
+    cursor: false,
   });
   const [saving, setSaving] = useState(false);
   // 鉴权形态：API key（默认）/ OAuth / 无鉴权（本机或受信自托管代理）。
@@ -337,11 +345,13 @@ export function CustomProviderDialog({
   const [test, setTest] = useState<Record<AgentKind, TestState>>({
     'claude-code': IDLE_TEST,
     codex: IDLE_TEST,
+    cursor: IDLE_TEST,
   });
   // per-runtime「获取模型列表」进行中标记（按钮瞬态 spinner）。
   const [fetchingModels, setFetchingModels] = useState<Record<AgentKind, boolean>>({
     'claude-code': false,
     codex: false,
+    cursor: false,
   });
   // 拉取成功后的勾选弹层：行集合 = 拉取结果 ∪ 表单已填（后者默认勾选、保留用户显示名）。
   const [picker, setPicker] = useState<{
@@ -416,7 +426,7 @@ export function CustomProviderDialog({
         }
         return next;
       });
-      setTest({ 'claude-code': IDLE_TEST, codex: IDLE_TEST });
+      setTest({ 'claude-code': IDLE_TEST, codex: IDLE_TEST, cursor: IDLE_TEST });
       const first = AGENTS.find((a) => p.runtimes[a]);
       if (first) setActiveTab(first);
     },
@@ -429,7 +439,7 @@ export function CustomProviderDialog({
     if (!editing || !initial) return;
     let cancelled = false;
     void (async () => {
-      const nextHas: Record<AgentKind, boolean> = { 'claude-code': false, codex: false };
+      const nextHas: Record<AgentKind, boolean> = { 'claude-code': false, codex: false, cursor: false };
       const fetched: Partial<Record<AgentKind, string>> = {};
       for (const a of AGENTS) {
         if (!initial.runtimes[a]) continue;
@@ -923,7 +933,7 @@ export function CustomProviderDialog({
                   type="button"
                   onClick={() => {
                     setAuthMode(m);
-                    setTest({ 'claude-code': IDLE_TEST, codex: IDLE_TEST });
+                    setTest({ 'claude-code': IDLE_TEST, codex: IDLE_TEST, cursor: IDLE_TEST });
                   }}
                   className={cn(
                     'rounded-full border px-3 py-1.5 text-12 font-medium transition-colors',

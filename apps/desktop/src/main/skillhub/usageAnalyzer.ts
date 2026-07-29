@@ -1,8 +1,9 @@
 import { createHash } from 'node:crypto';
 import path from 'node:path';
 import { stripTrailingPathSeparators } from '../../shared/pathText';
+import type { AgentKind } from '@cindy/maker-core';
 
-export type SkillUsageAgentKind = 'claude-code' | 'codex';
+export type SkillUsageAgentKind = AgentKind;
 
 export type SkillUsageExposureSource =
   | 'claude_skill_tool'

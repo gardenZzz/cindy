@@ -42,9 +42,9 @@ import {
 import { getScheduleDefaultModel, type EffortValue } from '../hooks/useScheduleForm';
 import { PENDING_SESSION_ID } from '../lib/scheduleFormLogic';
 import type { SessionReference } from '../../../../shared/sessionReference';
+import type { AgentKind } from '@cindy/maker-core';
 
 export type Destination = 'local' | 'worktree' | 'thread';
-export type AgentKind = 'claude-code' | 'codex';
 
 interface ChipButtonProps {
   icon?: React.ReactNode;
@@ -159,9 +159,14 @@ export function ProjectChip({
   );
 }
 
+/** Visible agent tabs only — cursor is a type-slot (#5), not selectable until registered. */
+const VISIBLE_AGENT_KINDS: readonly AgentKind[] = ['claude-code', 'codex'];
+
 const AGENT_META: Record<AgentKind, { label: string; vendor: 'cc' | 'codex' }> = {
   'claude-code': { label: 'Claude Code', vendor: 'cc' },
   codex: { label: 'Codex', vendor: 'codex' },
+  // Neutral placeholder; not in VISIBLE_AGENT_KINDS so AgentTabs never renders it.
+  cursor: { label: 'Cursor', vendor: 'cc' },
 };
 
 export function AgentTabs({ value, onChange, disabled }: { value: AgentKind; onChange: (v: AgentKind) => void; disabled?: boolean }) {
@@ -173,7 +178,7 @@ export function AgentTabs({ value, onChange, disabled }: { value: AgentKind; onC
         disabled && 'pointer-events-none opacity-50',
       )}
     >
-      {(Object.keys(AGENT_META) as AgentKind[]).map((kind) => {
+      {VISIBLE_AGENT_KINDS.map((kind) => {
         const active = kind === value;
         const meta = AGENT_META[kind];
         return (

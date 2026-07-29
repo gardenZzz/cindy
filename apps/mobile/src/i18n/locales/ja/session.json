@@ -32,6 +32,7 @@
     "createFailedTitle": "セッションの作成に失敗しました",
     "createFailedDefault": "セッションの作成に失敗しました。",
     "createFailedNotice": "セッションの作成に失敗しました：{{message}}",
+    "cursorUnsupportedOnDesktop": "このパソコンのバージョンはまだ Cursor に対応していません。パソコンの Cindy を更新してから再試行してください。",
     "backToEdit": "編集に戻る",
     "retry": "再試行",
     "firstMessageNotSent": "最初のメッセージは送信されませんでした。内容は入力欄に復元されました。",

@@ -1,3 +1,4 @@
+import type { AgentKind } from './common.js';
 /**
  * AgentCustomization —— "agent 自己认识的本地 customization" 的统一描述。
  *
@@ -24,7 +25,7 @@ export interface AgentCustomizationFile {
 
 export interface AgentCustomization {
   /** 来自哪个 agent。等价于 AgentKind, 但避开循环依赖故用宽松 string。 */
-  engine: 'claude-code' | 'codex';
+  engine: AgentKind;
 
   /**
    * Engine-specific 词汇:

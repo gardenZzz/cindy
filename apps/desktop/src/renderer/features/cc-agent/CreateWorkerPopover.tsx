@@ -28,9 +28,13 @@ import {
 } from '@/state/providerModelMemory';
 import type { Effort } from '@/lib/userPreferences.types';
 import { selectWorkerModels } from './workerModelAvailability';
+import type { AgentKind } from '@cindy/maker-core';
 
 const PREDEFINED_ROLES = ['developer', 'designer', 'reviewer', 'tester', 'merger'] as const;
 const PREFS_KEY = 'workerCreationPrefs';
+
+/** Orca worker 创建面板只覆盖已注册 runtime；cursor 未进选择面 (#5)。 */
+type WorkerSelectableAgent = Exclude<AgentKind, 'cursor'>;
 
 interface WorkerAgentPrefs {
   model: string;
@@ -41,7 +45,7 @@ interface WorkerAgentPrefs {
 }
 
 interface WorkerPrefs {
-  lastAgent: 'codex' | 'claude-code';
+  lastAgent: WorkerSelectableAgent;
   codex: WorkerAgentPrefs;
   'claude-code': WorkerAgentPrefs;
 }
@@ -57,7 +61,7 @@ function readWorkerPrefs(): WorkerPrefs {
     const raw = window.localStorage.getItem(PREFS_KEY);
     if (!raw) return DEFAULT_PREFS;
     const parsed = JSON.parse(raw) as Partial<WorkerPrefs>;
-    const agentPrefs = (agent: 'codex' | 'claude-code'): WorkerAgentPrefs => {
+    const agentPrefs = (agent: WorkerSelectableAgent): WorkerAgentPrefs => {
       const p = parsed[agent];
       return {
         ...DEFAULT_PREFS[agent],
@@ -88,7 +92,7 @@ function writeWorkerPrefs(prefs: WorkerPrefs): void {
 
 export interface CreateWorkerForm {
   role: string;
-  agent: 'claude-code' | 'codex';
+  agent: AgentKind;
   model: string;
   effort?: Effort;
   fast?: boolean;
@@ -121,7 +125,7 @@ export function CreateWorkerPopover({
   const navigate = useNavigate();
   const [role, setRole] = useState('developer');
   const [customRole, setCustomRole] = useState('');
-  const [agent, setAgent] = useState<'claude-code' | 'codex'>('codex');
+  const [agent, setAgent] = useState<WorkerSelectableAgent>('codex');
   const [model, setModel] = useState(DEFAULT_PREFS.codex.model);
   const [effort, setEffort] = useState<Effort>(DEFAULT_PREFS.codex.effort);
   const [fast, setFast] = useState(DEFAULT_PREFS.codex.fast);
@@ -307,7 +311,7 @@ export function CreateWorkerPopover({
 
   const vendorKey = agent === 'codex' ? 'codex' : 'cc';
   const updateAgent = useCallback(
-    (nextAgent: 'claude-code' | 'codex') => {
+    (nextAgent: WorkerSelectableAgent) => {
       if (nextAgent === agent) return;
       // 切走前把当前 agent 的 live 编辑(模型/effort/Fast/来源)快照进内存 prefs:
       // 恢复读的是 prefs,不快照会把「改了还没提交就切了个 tab」的编辑静默回滚到
