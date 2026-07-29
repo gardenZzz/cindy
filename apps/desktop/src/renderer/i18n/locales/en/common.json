@@ -3909,6 +3909,8 @@
     "user": {
       "settingsLink": "Settings, current user: {{name}}",
       "canaryBadge": "Canary user",
+      "regionCodeCn": "CN",
+      "regionCodeDev": "Dev",
       "viewReleaseNotes": "View release notes",
       "reopenUpdateBanner": "Update ready — click to review",
       "downloadMobile": "Download Cindy Mobile"
