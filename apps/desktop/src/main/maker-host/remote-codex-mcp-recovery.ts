@@ -35,6 +35,14 @@ export interface RemoteCodexMcpRecoveryDeps {
    * 重新注入回去 (codex-connector R21 P1)。
    */
   isCollabEnabled: () => boolean;
+  /**
+   * detach 该 host 上活跃的远端 codex session (跳过 turn 中的)。ensure
+   * 成功 (且非 live-turn defer) ⇒ daemon 已 rebootstrap ⇒ 旧 transport
+   * (到重启前 daemon socket 的长命 channel) 已死 — 不 detach 的话后续
+   * idle-live send 看到 drift 已清会跳过重建, 把消息送进死 transport
+   * (codex-connector R26 P1)。
+   */
+  detachRemoteCodexSessionsOnHost: (hostId: string) => void;
   log: { warn: (msg: string, meta?: Record<string, unknown>) => void };
 }
 
@@ -54,6 +62,13 @@ export function refreshRemoteCodexMcpAfterBridgeRecreate(deps: RemoteCodexMcpRec
           hostId,
           reason: result.reason,
         });
+        return;
+      }
+      // ensure 成功且非 live-turn defer ⇒ daemon 已 rebootstrap ⇒ 该 host
+      // 的活跃 session transport 已死 — detach 让下次 send 走 lazy-resume
+      // (codex-connector R26 P1)。live turn 在跑 ⇒ defer 未重启 ⇒ 不动。
+      if (!liveTurnChecker(hostId)) {
+        deps.detachRemoteCodexSessionsOnHost(hostId);
       }
     });
   }

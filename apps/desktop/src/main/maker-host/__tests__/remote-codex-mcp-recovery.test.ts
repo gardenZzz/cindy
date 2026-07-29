@@ -25,13 +25,14 @@ function host(id: string): RemoteHost {
 
 function makeDeps(overrides?: Partial<Parameters<typeof refreshRemoteCodexMcpAfterBridgeRecreate>[0]>) {
   const warn = vi.fn();
-  const checker = (_hostId: string): boolean => false;
+  const checker = vi.fn((_hostId: string): boolean => false);
   const deps = {
     listRemoteCodexHostIds: () => ['host-a', 'host-b'],
     getReadyHost: (id: string) => host(id),
     ensureBridgeStarted: async () => ({ port: 38080, serverNames: ['cindy_orca'], bridgeInstanceId: 'bridge-2' }),
     getLiveTurnChecker: () => checker,
     isCollabEnabled: () => true,
+    detachRemoteCodexSessionsOnHost: vi.fn(),
     log: { warn },
     ...overrides,
   };
@@ -70,6 +71,41 @@ describe('refreshRemoteCodexMcpAfterBridgeRecreate', () => {
     const { deps } = makeDeps({ getLiveTurnChecker: () => null });
     refreshRemoteCodexMcpAfterBridgeRecreate(deps);
     expect(ensureMock).not.toHaveBeenCalled();
+  });
+
+  it('detaches active codex sessions on the host after a successful rebootstrap (R26 P1)', async () => {
+    // ensure 成功且非 live-turn defer ⇒ daemon 已重启 ⇒ 旧 transport 死 —
+    // 必须 detach 让下次 send 走 lazy-resume, 否则 idle-live send 看到
+    // drift 已清会把消息送进死 channel。
+    const { deps, checker } = makeDeps();
+    const detachMock = deps.detachRemoteCodexSessionsOnHost as ReturnType<typeof vi.fn>;
+    refreshRemoteCodexMcpAfterBridgeRecreate(deps);
+    await vi.waitFor(() => {
+      expect(detachMock).toHaveBeenCalledWith('host-a');
+      expect(detachMock).toHaveBeenCalledWith('host-b');
+    });
+    expect(checker).toHaveBeenCalled();
+  });
+
+  it('does not detach when a live turn deferred the rebootstrap (daemon still running the old socket)', async () => {
+    const { deps } = makeDeps({ getLiveTurnChecker: () => () => true });
+    const detachMock = deps.detachRemoteCodexSessionsOnHost as ReturnType<typeof vi.fn>;
+    refreshRemoteCodexMcpAfterBridgeRecreate(deps);
+    await vi.waitFor(() => {
+      expect(ensureMock).toHaveBeenCalledTimes(2);
+    });
+    expect(detachMock).not.toHaveBeenCalled();
+  });
+
+  it('does not detach when the ensure fails (no rebootstrap happened)', async () => {
+    ensureMock.mockResolvedValue({ ok: false, reason: 'forward-failed' });
+    const { deps } = makeDeps({ listRemoteCodexHostIds: () => ['host-a'] });
+    const detachMock = deps.detachRemoteCodexSessionsOnHost as ReturnType<typeof vi.fn>;
+    refreshRemoteCodexMcpAfterBridgeRecreate(deps);
+    await vi.waitFor(() => {
+      expect(ensureMock).toHaveBeenCalledTimes(1);
+    });
+    expect(detachMock).not.toHaveBeenCalled();
   });
 
   it('logs a warning instead of throwing when an ensure reports failure', async () => {
