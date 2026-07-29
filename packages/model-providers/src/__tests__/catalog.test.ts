@@ -147,6 +147,26 @@ describe('bundled catalog validity (dynamic-first contract)', () => {
     expect(presets.map((p) => p.id)).toContain('openrouter');
   });
 
+  it('DeepSeek 预设携带厂商文档确认的 1M contextWindow (#735)', () => {
+    // 官方 V4 起全线 1M(api-docs.deepseek.com news260424);预设不带时
+    // buildUserProvider 回落 200K 保守默认,长上下文模型被错误降级。
+    const presets = BUNDLED_CATALOG.presets ?? [];
+    const deepseek = presets.find((p) => p.id === 'deepseek');
+    expect(deepseek).toBeDefined();
+    for (const [agent, rt] of Object.entries(deepseek!.runtimes)) {
+      for (const id of ['deepseek-v4-flash', 'deepseek-v4-pro']) {
+        const m = rt!.models.find((x) => x.id === id);
+        expect(m?.contextWindow, `${agent}/${id}`).toBe(1_000_000);
+      }
+    }
+    // OpenRouter 托管的同款模型页面同样标注 1,048,576,取与仓库口径一致的 1M。
+    const openrouter = presets.find((p) => p.id === 'openrouter');
+    expect(
+      openrouter?.runtimes['claude-code']?.models.find((m) => m.id === 'deepseek/deepseek-v4-pro')
+        ?.contextWindow,
+    ).toBe(1_000_000);
+  });
+
   it('ships Codex support metadata for the current XD gateway model set', () => {
     const metadata = BUNDLED_CATALOG.cindyModelMeta as {
       version?: unknown;
