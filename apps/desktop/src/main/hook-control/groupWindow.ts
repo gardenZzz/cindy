@@ -45,7 +45,7 @@ export function groupLaneOf(
 ): { chatId: string; threadId: string } | null {
   const parts = externalKey.split(':');
   if (parts[0] !== 'telegram') return null;
-  if (parts[1] === 'group' && parts.length >= 6 && parts[3]) {
+  if (parts[1] === 'group' && parts.length >= 7 && parts[3]) {
     return { chatId: parts[3], threadId: '' };
   }
   if (parts[1] === 'topic' && parts.length >= 7 && parts[3] && parts[4]) {
@@ -111,9 +111,15 @@ const GLOBAL_SWEEP_INTERVAL_MS = 6 * 60 * 60 * 1000;
 async function sweepExpiredRows(): Promise<void> {
   const now = Date.now();
   if (now - lastGlobalSweepAt < GLOBAL_SWEEP_INTERVAL_MS) return;
+  // 先占位挡住并发重复清扫; 失败时归零放行下次调用重试, 不吞掉 6h 窗口。
   lastGlobalSweepAt = now;
-  const db = getDbClient().drizzle;
-  await db.delete(hookGroupMessages).where(lt(hookGroupMessages.sentAt, now - WINDOW_TTL_MS));
+  try {
+    const db = getDbClient().drizzle;
+    await db.delete(hookGroupMessages).where(lt(hookGroupMessages.sentAt, now - WINDOW_TTL_MS));
+  } catch (err) {
+    lastGlobalSweepAt = 0;
+    throw err;
+  }
 }
 
 /**
