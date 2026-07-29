@@ -915,6 +915,76 @@ test("test gate lock reports the holder, waits, and acquires after release", asy
 	}
 });
 
+test("two real test gate lock holders serialize on the same identity", async () => {
+	const root = fs.mkdtempSync(path.join(os.tmpdir(), "test-gate-real-lock-"));
+	let firstLock;
+	let secondLock;
+	let reportWaiting;
+	const waiting = new Promise((resolve) => {
+		reportWaiting = resolve;
+	});
+	try {
+		firstLock = await acquireTestGateLock({
+			repoRoot: root,
+			owner: { pid: 41, tier: "unit", cwd: path.join(root, "first") },
+			output: () => {},
+		});
+		const secondLockPromise = acquireTestGateLock({
+			repoRoot: root,
+			owner: { pid: 42, tier: "db", cwd: path.join(root, "second") },
+			timeoutMs: 2_000,
+			retryDelayMs: 10,
+			output: reportWaiting,
+		}).then((lock) => {
+			secondLock = lock;
+			return lock;
+		});
+		const outcome = await Promise.race([
+			waiting.then(() => "waiting"),
+			secondLockPromise.then(() => "acquired"),
+			new Promise((resolve) => setTimeout(() => resolve("timed-out"), 1_000)),
+		]);
+		assert.equal(outcome, "waiting");
+
+		await firstLock.release();
+		firstLock = undefined;
+		await secondLockPromise;
+		assert.ok(secondLock.port >= 49_152);
+	} finally {
+		await secondLock?.release();
+		await firstLock?.release();
+		fs.rmSync(root, { recursive: true, force: true });
+	}
+});
+
+test("test gate lock skips ports denied at bind time", async () => {
+	const root = fs.mkdtempSync(path.join(os.tmpdir(), "test-gate-bind-denied-"));
+	const attemptedPorts = [];
+	try {
+		const lock = await acquireTestGateLock({
+			repoRoot: root,
+			owner: { pid: 99, tier: "unit", cwd: root },
+			probeCandidatesImpl: async (ports) =>
+				ports.map((port) => ({ port, result: "available" })),
+			listenImpl: async (port) => {
+				attemptedPorts.push(port);
+				if (attemptedPorts.length === 1) {
+					throw Object.assign(new Error("bind denied"), { code: "EACCES" });
+				}
+				return { port, release: async () => {} };
+			},
+			output: () => {},
+		});
+
+		assert.equal(attemptedPorts.length, 2);
+		assert.notEqual(attemptedPorts[0], attemptedPorts[1]);
+		assert.equal(lock.port, attemptedPorts[1]);
+		await lock.release();
+	} finally {
+		fs.rmSync(root, { recursive: true, force: true });
+	}
+});
+
 test("test gate lock timeout uses a distinct temporary-failure exit code", async () => {
 	const root = fs.mkdtempSync(path.join(os.tmpdir(), "test-gate-timeout-"));
 	let now = 0;

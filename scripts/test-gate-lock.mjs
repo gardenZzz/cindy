@@ -12,6 +12,7 @@ const PROBE_TIMEOUT_MS = 1_000;
 const RETRY_DELAY_MS = 500;
 const WAIT_REPORT_INTERVAL_MS = 60_000;
 const HEAVY_TEST_TIERS = new Set(["unit", "db", "git-integration"]);
+const BIND_DENIED_ERROR_CODES = new Set(["EACCES", "EPERM"]);
 
 export const TEST_GATE_LOCK_TIMEOUT_EXIT_CODE = 75;
 export const DEFAULT_TEST_GATE_LOCK_TIMEOUT_MS = 15 * 60_000;
@@ -245,9 +246,14 @@ export async function acquireTestGateLock({
 	});
 	const startedAt = now();
 	let lastReportAt = Number.NEGATIVE_INFINITY;
+	const bindDeniedPorts = new Set();
 
 	while (true) {
-		const probes = await probeCandidatesImpl(ports, identity);
+		const probes = (await probeCandidatesImpl(ports, identity)).map((probe) =>
+			bindDeniedPorts.has(probe.port)
+				? { port: probe.port, result: "collision" }
+				: probe,
+		);
 		const decision = decideTestGateLock(probes);
 		if (decision.type === "unavailable") {
 			throw new Error(
@@ -258,6 +264,10 @@ export async function acquireTestGateLock({
 			try {
 				return await listenImpl(decision.port, banner);
 			} catch (error) {
+				if (BIND_DENIED_ERROR_CODES.has(error?.code)) {
+					bindDeniedPorts.add(decision.port);
+					continue;
+				}
 				if (error?.code !== "EADDRINUSE") throw error;
 				const waitedMs = now() - startedAt;
 				if (waitedMs >= timeoutMs) throw createTimeoutError(waitedMs);
