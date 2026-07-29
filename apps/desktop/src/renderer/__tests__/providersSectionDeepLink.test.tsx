@@ -144,6 +144,17 @@ beforeEach(() => {
     maker: {
       scanLocalCli: vi.fn(async () => ({ detections: [] })),
       requestProviderModelsAutoRefresh: vi.fn(async () => ({ ok: true })),
+      agent: {
+        getCursorBinaryStatus: vi.fn(async () => ({ installed: false })),
+      },
+      auth: {
+        getState: vi.fn(async () => ({ authenticated: false })),
+        triggerLogin: vi.fn(),
+        cancelLogin: vi.fn(),
+        logout: vi.fn(),
+        onStateChanged: vi.fn(() => () => undefined),
+        onLoginProgress: vi.fn(() => () => undefined),
+      },
     },
   };
 });
@@ -249,6 +260,17 @@ describe('ProvidersSection — 深链定位', () => {
         providerOAuthLogin,
         providerOAuthCancel,
         onProviderOAuthProgress,
+        agent: {
+          getCursorBinaryStatus: vi.fn(async () => ({ installed: false })),
+        },
+        auth: {
+          getState: vi.fn(async () => ({ authenticated: false })),
+          triggerLogin: vi.fn(),
+          cancelLogin: vi.fn(),
+          logout: vi.fn(),
+          onStateChanged: vi.fn(() => () => undefined),
+          onLoginProgress: vi.fn(() => () => undefined),
+        },
       },
     };
 

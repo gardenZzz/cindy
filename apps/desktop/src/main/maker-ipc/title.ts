@@ -18,7 +18,7 @@ import { ipcMain } from 'electron';
 import { eq } from 'drizzle-orm';
 
 import { connectedProvidersForAgent, type ProviderView } from '@cindy/model-providers';
-import type { AgentKind } from '@cindy/maker-core';
+import { CURSOR_ONESHOT_DEFAULT_MODEL, type AgentKind } from '@cindy/maker-core';
 
 import { getDbClient } from '../localDb/client/current.js';
 import { sessions } from '../localDb/schema.js';
@@ -97,6 +97,9 @@ async function listConnectedProvidersForAgent(agentKind: AgentKind): Promise<Pro
 /**
  * 给某会话起标题。`sessionId` 用于读 DB 显式来源(race-free);空串 = 走 WYSIWYG 默认。
  * 失败统一返回 null(调用方回落启发式),不抛。
+ *
+ * Cursor 不走 Cindy provider catalog HTTP oneShot，改走 agent.oneShot
+ * （headless `cursor-agent -p` + 便宜模型）。
  */
 export async function generateMakerSessionTitle(
   message: string,
@@ -107,6 +110,9 @@ export async function generateMakerSessionTitle(
   // "请提供用户消息内容"式回复当标题返回。直接放弃,调用方保留默认名。
   const trimmed = message.trim();
   if (!trimmed) return null;
+  if (agentKind === 'cursor') {
+    return generateCursorSessionTitle(TITLE_PROMPT_TEMPLATE(trimmed));
+  }
   return generateTitleViaProvider(
     {
       sessionId: sessionId ?? '',
@@ -119,6 +125,29 @@ export async function generateMakerSessionTitle(
     },
   );
 }
+
+async function generateCursorSessionTitle(prompt: string): Promise<string | null> {
+  try {
+    // 动态 import：避免 title.ts 静态拉起整个 maker-host（electron mock 不全的单测会炸）。
+    const { getMakerIfReady } = await import('../maker-host/index.js');
+    const maker = getMakerIfReady();
+    if (!maker || !maker.listAvailableAgents().includes('cursor')) return null;
+    const text = await maker.oneShot('cursor', prompt, {
+      model: CURSOR_ONESHOT_DEFAULT_MODEL,
+      timeoutMs: TITLE_TIMEOUT_MS_CURSOR,
+    });
+    const title = text.trim().slice(0, 40);
+    return title || null;
+  } catch (err) {
+    log.debug('cursor title oneShot failed (swallowed)', {
+      error: err instanceof Error ? err.message : String(err),
+    });
+    return null;
+  }
+}
+
+/** Cursor headless 起标题超时（略宽于 HTTP 通路，CLI 冷启动更慢）。 */
+const TITLE_TIMEOUT_MS_CURSOR = 30_000;
 
 /** regenerate 的依赖注入面——单测用内存实现替换 DB / LLM 调用。 */
 export interface RegenerateTitleDeps {
@@ -137,20 +166,24 @@ async function readSessionAgentKindFromDb(sessionId: string): Promise<AgentKind 
     .where(eq(sessions.id, sessionId))
     .limit(1);
   if (!row) return null;
-  return row.agentKind === 'codex' ? 'codex' : 'claude-code';
+  if (row.agentKind === 'codex') return 'codex';
+  if (row.agentKind === 'cursor') return 'cursor';
+  return 'claude-code';
 }
 
 const defaultRegenerateDeps: RegenerateTitleDeps = {
   readSessionAgentKind: readSessionAgentKindFromDb,
   collectMaterial: regenerateTitleMaterial,
-  generateTitle: (sessionId, agentKind, prompt) =>
-    generateTitleViaProvider(
+  generateTitle: async (sessionId, agentKind, prompt) => {
+    if (agentKind === 'cursor') return generateCursorSessionTitle(prompt);
+    return generateTitleViaProvider(
       { sessionId, agentKind, prompt },
       {
         readSessionProviderId: readSessionProviderIdFromDb,
         listConnectedProviders: listConnectedProvidersForAgent,
       },
-    ),
+    );
+  },
 };
 
 /**

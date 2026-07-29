@@ -9,6 +9,7 @@
  *     session/cancel 真停；tool-call 不活动超时；dispose/close 无孤儿进程。
  * T6: cursor/create_plan → plan_review；cursor/ask_question → ask_user_question；
  *     cursor/update_todos → update_plan todo 卡；session/set_mode(plan) ↔ planMode。
+ * T7: AuthAdapter（status/login/logout）+ headless oneShot（起标题等）。
  *
  * 按 ADR:
  *  - 不注入任何 Cindy system prompt / makerMemory / userPrompt
@@ -20,8 +21,11 @@
 
 import {
   BaseAgent,
+  AgentNotAuthenticatedError,
+  OneShotError,
   type AgentDeps,
   type AgentSessionHandle,
+  type OneShotOptions,
   type SendOptions,
   type StartSessionOptions,
 } from '../base-agent.js';
@@ -100,6 +104,7 @@ import {
   toCursorProductModelId,
   type CursorListedModel,
 } from './models.js';
+import { CURSOR_ONESHOT_DEFAULT_MODEL, runCursorOneShot } from './oneShot.js';
 
 const UNSUPPORTED = {
   rewind: {
@@ -289,9 +294,69 @@ export class CursorAgent extends BaseAgent {
     );
   }
 
+  /**
+   * headless oneShot：`cursor-agent -p --output-format text` + 便宜模型。
+   * 供起标题等辅助任务；与 ACP 会话通道正交。
+   */
+  async oneShot(prompt: string, opts?: OneShotOptions): Promise<string> {
+    const log = this.deps.logger.child('cursor/oneShot');
+    const model = opts?.model ?? CURSOR_ONESHOT_DEFAULT_MODEL;
+    const timeoutMs = opts?.timeoutMs ?? 30_000;
+    if (opts?.maxTokens !== undefined) {
+      log.warn(`maxTokens=${opts.maxTokens} ignored — cursor-agent -p has no max_tokens flag`);
+    }
+
+    const authState = await this.deps.auth.getState();
+    if (!authState.authenticated) {
+      throw new AgentNotAuthenticatedError(
+        'cursor',
+        `cursor not authenticated: ${authState.errorReason ?? 'no_credentials'}`,
+      );
+    }
+
+    const startedAt = Date.now();
+    try {
+      const text = await runCursorOneShot({
+        binaryPath: this.deps.binaryPath,
+        prompt,
+        model,
+        timeoutMs,
+        signal: opts?.signal,
+      });
+      log.info('oneShot done', {
+        model,
+        elapsedMs: Date.now() - startedAt,
+        chars: text.length,
+      });
+      return text;
+    } catch (err) {
+      if (err instanceof AgentNotAuthenticatedError || err instanceof OneShotError) throw err;
+      if (opts?.signal?.aborted) throw err;
+      log.error('oneShot failed', {
+        model,
+        elapsedMs: Date.now() - startedAt,
+        error: err instanceof Error ? err.message : String(err),
+      });
+      throw new OneShotError(
+        'malformed',
+        err instanceof Error ? err.message : String(err),
+      );
+    }
+  }
+
   async startSession(opts: StartSessionOptions): Promise<AgentSessionHandle> {
     // ADR: 不消费 userPrompt / makerMemoryEnabled / runtimeConfig.systemPrompt。
     const log = this.deps.logger.child('cursor-agent');
+
+    // Auth gate：未登录直接拒，给出可读 reason（no_credentials），不 spawn ACP。
+    const authState = await this.deps.auth.getState();
+    if (!authState.authenticated) {
+      throw new AgentNotAuthenticatedError(
+        'cursor',
+        `cursor not authenticated: ${authState.errorReason ?? 'no_credentials'}`,
+      );
+    }
+
     const eventQueue: AsyncQueue<AgentEvent> = createAsyncQueue();
     const usageTracker = new UsageTracker();
     const rt = newAcpRuntime();

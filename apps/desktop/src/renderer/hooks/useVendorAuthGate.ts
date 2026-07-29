@@ -219,12 +219,12 @@ export function useVendorAuthGate(): UseVendorAuthGateReturn {
         return { proceed: false };
       }
 
-      // Cursor:不走 provider 来源门禁；只看本机 cursor-agent 是否已装（登录属 T7）。
+      // Cursor:本机二进制 + cursor-agent 登录态（不走 Cindy provider 目录）。
       if (vendor === 'cursor') {
         if (options?.deviceId) {
           await confirm({
             title: t('settings.providers.cursor.title'),
-            description: t('settings.providers.cursor.missingDescription'),
+            description: t('settings.providers.cursor.authRequiredDescription'),
             confirmText: t('logic.confirm.gotIt'),
             showCancel: false,
             autoFocusConfirm: true,
@@ -237,10 +237,27 @@ export function useVendorAuthGate(): UseVendorAuthGateReturn {
         } catch {
           installed = false;
         }
-        if (installed) return { proceed: true };
+        if (!installed) {
+          const ok = await confirm({
+            title: t('settings.providers.cursor.title'),
+            description: t('settings.providers.cursor.missingDescription'),
+            confirmText: t('logic.confirm.goToSettings'),
+            cancelText: t('logic.confirm.cancel'),
+            autoFocusConfirm: true,
+          });
+          if (ok) navigate('/settings?tab=providers');
+          return { proceed: false };
+        }
+        let authenticated = false;
+        try {
+          authenticated = (await window.electronAPI.maker.auth.getState('cursor')).authenticated;
+        } catch {
+          authenticated = false;
+        }
+        if (authenticated) return { proceed: true };
         const ok = await confirm({
-          title: t('settings.providers.cursor.title'),
-          description: t('settings.providers.cursor.missingDescription'),
+          title: t('settings.providers.cursor.authRequiredTitle'),
+          description: t('settings.providers.cursor.authRequiredDescription'),
           confirmText: t('logic.confirm.goToSettings'),
           cancelText: t('logic.confirm.cancel'),
           autoFocusConfirm: true,

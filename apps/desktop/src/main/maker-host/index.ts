@@ -17,7 +17,6 @@ import {
   CursorAgent,
   configureDefaultImageResizer,
 } from '@cindy/maker-core';
-import type { AuthAdapter } from '@cindy/maker-core';
 import {
   getActiveCatalog,
   getActiveCatalogRevision,
@@ -50,6 +49,7 @@ import { remoteInvoke } from '../device-link/index.js';
 import { WorktreePool } from '../worktree/index.js';
 import { getReadyBinaryPath, getCachedBinaryStatus } from '../agent-binaries/index.js';
 import { discoverCursorAgentBinarySync } from './cursor-binary-discovery.js';
+import { createDesktopCursorAuthAdapter } from './cursor-auth-adapter.js';
 import {
   desktopClaudeAuthAdapter,
   desktopCodexAuthAdapter,
@@ -644,11 +644,14 @@ export function getMaker(): Maker {
     _codexAgent = codexAgent;
 
     // Cursor:用户自装二进制,探测不到就不注册(全程可选,不影响既有 agent)。
-    // auth 走本机 cursor_login(T7);T2 stub 恒 authenticated,不挡 session/new。
+    // auth 走本机 cursor_login（Keychain；Cindy 不落盘凭证）。
     const cursorBinary = discoverCursorAgentBinarySync();
-    const cursorAgent = cursorBinary.installed
+    const cursorAuth = cursorBinary.installed
+      ? createDesktopCursorAuthAdapter({ binaryPath: cursorBinary.binaryPath })
+      : null;
+    const cursorAgent = cursorBinary.installed && cursorAuth
       ? new CursorAgent({
-          auth: createCursorAuthStub(),
+          auth: cursorAuth,
           runtimeConfig: desktopCursorRuntimeConfig,
           binaryPath: cursorBinary.binaryPath,
           logger: desktopMakerLogger,
@@ -1093,16 +1096,6 @@ export async function softCloseCcSessionsForHost(
 export async function shutdownLspServerPool(): Promise<void> {
   await lspPool?.shutdown();
   lspPool = null;
-}
-
-/** T2: Cursor 登录属 T7；session/new 复用本机 cursor_login，stub 不挡最小回路。 */
-function createCursorAuthStub(): AuthAdapter {
-  return {
-    getState: async () => ({ authenticated: true }),
-    triggerLogin: async () => ({ authenticated: true }),
-    logout: async () => undefined,
-    getAuthEnv: async () => ({}),
-  };
 }
 
 // re-exports for IPC layer

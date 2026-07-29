@@ -420,4 +420,29 @@ describe('CursorAgent lifecycle (FakeTransport)', () => {
     await consume;
     vi.unstubAllEnvs();
   });
+
+  it('startSession throws AgentNotAuthenticatedError when auth is missing', async () => {
+    const { AgentNotAuthenticatedError } = await import('../base-agent.js');
+    const agent = new CursorAgent({
+      auth: {
+        getState: async () => ({ authenticated: false, errorReason: 'no_credentials' }),
+        triggerLogin: async () => ({ authenticated: false }),
+        logout: async () => undefined,
+        getAuthEnv: async () => ({}),
+      },
+      runtimeConfig: {},
+      binaryPath: '/dev/null/cursor-agent',
+      logger: createConsoleLogger(),
+    });
+    await expect(
+      agent.startSession({
+        workingDir: '/tmp',
+        vendorOptions: {
+          createAcpTransport: () => {
+            throw new Error('should not spawn when unauthenticated');
+          },
+        },
+      }),
+    ).rejects.toBeInstanceOf(AgentNotAuthenticatedError);
+  });
 });
