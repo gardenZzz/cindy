@@ -76,15 +76,25 @@ function listCursorAcpProcesses(): string {
   }
 }
 
-function createAgent(): CursorAgent {
+/**
+ * userDataPath 必须由调用方传入并在同一场景内复用：上游把 ACP 会话落在
+ * `$CURSOR_CONFIG_DIR/acp-sessions/<id>/`，而 CURSOR_CONFIG_DIR 由
+ * userDataPath + 业务 sessionId 决定。resume 用例前后两个 agent 若各自
+ * mkdtemp，session/load 必然 not found 并静默退化成 fresh create——断言
+ * 就成了摆设。生产上该值是 app.getPath('userData')，跨 agent 实例稳定。
+ */
+function createAgent(userDataPath: string): CursorAgent {
   return new CursorAgent({
     auth: createAuthStub(),
-    runtimeConfig: {
-      userDataPath: mkdtempSync(path.join(tmpdir(), 'cindy-cursor-e2e-')),
-    },
+    runtimeConfig: { userDataPath },
     binaryPath: resolveCursorBinary()!,
     logger: createConsoleLogger('cursor-acp-e2e'),
   });
+}
+
+/** 每个用例一个隔离根；同一用例内的多个 agent 复用它。 */
+function createUserDataRoot(): string {
+  return mkdtempSync(path.join(tmpdir(), 'cindy-cursor-e2e-'));
 }
 
 describe.skipIf(!ENABLED)('Cursor ACP e2e (opt-in, billed)', () => {
@@ -112,7 +122,8 @@ describe.skipIf(!ENABLED)('Cursor ACP e2e (opt-in, billed)', () => {
   it('streams assistant text for a short prompt and closes cleanly', async () => {
     expect(binaryPath, 'cursor-agent binary not found').toBeTruthy();
 
-    const agent = createAgent();
+    const userDataRoot = createUserDataRoot();
+    const agent = createAgent(userDataRoot);
     const handle = await agent.startSession({
       sessionId: `cursor-e2e-${Date.now()}`,
       model: 'auto',
@@ -152,6 +163,15 @@ describe.skipIf(!ENABLED)('Cursor ACP e2e (opt-in, billed)', () => {
       content: 'Reply with exactly one word: pong',
     });
 
+    // send() 只负责派发 prompt 就返回（后台任务跑 RPC）——这是 #9 归还 Session
+    // reservation 的前提。因此不能 send 完立刻 close，否则会在终态 status/done
+    // 到达前拆掉事件流，sawStopped / sawDone 永远为 false。
+    const deadline = Date.now() + 120_000;
+    while (!sawDone && Date.now() < deadline) {
+      await new Promise((r) => setTimeout(r, 100));
+    }
+    expect(sawDone, 'turn did not reach done within 120s').toBe(true);
+
     await handle.close();
     closers.length = 0;
     await consume;
@@ -174,7 +194,9 @@ describe.skipIf(!ENABLED)('Cursor ACP e2e (opt-in, billed)', () => {
     const before = countCursorAcpProcesses();
     const bizId = `cursor-e2e-resume-${Date.now()}`;
 
-    const agent1 = createAgent();
+    // agent1 / agent2 共用同一 userDataRoot —— resume 的前提就是 CURSOR_CONFIG_DIR 一致。
+    const userDataRoot = createUserDataRoot();
+    const agent1 = createAgent(userDataRoot);
     const handle1 = await agent1.startSession({
       sessionId: bizId,
       model: 'auto',
@@ -212,7 +234,7 @@ describe.skipIf(!ENABLED)('Cursor ACP e2e (opt-in, billed)', () => {
     await consume1;
 
     // Resume on a fresh process — same Cindy business sessionId → same CURSOR_CONFIG_DIR.
-    const agent2 = createAgent();
+    const agent2 = createAgent(userDataRoot);
     const handle2 = await agent2.startSession({
       sessionId: bizId,
       model: 'auto',
