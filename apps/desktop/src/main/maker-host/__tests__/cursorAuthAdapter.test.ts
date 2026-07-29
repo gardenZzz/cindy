@@ -2,6 +2,16 @@ import { EventEmitter } from 'node:events';
 import type { ChildProcess } from 'node:child_process';
 import { describe, expect, it, vi } from 'vitest';
 
+const spawnMock = vi.hoisted(() => vi.fn());
+
+vi.mock('node:child_process', async () => {
+  const actual = await vi.importActual<typeof import('node:child_process')>('node:child_process');
+  return {
+    ...actual,
+    spawn: (...args: unknown[]) => spawnMock(...args),
+  };
+});
+
 import {
   createDesktopCursorAuthAdapter,
   extractCursorLoginUrlForTest,
@@ -261,5 +271,104 @@ describe('DesktopCursorAuthAdapter', () => {
 
     expect(order).toEqual(['kill', 'logout', 'logout-done']);
     expect(killTree).toHaveBeenCalled();
+  });
+
+  /**
+   * 修复前会失败：timeout 立刻 settle() 清空 activeLogin，logout 看到 null 直接跑
+   * cursor logout，不等 killTree onSettled。本测用延迟 onSettled 制造窗口。
+   */
+  it('after login timeout, logout waits until killTree onSettled (not race ahead)', async () => {
+    const { child } = hangingLoginChild({ killIgnoresClose: true });
+    const pendingOnSettled: Array<() => void> = [];
+    const order: string[] = [];
+    const killTree = vi.fn((_pid: number | undefined, _proc: ChildProcess, onSettled?: () => void) => {
+      order.push('kill-started');
+      if (onSettled) pendingOnSettled.push(onSettled);
+      // 故意不立刻 onSettled：模拟 Windows taskkill 重试/后代兜底仍在进行
+    });
+    const runCommand = vi.fn(async (args: string[]) => {
+      if (args[0] === 'logout') {
+        order.push('logout-cli');
+        return { stdout: '', stderr: '', code: 0 };
+      }
+      return {
+        stdout: JSON.stringify({ isAuthenticated: false }),
+        stderr: '',
+        code: 0,
+      };
+    });
+
+    const adapter = createDesktopCursorAuthAdapter({
+      binaryPath: '/fake/cursor-agent',
+      spawnProcess: () => child,
+      runCommand,
+      loginTimeoutMs: 30,
+      forceSettleMs: 5_000,
+      killProcessTree: killTree,
+    });
+
+    const state = await adapter.triggerLogin();
+    expect(state.authenticated).toBe(false);
+    expect(killTree).toHaveBeenCalled();
+    order.push('login-returned');
+
+    let logoutFinished = false;
+    const logoutPromise = adapter.logout().then(() => {
+      logoutFinished = true;
+      order.push('logout-done');
+    });
+
+    // 让 logout 的 cancel/wait 挂上；此时 kill 尚未 onSettled，不得抢跑 logout CLI
+    await Promise.resolve();
+    await Promise.resolve();
+    expect(logoutFinished).toBe(false);
+    expect(order).not.toContain('logout-cli');
+
+    // 收口：先完成 killTree，再 close 释放 reservation（forceSettleMs 故意设大，不靠它）
+    for (const cb of pendingOnSettled.splice(0)) cb();
+    child.emit('close', null);
+
+    await logoutPromise;
+    expect(logoutFinished).toBe(true);
+    expect(order).toEqual([
+      'kill-started',
+      'login-returned',
+      'kill-started', // logout→cancelLogin 再次 terminate
+      'logout-cli',
+      'logout-done',
+    ]);
+  });
+
+  /**
+   * 修复前会失败：默认 spawn 未设 detached，POSIX 下 kill(-pid) 打不中进程组。
+   */
+  it('default spawnProcess sets detached for process-group kill contract', async () => {
+    const { child } = hangingLoginChild();
+    spawnMock.mockReset();
+    spawnMock.mockReturnValue(child);
+
+    const adapter = createDesktopCursorAuthAdapter({
+      binaryPath: '/fake/cursor-agent',
+      // 不注入 spawnProcess，走构造函数默认实现
+      runCommand: async () => ({
+        stdout: JSON.stringify({ isAuthenticated: false }),
+        stderr: '',
+        code: 0,
+      }),
+      loginTimeoutMs: 60_000,
+      killProcessTree: (_pid, proc, onSettled) => {
+        proc.kill('SIGKILL');
+        onSettled?.();
+      },
+    });
+
+    const loginPromise = adapter.triggerLogin();
+    await Promise.resolve();
+    expect(spawnMock).toHaveBeenCalled();
+    const spawnOpts = spawnMock.mock.calls[0]?.[2] as { detached?: boolean };
+    expect(spawnOpts.detached).toBe(process.platform !== 'win32');
+
+    child.emit('close', 0);
+    await loginPromise;
   });
 });
