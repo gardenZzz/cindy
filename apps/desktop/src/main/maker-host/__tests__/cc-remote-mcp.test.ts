@@ -108,6 +108,29 @@ describe('buildCcRemoteHttpMcpServers', () => {
     expect(needsFreshStart).toBeFalsy();
   });
 
+  it('unregisters the stale session ctx when collab is disabled (R26 P2: no leftover auth route)', async () => {
+    // 此前注入注册过 ctx 的 session, collab 禁用后 build 必须摘掉它 —
+    // 否则 ?session=<id> 的授权路由在禁用后仍可用到 bridge 关闭。
+    const { bridge, registered } = fakeBridge();
+    registered.set('s-disable', { sessionId: 's-disable', agentKind: 'claude-code', vendorOptions: {} });
+    const { servers, fingerprint } = await buildCcRemoteHttpMcpServers(
+      { host: HOST, sessionId: 's-disable', workingDir: '/remote/repo' },
+      {
+        ensureBridgeStarted: async () => ({
+          port: 38080,
+          serverNames: ['cindy_orca', 'orca_worker_bridge'],
+          bridge,
+        }),
+        ensureForward: vi.fn(async () => 47921),
+        getBridgeToken: async () => 'persistent-test-token',
+        isCollabEnabled: () => false,
+      },
+    );
+    expect(servers).toEqual({});
+    expect(fingerprint).toBe('disabled');
+    expect(registered.has('s-disable')).toBe(false); // 旧 ctx 已摘
+  });
+
   it('returns a generation fingerprint on successful injection, and the disabled constant when gated off (R23 P2)', async () => {
     const { bridge } = fakeBridge();
     const injected = await buildCcRemoteHttpMcpServers(

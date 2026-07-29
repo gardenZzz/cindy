@@ -149,6 +149,11 @@ export async function buildCcRemoteHttpMcpServers(
     // 无注入也是一代 (collab 禁用 / 白名单空):指纹常量 'disabled',
     // 开→关的重启后 drift 判定成立 (R23 P2);不含 instanceId, 一直禁用
     // 的健康 query 不被误判。
+    // 禁用必须同时摘掉本 session 在 bridge 上的旧 ctx (此前注入注册):
+    // 不摘的话 ?session=<id> 的授权路由在 collab 已禁用后仍可用, 直到
+    // bridge 关闭 (codex-connector R26 P2)。token 轮换/失效不需要这里
+    // 清 — 鉴权层已按新 token 拒旧请求。
+    started.bridge.unregisterSessionCtx(args.sessionId);
     return { ...empty, fingerprint: CC_MCP_DISABLED_FINGERPRINT };
   }
   const remotePort = await deps.ensureForward(args.host, started.port);
