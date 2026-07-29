@@ -2397,7 +2397,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
   // payload 形态在 vite-env.d.ts 上声明:
   //   - { type: 'session', id, messageClientId? } : 跳路由到指定 session(可带消息锚点)
   //   - { type: 'project', workingDir }    : 聚焦已有 project 节点
-  //   - { type: 'new-session', workingDir }: 新建对话且预填 workingDir (右键 "通过 XDMaker 打开")
+  //   - { type: 'new-session', workingDir }: 新建对话且预填 workingDir (右键 "通过 Cindy 打开")
   //   - { type: 'share-import', filePath } : 打开 .cshare/.xdtshare 会话导入向导
   onDeepLinkNavigate: (
     callback: (
