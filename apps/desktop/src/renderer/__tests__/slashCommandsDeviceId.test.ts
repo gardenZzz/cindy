@@ -48,18 +48,18 @@ describe('loadAllCommands deviceId', () => {
     expect(cmds.map((x) => x.name).sort()).toEqual(['compact', 'goal', 'help', 'localskill']);
   });
 
-  it('本地 Claude 新对话无 workingDir 时仍加载全局 skills', async () => {
+  it('本地 Claude 新对话 workingDir=null 时仍加载全局 skills', async () => {
     const s = stubElectron();
-    const cmds = await loadAllCommands('claude-code', undefined);
+    const cmds = await loadAllCommands('claude-code', null);
 
     expect(s.invoke).not.toHaveBeenCalled();
     expect(s.listAgentSkills).toHaveBeenCalledWith('claude-code', {});
     expect(cmds.some((x) => x.name === 'localskill')).toBe(true);
   });
 
-  it('SSH remote 用 null 显式关闭控制端本机 skill 扫描', async () => {
+  it('SSH remote 用 skipAgentSkills 显式关闭控制端本机 skill 扫描', async () => {
     const s = stubElectron();
-    const cmds = await loadAllCommands('claude-code', null);
+    const cmds = await loadAllCommands('claude-code', null, { skipAgentSkills: true });
 
     expect(s.listAgentSkills).not.toHaveBeenCalled();
     expect(s.invoke).not.toHaveBeenCalledWith(
@@ -70,9 +70,9 @@ describe('loadAllCommands deviceId', () => {
     expect(cmds.some((x) => x.kind === 'agent-skill')).toBe(false);
   });
 
-  it('本地 Codex 新对话无 workingDir 时保持不请求 skills/list', async () => {
+  it('本地 Codex 新对话 workingDir=null 时保持不请求 skills/list', async () => {
     const s = stubElectron();
-    const cmds = await loadAllCommands('codex', undefined);
+    const cmds = await loadAllCommands('codex', null);
 
     expect(s.listAgentSkills).not.toHaveBeenCalled();
     expect(cmds.some((x) => x.kind === 'agent-skill')).toBe(false);
@@ -97,9 +97,9 @@ describe('loadAllCommands deviceId', () => {
     expect(cmds.some((x) => x.name === 'goal')).toBe(true);
   });
 
-  it('device-link Claude 新对话无 workingDir 时从被控端加载全局 skills', async () => {
+  it('device-link Claude 新对话 workingDir=null 时从被控端加载全局 skills', async () => {
     const s = stubElectron();
-    const cmds = await loadAllCommands('claude-code', undefined, undefined, 'dev-1');
+    const cmds = await loadAllCommands('claude-code', null, undefined, 'dev-1');
 
     expect(s.listAgentSkills).not.toHaveBeenCalled();
     expect(s.invoke).toHaveBeenCalledWith('dev-1', 'maker:list-agent-skills', [
