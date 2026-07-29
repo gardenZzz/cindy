@@ -398,8 +398,14 @@ export class CursorAgent extends BaseAgent {
     let interactionResolver: InteractionResolver | null = null;
     let closed = false;
     let turnInFlight = false;
-    /** 本 turn 已由 abort / tool-idle 推过终态，send() 收尾跳过二次 done/error。 */
-    let turnFinalizedExternally = false;
+    /**
+     * Per-turn generation token。每次 send 递增；abort / watchdog / prompt 收尾
+     * 只有持有当前 active token 才能改状态、清 watchdog、发 done/status。
+     * 晚到的旧轮响应一律丢弃，避免污染下一轮。
+     */
+    let turnGeneration = 0;
+    /** 已由 abort / tool-idle 推过终态的 generation；同 token 的 prompt 收尾跳过二次 done/error。 */
+    let lastFinalizedGeneration = 0;
     let sessionId = '';
     let mutablePermissionMode = normalizeCursorPermissionMode(opts.permissionMode);
     /** UI 武装态：send 消耗后熄灭；ACP 侧 sticky plan 另用 acpInPlanMode。 */
@@ -442,11 +448,12 @@ export class CursorAgent extends BaseAgent {
     const toolIdle: ToolIdleWatchdog = createToolIdleWatchdog({
       idleMs: resolveCursorToolIdleMs(process.env),
       onTimeout: ({ idleMs, pendingToolIds }) => {
-        if (closed || !turnInFlight || turnFinalizedExternally) return;
+        if (closed || !turnInFlight || lastFinalizedGeneration === turnGeneration) return;
         log.warn('cursor tool-call idle watchdog tripped', {
           idleMs,
           pendingToolIds,
           sessionId,
+          turnGeneration,
         });
         void finalizeTurnCancel({
           reason: 'tool_call_idle_timeout',
@@ -934,11 +941,22 @@ export class CursorAgent extends BaseAgent {
       reason: 'user_abort' | 'tool_call_idle_timeout';
       errorMessage?: string;
     }): Promise<void> => {
-      if (closed || turnFinalizedExternally) return;
-      turnFinalizedExternally = true;
+      if (closed) return;
+      const token = turnGeneration;
+      if (!turnInFlight || lastFinalizedGeneration === token) return;
+      // 同步收口：在任何 await 之前固定本 token，防止 B 轮抢跑后本轮再清 watchdog / 发 done。
+      lastFinalizedGeneration = token;
       turnInFlight = false;
       toolIdle.clear();
       dismissAllPending(optsCancel.reason, 'deny');
+      if (token !== turnGeneration) {
+        log.debug('skipping finalize events; newer turn already active', {
+          token,
+          turnGeneration,
+          reason: optsCancel.reason,
+        });
+        return;
+      }
       if (optsCancel.errorMessage) {
         pushAll([
           {
@@ -960,6 +978,52 @@ export class CursorAgent extends BaseAgent {
       } catch (e) {
         log.warn('session/cancel failed', { message: (e as Error).message, reason: optsCancel.reason });
       }
+    };
+
+    /**
+     * session/prompt 后台收尾。与 send() 解耦：send 在请求发出后即返回（对齐
+     * Claude/Codex「accept 后靠 isTurnRunning 管 reservation」契约）；晚到的旧
+     * generation 响应不得清 watchdog、改 turnInFlight 或发 done/status。
+     */
+    const settlePromptTurn = (
+      token: number,
+      promptPromise: Promise<PromptResponse>,
+    ): void => {
+      void (async () => {
+        try {
+          const response = await promptPromise;
+          if (token !== turnGeneration || closed) {
+            log.debug('discarding stale cursor prompt response', {
+              token,
+              turnGeneration,
+              closed,
+            });
+            return;
+          }
+          if (lastFinalizedGeneration === token) {
+            log.debug('cursor prompt response after external finalize', { token });
+            return;
+          }
+          toolIdle.clear();
+          pushAll(finishPromptTurn(response ?? { stopReason: 'end_turn' }, translateCtx));
+        } catch (e) {
+          if (token !== turnGeneration || closed || lastFinalizedGeneration === token) {
+            log.debug('discarding stale cursor prompt error', {
+              token,
+              turnGeneration,
+              closed,
+              finalized: lastFinalizedGeneration === token,
+            });
+            return;
+          }
+          toolIdle.clear();
+          pushAll(translateAcpError(e as Error, translateCtx));
+        } finally {
+          if (token === turnGeneration) {
+            turnInFlight = false;
+          }
+        }
+      })();
     };
 
     const applyInitialModelConfig = async () => {
@@ -1156,7 +1220,7 @@ export class CursorAgent extends BaseAgent {
       if (closed) return;
       closed = true;
       turnInFlight = false;
-      turnFinalizedExternally = true;
+      lastFinalizedGeneration = turnGeneration;
       toolIdle.clear();
       dismissAllPending('session_closed', 'deny');
       await client.close({ reason: 'CursorAgentSession.close()' });
@@ -1188,8 +1252,9 @@ export class CursorAgent extends BaseAgent {
           throw new Error('Cursor send: empty prompt');
         }
 
+        turnGeneration += 1;
+        const token = turnGeneration;
         turnInFlight = true;
-        turnFinalizedExternally = false;
         usageTracker.beginTurn();
         resetAcpTurn(rt);
         toolIdle.clear();
@@ -1216,6 +1281,13 @@ export class CursorAgent extends BaseAgent {
           }
         }
 
+        if (closed || sendOpts?.signal?.aborted || token !== turnGeneration) {
+          if (token === turnGeneration) {
+            turnInFlight = false;
+          }
+          throw new Error('Cursor send cancelled before acceptance');
+        }
+
         pushAll([
           {
             type: 'status',
@@ -1228,29 +1300,13 @@ export class CursorAgent extends BaseAgent {
           },
         ]);
 
-        try {
-          const response = await client.request<PromptResponse>(Method.SessionPrompt, {
-            sessionId,
-            prompt,
-          });
-          if (turnFinalizedExternally) {
-            // abort / tool-idle 已推终态；上游 cancelled 响应只做清场。
-            toolIdle.clear();
-            return;
-          }
-          toolIdle.clear();
-          pushAll(finishPromptTurn(response ?? { stopReason: 'end_turn' }, translateCtx));
-        } catch (e) {
-          if (turnFinalizedExternally || closed) {
-            toolIdle.clear();
-            return;
-          }
-          const err = e as Error;
-          toolIdle.clear();
-          pushAll(translateAcpError(err, translateCtx));
-        } finally {
-          turnInFlight = false;
-        }
+        // 与 Claude/Codex 对齐：send() 只表示 accept，不等整轮 session/prompt。
+        // Session 靠 isTurnRunning() 持有产品层 busy；abort/watchdog 翻 false 后即可发下一轮。
+        const promptPromise = client.request<PromptResponse>(Method.SessionPrompt, {
+          sessionId,
+          prompt,
+        });
+        settlePromptTurn(token, promptPromise);
       },
 
       async steer(_message: UserMessage, _sendOpts?: SendOptions) {
@@ -1279,6 +1335,10 @@ export class CursorAgent extends BaseAgent {
 
       setInteractionResolver(resolver: InteractionResolver) {
         interactionResolver = resolver;
+      },
+
+      isTurnRunning(): boolean {
+        return turnInFlight;
       },
 
       async setModel(newModel: string) {
