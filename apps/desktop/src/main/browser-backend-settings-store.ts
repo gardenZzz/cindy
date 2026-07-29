@@ -29,14 +29,34 @@
  * Per docs/dev-rules/configuration-and-overrides.md §3, the flip is driven by
  * *override state*, never by guessing intent from the stored value:
  *   - new users → `'external'`;
- *   - existing users who never touched the toggle (no override file / no `kind`
- *     key) → follow the new default, i.e. move back to `'external'`;
- *   - existing users who explicitly picked either backend → keep their choice
- *     untouched, including anyone who deliberately chose `'rsb-webview'`.
- * No migration step is needed for this: `createOverrideSettingsFile` persists
- * only the override, so "never customized" is directly observable. Note the
- * two backends do NOT share login state — a user moved back to `'external'` by
- * this default change starts from that profile's own cookies, and whatever they
+ *   - existing users with a recorded `kind` override → keep it. Under the
+ *     Phase-5 default that is *only* the users who picked `'external'`, and
+ *     `'external'` is what they now get anyway — so no observable change;
+ *   - **everyone currently on `'rsb-webview'` → moves to `'external'`.** This
+ *     includes users who deliberately picked the sidebar browser, not just
+ *     users who never touched the toggle. Do not read this as an override being
+ *     ignored: no override exists to honor. Two mechanisms collapse
+ *     "deliberately chose the then-default" into "never customized":
+ *       (a) `override-settings-file.writePatch` DELETES a key whose new value
+ *           equals the current default (`writeBrowserBackendKind` passes no
+ *           `preserveDefaults`), and an empty override map unlinks the file —
+ *           so toggling external→rsb-webview under the old default erased the
+ *           file it had just written;
+ *       (b) `setActiveBrowserBackendKind` short-circuits on same-kind, so
+ *           re-clicking the already-active backend never writes at all.
+ *     `isCustomized` is `Object.keys(overrides).length > 0`, hence false for
+ *     all of them.
+ * Consequence worth stating plainly: a user who chose the sidebar browser *for
+ * its tighter isolation* (no loopback CDP port, uploads confined to the session
+ * dir) is silently moved onto the backend that has neither. Protecting that
+ * user would need a customization flag independent of value-equality; §3
+ * forbids reconstructing intent from the old stored value, so we do NOT try to
+ * infer it retroactively. If that user class matters, the fix is a real flag
+ * plus a one-time notice — not a heuristic here.
+ * No migration step is needed either way: `createOverrideSettingsFile` persists
+ * only the override, so "has an override" is directly observable. Note the two
+ * backends do NOT share login state — a user moved to `'external'` by this
+ * default change starts from that profile's own cookies, and whatever they
  * logged into inside the sidebar browser stays in the webview partition.
  *
  * Stored as a single field so future knobs (e.g. snapshot format preference)
