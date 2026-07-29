@@ -4654,6 +4654,9 @@
       "networkUnreachableNoRetry": "ネットワークエラー:サービスに一時的に接続できません。",
       "networkAutoRetrying": "ネットワークエラー:自動的に再試行しています…",
       "networkReconnecting": "接続が中断されました。再接続中（{{attempt}}/{{maxAttempts}}）…",
+      "overloadRetrying": "モデルサービスが混雑しています:自動的に再試行しています（{{attempt}}/{{maxAttempts}}）…",
+      "overloadBusy": "モデルサービスが混雑しています。上流に空き容量がありません。「再試行」を押すか、別のモデルに切り替えてください",
+      "overloadBusyNoRetry": "モデルサービスが混雑しています。上流に空き容量がありません。しばらくしてから再試行するか、別のモデルに切り替えてください",
       "networkShowRaw": "元のエラーを表示",
       "networkHideRaw": "元のエラーを隠す",
       "silentStopContinue": "続行",
@@ -7321,7 +7324,8 @@
       "blocked": "ブロック中",
       "complete": "完了",
       "budgetLimited": "上限到達",
-      "usageLimited": "利用上限"
+      "usageLimited": "利用上限",
+      "capacityLimited": "モデルサービスが混雑"
     },
     "turns": "{{used}} ターン",
     "turnsWithMax": "{{used}} / {{max}} ターン",
@@ -7344,7 +7348,9 @@
       "failed": "目標の作成に失敗しました"
     },
     "usageLimitedUntil": "{{time}} に再開",
+    "capacityRetryAt": "{{time}} に再試行",
     "usageResumeNotice": "利用枠が回復しました。目標を再開します",
+    "capacityRetryNotice": "モデルサービスが混雑していました。目標を再試行します",
     "complete": {
       "record": "目標達成 · {{turns}} ターン · {{duration}}"
     },
