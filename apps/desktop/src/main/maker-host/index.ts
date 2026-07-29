@@ -286,6 +286,27 @@ export function setBeforeLocalCodexSessionStartHook(hook: (() => Promise<void>) 
 }
 
 /**
+ * detach 某 host 上活跃的远端 codex session (跳过 turn 中的)。
+ * 使用点:daemon 被 (重) bootstrap 后 (bridge 重建恢复 / shutdown strip) —
+ * 旧 transport 已死, detach 让下次 send 走 lazy-resume 重建
+ * (codex-connector R26 P1)。
+ */
+function detachActiveRemoteCodexSessions(hostId: string, reason: string): void {
+  for (const s of _maker?.listActiveSessions() ?? []) {
+    if (s.agentKind !== 'codex' || s.remoteHostId !== hostId) continue;
+    if (s.isTurnRunning()) continue;
+    void s.detach().catch((err) => {
+      desktopMakerLogger.warn('remote codex session detach after daemon rebootstrap failed', {
+        sessionId: s.id,
+        hostId,
+        reason,
+        message: err instanceof Error ? err.message : String(err),
+      });
+    });
+  }
+}
+
+/**
  * bridge 重建 / forward 端口重绑后的远端 CC query 失效 (装配版)。
  * fresh 标记无条件删 (下次注入重新 forceFresh);无 turn 的直接 detach,
  * 有 turn 的由 turn-done holder 补 detach — 不打断进行中的 turn。
@@ -333,6 +354,10 @@ export function handleCodexEnvironmentShutdownForRemote(): void {
     void stripRemoteCodexMcpConfig(host, {
       hasLiveTurnOnHost: liveTurnChecker ?? undefined,
     });
+    // strip 的 bootstrap (清 env 重启 daemon) 同样杀死旧 transport —
+    // live-turn 豁免内已在 strip 里跳过, 这里 detach 剩余活跃 session
+    // (codex-connector R26 P1 同源)。
+    detachActiveRemoteCodexSessions(hostId, 'bridge-shutdown-strip');
   }
 }
 
@@ -388,6 +413,8 @@ export async function ensureCodexMcpBridgeStartedForRemote(): Promise<{
           // 恢复路径同闸门 (codex-connector R21 P1):collab 全局禁用时
           // ensure 走清理而非重注入。
           isCollabEnabled: () => getPluginRegistry().isEnabled('collab'),
+          detachRemoteCodexSessionsOnHost: (hostId) =>
+            detachActiveRemoteCodexSessions(hostId, 'bridge-recreate-rebootstrap'),
           log: desktopMakerLogger,
         });
         // 远端 CC 侧同源恢复 (codex-connector R19 P2):活跃 query 持旧
