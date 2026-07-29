@@ -5196,12 +5196,35 @@ export function registerMakerIpc(maker: Maker, options: RegisterMakerIpcOptions)
           })
         ) {
           await ensureRemoteReadyForSessionStart({ session: live });
+          // ensure 完整生效 ⇒ daemon 已 (重) bootstrap ⇒ 长命 transport
+          // (到旧 daemon socket 的 proxy channel) 已死 — 继续用 live 直发
+          // 会把首条消息送进失效 transport, 用户先撞一次 transport error
+          // 才能靠 ensureStarted 自愈 (codex-connector R25 P1)。与 cc stale
+          // 同构:detach 落 lazy-resume 直接重建。drift 未清 = 他处有 live
+          // turn 在 defer, daemon 未重启, transport 仍活, 保持直发。
+          const driftCleared = !hasPendingRemoteMcpDrift(live.remoteHostId, {
+            collabEnabled: getPluginRegistry().isEnabled('collab'),
+            token: getRemoteMcpBridgeToken(),
+            bridgeInstanceId: getActiveCodexBridgeInstanceId(),
+          });
+          if (driftCleared) {
+            try {
+              await live.detach();
+            } catch (err) {
+              log.warn('sendToSession: detach after drift rebootstrap failed, falling through to lazy-resume', {
+                targetSessionId,
+                err: err instanceof Error ? err.message : String(err),
+              });
+            }
+            live = undefined;
+          }
         }
         // 远端 CC 的 invalidate 竞态 (codex-connector R23 P2):invalidate
         // (bridge 重建 / 端口重绑 / shutdown) 的 detach 是 fire-and-forget,
         // session 在 detach 完成前仍 active — 此时直发会进带旧 MCP URL 的
         // query。stale 命中时先同步 detach 再落 lazy-resume (forceFresh)。
         if (
+          live !== undefined &&
           live.remoteHostId &&
           live.agentKind === 'claude-code' &&
           getRemoteCcStaleQuery()?.(live.id) === true
