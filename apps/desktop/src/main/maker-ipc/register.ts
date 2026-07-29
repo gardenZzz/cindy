@@ -4316,7 +4316,7 @@ export function registerMakerIpc(maker: Maker, options: RegisterMakerIpcOptions)
   async function ensureRemoteReadyForSessionStart(params: {
     session?: { agentKind: AgentKind; remoteHostId: string | null } | null;
     createOpts?: unknown;
-  }): Promise<void> {
+  }): Promise<{ remoteCodexDaemonRebootstrapped: true } | void> {
     const { session, createOpts } = params;
     // Remote SSH auto-reconnect 前置: 拿 host 是否要联网在 maker-core 之前确定,
     // 避免 remote transport hook 同步抛 "not found in pool"。ensureRemoteHostReady
@@ -4389,7 +4389,7 @@ export function registerMakerIpc(maker: Maker, options: RegisterMakerIpcOptions)
         // 最后一次启动恒为携带双方的 MCP bootstrap;marker 一致时仅 1 次
         // cat RTT 零副作用。
         await reconcileCodexAgentProxyEnv(host);
-        await ensureRemoteCodexMcpBridge(host, {
+        const result = await ensureRemoteCodexMcpBridge(host, {
           ensureBridgeStarted: ensureCodexMcpBridgeStartedForRemote,
           // config 漂移生效要重启 daemon, 重启会断同 host 的 live turn:
           // 有 turn 在跑时 config 照写但 bootstrap 推迟 (driftUnapplied 持久,
@@ -4399,6 +4399,10 @@ export function registerMakerIpc(maker: Maker, options: RegisterMakerIpcOptions)
           // 名单不反映开关 (codex-connector R20 P2)。
           isCollabEnabled: () => getPluginRegistry().isEnabled('collab'),
         });
+        if (result.ok && result.daemonRebootstrapped && !codexRemoteHasLiveTurn(remoteHostIdToEnsure)) {
+          await detachIdleRemoteCodexSessionsOnHost(remoteHostIdToEnsure, 'codex-mcp-daemon-rebootstrap');
+          return { remoteCodexDaemonRebootstrapped: true };
+        }
       }
     }
   }
@@ -4424,6 +4428,25 @@ export function registerMakerIpc(maker: Maker, options: RegisterMakerIpcOptions)
   }
   setRemoteCodexLiveTurnChecker(codexRemoteHasLiveTurn);
 
+  async function detachIdleRemoteCodexSessionsOnHost(hostId: string, reason: string): Promise<void> {
+    const detachTasks: Array<Promise<void>> = [];
+    for (const s of maker.listActiveSessions()) {
+      if (s.remoteHostId !== hostId || s.agentKind !== 'codex') continue;
+      if (agentInputCoordinatorHolder?.hasActiveTurnForRewind(s.id) ?? false) continue;
+      detachTasks.push(
+        s.detach().catch((err) => {
+          log.warn('remote Codex session detach after daemon rebootstrap failed', {
+            sessionId: s.id,
+            hostId,
+            reason,
+            err: err instanceof Error ? err.message : String(err),
+          });
+        }),
+      );
+    }
+    await Promise.all(detachTasks);
+  }
+
   // turn 结束后补一次远端 MCP ensure (best-effort):live turn 期间被推迟的
   // daemon bootstrap (driftUnapplied 持久指纹, 见 codex-remote-mcp.ts) 在
   // idle 时点必然补刀 — 不等用户下次操作 (Greptile: defer 需要可靠自愈
@@ -4441,6 +4464,10 @@ export function registerMakerIpc(maker: Maker, options: RegisterMakerIpcOptions)
         ensureBridgeStarted: ensureCodexMcpBridgeStartedForRemote,
         hasLiveTurnOnHost: codexRemoteHasLiveTurn,
         isCollabEnabled: () => getPluginRegistry().isEnabled('collab'),
+      }).then(async (result) => {
+        if (result.ok && result.daemonRebootstrapped && !codexRemoteHasLiveTurn(remoteHostId)) {
+          await detachIdleRemoteCodexSessionsOnHost(remoteHostId, 'codex-mcp-turn-settled-rebootstrap');
+        }
       });
       return;
     }
@@ -5200,28 +5227,32 @@ export function registerMakerIpc(maker: Maker, options: RegisterMakerIpcOptions)
             bridgeInstanceId: getActiveCodexBridgeInstanceId(),
           })
         ) {
-          await ensureRemoteReadyForSessionStart({ session: live });
+          const ensureResult = await ensureRemoteReadyForSessionStart({ session: live });
           // ensure 完整生效 ⇒ daemon 已 (重) bootstrap ⇒ 长命 transport
           // (到旧 daemon socket 的 proxy channel) 已死 — 继续用 live 直发
           // 会把首条消息送进失效 transport, 用户先撞一次 transport error
           // 才能靠 ensureStarted 自愈 (codex-connector R25 P1)。与 cc stale
           // 同构:detach 落 lazy-resume 直接重建。drift 未清 = 他处有 live
           // turn 在 defer, daemon 未重启, transport 仍活, 保持直发。
-          const driftCleared = !hasPendingRemoteMcpDrift(live.remoteHostId, {
-            collabEnabled: getPluginRegistry().isEnabled('collab'),
-            token: getRemoteMcpBridgeToken(),
-            bridgeInstanceId: getActiveCodexBridgeInstanceId(),
-          });
-          if (driftCleared) {
-            try {
-              await live.detach();
-            } catch (err) {
-              log.warn('sendToSession: detach after drift rebootstrap failed, falling through to lazy-resume', {
-                targetSessionId,
-                err: err instanceof Error ? err.message : String(err),
-              });
-            }
+          if (ensureResult?.remoteCodexDaemonRebootstrapped) {
             live = undefined;
+          } else {
+            const driftCleared = !hasPendingRemoteMcpDrift(live.remoteHostId, {
+              collabEnabled: getPluginRegistry().isEnabled('collab'),
+              token: getRemoteMcpBridgeToken(),
+              bridgeInstanceId: getActiveCodexBridgeInstanceId(),
+            });
+            if (driftCleared) {
+              try {
+                await live.detach();
+              } catch (err) {
+                log.warn('sendToSession: detach after drift rebootstrap failed, falling through to lazy-resume', {
+                  targetSessionId,
+                  err: err instanceof Error ? err.message : String(err),
+                });
+              }
+              live = undefined;
+            }
           }
         }
         // 远端 CC 的 invalidate 竞态 (codex-connector R23 P2):invalidate
@@ -6496,7 +6527,9 @@ export function registerMakerIpc(maker: Maker, options: RegisterMakerIpcOptions)
     getSession: (sessionId) => maker.getSession(sessionId),
     closeSession: (sessionId) => maker.closeSession(sessionId),
     getSessionMeta: (sessionId) => maker.getSessionMeta(sessionId),
-    ensureRemoteReadyForSessionStart,
+    ensureRemoteReadyForSessionStart: async (params) => {
+      await ensureRemoteReadyForSessionStart(params);
+    },
     checkWorkDirExists,
     isOrcaMcpHydrated,
     buildCreateOptsWithStderr,

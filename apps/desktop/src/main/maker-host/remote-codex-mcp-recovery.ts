@@ -64,10 +64,9 @@ export function refreshRemoteCodexMcpAfterBridgeRecreate(deps: RemoteCodexMcpRec
         });
         return;
       }
-      // ensure 成功且非 live-turn defer ⇒ daemon 已 rebootstrap ⇒ 该 host
-      // 的活跃 session transport 已死 — detach 让下次 send 走 lazy-resume
-      // (codex-connector R26 P1)。live turn 在跑 ⇒ defer 未重启 ⇒ 不动。
-      if (!liveTurnChecker(hostId)) {
+      // Only an actual daemon rebootstrap invalidates the old transport. Plain
+      // successful no-op ensures leave active sessions attached.
+      if (result.daemonRebootstrapped && !liveTurnChecker(hostId)) {
         deps.detachRemoteCodexSessionsOnHost(hostId);
       }
     });

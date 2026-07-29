@@ -1245,6 +1245,7 @@ describe('codex-connector R27 regressions', () => {
       hasLiveTurnOnHost: () => false,
     });
     expect(result.ok).toBe(true);
+    expect(result.daemonRebootstrapped).toBe(true);
     const joined = execCmds.join('\n');
     expect(joined).toContain('base64 -d');
     expect(joined).toContain('bootstrap');
