@@ -61,6 +61,7 @@
       "input": "Input",
       "done": "Done",
       "running": "Running",
+      "networkReconnecting": "({{attempt}}/{{maxAttempts}}) Connection interrupted — reconnecting…",
       "updatingTasks": "Updating tasks",
       "awaitingPermission": "Awaiting permission",
       "awaitingQuestion": "Awaiting your reply",
@@ -267,6 +268,11 @@
           "keyHint": "Read a private key file directly. We don't store passphrases, so encrypted keys aren't supported — use this only when ssh-agent isn't available."
         },
         "identityFile": "Identity file path",
+        "agentProxy": "Route agent traffic via local proxy",
+        "agentProxyTip": "Open a 127.0.0.1 port on the remote that tunnels back over SSH to a proxy on this machine; remote codex / Claude Code traffic flows out through it",
+        "agentProxyAddr": "Local proxy address",
+        "agentProxyHint": "Opens a 127.0.0.1 port on the remote, tunneled over SSH back to your local proxy (e.g. Clash on 7890). {{appName}} does not provide a proxy — only the tunnel; the remote agent's HTTPS_PROXY points at the tunnel and domains are resolved by your proxy. Toggling restarts the remote codex daemon once to take effect.",
+        "agentProxyAddrInvalid": "Expected host:port, e.g. 127.0.0.1:7890",
         "cancel": "Cancel",
         "submit": "Add machine"
       },
@@ -282,6 +288,11 @@
         "statusInstalled": "Installed",
         "statusNotInstalled": "Not installed",
         "claudeCodeName": "Claude Code",
+        "agentProxyTitle": "Agent proxy tunnel",
+        "agentProxyActive": "Remote 127.0.0.1:{{port}} → local {{target}} · established",
+        "agentProxyPending": "Establishing tunnel → local {{target}}",
+        "agentProxyWaiting": "Host not connected; tunnel will be established on reconnect → local {{target}}",
+        "agentProxyError": "Tunnel failed: {{message}}",
         "button": {
           "install": "Install",
           "reinstall": "Reinstall",
@@ -492,6 +503,14 @@
       "soundPreviewAria": "Preview {{event}} sound",
       "skinAnimationAria": "Switch {{skin}} animation preview",
       "skins": {
+        "cindy": {
+          "name": "Cindy",
+          "description": "Cindy herself, keeping an eye on every run."
+        },
+        "blackcat": {
+          "name": "Black Cat",
+          "description": "A composed black cat whose yellow eyes stay sharp against the dark notch."
+        },
         "pululu": {
           "name": "Pululu",
           "description": "TapFamily's calm little guardian: round-headed, sincere, and ready to steady messy tasks."
@@ -519,6 +538,10 @@
         "muffin": {
           "name": "Muffin",
           "description": "A soft blue-gray companion that keeps running tasks feeling light and playful."
+        },
+        "erika": {
+          "name": "Erika",
+          "description": "Erika with her crescent hairpin — warm brown eyes, quietly focused on long runs."
         }
       },
       "soundEvents": {
@@ -1343,9 +1366,12 @@
         "capabilityNote": "Not available in {{agent}}",
         "divergedChip": "Hidden in {{agent}}",
         "refreshAria": "Refresh model list (additions only)",
+        "refreshBuiltinAria": "Refresh Model List",
+        "refreshingAria": "Refreshing model list…",
+        "refreshDone": "Model list refreshed",
         "refreshAdded": "Found {{count}} new models",
         "refreshNoNew": "Model list is up to date — nothing new",
-        "refreshFailed": "Failed to refresh the model list. Please try again later"
+        "refreshFailed": "Model list couldn’t be refreshed — try again later"
       },
       "genericOAuth": {
         "subtitle": "Subscription sign-in (OAuth)",
@@ -1530,6 +1556,90 @@
         "hint": "Send a notification message to the Bot on connect/disconnect"
       },
       "bind": "Bind"
+    },
+    "wechatBot": {
+      "title": "Personal WeChat",
+      "description": "Scan to connect personal WeChat and work with {{appName}} from a private chat.",
+      "statusAria": "Personal WeChat status: {{status}}",
+      "status": {
+        "disconnected": "Not connected",
+        "authorizing": "Preparing authorization…",
+        "waitingConfirmation": "Waiting for WeChat…",
+        "connected": "Connected",
+        "reconnecting": "Reconnecting…",
+        "needsReauth": "Authorization required",
+        "disabled": "Unavailable",
+        "error": "Connection failed"
+      },
+      "intro": "After connecting, private messages sent to this WeChat connection enter Cindy on this computer. Tencent provides the authorization page, which may display OpenClaw.",
+      "errorNote": "The connection was not completed. Check your network and scan again. Cindy never stores plaintext credentials after a failed connection.",
+      "disabledNote": "Personal WeChat is paused in this version by the compatibility policy. Saved conversations and settings are not removed.",
+      "permission": {
+        "label": "Permission mode",
+        "hint": "Applies to new context after /new. Risky actions still require confirmation in Cindy Desktop.",
+        "fullAccessDisabled": "Personal WeChat does not support Full Access yet because actions that cannot be confirmed in WeChat must not run directly.",
+        "permissionModeDisabled": "Personal WeChat always uses Cindy Desktop's confirmation policy, so this permission mode is unavailable."
+      },
+      "authorization": {
+        "title": "Authorize WeChat",
+        "rebindTitle": "Connect a new Cindy to WeChat",
+        "description": "Tencent's webpage will open for authorization. After scanning, you can talk to Cindy from WeChat.",
+        "rebindDescription": "This WeChat account already has a connection. Continuing may replace its existing Cindy or OpenClaw connection.",
+        "confirm": "Authorize",
+        "cancel": "Cancel",
+        "steps": {
+          "1": "Select Authorize to open the WeChat binding page in your system browser.",
+          "2": "Scan with the WeChat app and confirm the connection in WeChat.",
+          "3": "Return to Cindy after binding; the connection status updates automatically.",
+          "4": "Tencent provides the authorization page, which may display OpenClaw."
+        }
+      },
+      "waiting": {
+        "heading": "Waiting for confirmation in WeChat",
+        "note": "Finish scanning and confirmation in your system browser. Cindy updates automatically when it succeeds, or you can cancel this attempt.",
+        "cancel": "Cancel authorization"
+      },
+      "bound": {
+        "heading": "Personal WeChat connected",
+        "attentionHeading": "Personal WeChat needs attention",
+        "notes": {
+          "disconnected": "The connection is saved but is not currently running.",
+          "authorizing": "Preparing a new WeChat authorization.",
+          "waiting_confirmation": "Waiting for scan confirmation in WeChat.",
+          "connected": "WeChat private messages go directly to Cindy on this computer and are not relayed through Cindy servers.",
+          "reconnecting": "This computer is restoring the WeChat connection. No new scan is needed.",
+          "needs_reauth": "The WeChat authorization expired or was replaced by another connection. Scan again.",
+          "disabled_by_policy": "The connection is paused by this version's compatibility policy; credentials and conversations remain saved.",
+          "error": "The connection is temporarily unavailable. Scan again or unbind and retry later."
+        }
+      },
+      "actions": {
+        "connect": "Connect WeChat",
+        "rebind": "Reconnect",
+        "unbind": "Unbind"
+      },
+      "workingDir": {
+        "title": "Working directory for new conversations",
+        "hint": "Used for the first WeChat conversation and after /new. Changing it does not move the current context.",
+        "managed": "Use a Cindy-managed directory",
+        "reset": "Restore default",
+        "unavailable": "The selected directory is unavailable. New conversations temporarily use a Cindy-managed directory."
+      },
+      "unbind": {
+        "title": "Unbind personal WeChat?",
+        "description": "Unbinding stops messaging, removes local WeChat credentials, and clears unfinished tasks. Existing Cindy conversations, history, and saved attachments remain.",
+        "confirm": "Unbind",
+        "cancel": "Cancel"
+      },
+      "toasts": {
+        "authorizeFailed": "Could not start WeChat authorization. Try again later.",
+        "cancelFailed": "Could not cancel WeChat authorization",
+        "unbound": "Personal WeChat unbound",
+        "unbindFailed": "Unbind failed. Try again later.",
+        "workingDirSaved": "Working directory for new WeChat conversations updated",
+        "workingDirReset": "New WeChat conversations now use the default directory",
+        "workingDirFailed": "Could not update the working directory. Select it again."
+      }
     },
     "discordBot": {
       "title": "Discord Bot",
@@ -2252,15 +2362,16 @@
       },
       "tips": {
         "cindy": "Cindy is the official shared bot — no credentials needed. Connect Slack and just @Cindy to hand off tasks.",
-        "personal": "Personal bots connect to Feishu / Discord with your own credentials — the bot is fully yours, but you create the app and fill in its config yourself.",
-        "personalFeishuOnly": "Personal bots connect to Feishu with your own credentials — the bot is fully yours, but you create the app and fill in its config yourself."
+        "personal": "Personal connections include WeChat scan authorization and your own Feishu / Discord credentials. Each channel keeps independent new-conversation settings.",
+        "personalFeishuOnly": "Personal connections include WeChat scan authorization and your own Feishu credentials. Each channel keeps independent new-conversation settings."
       },
       "defaults": {
         "title": "New Conversation Configuration",
         "channelDescriptions": {
           "feishu": "New Feishu conversations use this Agent and model. Send /new in an existing DM to apply it.",
           "slack": "New Slack threads use this Agent and model.",
-          "discord": "New Discord conversations use this Agent and model. Send /new in an existing DM to apply it."
+          "discord": "New Discord conversations use this Agent and model. Send /new in an existing DM to apply it.",
+          "wechat": "New WeChat conversations use this Agent, model, and permission mode. Send /new in an existing chat to apply them."
         },
         "agentLabel": "Agent",
         "modelLabel": "Model Configuration",
@@ -3026,6 +3137,13 @@
     "ssoOrgPlaceholder": "Company ID, slug, or domain",
     "ssoOrgHint": "Don't know your enterprise sign-in identifier? Ask your admin",
     "ssoOrgDetected": "Choose a single sign-on connection for \"{{org}}\"",
+    "realmConsent": {
+      "title": "Connect to your enterprise region",
+      "bodyCn": "Your enterprise is in Mainland China.\nContinue to connect Cindy to this region.",
+      "bodyGlobal": "Your enterprise is in the Global region.\nContinue to connect Cindy to this region.",
+      "agree": "Continue sign-in",
+      "disagree": "Cancel"
+    },
     "ssoVerificationTitle": "Verify Your Work Identity",
     "ssoVerificationSubtitle": "First-time sign-in requires verification of the contact returned by your identity provider: {{target}}",
     "enterCode": "Enter verification code",
@@ -3074,6 +3192,8 @@
       "RATE_LIMITED": "Too many attempts. Please wait and try again.",
       "SSO_LOGIN_REQUIRED": "This organization requires SSO sign-in.",
       "ORG_SSO_NOT_FOUND": "Company not found, or it has no SSO connection enabled",
+      "ORG_REALM_AMBIGUOUS": "This enterprise identifier exists in both regions. Contact your administrator.",
+      "ORG_REALM_UNAVAILABLE": "Cindy cannot verify the enterprise region right now. Check your connection and retry.",
       "SSO_EMAIL_REQUIRED": "Your work identity did not provide a valid email. Ask your admin to check the IdP configuration.",
       "INVALID_SSO_VERIFICATION_TICKET": "Work identity verification expired. Start SSO sign-in again.",
       "SOCIAL_TOKEN_INVALID": "The provider authorization expired. Please try again.",
@@ -3162,6 +3282,8 @@
       "balanceAvailable": "Balance available",
       "balanceDepleted": "Balance depleted",
       "balanceUnlimited": "Balance Unlimited",
+      "resetCreditsAvailableLine": "Available resets: {{count}}",
+      "resetCreditEarliestExpiryLine": "Earliest expiry: {{at}}",
       "windowLine": "{{label}} {{remaining}} left ({{used}} used)",
       "windowSegment": "{{label}} {{remaining}} left",
       "resetAt": "resets {{at}}",
@@ -3311,6 +3433,7 @@
         "browser": "Browser",
         "terminal": "Terminal",
         "review": "Review",
+        "backgroundTasks": "Background tasks",
         "collaboration": "Team",
         "unknown": "Unknown tab",
         "ghostPanel": "Plugin panel"
@@ -3334,6 +3457,8 @@
         "fileSub": "Files",
         "openReview": "Open review",
         "reviewSub": "Review",
+        "openBackgroundTasks": "Open background tasks",
+        "backgroundTasksSub": "Background tasks",
         "openBrowser": "Open browser",
         "browserSub": "Browser",
         "openTerminal": "Open terminal",
@@ -3695,6 +3820,16 @@
       "touchCountAria_other": "Edited {{count}} times",
       "expandAllAria": "Expand all files",
       "collapseAllAria": "Collapse all files"
+    },
+    "backgroundTasks": {
+      "running": "Running",
+      "completed": "Completed",
+      "empty": "No background tasks in this session yet",
+      "stop": "Stop",
+      "back": "Back",
+      "progressSummary": "{{done}}/{{total}} agents",
+      "tokens": "{{value}} tokens",
+      "noProgress": "No progress details yet"
     }
   },
   "update": {
@@ -4005,7 +4140,14 @@
       "trigger": {
         "placeholder": "Select model",
         "aria": "Select model. Current: {{model}}",
-        "ariaWithEffort": "Select model. Current: {{model}}, effort: {{effort}}"
+        "ariaWithEffort": "Select model. Current: {{model}}, effort: {{effort}}",
+        "pendingAria": "Select model. Next message: {{agent}} · {{model}}",
+        "pendingAriaWithEffort": "Select model. Next message: {{agent}} · {{model}}, effort: {{effort}}",
+        "agent": {
+          "claudeCode": "Claude Code",
+          "codex": "Codex",
+          "pending": "Next: {{agent}}"
+        }
       },
       "category": {
         "anthropic": "Anthropic",
@@ -4289,6 +4431,12 @@
       "editTitle": "Edit Pasted Text",
       "cancelEdit": "Cancel Editing",
       "saveEdit": "Save Text"
+    },
+    "permissionPrompt": {
+      "alwaysAllowScoped": "Always Allow {{scope}} in This Session",
+      "alwaysAllowScopedHint": "Applies to the whole session, and only to what is listed here.",
+      "alwaysAllowSessionHint": "Applies to the whole session, not just this one request.",
+      "ruleSeparator": ", "
     }
   },
   "onboarding": {
@@ -4413,6 +4561,9 @@
         "stopped": "Stopped"
       },
       "stop": "Stop this task",
+      "openInPanel": "Open in the background tasks panel",
+      "workflowProgressLine": "{{phase}} · {{done}}/{{total}} agents",
+      "workflowProgressCount": "{{done}}/{{total}} agents",
       "tokens": "{{count}} tokens",
       "toolUses_one": "{{count}} tool use",
       "toolUses_other": "{{count}} tool uses",
@@ -4489,6 +4640,7 @@
       "networkUnreachable": "Network error: the service is temporarily unreachable. Click \"Retry\" to try again.",
       "networkUnreachableNoRetry": "Network error: the service is temporarily unreachable.",
       "networkAutoRetrying": "Network error — retrying automatically…",
+      "networkReconnecting": "Connection interrupted — reconnecting ({{attempt}}/{{maxAttempts}})…",
       "networkShowRaw": "Show raw error",
       "networkHideRaw": "Hide raw error",
       "silentStopContinue": "Continue",
@@ -4968,13 +5120,19 @@
     "workflowTree": {
       "agentsCount": "{{count}} agents",
       "attempt": "attempt {{count}}",
+      "endedEarly": "Ended before completion",
       "state": {
         "queued": "Queued",
+        "pending": "Pending",
+        "start": "Starting",
         "running": "Running",
+        "progress": "Running",
         "done": "Done",
         "completed": "Completed",
         "failed": "Failed",
-        "stopped": "Stopped"
+        "error": "Failed",
+        "stopped": "Stopped",
+        "killed": "Killed"
       }
     },
     "credentialSwitchWait": {
@@ -6378,13 +6536,20 @@
       "typeFeature": "Feature",
       "titleLabel": "Title",
       "bodyLabel": "Body (Markdown)",
-      "identityGithubUser": "Submitting identity: GitHub user @{{login}} (you)",
-      "identityPlatform": "Submitting identity: Cindy platform (GitHub App {{login}})",
+      "submissionMethodLabel": "Publishing Method",
+      "identityGithubUser": "Publish directly through GitHub account @{{login}}",
+      "identityGithubUserHint": "You will be the GitHub author and can edit or close this Issue on GitHub",
+      "identityPlatform": "Publish through Cindy (GitHub App {{login}})",
+      "identityPlatformHint": "You will not be the GitHub author and cannot edit or close this Issue yourself",
+      "publicNameLabel": "Public Attribution",
+      "publicNameHint": "This attribution will appear publicly in the Issue body",
+      "anonymous": "Anonymous",
+      "useAnonymous": "Use Anonymous Attribution",
       "envLine": "Attached automatically on submit: client {{appVersion}} · {{platform}} {{arch}} · UI language {{uiLanguage}}",
       "regionLine": "Build region: {{region}}",
       "regionCodeCn": "CN",
       "regionCodeDev": "Dev",
-      "submit": "Submit",
+      "submit": "Submit Feedback",
       "cancel": "Cancel"
     },
     "redirect": {
@@ -7251,11 +7416,6 @@
     },
     "hub": {
       "learnButton": "Learn this skill"
-    }
-  },
-  "workflows": {
-    "toast": {
-      "none": "No workflow is running in this session"
     }
   },
   "planMode": {
