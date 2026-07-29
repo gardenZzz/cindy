@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
-import { hasAuthSessionIdentityChanged } from '../authSessionIdentity';
+import { hasAuthSessionIdentityChanged } from '../authSessionIdentity.js';
 
 describe('hasAuthSessionIdentityChanged', () => {
   it('treats user or realm changes as an authentication boundary', () => {
