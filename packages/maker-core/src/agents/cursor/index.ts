@@ -320,7 +320,14 @@ export async function userMessageToPromptBlocks(message: UserMessage): Promise<C
         });
         continue;
       }
-      const filePath = resizedPaths.get(idx) ?? stripFileUrl(raw);
+      const originalPath = stripFileUrl(raw);
+      const filePath = resizedPaths.get(idx) ?? originalPath;
+      // resizer 返回替代路径（通常 .webp）时必须从该路径推导 MIME；
+      // 原样返回原路径（跳过阈值 / sharp 不可用 / 失败降级）才沿用 block.mimeType。
+      const mimeType =
+        filePath === originalPath
+          ? mimeTypeForImagePath(filePath, block.mimeType)
+          : mimeTypeForImagePath(filePath);
       let statSize: number | undefined;
       try {
         statSize = (await fs.stat(filePath)).size;
@@ -352,7 +359,7 @@ export async function userMessageToPromptBlocks(message: UserMessage): Promise<C
       blocks.push({
         type: 'image',
         data,
-        mimeType: mimeTypeForImagePath(filePath, block.mimeType),
+        mimeType,
       });
       continue;
     }

@@ -711,4 +711,60 @@ describe('userMessageToPromptBlocks (async image path)', () => {
       rmSync(imageDir, { recursive: true, force: true });
     }
   });
+
+  it('keeps original mimeType when resizer skips conversion (under skipUnderBytes)', async () => {
+    const imageDir = mkdtempSync(join(tmpdir(), 'cindy-cursor-skip-img-'));
+    const imagePath = join(imageDir, 'small.png');
+    // 8-byte PNG header ≪ 500KB skip 阈值 → resizer 原样返回原路径。
+    const png = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
+    writeFileSync(imagePath, png);
+    try {
+      const blocks = await userMessageToPromptBlocks({
+        type: 'user',
+        content: [{ type: 'image', path: imagePath, mimeType: 'image/png' }],
+      });
+      expect(blocks).toEqual([
+        { type: 'image', data: png.toString('base64'), mimeType: 'image/png' },
+      ]);
+    } finally {
+      rmSync(imageDir, { recursive: true, force: true });
+    }
+  });
+
+  it('uses image/webp mimeType and WebP bytes after resizer converts a large PNG', async () => {
+    // 修复前：resizer 写出 .webp 但仍沿用 block.mimeType=image/png → 本断言会失败。
+    const imageDir = mkdtempSync(join(tmpdir(), 'cindy-cursor-resize-img-'));
+    const imagePath = join(imageDir, 'large.png');
+    try {
+      const sharp = (await import('sharp')).default;
+      // 噪声图 + 低压缩，确保 > skipUnderBytes(500KB)，真实触发 WebP 转换。
+      const width = 900;
+      const height = 900;
+      const raw = Buffer.alloc(width * height * 3);
+      for (let i = 0; i < raw.length; i++) raw[i] = (i * 37) & 0xff;
+      const pngBuf = await sharp(raw, { raw: { width, height, channels: 3 } })
+        .png({ compressionLevel: 0 })
+        .toBuffer();
+      expect(pngBuf.byteLength).toBeGreaterThan(500_000);
+      writeFileSync(imagePath, pngBuf);
+
+      const blocks = await userMessageToPromptBlocks({
+        type: 'user',
+        content: [{ type: 'image', path: imagePath, mimeType: 'image/png' }],
+      });
+
+      expect(blocks).toHaveLength(1);
+      const imageBlock = blocks[0] as { type: string; data?: string; mimeType?: string };
+      expect(imageBlock.type).toBe('image');
+      expect(imageBlock.mimeType).toBe('image/webp');
+      expect(imageBlock.data).toBeTruthy();
+      const decoded = Buffer.from(imageBlock.data!, 'base64');
+      expect(decoded.subarray(0, 4).toString('ascii')).toBe('RIFF');
+      expect(decoded.subarray(8, 12).toString('ascii')).toBe('WEBP');
+      // 不得仍是原 PNG 字节。
+      expect(decoded.subarray(0, 8).equals(pngBuf.subarray(0, 8))).toBe(false);
+    } finally {
+      rmSync(imageDir, { recursive: true, force: true });
+    }
+  });
 });
