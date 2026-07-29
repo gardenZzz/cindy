@@ -653,6 +653,16 @@ function skillDescription(skill: SkillMetadata): string | undefined {
   );
 }
 
+function isPaletteVisibleCodexSkill(skill: SkillMetadata): boolean {
+  if (!skill.enabled || skill.scope === 'system' || skill.scope === 'admin') return false;
+
+  // Codex plugins can contribute internal skills and currently report them as scope=user.
+  // They remain available to Codex's own dispatch, but Cindy's slash palette should only
+  // expose installed user/repo skills instead of every plugin implementation detail.
+  const normalizedPath = skill.path.replace(/\\/g, '/');
+  return !/\/plugins\/cache\/[^/]+\/[^/]+\/[^/]+\/skills\//i.test(normalizedPath);
+}
+
 function parseLeadingSlashToken(text: string): { name: string; rest: string } | null {
   const match = text.match(/^\/([^\s/]+)(?:\s+([\s\S]*))?$/);
   if (!match?.[1]) return null;
@@ -1167,7 +1177,7 @@ export class CodexAgent extends BaseAgent {
       const { skills, errors } = await this.listSkillsForCwd(workingDir, opts.forceReload ?? false);
       const out: ListAgentSkillsResult = {
         skills: skills
-          .filter((skill) => skill.enabled)
+          .filter(isPaletteVisibleCodexSkill)
           .map((skill) => ({
             kind: 'agent-skill' as const,
             name: skill.name,
