@@ -1908,6 +1908,10 @@ export function NewMakerDraftRoute() {
             text: message,
             files: rehydratedFiles,
             mentions,
+            // Cursor：种子 Auto 不是显式选择；只有 modelChosenByVendor 为真才强制 set_config_option。
+            ...(capabilityAgentKind === 'cursor' && draftModelChosenByUser
+              ? { vendorOptions: { cursorModelExplicit: true } }
+              : {}),
             ...(opts?.quotesEncoded ? { quotesEncoded: true } : {}),
             ...(opts?.agentReferences?.length ? { agentReferences: opts.agentReferences } : {}),
             ...(opts?.pastedTextRanges?.length ? { pastedTextRanges: opts.pastedTextRanges } : {}),

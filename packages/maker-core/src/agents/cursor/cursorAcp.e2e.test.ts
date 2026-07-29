@@ -10,9 +10,9 @@
  */
 
 import { afterAll, describe, expect, it } from 'vitest';
-import { homedir } from 'node:os';
+import { homedir, tmpdir } from 'node:os';
 import path from 'node:path';
-import { accessSync, constants, existsSync } from 'node:fs';
+import { accessSync, constants, existsSync, mkdtempSync } from 'node:fs';
 import { execSync } from 'node:child_process';
 
 import { createConsoleLogger } from '../../interfaces/logger.js';
@@ -79,7 +79,9 @@ function listCursorAcpProcesses(): string {
 function createAgent(): CursorAgent {
   return new CursorAgent({
     auth: createAuthStub(),
-    runtimeConfig: {},
+    runtimeConfig: {
+      userDataPath: mkdtempSync(path.join(tmpdir(), 'cindy-cursor-e2e-')),
+    },
     binaryPath: resolveCursorBinary()!,
     logger: createConsoleLogger('cursor-acp-e2e'),
   });

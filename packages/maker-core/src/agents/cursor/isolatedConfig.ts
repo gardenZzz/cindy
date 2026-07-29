@@ -17,12 +17,12 @@
  * - **agent dispose / close**：no-op —— 不得 rm（否则 session/load not found）
  * - **Cindy session status → deleted**：宿主调用 `removeCursorIsolatedConfigDir`
  *   （对齐 imageCache / media refs；archived 保留，恢复后仍可 resume）
- * - **userDataPath**：必须由宿主注入（Desktop = `app.getPath('userData')`）。
- *   家目录 `~/.cindy/cursor-acp` 仅非 Electron 单测 / CLI 回落，生产不得依赖。
+ * - **userDataPath**：必须由宿主注入（Desktop = `app.getPath('userData')`；
+ *   CLI / 单测 = `mkdtemp` 根）。maker-core **不**回落 HOME / `~/.cindy`
+ *   （见 credentials-and-local-storage.md）。
  */
 
 import { mkdirSync, rmSync, writeFileSync } from 'node:fs';
-import { homedir, tmpdir } from 'node:os';
 import { join, relative, resolve, sep } from 'node:path';
 import { createHash } from 'node:crypto';
 
@@ -42,11 +42,10 @@ export interface CreateCursorIsolatedConfigOptions {
    */
   stableKey?: string;
   /**
-   * 宿主注入的 userData 根（Electron `app.getPath('userData')`）。
-   * 缺省回落到 `~/.cindy/cursor-acp`——**仅**非 Electron 单测 / CLI；
-   * Desktop 生产必须注入，不得依赖此回落。
+   * 宿主注入的 userData 根（Electron `app.getPath('userData')`，或测试 `mkdtemp`）。
+   * **必填**——maker-core 零 Electron 依赖，也不静默写开发者 HOME。
    */
-  userDataPath?: string;
+  userDataPath: string;
 }
 
 function safeDirSegment(key: string): string {
@@ -58,16 +57,18 @@ function safeDirSegment(key: string): string {
   return `${prefix}-${hash}`;
 }
 
-function resolveRoot(userDataPath?: string): string {
-  if (userDataPath && userDataPath.trim()) {
-    return join(userDataPath.trim(), 'cursor-acp');
+function requireUserDataPath(userDataPath: string | undefined): string {
+  const trimmed = typeof userDataPath === 'string' ? userDataPath.trim() : '';
+  if (!trimmed) {
+    throw new Error(
+      'Cursor isolated config requires userDataPath (host/CLI/test must inject; no HOME fallback)',
+    );
   }
-  // maker-core 零 Electron 依赖；无 host 路径时用家目录兜底（单测 / CLI only）。
-  try {
-    return join(homedir(), '.cindy', 'cursor-acp');
-  } catch {
-    return join(tmpdir(), 'cindy-cursor-acp');
-  }
+  return trimmed;
+}
+
+function resolveRoot(userDataPath: string): string {
+  return join(requireUserDataPath(userDataPath), 'cursor-acp');
 }
 
 /** True iff `child` is strictly inside `parent` (not equal). */
@@ -95,7 +96,7 @@ function writeIsolatedCliConfig(configDir: string): void {
 
 /** Resolve the sticky config dir for a Cindy business session id. */
 export function resolveCursorIsolatedConfigDir(
-  userDataPath: string | undefined,
+  userDataPath: string,
   stableKey: string,
 ): string {
   return join(resolveRoot(userDataPath), safeDirSegment(stableKey));
@@ -107,7 +108,7 @@ export function resolveCursorIsolatedConfigDir(
  * 路径若不在 cursor-acp root 内则 no-op（防路径穿越）。
  */
 export function removeCursorIsolatedConfigDir(
-  userDataPath: string | undefined,
+  userDataPath: string,
   stableKey: string,
 ): void {
   const key = stableKey.trim();
@@ -120,7 +121,7 @@ export function removeCursorIsolatedConfigDir(
 
 export function createCursorIsolatedConfigDir(
   baseEnv: NodeJS.ProcessEnv = process.env,
-  opts: CreateCursorIsolatedConfigOptions = {},
+  opts: CreateCursorIsolatedConfigOptions,
 ): CursorIsolatedConfig {
   const root = resolveRoot(opts.userDataPath);
   mkdirSync(root, { recursive: true });

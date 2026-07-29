@@ -3,6 +3,9 @@
  */
 
 import { describe, expect, it, vi } from 'vitest';
+import { mkdtempSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 
 import { createConsoleLogger } from '../../interfaces/logger.js';
 import type { AuthAdapter } from '../../interfaces/auth-adapter.js';
@@ -98,9 +101,10 @@ async function bootCursorSession(args: {
     behavior: 'allow' | 'deny';
   }>;
 }) {
+  const userDataPath = mkdtempSync(join(tmpdir(), 'cindy-cursor-perm-'));
   const agent = new CursorAgent({
     auth: createAuthStub(),
-    runtimeConfig: {},
+    runtimeConfig: { userDataPath },
     binaryPath: '/tmp/fake-cursor-agent',
     logger: createConsoleLogger('cursor-perm-test'),
     classifyAutoPermission: args.classifyAutoPermission,
@@ -143,22 +147,36 @@ async function bootCursorSession(args: {
     }
   };
 
-  const handle = await agent.startSession({
-    workingDir: '/tmp',
-    model: 'default',
-    sessionId: 'biz-session-perm',
-    permissionMode: args.permissionMode ?? 'auto',
-    vendorOptions: { createAcpTransport: () => args.transport },
-  });
-  if (args.interactionResolver) {
-    handle.setInteractionResolver(async (req) => {
-      if (req.kind !== 'permission') {
-        return { kind: 'permission', behavior: 'deny' };
-      }
-      return args.interactionResolver!(req);
+  try {
+    const handle = await agent.startSession({
+      workingDir: '/tmp',
+      model: 'default',
+      sessionId: 'biz-session-perm',
+      permissionMode: args.permissionMode ?? 'auto',
+      vendorOptions: { createAcpTransport: () => args.transport },
     });
+    if (args.interactionResolver) {
+      handle.setInteractionResolver(async (req) => {
+        if (req.kind !== 'permission') {
+          return { kind: 'permission', behavior: 'deny' };
+        }
+        return args.interactionResolver!(req);
+      });
+    }
+    const prevClose = handle.close.bind(handle);
+    handle.close = async () => {
+      try {
+        await prevClose();
+      } finally {
+        await agent.dispose().catch(() => undefined);
+        rmSync(userDataPath, { recursive: true, force: true });
+      }
+    };
+    return { agent, handle };
+  } catch (err) {
+    rmSync(userDataPath, { recursive: true, force: true });
+    throw err;
   }
-  return { agent, handle };
 }
 
 describe('CursorAgent capabilities — permission modes', () => {
