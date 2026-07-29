@@ -145,20 +145,42 @@ describe('remoteCcQueryFactory persistent generation drift (R23 P2)', () => {
     // drift 必须进入 forceFreshQuery 判定。
     expect(source).toContain('!forcedFreshCcBridgeSessions.has(sessionId)) ||');
     // open 成功后 (含 attach) 必须落盘 applied 指纹。
-    expect(source).toContain('writeCcAppliedFingerprint(sessionId, mcpInjectFingerprint)');
+    expect(source).toContain('writeCcAppliedFingerprint(sessionId, appliedFingerprintToWrite)');
   });
 });
 
 describe('remoteCcQueryFactory drift override (R27 P1)', () => {
   it('does not let the forced-fresh set suppress a detected generation drift', () => {
-    expect(source).toContain('ccGenerationDrift;');
+    expect(source).toContain('ccGenerationDrift ||');
     const driftCheck = source.indexOf('ccGenerationDrift =');
     const forceFreshAssign = source.indexOf('const forceFreshQuery =', driftCheck);
     expect(forceFreshAssign).toBeGreaterThan(driftCheck);
     // drift 独立成项:豁免闭括号 (has(sessionId)) 之后的 || 分支即 drift。
     const exemptClose = source.indexOf('!forcedFreshCcBridgeSessions.has(sessionId)) ||', forceFreshAssign);
-    const orDrift = source.indexOf('ccGenerationDrift;', exemptClose);
+    const orDrift = source.indexOf('ccGenerationDrift ||', exemptClose);
     expect(exemptClose).toBeGreaterThan(forceFreshAssign);
     expect(orDrift).toBeGreaterThan(exemptClose);
+  });
+});
+
+describe('remoteCcQueryFactory missing desired generation (Greptile R29 P1)', () => {
+  it('forces a clean no-MCP query when injection cannot produce a desired fingerprint for a previously injected session', () => {
+    expect(source).toContain('CC_MCP_DISABLED_FINGERPRINT');
+    expect(source).toContain('const ccMissingDesiredStale =');
+    expect(source).toContain('mcpInjectFingerprint === undefined');
+    expect(source).toContain('ccAppliedFingerprint !== CC_MCP_DISABLED_FINGERPRINT');
+
+    const missingDesired = source.indexOf('const ccMissingDesiredStale =');
+    const forceFreshAssign = source.indexOf('const forceFreshQuery =', missingDesired);
+    const forceFreshBranch = source.indexOf('ccMissingDesiredStale;', forceFreshAssign);
+    expect(forceFreshAssign).toBeGreaterThan(missingDesired);
+    expect(forceFreshBranch).toBeGreaterThan(forceFreshAssign);
+
+    const appliedWrite = source.indexOf('const appliedFingerprintToWrite =', forceFreshBranch);
+    expect(appliedWrite).toBeGreaterThan(forceFreshBranch);
+    expect(source.slice(appliedWrite, source.indexOf('if (appliedFingerprintToWrite)', appliedWrite))).toContain(
+      'ccMissingDesiredStale ? CC_MCP_DISABLED_FINGERPRINT : undefined',
+    );
+    expect(source).toContain('writeCcAppliedFingerprint(sessionId, appliedFingerprintToWrite)');
   });
 });

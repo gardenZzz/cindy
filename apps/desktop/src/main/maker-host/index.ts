@@ -120,7 +120,12 @@ import {
 import type { CodexHttpBridge } from '../mcp-integrations/codexHttpBridge.js';
 import { setRemoteMcpBridgeTokenRotatedHook } from '../mcp-integrations/remoteMcpBridgeToken.js';
 import { ensureRemoteMcpForward, setRemoteMcpForwardRearmedHook, stripRemoteCodexMcpConfig } from '../remote-ssh/codex-remote-mcp.js';
-import { buildCcRemoteHttpMcpServers, readCcAppliedFingerprint, writeCcAppliedFingerprint } from './cc-remote-mcp.js';
+import {
+  buildCcRemoteHttpMcpServers,
+  CC_MCP_DISABLED_FINGERPRINT,
+  readCcAppliedFingerprint,
+  writeCcAppliedFingerprint,
+} from './cc-remote-mcp.js';
 import { getRemoteSessionStartEnsure, getRemoteCodexLiveTurnChecker, setRemoteCcTurnSettledHandler, setRemoteCcStaleQuery } from './remote-session-start-ensure.js';
 import {
   refreshRemoteCodexMcpAfterBridgeRecreate,
@@ -754,6 +759,15 @@ export function getMaker(): Maker {
           mcpInjectFingerprint !== undefined &&
           ccAppliedFingerprint !== null &&
           mcpInjectFingerprint !== ccAppliedFingerprint;
+        // 注入失败 / bridge 不可用时没有 desired 指纹,但若 applied 记录显示
+        // 该 session 上一代确实带过 MCP,attach 旧 alive query 会复用失效
+        // Authorization / URL / mcp-session-id。此时 forceFresh 成无 MCP 的
+        // 干净 query,并在 open 成功后把 applied 收敛为 disabled,避免故障
+        // 期间每次 open 都重复 kill + fresh (Greptile R29 P1)。
+        const ccMissingDesiredStale =
+          mcpInjectFingerprint === undefined &&
+          ccAppliedFingerprint !== null &&
+          ccAppliedFingerprint !== CC_MCP_DISABLED_FINGERPRINT;
         // 持久代际 drift (ccGenerationDrift) 不受 fresh 集合豁免:
         // token/bridge/端口变化后 applied 指纹 ≠ desired 时, 已 fresh 过的
         // session 也必须重新 forceFresh — 否则豁免让 drift 判定只在「从未
@@ -762,7 +776,8 @@ export function getMaker(): Maker {
         const forceFreshQuery =
           ((injectedServerCount > 0 || mcpNeedsFreshStart || staleInvalidatedCcSessions.has(sessionId)) &&
             !forcedFreshCcBridgeSessions.has(sessionId)) ||
-          ccGenerationDrift;
+          ccGenerationDrift ||
+          ccMissingDesiredStale;
 
         // 协同 MCP 已 mutate 进 startParams.mcpServers;这里再把 proxy env 合入
         // 得到最终 startParams (mcpServers 与 env 都带上)。
@@ -801,8 +816,10 @@ export function getMaker(): Maker {
         }
         // 注入/禁用代际随 open 成功落盘 (attach 也算 — 它确认了该 query
         // 的 MCP 代际);下次 open 前据此判 drift。
-        if (mcpInjectFingerprint) {
-          writeCcAppliedFingerprint(sessionId, mcpInjectFingerprint);
+        const appliedFingerprintToWrite =
+          mcpInjectFingerprint ?? (ccMissingDesiredStale ? CC_MCP_DISABLED_FINGERPRINT : undefined);
+        if (appliedFingerprintToWrite) {
+          writeCcAppliedFingerprint(sessionId, appliedFingerprintToWrite);
         }
 
         // 把 ssh transport disposer 串进 remoteQuery.close — maker-core 不知道
