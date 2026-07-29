@@ -737,8 +737,9 @@ export const MAKER_PUSH = {
   /**
    * 被控端「当前 New Maker 草稿」全量变更广播。SYNC_NEW_MAKER_DRAFT 落 main 缓存后随即发,
    * 经 device-link tap 转发给控制端(account 级 → sessions topic),控制端刷新远程草稿显示镜像。
-   * payload = { claudeCode: RemoteNewMakerDefaults, codex: RemoteNewMakerDefaults }(per-vendor,
-   * 控制端直接复用 resolveDeviceLinkDraftDefaults)。本地窗口不消费(被控端是真相、不自镜像)。
+   * payload = { claudeCode, codex, cursor } 三槽,值均为 RemoteNewMakerDefaults(per-vendor,
+   * 控制端直接复用 resolveDeviceLinkDraftDefaults)。槽名由 agentKindToDraftPushSlot 统一
+   * 给出,构造见 buildNewMakerDraftChangedPayload。本地窗口不消费(被控端是真相、不自镜像)。
    */
   NEW_MAKER_DRAFT_CHANGED: 'maker:new-maker-draft:changed',
   /**
