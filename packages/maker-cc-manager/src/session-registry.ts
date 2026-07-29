@@ -718,7 +718,7 @@ export class SessionRegistry {
 }
 
 interface RegistryError extends Error {
-  code: 'SESSION_NOT_FOUND' | 'SESSION_ALREADY_EXISTS' | 'SDK_ERROR';
+  code: 'SESSION_NOT_FOUND' | 'SESSION_ALREADY_EXISTS' | 'SESSION_KILL_PENDING' | 'SDK_ERROR';
 }
 
 function makeRegistryError(code: RegistryError['code'], message: string): RegistryError {

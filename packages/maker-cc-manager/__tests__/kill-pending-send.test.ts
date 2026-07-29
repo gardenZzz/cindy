@@ -39,7 +39,7 @@ function buildBlockingFactory(): SdkQueryFactory {
 describe('kill 终止窗口的 sendMessage 拒绝 (Greptile P1)', () => {
   it('rejects sendMessage with SESSION_KILL_PENDING while a forceful kill is still settling', async () => {
     const registry = new SessionRegistry({ sdkQueryFactory: buildBlockingFactory() });
-    const session = await registry.create({ sessionId: 's1', cwd: '/repo', model: 'm' });
+    const session = await registry.create({ sessionId: 's1', cwd: '/repo', model: 'm', env: {} });
 
     // kill 发出后 consume loop 仍挂在线上 (inputStream 未消费新消息) —
     // alive 为 true、inputQueue 已 end 的窗口期。
@@ -55,7 +55,7 @@ describe('kill 终止窗口的 sendMessage 拒绝 (Greptile P1)', () => {
 
   it('still throws SESSION_NOT_FOUND after the session fully exits (not the kill-pending code)', async () => {
     const registry = new SessionRegistry({ sdkQueryFactory: buildBlockingFactory() });
-    await registry.create({ sessionId: 's2', cwd: '/repo', model: 'm' });
+    await registry.create({ sessionId: 's2', cwd: '/repo', model: 'm', env: {} });
 
     await registry.close('s2'); // close 路径: alive 立即 false
     expect(() => registry.sendMessage('s2', { text: 'hello' })).toThrowError(/SESSION_NOT_FOUND|no longer alive/);

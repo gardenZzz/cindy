@@ -118,6 +118,7 @@ import {
   unregisterCodexMcpThreadContext,
 } from '../mcp-integrations/codexEnvironment.js';
 import type { CodexHttpBridge } from '../mcp-integrations/codexHttpBridge.js';
+import { setRemoteMcpBridgeTokenRotatedHook } from '../mcp-integrations/remoteMcpBridgeToken.js';
 import { ensureRemoteMcpForward, setRemoteMcpForwardRearmedHook, stripRemoteCodexMcpConfig } from '../remote-ssh/codex-remote-mcp.js';
 import { buildCcRemoteHttpMcpServers, readCcAppliedFingerprint, writeCcAppliedFingerprint } from './cc-remote-mcp.js';
 import { getRemoteSessionStartEnsure, getRemoteCodexLiveTurnChecker, setRemoteCcTurnSettledHandler, setRemoteCcStaleQuery } from './remote-session-start-ensure.js';
@@ -537,6 +538,12 @@ export function getMaker(): Maker {
     // (codex-connector R22 P1):插件开关 / custom MCP CRUD / contacts /
     // Slack provider / 账号切换等所有 shutdown 路径自动覆盖, 不靠逐点调用。
     setCodexEnvironmentShutdownHook(handleCodexEnvironmentShutdownForRemote);
+    // bridge token 轮换 (账号切换 secrets 清空) 时同步失效远端 CC query —
+    // 旧 Authorization header 在新 bridge 上持续 401;独立于 shutdown 路径
+    // (本地 turn 忙时 shutdown 会被跳过, codex-connector R24 P2)。
+    setRemoteMcpBridgeTokenRotatedHook(() => {
+      invalidateActiveRemoteCcQueries({ reason: 'bridge-token-rotated' });
+    });
     // forward 端口重绑 (SSH 重连 onRearmed) 时, 该 host 上活跃远端 CC
     // query 的 mcpServers URL 还指旧端口 — fresh 失效 + detach 促重建
     // (codex-connector R19 P2)。

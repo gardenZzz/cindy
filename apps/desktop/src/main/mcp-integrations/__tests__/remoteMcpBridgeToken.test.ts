@@ -33,6 +33,7 @@ vi.mock('../../secrets/providerSecretStore.js', () => ({
 import {
   getRemoteMcpBridgeToken,
   resetRemoteMcpBridgeTokenCacheForTests,
+  setRemoteMcpBridgeTokenRotatedHook,
 } from '../remoteMcpBridgeToken.js';
 
 describe('remoteMcpBridgeToken', () => {
@@ -42,6 +43,7 @@ describe('remoteMcpBridgeToken', () => {
     h.reads.count = 0;
     h.writes.count = 0;
     resetRemoteMcpBridgeTokenCacheForTests();
+    setRemoteMcpBridgeTokenRotatedHook(null);
   });
 
   it('lazily generates and persists the token on first use, then serves from cache', () => {
@@ -52,6 +54,25 @@ describe('remoteMcpBridgeToken', () => {
     const second = getRemoteMcpBridgeToken();
     expect(second).toBe(first);
     expect(h.reads.count).toBe(1); // 第二次走进程内缓存,不再读 safeStorage
+  });
+
+  it('invokes the rotated hook when secrets are cleared (R24 P2: remote CC must be invalidated)', () => {
+    const hook = vi.fn();
+    setRemoteMcpBridgeTokenRotatedHook(hook);
+    getRemoteMcpBridgeToken();
+    expect(hook).not.toHaveBeenCalled();
+    for (const listener of h.clearListeners) listener();
+    expect(hook).toHaveBeenCalledTimes(1);
+  });
+
+  it('keeps the secrets-cleared flow working when the rotated hook throws', () => {
+    setRemoteMcpBridgeTokenRotatedHook(() => {
+      throw new Error('invalidate exploded');
+    });
+    getRemoteMcpBridgeToken();
+    expect(() => {
+      for (const listener of h.clearListeners) listener();
+    }).not.toThrow();
   });
 
   it('registers the secrets-cleared listener on first use', () => {
