@@ -538,7 +538,7 @@ describe('FORGE_GUIDE', () => {
       "kind: 'deposit_media'",
       "kind: 'release_media'",
       '"cindy": { "media": ["deposit"] }',
-      '每意识配额 512MB',
+      '每意识配额 1GB',
       '寄存物不是产物',
     ]) {
       expect(FORGE_GUIDE).toContain(marker);

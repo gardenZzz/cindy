@@ -2652,7 +2652,7 @@
         "cindyVideoGenerate": "Video generation (delegated to Cindy)",
         "cindyVideoEdit": "Image-to-video (delegated to Cindy, reference images from its own media only)",
         "cindyMediaDeposit": "Can save images, video or audio it holds into your media library",
-        "cindyMediaDepositDetail": "This lets AI work on material you paste or drop into the plugin. Saved items are recorded under this plugin, use at most {{quota}} MB, and are cleaned up when you uninstall it.",
+        "cindyMediaDepositDetail": "This lets AI work on material you paste or drop into the plugin. Saved items are recorded under this plugin, use at most {{quota}}, and are cleaned up when you uninstall it.",
         "agentUserAction": "Can start a new Agent turn after you click a plugin card",
         "agentUserActionDetail": "Each click permits one turn only, and only in the session that owns the card.",
         "agentBackground": "Can automatically start new Agent turns in the background",
