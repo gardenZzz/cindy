@@ -159,6 +159,8 @@ interface SessionState {
    * 用户消息看似成功实则消失)。
    */
   killing?: boolean;
+  /** consume loop 的完成 promise — kill 同步等待它 (带看门狗)。 */
+  consumeLoopDone?: Promise<void>;
   /** Currently attached client's notify function; null when no client is attached. */
   attachedNotify: AttachedNotify | null;
   /**
@@ -502,7 +504,28 @@ export class SessionRegistry {
       });
     }
     s.inputQueue.end();
-    // Loop will discover end + remove from registry.
+    // 同步等 consume loop 真正退出 (带 10s 看门狗):kill 返回时 session
+    // 必然不再 alive — client 不再需要用「固定期限轮询 list」猜终止状态
+    // (Greptile R27 confidence:固定期限的客户端等待没有 daemon 侧保证,
+    // 慢退出场景反复失败)。看门狗超时 = consume loop 卡死 (daemon 病态),
+    // 强制标记 dead 让恢复路径继续, 不让 kill RPC 永不返回。
+    const KILL_SETTLE_WATCHDOG_MS = 10_000;
+    if (s.consumeLoopDone) {
+      const settled = await Promise.race([
+        s.consumeLoopDone.then(() => true),
+        new Promise<false>((resolve) => {
+          const timer = setTimeout(() => resolve(false), KILL_SETTLE_WATCHDOG_MS);
+          timer.unref?.();
+        }),
+      ]);
+      if (!settled) {
+        this.logger.warn('consume loop did not exit within watchdog after kill — marking dead forcibly', {
+          sessionId,
+          watchdogMs: KILL_SETTLE_WATCHDOG_MS,
+        });
+        s.alive = false;
+      }
+    }
   }
 
   /**
@@ -631,7 +654,7 @@ export class SessionRegistry {
   /* ============================== private ============================== */
 
   private startConsumeLoop(session: SessionState): void {
-    void (async (): Promise<void> => {
+    session.consumeLoopDone = (async (): Promise<void> => {
       try {
         for await (const message of session.query) {
           this.recordEvent(session, message);
@@ -648,6 +671,8 @@ export class SessionRegistry {
         this.notifyClosed(session, 'error', (err as Error).message);
       }
     })();
+    // 迟到失败不成 unhandled rejection (kill 的同步等待另有 race 兜底)。
+    session.consumeLoopDone.catch(() => undefined);
   }
 
   private recordEvent(session: SessionState, message: unknown): void {

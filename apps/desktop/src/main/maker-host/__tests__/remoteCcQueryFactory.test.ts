@@ -143,8 +143,22 @@ describe('remoteCcQueryFactory persistent generation drift (R23 P2)', () => {
     expect(source).toContain('ccGenerationDrift');
     expect(source).toContain('mcpInjectFingerprint !== ccAppliedFingerprint');
     // drift 必须进入 forceFreshQuery 判定。
-    expect(source).toContain('|| ccGenerationDrift)');
+    expect(source).toContain('!forcedFreshCcBridgeSessions.has(sessionId)) ||');
     // open 成功后 (含 attach) 必须落盘 applied 指纹。
     expect(source).toContain('writeCcAppliedFingerprint(sessionId, mcpInjectFingerprint)');
+  });
+});
+
+describe('remoteCcQueryFactory drift override (R27 P1)', () => {
+  it('does not let the forced-fresh set suppress a detected generation drift', () => {
+    expect(source).toContain('ccGenerationDrift;');
+    const driftCheck = source.indexOf('ccGenerationDrift =');
+    const forceFreshAssign = source.indexOf('const forceFreshQuery =', driftCheck);
+    expect(forceFreshAssign).toBeGreaterThan(driftCheck);
+    // drift 独立成项:豁免闭括号 (has(sessionId)) 之后的 || 分支即 drift。
+    const exemptClose = source.indexOf('!forcedFreshCcBridgeSessions.has(sessionId)) ||', forceFreshAssign);
+    const orDrift = source.indexOf('ccGenerationDrift;', exemptClose);
+    expect(exemptClose).toBeGreaterThan(forceFreshAssign);
+    expect(orDrift).toBeGreaterThan(exemptClose);
   });
 });
