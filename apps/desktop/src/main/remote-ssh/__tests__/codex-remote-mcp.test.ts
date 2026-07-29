@@ -1111,12 +1111,14 @@ describe('codex-connector R21 regressions', () => {
     execCmds.length = 0;
 
     // live turn 中 strip:整体跳过 (不写不重启)。
-    await stripRemoteCodexMcpConfig(host, { hasLiveTurnOnHost: () => true });
+    const liveStrip = await stripRemoteCodexMcpConfig(host, { hasLiveTurnOnHost: () => true });
+    expect(liveStrip.daemonRebootstrapped).toBe(false);
     expect(execCmds.join('\n')).not.toContain('base64 -d');
     expect(execCmds.join('\n')).not.toContain('bootstrap');
 
     // idle 后 strip:剥段 + bootstrap 清 env + applied 摘除。
-    await stripRemoteCodexMcpConfig(host, { hasLiveTurnOnHost: () => false });
+    const idleStrip = await stripRemoteCodexMcpConfig(host, { hasLiveTurnOnHost: () => false });
+    expect(idleStrip.daemonRebootstrapped).toBe(true);
     const joined = execCmds.join('\n');
     expect(joined).toContain('base64 -d');
     expect(joined).toContain('bootstrap');
