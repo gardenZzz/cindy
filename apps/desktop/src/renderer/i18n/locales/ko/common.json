@@ -3908,6 +3908,8 @@
     "user": {
       "settingsLink": "설정, 현재 사용자: {{name}}",
       "canaryBadge": "Canary 사용자",
+      "regionCodeCn": "CN",
+      "regionCodeDev": "Dev",
       "viewReleaseNotes": "릴리즈 노트 보기",
       "reopenUpdateBanner": "업데이트 준비됨 — 클릭하여 확인",
       "downloadMobile": "Cindy 모바일 다운로드"

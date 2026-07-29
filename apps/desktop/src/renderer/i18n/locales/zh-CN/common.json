@@ -3908,6 +3908,8 @@
     "user": {
       "settingsLink": "设置，当前用户：{{name}}",
       "canaryBadge": "灰度用户",
+      "regionCodeCn": "CN",
+      "regionCodeDev": "Dev",
       "viewReleaseNotes": "查看版本日志",
       "reopenUpdateBanner": "有更新待重启，点击查看",
       "downloadMobile": "下载 Cindy 移动端"
