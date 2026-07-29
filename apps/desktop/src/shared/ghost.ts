@@ -1412,9 +1412,16 @@ const GHOST_CINDY_PERM_DETAIL: Record<string, string> = {
   'media.deposit': 'cindyMediaDepositDetail',
 };
 
-/** 字节 → 确认框里给用户看的整数 MB(向下取整,不给"511.99"这种数)。 */
-function formatGhostQuotaMb(bytes: number): string {
-  return String(Math.floor(bytes / (1024 * 1024)));
+/**
+ * 字节 → 确认框里给用户看的容量(含单位)。整数向下取整,不给"511.99"这种数;
+ * 整 GB 用 GB 表述(1GB 显示成"1024 MB"读起来像凑数)。单位跟着数字一起从
+ * 常量算出来,locale 里只留 {{quota}} 占位 —— 否则上限改成 GB 量级时,四份
+ * locale 里写死的 "MB" 就成了错的。
+ */
+function formatGhostQuotaSize(bytes: number): string {
+  const mb = Math.floor(bytes / (1024 * 1024));
+  if (mb >= 1024 && mb % 1024 === 0) return `${mb / 1024} GB`;
+  return `${mb} MB`;
 }
 
 /**
@@ -1439,7 +1446,7 @@ export function ghostPermissionItems(manifest: GhostManifest): GhostPermissionIt
           // 寄存上限由常量单源插值进确认框说明(媒体规则要求装入确认展示
           // 持久媒体占用上限);改常量四份 locale 自动跟随。
           ...(cap === 'media.deposit'
-            ? { detailArgs: { quota: formatGhostQuotaMb(GHOST_CINDY_DEPOSIT_QUOTA_BYTES) } }
+            ? { detailArgs: { quota: formatGhostQuotaSize(GHOST_CINDY_DEPOSIT_QUOTA_BYTES) } }
             : {}),
         });
       }
@@ -4656,8 +4663,20 @@ export const GHOST_CINDY_MAX_ASYNC_JOBS = 2;
  * 自带三重硬闸:单次上限、每意识累计配额、令牌桶频控。
  */
 
-/** 单次寄存上限(解码后字节;与 fs 槽单次写同量级,超限整单拒)。 */
-export const GHOST_CINDY_DEPOSIT_MAX_BYTES = 16 * 1024 * 1024;
+/**
+ * 单次寄存上限(解码后字节;超限整单拒)。
+ *
+ * 2026-07-29 由 16MB(fs 槽单次写量级)上调至 50MB:实拍照片与短视频素材
+ * 常态超过 16MB,压到 16MB 以下要插件自己转码,与"画布上的图直接能改"的
+ * 目标冲突。下游没有新的天花板 —— network `as:'media'` 的入仓硬顶本就是
+ * GHOST_FETCH_MEDIA_MAX_BYTES(256MB),blobStore 不设上限。
+ *
+ * 代价说明白:寄存的字节以 base64 走一次 ghost-pipe IPC(50MB → 约 67MB
+ * 字符串的瞬时分配),这是本通道与 network 通道的结构性差别 —— 后者字节
+ * 全程在主机手里、不过 IPC。因此这个数不宜再往上抬;真需要更大的素材,
+ * 正确解法是插件侧压缩或分片,不是继续抬上限。
+ */
+export const GHOST_CINDY_DEPOSIT_MAX_BYTES = 50 * 1024 * 1024;
 
 /**
  * 每意识寄存累计配额(字节)。只统计**寄存**引用(refKind 'ghost-deposit'),
@@ -4665,8 +4684,11 @@ export const GHOST_CINDY_DEPOSIT_MAX_BYTES = 16 * 1024 * 1024;
  * 存不进来。内容寻址天然去重:同一张图反复寄存不重复占额。
  * 用满的释放口是 release_media(面板删素材时撤回),不做静默 LRU 淘汰
  * ——"昨天能改今天改不了"正是 #784 要消灭的体验。
+ *
+ * 2026-07-29 由 512MB 上调至 1GB:单次上限同步抬到 50MB 后,原配额只够存
+ * 十来件大素材,重度使用的无限画布会频繁撞顶。
  */
-export const GHOST_CINDY_DEPOSIT_QUOTA_BYTES = 512 * 1024 * 1024;
+export const GHOST_CINDY_DEPOSIT_QUOTA_BYTES = 1024 * 1024 * 1024;
 
 /**
  * 频控令牌桶:容量 = 允许的突发张数(用户一次粘一批图要立刻可用),
@@ -4776,9 +4798,8 @@ export type GhostPipeCindyRequest =
       kind: 'deposit_media';
       /**
        * 媒体字节的 base64(不含 data: 前缀;解码后 ≤
-       * GHOST_CINDY_DEPOSIT_MAX_BYTES,与 fs 槽单次写同量级)。真实类型由
-       * 主机按字节魔数判定,识别不出受支持媒体一律拒收——自报的 mime /
-       * 扩展名不作为依据。
+       * GHOST_CINDY_DEPOSIT_MAX_BYTES = 50MB)。真实类型由主机按字节魔数
+       * 判定,识别不出受支持媒体一律拒收——自报的 mime / 扩展名不作为依据。
        */
       data: string;
       /** 可选备注(入账 label;仅供主机侧账目与排查,不进聊天)。 */

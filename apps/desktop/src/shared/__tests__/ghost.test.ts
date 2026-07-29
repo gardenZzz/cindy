@@ -1439,8 +1439,13 @@ describe('ghost · cindy 详单 video 类目', () => {
       labelKey: 'cindyMediaDeposit',
       detailKey: 'cindyMediaDepositDetail',
     });
-    expect(Number(items[0].detailArgs?.quota)).toBe(
-      Math.floor(GHOST_CINDY_DEPOSIT_QUOTA_BYTES / (1024 * 1024)),
+    // 数字与单位都从常量算出来(locale 里只有 {{quota}} 占位):反解回字节
+    // 必须等于常量本身 —— 上限调成 GB 量级时,写死 "MB" 的文案就是错的。
+    const quota = items[0].detailArgs?.quota ?? '';
+    expect(quota).toMatch(/^\d+ (MB|GB)$/);
+    const [amount, unit] = quota.split(' ');
+    expect(Number(amount) * 1024 * 1024 * (unit === 'GB' ? 1024 : 1)).toBe(
+      GHOST_CINDY_DEPOSIT_QUOTA_BYTES,
     );
   });
 

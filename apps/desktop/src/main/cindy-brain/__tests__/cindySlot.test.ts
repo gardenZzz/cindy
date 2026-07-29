@@ -926,7 +926,9 @@ describe('寄存(deposit_media / release_media)', () => {
   it('单次上限:超限在解码前就拒(不为超长串分配解码缓冲)', async () => {
     const { slot, sniffDepositMime, depositMedia } = makeSlot();
     // 只造字符数、不造真字节:上限判定必须早于 base64 校验与解码。
-    const huge = 'A'.repeat(GHOST_CINDY_DEPOSIT_MAX_BYTES * 2);
+    // 刚好越过字符闸(4/3 膨胀率 + padding)即可,不用造两倍——上限已是
+    // 50MB 量级,乘 2 会让每次跑测试白分配上百 MB。
+    const huge = 'A'.repeat(Math.ceil((GHOST_CINDY_DEPOSIT_MAX_BYTES * 4) / 3) + 1024);
     const r = await slot.handleModelRequest('art', depositReq(huge));
     expect(r).toMatchObject({ ok: false });
     expect((r as { message: string }).message).toContain('单次寄存上限');
