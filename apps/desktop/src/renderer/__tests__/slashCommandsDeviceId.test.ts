@@ -70,12 +70,12 @@ describe('loadAllCommands deviceId', () => {
     expect(cmds.some((x) => x.kind === 'agent-skill')).toBe(false);
   });
 
-  it('本地 Codex 新对话 workingDir=null 时保持不请求 skills/list', async () => {
+  it('本地 Codex 新对话 workingDir=null 时仍加载全局 skills', async () => {
     const s = stubElectron();
     const cmds = await loadAllCommands('codex', null);
 
-    expect(s.listAgentSkills).not.toHaveBeenCalled();
-    expect(cmds.some((x) => x.kind === 'agent-skill')).toBe(false);
+    expect(s.listAgentSkills).toHaveBeenCalledWith('codex', {});
+    expect(cmds.some((x) => x.name === 'localskill')).toBe(true);
   });
 
   it('远程会话:agent-builtin / agent-skill 走隧道,desktop 仍本地', async () => {

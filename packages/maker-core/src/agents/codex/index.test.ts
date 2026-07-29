@@ -2708,6 +2708,19 @@ describe('CodexAgent MCP thread context hooks', () => {
     await agent.dispose();
   });
 
+  it('uses the home directory to list global skills for a new conversation without a cwd', async () => {
+    const agent = new CodexAgent(createDeps());
+
+    await expect(agent.listAgentSkills({})).resolves.toMatchObject({ skills: [] });
+
+    const request = createdTransports[0].lines
+      .map((line) => JSON.parse(line) as { method?: string; params?: unknown })
+      .find((line) => line.method === Method.SkillsList);
+    expect(request?.params).toMatchObject({ cwds: [os.homedir()] });
+
+    await agent.dispose();
+  });
+
   it('starts a cold OAuth host before account rate-limit RPCs', async () => {
     const rateLimits = {
       rateLimits: { planType: 'plus', primary: { usedPercent: 100, windowMinutes: 300 } },
