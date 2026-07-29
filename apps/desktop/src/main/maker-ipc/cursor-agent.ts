@@ -30,7 +30,8 @@ export function registerCursorAgentIpc(): void {
 
   ipcMain.handle(
     MAKER_INVOKE.CURSOR_BINARY_STATUS,
-    async (): Promise<CursorBinaryStatusView> => {
+    async (event): Promise<CursorBinaryStatusView> => {
+      assertTrustedAppRendererEvent(event);
       try {
         const status = await discoverCursorAgentBinary();
         return { installed: status.installed };
