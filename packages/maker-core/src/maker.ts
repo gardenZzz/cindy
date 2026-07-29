@@ -285,13 +285,21 @@ export class Maker {
       ...startOpts,
       sessionId: id,
       // 强制由 Maker 注入持久化 CAS，不能信任外部 CreateSessionOptions 自带回调。
-      // Claude adapter 只在精确识别 invalid-resume 时调用；Codex 不消费该字段。
+      // Claude adapter 只在精确识别 invalid-resume 时调用；Cursor 只在 session/load
+      // 判定 resume 失效时调用（cursor/index.ts）；Codex 不消费该字段。
+      //
       // 对所有 claude-code 会话装配(不止 resume):全新会话也可能在首个 turn 崩溃前
       // 就把 SDK 回填、已落库的 sdk_session_id 变成幽灵 id(见 claude-code/index.ts
       // 的 fresh-session self-reference 恢复),需要同一把 CAS 才能把它清掉,否则下一次
       // send 会 resume 同一个不存在的会话反复失败。
+      //
+      // Cursor 没有 Claude 那种 fresh-session self-reference 恢复，消费点仅 resume
+      // 失效。但仍对**所有** cursor 会话注入（不只 resume）：否则生产路径拿不到
+      // 回调，invalid-resume 会无 CAS 地 fresh create，随后 Maker 的普通 update 会
+      // 无条件覆盖并发 actor 已写入的有效 sdk id。注入对全新 cursor 会话无害
+      // （未触发 resume 失败时不会调用）。
       onInvalidResumeSession:
-        opts.agentKind === 'claude-code'
+        opts.agentKind === 'claude-code' || opts.agentKind === 'cursor'
           ? (expectedSdkSessionId) =>
               this.invalidateAndClearSdkSessionId(id, expectedSdkSessionId)
           : undefined,

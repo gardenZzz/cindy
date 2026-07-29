@@ -1256,4 +1256,73 @@ describe('Maker invalid-resume persistence bridge', () => {
     expect(persistedSdkSessionIds).toEqual(['sdk-old', 'sdk-fresh']);
     await maker.closeSession('session-1');
   });
+
+  it('injects a compare-and-clear callback for cursor sessions', async () => {
+    const storage = createStorage();
+    await storage.create({
+      id: 'session-cursor',
+      agentKind: 'cursor',
+      workDir: '/repo',
+      title: 'Cursor resume',
+      model: 'auto',
+      sdkSessionId: 'cursor-old',
+    });
+    const startSession = vi.fn(async (opts: CreateSessionOptions) => {
+      expect(await opts.onInvalidResumeSession?.('cursor-old')).toBe(true);
+      expect(await opts.onInvalidResumeSession?.('cursor-old')).toBe(false);
+      return createHandle({ id: '<pending>', agentKind: 'cursor' });
+    });
+    const maker = new Maker({
+      agents: { cursor: createAgent(startSession, 'cursor') },
+      storage,
+      logger: createLogger(),
+    });
+    await maker.createSession({
+      id: 'session-cursor',
+      agentKind: 'cursor',
+      workingDir: '/repo',
+      model: 'auto',
+      resumeSessionId: 'cursor-old',
+    });
+    expect((await storage.get('session-cursor'))?.sdkSessionId).toBeUndefined();
+  });
+
+  it('cursor CAS conflict refuses fresh create so Maker cannot overwrite a newer sdk id', async () => {
+    // 失败场景：load 旧 id A 失败时 DB 已被另一 actor 写成有效 B；无 CAS 会 fresh 出 C
+    // 并被 Maker update 无条件覆盖 B。有 CAS 时 compare-and-clear(A) 失败 → 抛错，B 保留。
+    const storage = createStorage();
+    await storage.create({
+      id: 'session-cursor',
+      agentKind: 'cursor',
+      workDir: '/repo',
+      title: 'Cursor',
+      model: 'auto',
+      sdkSessionId: 'sdk-B',
+    });
+
+    const startSession = vi.fn(async (opts: CreateSessionOptions) => {
+      expect(opts.onInvalidResumeSession).toBeDefined();
+      const cleared = await opts.onInvalidResumeSession?.('sdk-A');
+      expect(cleared).toBe(false);
+      throw new Error('CAS conflict: resume id no longer current');
+    });
+    const maker = new Maker({
+      agents: { cursor: createAgent(startSession, 'cursor') },
+      storage,
+      logger: createLogger(),
+    });
+
+    await expect(
+      maker.createSession({
+        id: 'session-cursor',
+        agentKind: 'cursor',
+        workingDir: '/repo',
+        model: 'auto',
+        resumeSessionId: 'sdk-A',
+      }),
+    ).rejects.toThrow(/CAS conflict/);
+
+    expect((await storage.get('session-cursor'))?.sdkSessionId).toBe('sdk-B');
+    expect(startSession).toHaveBeenCalledTimes(1);
+  });
 });
