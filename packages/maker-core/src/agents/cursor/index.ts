@@ -38,10 +38,11 @@ import type {
   InteractionResolver,
   UsageSnapshot,
 } from '../../types/events.js';
-import { readFileSync } from 'node:fs';
+import { promises as fs } from 'node:fs';
 import { extname } from 'node:path';
 import type { Effort, PermissionMode, UserContentBlock, UserMessage } from '../../types/common.js';
 import { createAsyncQueue, type AsyncQueue } from '../shared/async-queue.js';
+import { getDefaultImageResizer } from '../shared/image-resizer.js';
 import { UsageTracker } from '../shared/usage-tracker.js';
 import {
   AcpClient,
@@ -253,17 +254,58 @@ function mimeTypeForImagePath(filePath: string, provided?: string): string {
   }
 }
 
+/** ACP prompt 内嵌 base64 前，单图（resize 后）字节上限。 */
+export const CURSOR_PROMPT_IMAGE_MAX_BYTES = 20 * 1024 * 1024;
+
+export type CursorImageBytesReader = (filePath: string) => Promise<Buffer>;
+
+const defaultImageBytesReader: CursorImageBytesReader = (filePath) => fs.readFile(filePath);
+
+let imageBytesReader: CursorImageBytesReader = defaultImageBytesReader;
+let promptImageMaxBytes = CURSOR_PROMPT_IMAGE_MAX_BYTES;
+
+/** @internal 单测注入慢 reader / 恢复默认。 */
+export function __setCursorImageBytesReaderForTesting(
+  reader: CursorImageBytesReader | null,
+): void {
+  imageBytesReader = reader ?? defaultImageBytesReader;
+}
+
+/** @internal 单测注入超限阈值 / 恢复默认。 */
+export function __setCursorPromptImageMaxBytesForTesting(maxBytes: number | null): void {
+  promptImageMaxBytes = maxBytes ?? CURSOR_PROMPT_IMAGE_MAX_BYTES;
+}
+
 /**
  * Encode Cindy UserMessage into ACP prompt blocks.
  * Image blocks become real `ImageContentBlock` (base64 data + mimeType, or http(s) uri).
+ *
+ * Async：本地图先经 image-resizer（与 Claude/Codex 同 maxEdgePx 等默认上限），
+ * 再 `fs.promises.readFile` —— 禁止在 Main 热路径上 sync 读整图。
  */
-function userMessageToPromptBlocks(message: UserMessage): ContentBlock[] {
+export async function userMessageToPromptBlocks(message: UserMessage): Promise<ContentBlock[]> {
   const content = message.content;
   if (typeof content === 'string') {
     return content.length > 0 ? [{ type: 'text', text: content }] : [];
   }
   const blocks: ContentBlock[] = [];
-  for (const block of content as UserContentBlock[]) {
+  const resizer = getDefaultImageResizer();
+
+  // 同 turn 多张本地图并发缩，semaphore 在 resizer 内部控并发。
+  const localImageJobs = new Map<number, Promise<string>>();
+  content.forEach((block, idx) => {
+    if (block.type !== 'image') return;
+    const raw = block.path;
+    if (raw.startsWith('http://') || raw.startsWith('https://')) return;
+    localImageJobs.set(idx, resizer.process(stripFileUrl(raw)));
+  });
+  const resizedPaths = new Map<number, string>();
+  for (const [idx, p] of localImageJobs) {
+    resizedPaths.set(idx, await p);
+  }
+
+  for (let idx = 0; idx < content.length; idx++) {
+    const block = content[idx] as UserContentBlock;
     if (block.type === 'text' && block.text.length > 0) {
       blocks.push({ type: 'text', text: block.text });
       continue;
@@ -278,11 +320,29 @@ function userMessageToPromptBlocks(message: UserMessage): ContentBlock[] {
         });
         continue;
       }
-      const filePath = stripFileUrl(raw);
+      const filePath = resizedPaths.get(idx) ?? stripFileUrl(raw);
+      let statSize: number | undefined;
+      try {
+        statSize = (await fs.stat(filePath)).size;
+      } catch {
+        // fall through — reader will surface the error
+      }
+      if (typeof statSize === 'number' && statSize > promptImageMaxBytes) {
+        throw new Error(
+          `Cursor send: image exceeds ${promptImageMaxBytes} bytes at ${filePath} (${statSize} bytes)`,
+        );
+      }
       let data: string;
       try {
-        data = readFileSync(filePath).toString('base64');
+        const buf = await imageBytesReader(filePath);
+        if (buf.byteLength > promptImageMaxBytes) {
+          throw new Error(
+            `Cursor send: image exceeds ${promptImageMaxBytes} bytes at ${filePath} (${buf.byteLength} bytes)`,
+          );
+        }
+        data = buf.toString('base64');
       } catch (err) {
+        if (err instanceof Error && err.message.includes('image exceeds')) throw err;
         throw new Error(
           `Cursor send: failed to read image at ${filePath}: ${
             err instanceof Error ? err.message : String(err)
@@ -1178,6 +1238,8 @@ export class CursorAgent extends BaseAgent {
         typeof opts.resumeSessionId === 'string' && opts.resumeSessionId.length > 0
           ? opts.resumeSessionId
           : undefined;
+      /** session/load 真正成功才为 true（不是「请求了 resume」）。 */
+      let resumedSuccessfully = false;
 
       if (resumeId) {
         suppressHistoryReplay = true;
@@ -1188,6 +1250,7 @@ export class CursorAgent extends BaseAgent {
             mcpServers: [],
           });
           sessionId = resumeId;
+          resumedSuccessfully = true;
           await applyModelsFromSessionPayload(loaded ?? {});
           await applyInitialModelConfig();
           log.info('session loaded', {
@@ -1263,7 +1326,7 @@ export class CursorAgent extends BaseAgent {
         permissionMode: mutablePermissionMode,
         planMode: mutablePlanMode,
         listedModels: this.listedModels.length,
-        resumed: Boolean(resumeId),
+        resumed: resumedSuccessfully,
       });
 
       if (mutablePlanMode) {
@@ -1322,7 +1385,10 @@ export class CursorAgent extends BaseAgent {
           throw new Error('Cursor turn already in flight (sameTurnSteer not supported)');
         }
 
-        const prompt = userMessageToPromptBlocks(message);
+        const prompt = await userMessageToPromptBlocks(message);
+        if (sendOpts?.signal?.aborted || closed) {
+          throw new Error('Cursor send cancelled before acceptance');
+        }
         if (prompt.length === 0) {
           throw new Error('Cursor send: empty prompt');
         }
@@ -1333,6 +1399,10 @@ export class CursorAgent extends BaseAgent {
         usageTracker.beginTurn();
         resetAcpTurn(rt);
         toolIdle.clear();
+
+        /** 本 token 仍是活跃轮：未 close、未被更新的 generation 抢占、未被 abort/watchdog finalize。 */
+        const isActiveTurn = (): boolean =>
+          !closed && token === turnGeneration && lastFinalizedGeneration !== token;
 
         // 武装态一次性消耗（与 Claude/Codex 同语义）：勾选熄灭，ACP sticky plan 保留到 create_plan 批准。
         const requestedPlanTurn = sendOpts?.planMode ?? mutablePlanMode;
@@ -1356,8 +1426,10 @@ export class CursorAgent extends BaseAgent {
           }
         }
 
-        if (closed || sendOpts?.signal?.aborted || token !== turnGeneration) {
-          if (token === turnGeneration) {
+        // set_mode 等 preflight await 之后必须再查 active-turn：abort 可能已 finalize 本 token，
+        // 此时绝不能再发 session/prompt（否则 UI 已 cancelled，上游却重跑旧请求）。
+        if (!isActiveTurn() || sendOpts?.signal?.aborted) {
+          if (token === turnGeneration && lastFinalizedGeneration !== token) {
             turnInFlight = false;
           }
           throw new Error('Cursor send cancelled before acceptance');

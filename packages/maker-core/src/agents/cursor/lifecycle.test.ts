@@ -4,12 +4,17 @@
  * abort → immediate idle, tool-idle timeout → session/cancel.
  */
 
-import { describe, expect, it, vi } from 'vitest';
+import { describe, expect, it, vi, afterEach } from 'vitest';
 import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
-import { CursorAgent } from './index.js';
+import {
+  CursorAgent,
+  userMessageToPromptBlocks,
+  __setCursorImageBytesReaderForTesting,
+  __setCursorPromptImageMaxBytesForTesting,
+} from './index.js';
 import { createConsoleLogger } from '../../interfaces/logger.js';
 import type { AuthAdapter } from '../../interfaces/auth-adapter.js';
 import type { AgentEvent } from '../../types/events.js';
@@ -23,6 +28,9 @@ class FakeTransport implements Transport {
   private readonly closeHandlers = new Set<CloseHandler>();
   private closed = false;
   pid = 4242;
+  /** 为 true 时 session/set_mode 不自动回应，id 记入 pendingSetModeIds。 */
+  hangSessionSetMode = false;
+  pendingSetModeIds: Array<number | string> = [];
 
   async writeLine(line: string): Promise<void> {
     this.written.push(JSON.parse(line));
@@ -72,10 +80,35 @@ class FakeTransport implements Transport {
     return undefined;
   }
 
+  findAllRequests(method: string): Array<{ id: number | string; params?: unknown }> {
+    const out: Array<{ id: number | string; params?: unknown }> = [];
+    for (const msg of this.written) {
+      if (
+        isRecord(msg) &&
+        msg.method === method &&
+        (typeof msg.id === 'number' || typeof msg.id === 'string')
+      ) {
+        out.push({ id: msg.id as number | string, params: msg.params });
+      }
+    }
+    return out;
+  }
+
   findNotifications(method: string): unknown[] {
     return this.written.filter(
       (msg) => isRecord(msg) && msg.method === method && !('id' in msg),
     );
+  }
+
+  resolvePendingSetModes(): void {
+    for (const id of this.pendingSetModeIds) {
+      this.emit({
+        jsonrpc: JSONRPC_VERSION,
+        id,
+        result: {},
+      });
+    }
+    this.pendingSetModeIds = [];
   }
 }
 
@@ -222,6 +255,10 @@ async function bootWithTransport(
       return;
     }
     if (msg.method === Method.SessionSetMode) {
+      if (transport.hangSessionSetMode) {
+        transport.pendingSetModeIds.push(msg.id as number | string);
+        return;
+      }
       queueMicrotask(() =>
         transport.emit({
           jsonrpc: JSONRPC_VERSION,
@@ -539,6 +576,32 @@ describe('CursorAgent lifecycle (FakeTransport)', () => {
     }
   });
 
+  it('abort during hanging session/set_mode(plan) never sends session/prompt', async () => {
+    await withBootedSession(async ({ transport, handle }) => {
+      transport.hangSessionSetMode = true;
+
+      const sendPromise = handle.send(
+        { type: 'user', content: 'plan this turn' },
+        { planMode: true },
+      );
+
+      const modeDeadline = Date.now() + 1000;
+      while (Date.now() < modeDeadline && transport.pendingSetModeIds.length === 0) {
+        await new Promise((r) => setTimeout(r, 10));
+      }
+      expect(transport.pendingSetModeIds.length).toBeGreaterThan(0);
+      expect(transport.findAllRequests(Method.SessionPrompt)).toHaveLength(0);
+
+      await handle.abort();
+      // 迟到的 set_mode 响应到达后，旧 token 已 finalize，不得再发 prompt。
+      transport.resolvePendingSetModes();
+      await expect(sendPromise).rejects.toThrow(/cancelled before acceptance/);
+
+      await new Promise((r) => setTimeout(r, 40));
+      expect(transport.findAllRequests(Method.SessionPrompt)).toHaveLength(0);
+    });
+  });
+
   it('startSession throws AgentNotAuthenticatedError when auth is missing', async () => {
     const { AgentNotAuthenticatedError } = await import('../base-agent.js');
     const agent = new CursorAgent({
@@ -563,5 +626,71 @@ describe('CursorAgent lifecycle (FakeTransport)', () => {
         },
       }),
     ).rejects.toBeInstanceOf(AgentNotAuthenticatedError);
+  });
+});
+
+describe('userMessageToPromptBlocks (async image path)', () => {
+  afterEach(() => {
+    __setCursorImageBytesReaderForTesting(null);
+    __setCursorPromptImageMaxBytesForTesting(null);
+  });
+
+  it('does not sync-block the event loop while a slow image reader is pending', async () => {
+    const imageDir = mkdtempSync(join(tmpdir(), 'cindy-cursor-slow-img-'));
+    const imagePath = join(imageDir, 'pic.png');
+    const png = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
+    writeFileSync(imagePath, png);
+    try {
+      let readerStarted = false;
+      let readerFinished = false;
+      __setCursorImageBytesReaderForTesting(async () => {
+        readerStarted = true;
+        await new Promise((r) => setTimeout(r, 80));
+        readerFinished = true;
+        return png;
+      });
+
+      let ticks = 0;
+      const timer = setInterval(() => {
+        ticks += 1;
+      }, 10);
+
+      const blocksPromise = userMessageToPromptBlocks({
+        type: 'user',
+        content: [{ type: 'image', path: imagePath, mimeType: 'image/png' }],
+      });
+
+      // sync readFileSync 会卡住整个 turn，timers 在返回前不会涨。
+      await new Promise((r) => setTimeout(r, 40));
+      expect(readerStarted).toBe(true);
+      expect(readerFinished).toBe(false);
+      expect(ticks).toBeGreaterThan(0);
+
+      const blocks = await blocksPromise;
+      clearInterval(timer);
+      expect(readerFinished).toBe(true);
+      expect(blocks).toEqual([
+        { type: 'image', data: png.toString('base64'), mimeType: 'image/png' },
+      ]);
+    } finally {
+      rmSync(imageDir, { recursive: true, force: true });
+    }
+  });
+
+  it('rejects images that exceed the prompt byte limit before base64', async () => {
+    const imageDir = mkdtempSync(join(tmpdir(), 'cindy-cursor-big-img-'));
+    const imagePath = join(imageDir, 'big.png');
+    writeFileSync(imagePath, Buffer.alloc(64, 1));
+    try {
+      __setCursorPromptImageMaxBytesForTesting(16);
+      await expect(
+        userMessageToPromptBlocks({
+          type: 'user',
+          content: [{ type: 'image', path: imagePath, mimeType: 'image/png' }],
+        }),
+      ).rejects.toThrow(/image exceeds 16 bytes/);
+    } finally {
+      rmSync(imageDir, { recursive: true, force: true });
+    }
   });
 });

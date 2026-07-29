@@ -206,15 +206,26 @@ describe.skipIf(!ENABLED)('Cursor ACP e2e (opt-in, billed)', () => {
     const sdkSessionId = handle1.id;
     expect(sdkSessionId.length).toBeGreaterThan(8);
 
-    const events1: AgentEvent[] = [];
+    let sawDone1 = false;
     const consume1 = (async () => {
-      for await (const ev of handle1.events()) events1.push(ev);
+      for await (const ev of handle1.events()) {
+        if (ev.type === 'done') sawDone1 = true;
+      }
     })();
 
     await handle1.send({
       type: 'user',
       content: 'Reply with exactly one word: alpha',
     });
+
+    // 上游只在至少完成一轮后才写出 store.db；send 后立刻 SIGKILL 时目录里只有
+    // 空壳 meta.json，session/load 会 Session not found 并退化成 fresh create。
+    // 所以这里等 turn done，再硬杀——测的是「崩溃恢复」，不是「半轮未落盘」。
+    const turnDeadline = Date.now() + 120_000;
+    while (!sawDone1 && Date.now() < turnDeadline) {
+      await new Promise((r) => setTimeout(r, 100));
+    }
+    expect(sawDone1, 'first turn did not reach done within 120s').toBe(true);
 
     // Hard-kill the ACP child to simulate crash (leave sdk session id intact).
     const pid = (handle1 as { _acpPid?: number | null })._acpPid;
