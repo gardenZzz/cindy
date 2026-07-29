@@ -53,7 +53,7 @@ describe('runtime-configs', () => {
       readMemorySettings: () => memorySettings,
     }));
 
-    const { buildDesktopClaudeRuntimeConfig, desktopCodexRuntimeConfig } = await import('../runtime-configs.js');
+    const { buildDesktopClaudeRuntimeConfig, desktopCodexRuntimeConfig, desktopCursorRuntimeConfig } = await import('../runtime-configs.js');
 
     const claudeConfig = buildDesktopClaudeRuntimeConfig(() => 'http://127.0.0.1:1234');
 
@@ -61,6 +61,9 @@ describe('runtime-configs', () => {
     expect(claudeConfig.makerMemoryEnabled).toBe(true);
     expect(desktopCodexRuntimeConfig.memoryEnabled).toBe(false);
     expect(desktopCodexRuntimeConfig.makerMemoryEnabled).toBe(true);
+    expect(desktopCursorRuntimeConfig.userDataPath).toBe('/tmp/xdt-maker-test-user-data');
+    expect(claudeConfig.userDataPath).toBe('/tmp/xdt-maker-test-user-data');
+    expect(desktopCodexRuntimeConfig.userDataPath).toBe('/tmp/xdt-maker-test-user-data');
 
     memorySettings = {
       maker: false,

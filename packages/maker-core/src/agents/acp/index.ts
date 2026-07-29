@@ -44,6 +44,8 @@ export {
   type JsonRpcId,
   type NewSessionParams,
   type NewSessionResponse,
+  type LoadSessionParams,
+  type LoadSessionResponse,
   type AcpConfigOption,
   type AcpModelInfo,
   type AcpModelsState,

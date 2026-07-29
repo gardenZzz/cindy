@@ -40,11 +40,17 @@ class FakeTransport implements Transport {
   async writeLine(line: string): Promise<void> {
     this.lines.push(line);
   }
-  onLine(handler: LineHandler): void {
+  onLine(handler: LineHandler): () => void {
     this.lineHandler = handler;
+    return () => {
+      if (this.lineHandler === handler) this.lineHandler = null;
+    };
   }
-  onClose(handler: CloseHandler): void {
+  onClose(handler: CloseHandler): () => void {
     this.closeHandler = handler;
+    return () => {
+      if (this.closeHandler === handler) this.closeHandler = null;
+    };
   }
   async close(): Promise<void> {
     this.closeHandler?.({ reason: 'test' });

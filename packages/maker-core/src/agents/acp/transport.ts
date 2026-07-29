@@ -24,4 +24,6 @@ export interface Transport {
   onStderr?(handler: StderrHandler): () => void;
   onClose(handler: CloseHandler): () => void;
   close(reason?: string): Promise<void>;
+  /** 本地 stdio 子进程 pid；非本地 / 已退出时为 null。供孤儿清理核验。 */
+  getPid?(): number | null;
 }

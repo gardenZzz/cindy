@@ -5,6 +5,8 @@
  * T3: tool_call* 翻译 + session/request_permission → InteractionRequest；
  *     Ask / Auto / Full 全部在 Cindy 客户端策略层实现。
  * T4: session/new 模型目录上报 host；effort / fast 经 session/set_config_option。
+ * T5: session/load resume（跳过上游历史回放）+ invalid-resume CAS；
+ *     session/cancel 真停；tool-call 不活动超时；dispose/close 无孤儿进程。
  *
  * 按 ADR:
  *  - 不注入任何 Cindy system prompt / makerMemory / userPrompt
@@ -52,13 +54,24 @@ import {
   type AcpConfigOption,
   type AcpTranslateContext,
   type ContentBlock,
+  type LoadSessionResponse,
   type NewSessionResponse,
   type PromptResponse,
   type RequestPermissionParams,
   type RequestPermissionResult,
   type SetConfigOptionResult,
+  type Transport,
 } from '../acp/index.js';
 import { createCursorIsolatedConfigDir } from './isolatedConfig.js';
+import { isCursorResumeSessionNotFound } from './invalidResume.js';
+import {
+  createToolIdleWatchdog,
+  formatCursorInvalidResumeCasConflictMessage,
+  formatCursorInvalidResumeMessage,
+  formatCursorToolIdleMessage,
+  resolveCursorToolIdleMs,
+  type ToolIdleWatchdog,
+} from './toolIdleWatchdog.js';
 import {
   cursorAutoModelFallback,
   enrichCursorModelFromConfigOptions,
@@ -197,12 +210,38 @@ function normalizeCursorPermissionMode(mode: PermissionMode | undefined): Permis
   return 'ask';
 }
 
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null;
+}
+
+/** 单测可经 vendorOptions.createAcpTransport 注入 FakeTransport。 */
+function resolveCreateTransport(
+  opts: StartSessionOptions,
+  deps: AgentDeps,
+  isolatedEnv: NodeJS.ProcessEnv,
+): () => Transport {
+  const injected = opts.vendorOptions?.createAcpTransport;
+  if (typeof injected === 'function') {
+    return injected as () => Transport;
+  }
+  return () =>
+    createAcpStdioTransport({
+      binaryPath: deps.binaryPath,
+      args: ['acp'],
+      cwd: opts.workingDir,
+      env: isolatedEnv,
+    });
+}
+
 export class CursorAgent extends BaseAgent {
   readonly kind = 'cursor' as const;
   readonly capabilities: Capabilities;
 
   /** 跨会话缓存最近一次上报的目录（含 set_config_option 丰富后的 effort/fast）。 */
   private listedModels: CursorListedModel[] = [cursorAutoModelFallback()];
+
+  /** 仍存活的会话 close 钩子 — dispose() 时 drain，防孤儿。 */
+  private readonly liveSessionClosers = new Set<() => Promise<void>>();
 
   constructor(deps: AgentDeps) {
     super(deps);
@@ -223,6 +262,20 @@ export class CursorAgent extends BaseAgent {
     }
   }
 
+  async dispose(): Promise<void> {
+    const closers = Array.from(this.liveSessionClosers);
+    this.liveSessionClosers.clear();
+    await Promise.all(
+      closers.map((close) =>
+        close().catch((err) => {
+          this.deps.logger.warn('CursorAgent.dispose session close failed', {
+            message: err instanceof Error ? err.message : String(err),
+          });
+        }),
+      ),
+    );
+  }
+
   async startSession(opts: StartSessionOptions): Promise<AgentSessionHandle> {
     // ADR: 不消费 userPrompt / makerMemoryEnabled / runtimeConfig.systemPrompt。
     const log = this.deps.logger.child('cursor-agent');
@@ -239,6 +292,8 @@ export class CursorAgent extends BaseAgent {
     let interactionResolver: InteractionResolver | null = null;
     let closed = false;
     let turnInFlight = false;
+    /** 本 turn 已由 abort / tool-idle 推过终态，send() 收尾跳过二次 done/error。 */
+    let turnFinalizedExternally = false;
     let sessionId = '';
     let mutablePermissionMode = normalizeCursorPermissionMode(opts.permissionMode);
     let mutableModel = toCursorProductModelId(opts.model || CURSOR_AUTO_MODEL.id);
@@ -247,21 +302,20 @@ export class CursorAgent extends BaseAgent {
     let latestConfigOptions: AcpConfigOption[] = [];
     const sessionAllowKeys = new Set<string>();
     let autoFallbackNotified = false;
+    /** session/load 回放历史期间为 true — Cindy 自有存储渲染，跳过上游回放。 */
+    let suppressHistoryReplay = false;
 
-    const isolated = createCursorIsolatedConfigDir(process.env);
+    const isolated = createCursorIsolatedConfigDir(process.env, {
+      stableKey: opts.sessionId,
+      userDataPath: this.deps.runtimeConfig.userDataPath,
+    });
 
     const pushAll = (events: AgentEvent[]): void => {
       for (const ev of events) eventQueue.push(ev);
     };
 
     const client = new AcpClient({
-      createTransport: () =>
-        createAcpStdioTransport({
-          binaryPath: this.deps.binaryPath,
-          args: ['acp'],
-          cwd: opts.workingDir,
-          env: isolated.env,
-        }),
+      createTransport: resolveCreateTransport(opts, this.deps, isolated.env),
       logger: log,
       onTransportError: (err) => {
         log.error('transport error', { message: err.message });
@@ -269,6 +323,22 @@ export class CursorAgent extends BaseAgent {
           pushAll(translateAcpError(err, translateCtx));
           eventQueue.end();
         }
+      },
+    });
+
+    const toolIdle: ToolIdleWatchdog = createToolIdleWatchdog({
+      idleMs: resolveCursorToolIdleMs(process.env),
+      onTimeout: ({ idleMs, pendingToolIds }) => {
+        if (closed || !turnInFlight || turnFinalizedExternally) return;
+        log.warn('cursor tool-call idle watchdog tripped', {
+          idleMs,
+          pendingToolIds,
+          sessionId,
+        });
+        void finalizeTurnCancel({
+          reason: 'tool_call_idle_timeout',
+          errorMessage: formatCursorToolIdleMessage(idleMs),
+        });
       },
     });
 
@@ -305,7 +375,59 @@ export class CursorAgent extends BaseAgent {
       await this.publishListedModels(productModelId);
     };
 
+    const applyModelsFromSessionPayload = async (
+      payload: NewSessionResponse | LoadSessionResponse,
+    ) => {
+      const parsed = parseCursorModelsState(payload.models);
+      if (parsed) {
+        const prevById = new Map(this.listedModels.map((m) => [m.id, m]));
+        this.listedModels = parsed.models.map((m) => {
+          const prev = prevById.get(m.id);
+          return prev
+            ? {
+                ...m,
+                efforts: prev.efforts.length > 0 ? prev.efforts : m.efforts,
+                defaultEffort: prev.defaultEffort ?? m.defaultEffort,
+                supportsFastMode: prev.supportsFastMode ?? m.supportsFastMode,
+                contextWindow: prev.contextWindow !== 200_000 ? prev.contextWindow : m.contextWindow,
+              }
+            : m;
+        });
+        mutableModel = parsed.currentModelId;
+      } else {
+        log.warn('cursor session models missing or empty; keeping Auto fallback');
+      }
+      latestConfigOptions = parseAcpConfigOptions(payload.configOptions);
+      await this.publishListedModels(mutableModel);
+    };
+
+    const trackToolActivityFromUpdate = (params: unknown): void => {
+      if (!isRecord(params)) return;
+      const update = params.update;
+      if (!isRecord(update) || typeof update.sessionUpdate !== 'string') return;
+      const kind = update.sessionUpdate;
+      if (kind === 'tool_call' || kind === 'tool_call_update') {
+        const toolCallId = typeof update.toolCallId === 'string' ? update.toolCallId : '';
+        const status = typeof update.status === 'string' ? update.status : undefined;
+        if (!toolCallId) return;
+        if (status === 'completed' || status === 'failed') {
+          toolIdle.noteToolTerminal(toolCallId);
+        } else {
+          toolIdle.noteToolActive(toolCallId);
+        }
+        toolIdle.noteActivity();
+        return;
+      }
+      // 文本 / 其它 update 也算活动（仅在已有 pending tool 时重置计时）
+      toolIdle.noteActivity();
+    };
+
     client.onNotification(Method.SessionUpdate, (params) => {
+      if (suppressHistoryReplay) {
+        // 上游 session/load 会回放历史；Cindy 用自有存储渲染，这里整段丢弃。
+        return;
+      }
+      trackToolActivityFromUpdate(params);
       pushAll(translateSessionUpdate(params, translateCtx));
     });
 
@@ -388,6 +510,7 @@ export class CursorAgent extends BaseAgent {
       params: unknown,
       meta: { id: string | number; method: string },
     ): Promise<RequestPermissionResult> => {
+      toolIdle.noteActivity();
       const requestId = `cursor-perm:${String(meta.id)}:${++permissionSeq}`;
       const permParams = (
         isRecord(params) ? params : { sessionId: '', toolCall: {}, options: [] }
@@ -488,63 +611,65 @@ export class CursorAgent extends BaseAgent {
 
     client.setRequestHandler(Method.SessionRequestPermission, handleRequestPermission);
 
-    client.start();
-
-    try {
-      await client.initialize({
-        protocolVersion: ACP_PROTOCOL_VERSION,
-        clientCapabilities: {
-          fs: { readTextFile: false, writeTextFile: false },
-          _meta: { parameterizedModelPicker: true },
+    const pushCancelledIdle = (statusText: string) => {
+      pushAll([
+        {
+          type: 'done',
+          data: { stopReason: 'cancelled', reason: 'cancelled' },
+          source: 'cursor',
         },
-        clientInfo: {
-          name: 'cindy',
-          title: 'Cindy',
-          version: '0.0.0',
+        {
+          type: 'status',
+          data: {
+            isRunning: false,
+            text: statusText,
+            ...usageTracker.snapshot(),
+          },
+          source: 'cursor',
         },
-      });
+      ]);
+      resetAcpTurn(rt);
+    };
 
-      const created = await client.request<NewSessionResponse>(Method.SessionNew, {
-        cwd: opts.workingDir,
-        mcpServers: [],
-      });
-      if (!created?.sessionId || typeof created.sessionId !== 'string') {
-        throw new Error('cursor session/new: missing sessionId');
+    const finalizeTurnCancel = async (optsCancel: {
+      reason: 'user_abort' | 'tool_call_idle_timeout';
+      errorMessage?: string;
+    }): Promise<void> => {
+      if (closed || turnFinalizedExternally) return;
+      turnFinalizedExternally = true;
+      turnInFlight = false;
+      toolIdle.clear();
+      dismissAllPending(optsCancel.reason, 'deny');
+      if (optsCancel.errorMessage) {
+        pushAll([
+          {
+            type: 'error',
+            data: {
+              message: optsCancel.errorMessage,
+              isTerminal: true,
+              reason: optsCancel.reason,
+            },
+            source: 'cursor',
+          },
+        ]);
       }
-      sessionId = created.sessionId;
-
-      const parsed = parseCursorModelsState(created.models);
-      if (parsed) {
-        // 保留上一轮 enrich 过的 effort/fast 元数据（同 id 合并）。
-        const prevById = new Map(this.listedModels.map((m) => [m.id, m]));
-        this.listedModels = parsed.models.map((m) => {
-          const prev = prevById.get(m.id);
-          return prev
-            ? {
-                ...m,
-                efforts: prev.efforts.length > 0 ? prev.efforts : m.efforts,
-                defaultEffort: prev.defaultEffort ?? m.defaultEffort,
-                supportsFastMode: prev.supportsFastMode ?? m.supportsFastMode,
-                contextWindow: prev.contextWindow !== 200_000 ? prev.contextWindow : m.contextWindow,
-              }
-            : m;
-        });
-        // 会话默认跟随 cursor 侧当前模型；创建参数若显式指定则下面再 set。
-        mutableModel = parsed.currentModelId;
-      } else {
-        log.warn('cursor session/new models missing or empty; keeping Auto fallback');
+      pushCancelledIdle(optsCancel.reason === 'user_abort' ? 'Cancelled' : 'Timed out');
+      try {
+        if (sessionId) {
+          await client.notify(Method.SessionCancel, { sessionId });
+        }
+      } catch (e) {
+        log.warn('session/cancel failed', { message: (e as Error).message, reason: optsCancel.reason });
       }
-      latestConfigOptions = parseAcpConfigOptions(created.configOptions);
-      await this.publishListedModels(mutableModel);
+    };
 
-      // 创建参数模型与 cursor 当前不一致 → 立刻 set_config_option。
+    const applyInitialModelConfig = async () => {
       const desiredModel = toCursorProductModelId(opts.model || mutableModel);
       if (desiredModel !== mutableModel) {
         const options = await setConfigOption('model', toCursorAcpModelId(desiredModel));
         mutableModel = desiredModel;
         await applyConfigEnrichment(mutableModel, options);
       } else if (desiredModel !== CURSOR_AUTO_MODEL.id) {
-        // 已是目标模型时仍拉一次 config，拿 effort/fast 选项。
         try {
           const options = await setConfigOption('model', toCursorAcpModelId(desiredModel));
           await applyConfigEnrichment(desiredModel, options);
@@ -580,12 +705,126 @@ export class CursorAgent extends BaseAgent {
           });
         }
       }
+    };
 
-      log.info('session created', {
+    const createFreshSession = async (): Promise<void> => {
+      const created = await client.request<NewSessionResponse>(Method.SessionNew, {
+        cwd: opts.workingDir,
+        mcpServers: [],
+      });
+      if (!created?.sessionId || typeof created.sessionId !== 'string') {
+        throw new Error('cursor session/new: missing sessionId');
+      }
+      sessionId = created.sessionId;
+      await applyModelsFromSessionPayload(created);
+      await applyInitialModelConfig();
+    };
+
+    client.start();
+
+    try {
+      await client.initialize({
+        protocolVersion: ACP_PROTOCOL_VERSION,
+        clientCapabilities: {
+          fs: { readTextFile: false, writeTextFile: false },
+          _meta: { parameterizedModelPicker: true },
+        },
+        clientInfo: {
+          name: 'cindy',
+          title: 'Cindy',
+          version: '0.0.0',
+        },
+      });
+
+      const resumeId =
+        typeof opts.resumeSessionId === 'string' && opts.resumeSessionId.length > 0
+          ? opts.resumeSessionId
+          : undefined;
+
+      if (resumeId) {
+        suppressHistoryReplay = true;
+        try {
+          const loaded = await client.request<LoadSessionResponse>(Method.SessionLoad, {
+            cwd: opts.workingDir,
+            sessionId: resumeId,
+            mcpServers: [],
+          });
+          sessionId = resumeId;
+          await applyModelsFromSessionPayload(loaded ?? {});
+          await applyInitialModelConfig();
+          log.info('session loaded', {
+            sessionId,
+            model: mutableModel,
+            permissionMode: mutablePermissionMode,
+          });
+        } catch (loadErr) {
+          const err = loadErr as Error;
+          if (
+            isCursorResumeSessionNotFound(err, resumeId) &&
+            opts.onInvalidResumeSession
+          ) {
+            let cleared = false;
+            try {
+              cleared = await opts.onInvalidResumeSession(resumeId);
+            } catch (casErr) {
+              log.error('onInvalidResumeSession threw', {
+                message: casErr instanceof Error ? casErr.message : String(casErr),
+              });
+              cleared = false;
+            }
+            if (!cleared) {
+              throw new Error(formatCursorInvalidResumeCasConflictMessage());
+            }
+            log.warn('invalid resume id cleared; creating fresh cursor session', {
+              resumeId,
+              evidence: err.message,
+            });
+            pushAll([
+              {
+                type: 'error',
+                data: {
+                  message: formatCursorInvalidResumeMessage(resumeId),
+                  isTerminal: false,
+                  reason: 'resume_session_not_found',
+                },
+                source: 'cursor',
+              },
+            ]);
+            await createFreshSession();
+          } else if (isCursorResumeSessionNotFound(err, resumeId)) {
+            // 无 CAS 钩子：仍可读提示 + 新建，避免卡死在协议错。
+            log.warn('invalid resume without CAS hook; creating fresh session', {
+              resumeId,
+              evidence: err.message,
+            });
+            pushAll([
+              {
+                type: 'error',
+                data: {
+                  message: formatCursorInvalidResumeMessage(resumeId),
+                  isTerminal: false,
+                  reason: 'resume_session_not_found',
+                },
+                source: 'cursor',
+              },
+            ]);
+            await createFreshSession();
+          } else {
+            throw err;
+          }
+        } finally {
+          suppressHistoryReplay = false;
+        }
+      } else {
+        await createFreshSession();
+      }
+
+      log.info('session ready', {
         sessionId,
         model: mutableModel,
         permissionMode: mutablePermissionMode,
         listedModels: this.listedModels.length,
+        resumed: Boolean(resumeId),
       });
 
       eventQueue.push({
@@ -601,6 +840,20 @@ export class CursorAgent extends BaseAgent {
       isolated.dispose();
       throw err;
     }
+
+    const liveSessionClosers = this.liveSessionClosers;
+    const closeSession = async (): Promise<void> => {
+      if (closed) return;
+      closed = true;
+      turnInFlight = false;
+      turnFinalizedExternally = true;
+      toolIdle.clear();
+      dismissAllPending('session_closed', 'deny');
+      await client.close({ reason: 'CursorAgentSession.close()' });
+      isolated.dispose();
+      eventQueue.end();
+    };
+    liveSessionClosers.add(closeSession);
 
     const handle: AgentSessionHandle = {
       get id() {
@@ -626,8 +879,10 @@ export class CursorAgent extends BaseAgent {
         }
 
         turnInFlight = true;
+        turnFinalizedExternally = false;
         usageTracker.beginTurn();
         resetAcpTurn(rt);
+        toolIdle.clear();
         pushAll([
           {
             type: 'status',
@@ -645,9 +900,20 @@ export class CursorAgent extends BaseAgent {
             sessionId,
             prompt,
           });
+          if (turnFinalizedExternally) {
+            // abort / tool-idle 已推终态；上游 cancelled 响应只做清场。
+            toolIdle.clear();
+            return;
+          }
+          toolIdle.clear();
           pushAll(finishPromptTurn(response ?? { stopReason: 'end_turn' }, translateCtx));
         } catch (e) {
+          if (turnFinalizedExternally || closed) {
+            toolIdle.clear();
+            return;
+          }
           const err = e as Error;
+          toolIdle.clear();
           pushAll(translateAcpError(err, translateCtx));
         } finally {
           turnInFlight = false;
@@ -659,23 +925,13 @@ export class CursorAgent extends BaseAgent {
       },
 
       async abort() {
-        if (closed || !turnInFlight) return;
-        dismissAllPending('session_aborted', 'deny');
-        try {
-          await client.notify(Method.SessionCancel, { sessionId });
-        } catch (e) {
-          log.warn('session/cancel failed', { message: (e as Error).message });
-        }
+        if (closed || (!turnInFlight && pendingApprovals.size === 0)) return;
+        await finalizeTurnCancel({ reason: 'user_abort' });
       },
 
       async close() {
-        if (closed) return;
-        closed = true;
-        turnInFlight = false;
-        dismissAllPending('session_closed', 'deny');
-        await client.close({ reason: 'CursorAgentSession.close()' });
-        isolated.dispose();
-        eventQueue.end();
+        liveSessionClosers.delete(closeSession);
+        await closeSession();
       },
 
       events(): AsyncIterable<AgentEvent> {
@@ -694,7 +950,6 @@ export class CursorAgent extends BaseAgent {
         if (closed) throw new Error('Cursor session is closed');
         const productId = toCursorProductModelId(newModel);
         if (productId === mutableModel) {
-          // 同模型仍刷新一次 config，确保 effort/fast 元数据跟上。
           const options = await setConfigOption('model', toCursorAcpModelId(productId));
           await applyConfigEnrichment(productId, options);
           return;
@@ -708,7 +963,6 @@ export class CursorAgent extends BaseAgent {
       async setEffort(newEffort: Effort) {
         if (closed) throw new Error('Cursor session is closed');
         if (!latestConfigOptions.some((o) => o.id === 'effort')) {
-          // 当前模型无 effort 选项：先刷新 model config 再试一次。
           const refreshed = await setConfigOption('model', toCursorAcpModelId(mutableModel));
           await applyConfigEnrichment(mutableModel, refreshed);
         }
@@ -760,10 +1014,12 @@ export class CursorAgent extends BaseAgent {
       },
     };
 
+    // 暴露 pid 给 e2e / 孤儿核验（不进 AgentSessionHandle 公开面）
+    Object.defineProperty(handle, '_acpPid', {
+      get: () => client.getPid(),
+      enumerable: false,
+    });
+
     return handle;
   }
-}
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === 'object' && value !== null;
 }
