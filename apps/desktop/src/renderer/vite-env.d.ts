@@ -2517,7 +2517,7 @@ interface ElectronAPI {
       force?: boolean;
       /** 完整安装目标路径。不传 → global scope 默认路径。*/
       installPath?: string;
-      /** force 覆盖时跳过 XDMaker 持久备份,直接 rmrf 旧目录(完整替换)。 */
+      /** force 覆盖时跳过 Cindy 持久备份,直接 rmrf 旧目录(完整替换)。 */
       skipBackup?: boolean;
     }) => Promise<
       | { success: true; name: string; version: string; absolutePath: string }
@@ -3509,9 +3509,10 @@ interface ElectronAPI {
   };
 
   /**
-   * Browser backend toggle (Phase 5): 切换 MCP `browser` 工具实际控制的浏览器。
-   * - `external`: vendored Playwright + 独立 Chrome(老行为)
-   * - `rsb-webview`: 右侧栏内置 webview tab(新默认)
+   * Browser backend toggle: 切换 MCP `browser` 工具实际控制的浏览器。
+   * - `external`: vendored Playwright + 独立 Chrome(**系统默认**)
+   * - `rsb-webview`: 右侧栏内置 webview tab
+   * 默认值口径与两次翻转的 override 语义见 main/browser-backend-settings-store.ts。
    */
   browserBackend: {
     getState: () => Promise<{
