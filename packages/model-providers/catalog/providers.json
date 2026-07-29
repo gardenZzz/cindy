@@ -193,7 +193,8 @@
             },
             {
               "id": "deepseek/deepseek-v4-pro",
-              "name": "DeepSeek V4 Pro (OpenRouter)"
+              "name": "DeepSeek V4 Pro (OpenRouter)",
+              "contextWindow": 1000000
             }
           ]
         },
@@ -222,11 +223,13 @@
           "models": [
             {
               "id": "deepseek-v4-flash",
-              "name": "DeepSeek V4 Flash"
+              "name": "DeepSeek V4 Flash",
+              "contextWindow": 1000000
             },
             {
               "id": "deepseek-v4-pro",
-              "name": "DeepSeek V4 Pro"
+              "name": "DeepSeek V4 Pro",
+              "contextWindow": 1000000
             }
           ],
           "modelsUrl": "https://api.deepseek.com/models"
@@ -237,11 +240,13 @@
           "models": [
             {
               "id": "deepseek-v4-flash",
-              "name": "DeepSeek V4 Flash"
+              "name": "DeepSeek V4 Flash",
+              "contextWindow": 1000000
             },
             {
               "id": "deepseek-v4-pro",
-              "name": "DeepSeek V4 Pro"
+              "name": "DeepSeek V4 Pro",
+              "contextWindow": 1000000
             }
           ],
           "modelsUrl": "https://api.deepseek.com/models"
