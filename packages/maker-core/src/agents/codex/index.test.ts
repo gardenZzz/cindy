@@ -2709,14 +2709,61 @@ describe('CodexAgent MCP thread context hooks', () => {
   });
 
   it('uses the home directory to list global skills for a new conversation without a cwd', async () => {
+    const home = os.homedir();
+    MockCodexTransport.onCreate = (transport) => {
+      transport.setMockResponse(Method.SkillsList, {
+        result: {
+          data: [{
+            cwd: home,
+            skills: [
+              {
+                name: 'pr-watch',
+                description: 'Watch PR feedback',
+                path: path.join(home, '.agents', 'skills', 'pr-watch', 'SKILL.md'),
+                scope: 'user',
+                enabled: true,
+              },
+              {
+                name: 'openai-templates:artifact-template-report',
+                description: 'Plugin-internal template',
+                path: path.join(
+                  home,
+                  '.codex',
+                  'plugins',
+                  'cache',
+                  'openai-curated-remote',
+                  'openai-templates',
+                  '0.1.0',
+                  'skills',
+                  'artifact-template-report',
+                  'SKILL.md',
+                ),
+                scope: 'user',
+                enabled: true,
+              },
+              {
+                name: 'skill-creator',
+                description: 'System skill',
+                path: path.join(home, '.codex', 'skills', '.system', 'skill-creator', 'SKILL.md'),
+                scope: 'system',
+                enabled: true,
+              },
+            ],
+            errors: [],
+          }],
+        },
+      });
+    };
     const agent = new CodexAgent(createDeps());
 
-    await expect(agent.listAgentSkills({})).resolves.toMatchObject({ skills: [] });
+    await expect(agent.listAgentSkills({})).resolves.toMatchObject({
+      skills: [expect.objectContaining({ name: 'pr-watch', scope: 'user' })],
+    });
 
     const request = createdTransports[0].lines
       .map((line) => JSON.parse(line) as { method?: string; params?: unknown })
       .find((line) => line.method === Method.SkillsList);
-    expect(request?.params).toMatchObject({ cwds: [os.homedir()] });
+    expect(request?.params).toMatchObject({ cwds: [home] });
 
     await agent.dispose();
   });
