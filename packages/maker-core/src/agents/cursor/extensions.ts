@@ -36,11 +36,19 @@ export interface CursorAskQuestionParams {
   questions: CursorAskQuestionItem[];
 }
 
+/** Cursor ask_question 单题回答：选项 id + 可选自由文本（proto: freeformText）。 */
+export interface CursorAskQuestionAnswer {
+  questionId: string;
+  selectedOptionIds: string[];
+  /** 不在 option 集合里的自由输入；有则必传，空则省略。 */
+  freeformText?: string;
+}
+
 export type CursorAskQuestionResponse = {
   outcome:
     | {
         outcome: 'answered';
-        answers: Array<{ questionId: string; selectedOptionIds: string[] }>;
+        answers: CursorAskQuestionAnswer[];
       }
     | { outcome: 'skipped'; reason?: string }
     | { outcome: 'cancelled' };
@@ -190,17 +198,27 @@ export function askQuestionResponseFromDecision(
     return { outcome: { outcome: 'cancelled' } };
   }
   const answers = decision.answers ?? {};
-  const mapped: Array<{ questionId: string; selectedOptionIds: string[] }> = [];
+  const mapped: CursorAskQuestionAnswer[] = [];
   for (const q of params.questions) {
     const raw = answers[q.prompt] ?? answers[q.id];
     const labels = labelsFromAnswer(raw, q.allowMultiple === true);
     if (labels.length === 0) continue;
     const byLabel = new Map(q.options.map((o) => [o.label, o.id]));
-    const selectedOptionIds = labels
-      .map((label) => byLabel.get(label))
-      .filter((id): id is string => typeof id === 'string');
-    // 自由输入不在 Cursor option 集合里时仍回 answered（空 selected），避免整轮 skipped。
-    mapped.push({ questionId: q.id, selectedOptionIds });
+    const selectedOptionIds: string[] = [];
+    const freeformParts: string[] = [];
+    for (const label of labels) {
+      const id = byLabel.get(label);
+      if (typeof id === 'string') {
+        selectedOptionIds.push(id);
+      } else if (label.trim()) {
+        freeformParts.push(label.trim());
+      }
+    }
+    const freeformText = freeformParts.length > 0 ? freeformParts.join('\n') : undefined;
+    if (selectedOptionIds.length === 0 && !freeformText) continue;
+    const entry: CursorAskQuestionAnswer = { questionId: q.id, selectedOptionIds };
+    if (freeformText) entry.freeformText = freeformText;
+    mapped.push(entry);
   }
   if (mapped.length === 0) {
     return { outcome: { outcome: 'skipped', reason: 'no answers' } };
