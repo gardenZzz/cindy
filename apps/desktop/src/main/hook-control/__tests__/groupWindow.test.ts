@@ -1,7 +1,7 @@
 /**
  * groupWindow(group-relay-v1 本地群窗口)单测: 入窗幂等、GC、lane 解析、
  * 上下文拼装(trigger 剔重 / 游标增量 / 字符预算)。DB 用内存 better-sqlite3
- * 直接执行 0082 migration SQL, 经 drizzle 同步 driver 假装成 DbClient。
+ * 直接执行 0083 migration SQL, 经 drizzle 同步 driver 假装成 DbClient。
  */
 
 import fs from 'node:fs';
@@ -29,8 +29,8 @@ import {
 
 function migrationSql(): string {
   const dir = path.resolve(__dirname, '../../../../drizzle');
-  const file = fs.readdirSync(dir).find((name) => name.startsWith('0082_'));
-  if (!file) throw new Error('0082 migration not found');
+  const file = fs.readdirSync(dir).find((name) => name.startsWith('0083_'));
+  if (!file) throw new Error('0083 migration not found');
   return fs.readFileSync(path.join(dir, file), 'utf8').replaceAll('--> statement-breakpoint', ';');
 }
 

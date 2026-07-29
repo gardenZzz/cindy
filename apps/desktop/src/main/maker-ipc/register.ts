@@ -32,7 +32,8 @@ import { redactSensitiveText } from '@cindy/maker-shared/error-redaction';
 import { permissionModeOrAsk } from '@cindy/maker-shared/permission-mode';
 import { DL_SESSION_REFERENCE_CAPABILITY_CHANNEL } from '@cindy/device-link';
 import { and, desc, eq, inArray, isNull, sql } from 'drizzle-orm';
-import { BrowserWindow, ipcMain } from 'electron';
+import { BrowserWindow, ipcMain, type IpcMainInvokeEvent } from 'electron';
+import { getActiveAppSession } from '../appSessionState.js';
 import type { AgentMeta } from '../../renderer/lib/ccAgent.types';
 import {
   deriveAutoTitleSeed,
@@ -280,10 +281,7 @@ import {
   recordTurnSpend,
 } from '../usageBroadcaster.js';
 import { throwIpcError } from '../utils/ipcValidate.js';
-import {
-  deriveWorkflowsDir,
-  readWorkflowProgressByTaskId,
-} from '../workflow-progress/reader.js';
+import { readWorkflowProgressForSession } from '../workflow-progress/reader.js';
 import {
   AgentInputCoordinator,
 } from './agent-input-coordinator.js';
@@ -305,6 +303,7 @@ import { refreshCodexMcpEnvironment } from './codexMcpRefresh.js';
 import { broadcastSchedulerChanged } from './schedule.js';
 import { validateExtraDirs } from './extraDirsValidator.js';
 import { prepareHandoffWorktree, shouldRecycleHandoffWorktreeOnFailure } from './handoffWorktree.js';
+import { validateHandoffWorkingDir } from './handoffWorkingDir.js';
 import { registerProjectPluginPolicyHandlers } from './projectPluginPolicyHandlers.js';
 import {
   restoreMissingManagedWorktreeForSession,
@@ -325,6 +324,7 @@ import {
   readOrcaWorkerOutputReadOnly,
 } from './orcaDiagnostics.js';
 import { createMakerSendTransaction } from './makerSendTransaction.js';
+import { installDesktopInteractionHandler } from './interactionRouter.js';
 import { registerMakerMessageDeleteHandler } from './messageDeleteHandler.js';
 import { normalizeUserMessage, materializeQueuedOssAttachments } from './normalizeAttachments.js';
 import { AGENT_ISLAND_DISPLAY_CONFIG } from '../agent-island/displayConfig.js';
@@ -387,6 +387,7 @@ import {
 } from '../mcp-integrations/custom-mcp-registry.js';
 import {
   getDesktopProviderService,
+  refreshActiveCatalogFromSource,
   refreshCustomProvidersIntoCatalog,
 } from '../maker-host/createDesktopProviderService.js';
 import { connectedProvidersForAgent, effectiveSourceIdForModel } from '@cindy/model-providers';
@@ -403,6 +404,12 @@ import {
   getAnthropicModelDiscoveryFailure,
   refreshAnthropicModelsFromHttp,
 } from '../maker-host/model-discovery/anthropic.js';
+import { refreshBuiltinProviderModels } from '../maker-host/provider-model-refresh.js';
+import {
+  configureProviderModelAutoRefresh,
+  refreshProviderModelsManually,
+  requestProviderModelAutoRefresh,
+} from '../maker-host/provider-model-auto-refresh.js';
 import { setProviderUpstreamErrorBroadcaster } from '../maker-host/provider-upstream-error-observer.js';
 import {
   createClaudeAutoPermissionFallbackCoordinator,
@@ -795,6 +802,8 @@ interface OrcaCollabService {
       title?: string;
       /** create 分支可选:true = 为新 session 预建独立 git worktree 并以其为 workingDir(jump 忽略)。 */
       useWorktree?: boolean;
+      /** create 分支可选:新 session 的工作目录覆盖(绝对路径,须已存在;jump 忽略)。#811 */
+      workingDir?: string;
       /** Host-owned create defaults for non-session callers such as scheduler script tasks. */
       createDefaults?: SendToSessionCreateDefaults;
     },
@@ -1483,13 +1492,21 @@ export function takePendingInteractionsForSession(
   return taken;
 }
 
+type WiredSession = NonNullable<ReturnType<Maker['getSession']>>;
+
+interface WiredSessionRegistration {
+  session: WiredSession;
+  disposers: Array<() => void>;
+}
+
 /**
- * 标记已经 wire 过 IPC 转发的 session, 避免 lazy-create 路径或多个调用方
+ * 记录已经 wire 过 IPC 转发的 session 实例，避免 lazy-create 路径或多个调用方
  * (renderer IPC handler / scheduler runner / feishu 接管 / future MCP server) 重复挂 listener。
  *
- * 进程级单例 —— register.ts 模块只 load 一次, 此 Set 在 closeSession 时按 id 清理。
+ * deferred agent switch 会保留业务 id 但替换 Session 实例；此时必须解绑旧实例并完整
+ * wire 新实例，不能只按 id 去重。
  */
-const wiredSessionIds = new Set<string>();
+const wiredSessionsById = new Map<string, WiredSessionRegistration>();
 
 /**
  * SDK result 事件的 total_cost_usd 是 session 累计 (不是 per-turn) ——
@@ -2136,22 +2153,19 @@ export function setGoalAskAnswerObserver(
 }
 
 /**
- * 把 desktop 版的 interaction listener 装到一个 session 上 — 行为: broadcast
+ * 把 Desktop fallback handler 登记到 session 级中央 InteractionRouter — 行为:broadcast
  * INTERACTION_REQUEST 给所有 window, 等 renderer 通过 RESOLVE_INTERACTION IPC
  * 回 decision。permission 10 分钟超时兜底为 deny; ask/plan 不超时，必须等
  * 用户提交、停止任务或关闭 session。
  *
- * 抽出来 export 是为了 feishu /ctr 接管流程的 detach 路径能"还原" desktop
- * listener: 接管期间 setInteractionListener 是 single-listener 语义, 被 feishu
- * 版覆盖了, detach 后必须主动调一次 install... 把 desktop 版重新挂回去,
- * 否则 desktop renderer 永远收不到 permission 弹窗。
- *
- * 幂等: setInteractionListener 是覆盖式写, 重复调安全。
+ * Router 在 Session 实例生命周期内只安装一次 listener。Feishu/Discord/Slack
+ * turn 通过 beforeProviderStart 登记临时 route，终态只释放自己的 lease，
+ * 不再覆盖或“还原” Desktop listener。重复调用只更新 Desktop fallback。
  */
 export function installDesktopInteractionListener(
   session: { id: string; setInteractionListener: (l: ((req: InteractionRequest) => Promise<InteractionDecision>) | null) => void },
 ): void {
-  session.setInteractionListener(async (req: InteractionRequest) => {
+  installDesktopInteractionHandler(session, async (req: InteractionRequest) => {
     const agentIslandInteractionEpoch = shouldNotifyAgentIslandForSession(session.id)
       ? getAgentIslandService()?.captureInteractionEpoch(session.id) ?? null
       : null;
@@ -2362,8 +2376,17 @@ async function handleSilentStopTurnEnd(
 
 export function wireSessionToIpc(session: ReturnType<Maker['getSession']>): void {
   if (!session) return;
-  if (wiredSessionIds.has(session.id)) return;
-  wiredSessionIds.add(session.id);
+  const existing = wiredSessionsById.get(session.id);
+  if (existing?.session === session) {
+    installDesktopInteractionListener(session);
+    return;
+  }
+  if (existing) {
+    for (const dispose of existing.disposers) dispose();
+    existing.session.setInteractionListener(null);
+  }
+  const registration: WiredSessionRegistration = { session, disposers: [] };
+  wiredSessionsById.set(session.id, registration);
 
   // session-agent-switch:登记本会话当前引擎,broadcaster / user 行落库据此逐行
   // stamp messages.agent_kind(切换后历史行的 agent_meta 必须按写入时引擎解析)。
@@ -2372,15 +2395,15 @@ export function wireSessionToIpc(session: ReturnType<Maker['getSession']>): void
   // 订阅槽①旁听 tap(独立监听,叠加在主转发之外互不干扰):AgentEvent →
   // did-turn-*。资格(用户主会话)与自动化轮次过滤都在 tap 内部,这里零逻辑。
   const ghostSessionTap = createGhostSessionTap(session.id);
-  session.onEvent((event: AgentEvent) => {
+  registration.disposers.push(session.onEvent((event: AgentEvent) => {
     ghostSessionTap.handleEvent(
       event as { type: string; data?: unknown; source?: string; turnOrigin?: { kind?: string } },
     );
-  });
+  }));
 
   // 转发事件到所有 window。interaction_dismissed 单独走专用 channel,
   // 让 renderer chat store 不必扫所有 vendor-raw 找它。
-  session.onEvent((event: AgentEvent) => {
+  registration.disposers.push(session.onEvent((event: AgentEvent) => {
     const broadcastEvent = redactEventForRenderer(event);
     if (event.type === 'interaction_dismissed') {
       const data = event.data as { requestId?: unknown; reason?: unknown };
@@ -3146,8 +3169,9 @@ export function wireSessionToIpc(session: ReturnType<Maker['getSession']>): void
         });
       }
     }
-  });
-  session.onStatusChange((status) => {
+  }));
+  registration.disposers.push(session.onStatusChange((status) => {
+    if (wiredSessionsById.get(session.id)?.session !== session) return;
     broadcastToAllWindows(MAKER_PUSH.STATUS_CHANGED, { sessionId: session.id, status });
     if (status === 'closed') {
       cleanupPendingInteractionsForSession(session.id, 'session_closed');
@@ -3157,7 +3181,9 @@ export function wireSessionToIpc(session: ReturnType<Maker['getSession']>): void
       deferredCodexRestartHolder?.onSessionSettled();
       agentInputCoordinatorHolder?.onExternalTurnSettled(session.id);
       gitSnapshotCoordinator?.onSessionClosed(session.id);
-      wiredSessionIds.delete(session.id);
+      wiredSessionsById.delete(session.id);
+      for (const dispose of registration.disposers) dispose();
+      session.setInteractionListener(null);
       clearOrcaMcpHydrated(session.id);
       knownNonOrcaSessionIds.delete(session.id);
       lastReportedCostUsdBySession.delete(session.id);
@@ -3170,7 +3196,7 @@ export function wireSessionToIpc(session: ReturnType<Maker['getSession']>): void
       clearSessionPersistState(session.id);
       handleAgentIslandSessionClosedAfterCleanup(session.id);
     }
-  });
+  }));
 
   // 注入 interaction listener (permission/ask/plan 三合一,renderer 按 kind 弹不同 UI)
   installDesktopInteractionListener(session);
@@ -3186,9 +3212,11 @@ export const wireSessionToIpcExternal = wireSessionToIpc;
 
 export interface RegisterMakerIpcOptions {
   onAnySessionTurnKeepaliveChange?: (isRunning: boolean) => void;
+  /** 由 bootstrap 注入，避免 maker-ipc → model-access → maker-host 的循环依赖。 */
+  refreshXdGatewayModels(): Promise<void>;
 }
 
-export function registerMakerIpc(maker: Maker, options: RegisterMakerIpcOptions = {}): void {
+export function registerMakerIpc(maker: Maker, options: RegisterMakerIpcOptions): void {
   log.info('registering maker:* IPC handlers');
   getAgentIslandService()?.setPermissionResolver(resolvePendingPermissionFromAgentIsland);
   sessionTurnActivityTracker.setTurnKeepaliveChangeListener(options.onAnySessionTurnKeepaliveChange ?? null);
@@ -3320,17 +3348,49 @@ export function registerMakerIpc(maker: Maker, options: RegisterMakerIpcOptions 
       if (typeof sessionId !== 'string' || typeof taskId !== 'string' || !taskId) return null;
       try {
         const s = maker.listActiveSessions().find((x) => x.id === sessionId);
-        if (!s) return null;
-        // 远程(device-link)会话:Claude CLI 跑在远端机器,workflow 记录写在**远端 HOME**
-        // 下的 ~/.claude/projects/...(远程 env 路径与桌面 HOME 刻意隔离)。用本地 os.homedir()
-        // 拼 workDir 会指向不存在的本地目录,永远读不到。直接返回 null → renderer 回退到
-        // workflow 级卡片(其数据走事件流、跨隧道可用)。远程逐 agent 树需经 device-link 隧道
-        // 读远端文件,列为后续增强。
-        if (s.remoteHostId) return null;
-        const { sdkSessionId, workDir } = s;
-        if (!sdkSessionId || !workDir) return null;
-        const dir = deriveWorkflowsDir(os.homedir(), workDir, sdkSessionId);
-        return await readWorkflowProgressByTaskId(dir, taskId);
+        if (s) {
+          // SSH 远程工作区会话(s.remoteHostId):Claude CLI 跑在 SSH 远端主机,workflow
+          // 记录文件写在**SSH 远端 HOME** 下 —— 用本机 os.homedir() 拼目录必落空,读远端
+          // 文件需经 remote-file-service,暂不支持 → 返回 null,renderer 回退到 workflow 级
+          // 卡片(其数据走事件流,SSH 下可用)。注意这不是 device-link:device-link 远程会话
+          // 不在本机 listActiveSessions,由控制端 renderer 的 makerTransport 隧道路由到被控端
+          // 执行本 handler(见 allowlist 的 maker:get-workflow-progress 准入)。
+          if (s.remoteHostId) return null;
+          const { sdkSessionId, workDir } = s;
+          // sdkSessionId 允许为空(/clear 后置空):reader 跳过精确目录直接跨目录扫描。
+          if (!workDir) return null;
+          // reader 内部带跨 sdkSessionId 换代兜底:resume 换代前跑的 workflow
+          // 记录在旧 session 目录,精确目录 miss 后按 taskId 扫同 project 下其它目录。
+          return await readWorkflowProgressForSession(
+            os.homedir(),
+            workDir,
+            sdkSessionId ?? null,
+            taskId,
+          );
+        }
+        // 会话不活跃(app 重启后看历史 / 会话已被关闭释放):workflow 记录文件仍在
+        // 本机磁盘,回退持久化 session 行的 working_dir + sdk_session_id 定位目录
+        // (同样带跨换代兜底)。remote_host_id 非空(SSH)与活跃分支同理返回 null。
+        const db = getDbClient().drizzle;
+        const rows = await db
+          .select({
+            workingDir: sessions.workingDir,
+            sdkSessionId: sessions.sdkSessionId,
+            remoteHostId: sessions.remoteHostId,
+          })
+          .from(sessions)
+          .where(eq(sessions.id, sessionId))
+          .limit(1);
+        const row = rows[0];
+        // sdkSessionId 允许为空:/clear 会把它置 null,但旧 wf 记录文件仍在,
+        // reader 会跳过精确目录直接跨目录扫描(taskId 全局唯一)。
+        if (!row || row.remoteHostId || !row.workingDir) return null;
+        return await readWorkflowProgressForSession(
+          os.homedir(),
+          row.workingDir,
+          row.sdkSessionId ?? null,
+          taskId,
+        );
       } catch {
         return null;
       }
@@ -3472,6 +3532,23 @@ export function registerMakerIpc(maker: Maker, options: RegisterMakerIpcOptions 
   // 模型供应商目录（只读）+ 自定义供应商 CRUD —— handler body 注入 listProviders / 副作用，
   // 便于脱 Electron + 内存 db 单测。CRUD 成功后刷新 active-catalog 并广播 PROVIDER_CHANGED，
   // 让设置页列表 + 对话模型选择器（各 useProviders 实例）live 刷新。
+  configureProviderModelAutoRefresh({
+    listProviders: (opts) => getDesktopProviderService().listProviders(opts),
+    getScopeKey: () => getActiveAppSession().generation,
+    refreshProvider: (providerId) =>
+      refreshBuiltinProviderModels(providerId, {
+        refreshXd: options.refreshXdGatewayModels,
+        refreshAnthropic: refreshAnthropicModelsFromHttp,
+        refreshOpenAi: () => maker.refreshAgentLocalModels(
+          'codex',
+          { credentialMode: 'oauth-bearer' },
+        ),
+        refreshXaiCatalog: async () => {
+          await refreshActiveCatalogFromSource();
+        },
+      }),
+  });
+
   registerProviderHandlers(createElectronIpcHandlerRegistry(), {
     listProviders: (opts) => getDesktopProviderService().listProviders(opts),
     getModelVisibilityOverrides: () => getModelVisibilityMirrorSnapshot(),
@@ -3495,6 +3572,8 @@ export function registerMakerIpc(maker: Maker, options: RegisterMakerIpcOptions 
       await refreshAnthropicModelsFromHttp();
       return getAnthropicModelDiscoveryFailure();
     },
+    refreshBuiltinModels: refreshProviderModelsManually,
+    requestModelsAutoRefresh: requestProviderModelAutoRefresh,
     scanLocalCli: () => scanLocalCliAuth(createLocalCliScanDeps()),
     // 通用 OAuth（目录 auth.oauth 描述符驱动）：login 成功后 best-effort 拉动态模型发现
     // (additions-only merge 进 active-catalog) 并广播 PROVIDER_CHANGED 让 UI 刷新连接态。
@@ -3766,7 +3845,7 @@ export function registerMakerIpc(maker: Maker, options: RegisterMakerIpcOptions 
   });
 
   // ── Session 生命周期 ────────────────────────────────────────────────────
-  // wiredSessionIds + lastReportedCostUsdBySession + sessionTurnActivityTracker 都在模块顶层,
+  // wiredSessionsById + lastReportedCostUsdBySession + sessionTurnActivityTracker 都在模块顶层,
   // 让 scheduler runner / feishu 接管 / future MCP 等绕过 IPC 的调用方也能复用同一份 wire 逻辑。
 
   type CreateOpts = MakerSessionCreateOpts;
@@ -4486,6 +4565,8 @@ export function registerMakerIpc(maker: Maker, options: RegisterMakerIpcOptions 
       dispatcherSessionId?: string;
       title?: string;
       useWorktree?: boolean;
+      /** create 分支可选:新 session 的工作目录覆盖(绝对路径,须已存在;jump 忽略)。#811 */
+      workingDir?: string;
       onAccepted?: () => void | Promise<void>;
       onAcceptedRollback?: () => void | Promise<void>;
       origin?: AgentInputQueuedMessage['origin'];
@@ -4502,6 +4583,7 @@ export function registerMakerIpc(maker: Maker, options: RegisterMakerIpcOptions 
       dispatcherSessionId,
       title,
       useWorktree,
+      workingDir: workingDirOverride,
       onAccepted,
       onAcceptedRollback,
       origin,
@@ -4548,6 +4630,27 @@ export function registerMakerIpc(maker: Maker, options: RegisterMakerIpcOptions 
               message: `dispatcher session ${dispatcherSessionId} not found`,
             };
           }
+          // working_dir 覆盖(#811):把新 session 落到指定项目目录,而不是恒继承
+          // dispatcher 的目录。先于 worktree 预建校验——use_worktree 的 base 仓库
+          // 也从覆盖后的目录(校验器规范化后的形态)解析。
+          let resolvedWorkDir = meta.workDir;
+          if (workingDirOverride !== undefined) {
+            // 远程 SSH 会话的 workDir 是远端路径,本机 stat 校验对它无意义
+            // (本机恰好同名目录会假阳性、远端合法目录会假阴性)——fail-closed
+            // 拒绝,待远程校验通道具备后再放开。
+            if (meta.remoteHostId) {
+              return {
+                ok: false,
+                errorCode: 'INVALID_ARGS',
+                message: 'working_dir 暂不支持远程会话(远端路径无法在本机校验)',
+              };
+            }
+            const checked = await validateHandoffWorkingDir(workingDirOverride);
+            if (!checked.ok) {
+              return { ok: false, errorCode: 'INVALID_ARGS', message: checked.message };
+            }
+            resolvedWorkDir = checked.dir;
+          }
           // useWorktree:为新 session 预建正规 session worktree(与 UI 新会话勾选
           // worktree 同类:worktreeStore 绑定 + 关闭时 auto-stash 清理),新 session 的
           // id 必须用预生成的那个(worktree 绑定已按它登记)。失败硬报 WORKTREE_UNAVAILABLE
@@ -4564,8 +4667,13 @@ export function registerMakerIpc(maker: Maker, options: RegisterMakerIpcOptions 
                 createWorktree: worktreeManager.createWorktree,
                 createId: () => randomUUID(),
               },
-              dispatcherSessionId,
-              meta.workDir,
+              // working_dir 覆盖时不带 dispatcherSessionId:resolveHandoffBaseRepo
+              // 的「dispatcher 自身 worktree」捷径按路径包含判定——覆盖目录若指向
+              // dispatcher worktree 树内的**嵌套独立仓库**,捷径会跳过 detectCwd、
+              // 误用 dispatcher 的 baseRepo。去掉捷径后 detectCwd 按目录自身探测
+              // git 根;覆盖目录落在登记过的 worktree 内时,listAll 反查分支仍生效。
+              workingDirOverride !== undefined ? undefined : dispatcherSessionId,
+              resolvedWorkDir,
             );
             if (!prep.ok) {
               return { ok: false, errorCode: 'WORKTREE_UNAVAILABLE', message: prep.message };
@@ -4579,14 +4687,21 @@ export function registerMakerIpc(maker: Maker, options: RegisterMakerIpcOptions 
             .limit(1);
           inherited = {
             agentKind: meta.agentKind,
-            workingDir: meta.workDir,
+            workingDir: resolvedWorkDir,
+            // 覆盖目录必有真实项目目录 → 归 project 工作区(标题/侧栏分组按项目
+            // 语义走);未覆盖时保持缺省继承,行为不变。
+            ...(workingDirOverride !== undefined ? { workspaceKind: 'project' as const } : {}),
             model: meta.model,
             effort: (row?.effort ?? undefined) as SendToSessionCreateDefaults['effort'],
             fastMode: !!row?.fastMode,
             providerId: row?.providerId ?? undefined,
-            permissionMode: inheritSourcePermissionMode
-              ? permissionModeOrAsk(row?.permissionMode)
-              : 'bypassPermissions',
+            // working_dir 覆盖时强制继承来源会话的权限档(review 反馈):把新目录
+            // 以 Full access 打开是相对 dispatcher 的权限升级,跨项目 handoff
+            // 不应隐式发生;未覆盖时保持既有缺省(bypassPermissions)不变。
+            permissionMode:
+              inheritSourcePermissionMode || workingDirOverride !== undefined
+                ? permissionModeOrAsk(row?.permissionMode)
+                : 'bypassPermissions',
           };
         } else {
           if (useWorktree) {
