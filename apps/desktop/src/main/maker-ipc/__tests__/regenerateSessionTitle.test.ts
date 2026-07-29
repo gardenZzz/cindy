@@ -20,6 +20,9 @@ vi.mock('../../maker-host/createDesktopProviderService.js', () => ({
 vi.mock('../../maker-host/title-one-shot.js', () => ({
   generateTitleViaProvider: vi.fn(),
 }));
+vi.mock('../../maker-host/index.js', () => ({
+  getMakerIfReady: vi.fn(() => null),
+}));
 
 import {
   generateMakerSessionTitle,
