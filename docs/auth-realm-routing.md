@@ -59,7 +59,11 @@ Desktop safeStorage 和 Mobile SecureStore 都只保存一个加密的原子记�
 
 旧版裸 refresh token 只在一次性迁移时按 `buildRegion` 解释。冷启动先加载并核验记录中
 区域的端点清单，再向该区域 refresh；对端清单暂不可用时保留记录供重试，禁止退回
-`buildRegion` 发送 token。登出会清除记录和 `sessionRealm`，业务端点恢复安装包区域。
+`buildRegion` 发送 token。Desktop 在 refresh 返回组织 membership 后才允许激活跨区业务
+端点；个人 membership 只有在 `sessionRealm === buildRegion` 时才能恢复。跨区个人
+session 被拒绝时，Desktop 仍把轮换后的 refresh token 写回原 realm，但保持未登录且不
+删除记录，避免破坏共享 userData 中另一实例仍在使用的会话。登出会清除记录和
+`sessionRealm`，业务端点恢复安装包区域。
 
 Mobile 的 Pending OAuth 同时保存 `realm`，但 redirect scheme 始终使用当前安装包的
 scheme。个人验证码和社交登录不做跨区域发现，也不合并两区 passport。
