@@ -2,7 +2,15 @@
 
 本仓的 issue 与 PRD 都记在 **本仓库自己的 GitHub Issues** 里，用 `gh` CLI 操作。
 
-`gh` 在本 clone 内会自动解析到 `gardenZzz/cindy`，命令不需要显式带 `--repo`。
+本 clone 同时有 `origin`（fork）和 `upstream` 两个 remote，`gh` **不会**自己选中 fork——
+未设默认仓库时它会解析到 `makecindy/cindy`，写操作会打到上游。每个新 clone / worktree
+先跑一次：
+
+```sh
+gh repo set-default gardenZzz/cindy
+```
+
+设过之后命令不需要显式带 `--repo`；没把握时用 `gh repo set-default --view` 确认。
 
 ## 与上游的关系
 
