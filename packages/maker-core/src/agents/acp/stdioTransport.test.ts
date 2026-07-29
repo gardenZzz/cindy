@@ -229,8 +229,9 @@ describe('createAcpStdioTransport orphan cleanup', () => {
 
     expect(spawnCount, 'Windows close() must issue exactly one taskkill').toBe(1);
 
-    // 兜底清掉这个真实子进程：win32 分支下 killTree 走的是假 spawner，没人真杀它。
-    try { process.kill(pid, 'SIGKILL'); } catch { /* already gone */ }
+    // taskkill 挂住（不 exit 不 error）时两个回落条件都不触发，close() 若就此
+    // fireClose 就是伪成功。超时必须也按回落处理，子进程最终应被直接杀掉。
+    await expectDeadWithin(pid, 3000, 'child after hung taskkill');
   }, 20_000);
 
   it('close() is idempotent', async () => {
