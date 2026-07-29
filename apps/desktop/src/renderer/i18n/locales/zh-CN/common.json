@@ -4654,6 +4654,9 @@
       "networkUnreachableNoRetry": "网络异常，服务暂时不可达。",
       "networkAutoRetrying": "网络异常，正在自动重试…",
       "networkReconnecting": "网络连接中断，正在重新连接（{{attempt}}/{{maxAttempts}}）…",
+      "overloadRetrying": "模型服务繁忙，正在自动重试（{{attempt}}/{{maxAttempts}}）…",
+      "overloadBusy": "模型服务繁忙，上游暂时没有可用容量。可点击「重试」，或换一个模型。",
+      "overloadBusyNoRetry": "模型服务繁忙，上游暂时没有可用容量。可稍后重试，或换一个模型。",
       "networkShowRaw": "查看原始错误",
       "networkHideRaw": "收起原始错误",
       "silentStopContinue": "继续",
@@ -7321,7 +7324,8 @@
       "blocked": "已受阻",
       "complete": "已完成",
       "budgetLimited": "已达上限",
-      "usageLimited": "用量受限"
+      "usageLimited": "用量受限",
+      "capacityLimited": "模型服务繁忙"
     },
     "turns": "{{used}} 轮",
     "turnsWithMax": "{{used}} / {{max}} 轮",
@@ -7344,7 +7348,9 @@
       "failed": "新建目标失败"
     },
     "usageLimitedUntil": "{{time}} 恢复",
+    "capacityRetryAt": "{{time}} 重试",
     "usageResumeNotice": "用量已恢复，继续目标",
+    "capacityRetryNotice": "模型服务繁忙，正在重试目标",
     "complete": {
       "record": "目标已达成 · {{turns}} 轮 · 耗时 {{duration}}"
     },
