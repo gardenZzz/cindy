@@ -25,6 +25,7 @@ export {
   toCursorAcpModelId,
   toCursorProductModelId,
 } from './cursor/models.js';
+export { CURSOR_ONESHOT_DEFAULT_MODEL } from './cursor/oneShot.js';
 export {
   canReuseCodexHostForCredentialMode,
   canReuseHostForCredentialMode,
