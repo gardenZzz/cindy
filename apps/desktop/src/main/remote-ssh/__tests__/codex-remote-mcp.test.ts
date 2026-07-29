@@ -1177,3 +1177,33 @@ describe('hasPendingRemoteMcpDrift (R23 P1 lightweight live-send gate)', () => {
     expect(hasPendingRemoteMcpDrift('host-drift-collab-off', { ...base, collabEnabled: false })).toBe(false);
   });
 });
+
+describe('codex-connector R24 regressions', () => {
+  it('readConfigCmd only suppresses the missing-file case and propagates other read failures (R24 P2)', async () => {
+    // cat 失败 (权限 / 瞬时 IO) 不得被当「文件缺席」— 否则 merge/write 把
+    // 用户已有 config (含 secret) 整个替换成只剩受管段 (数据丢失类)。
+    const { host, execCmds } = fakeHost('host-read-perm-fail', '');
+    // fake exec 对 read 返回权限错误 (exit!=0)。
+    (host as { exec: (cmd: string, opts?: { input?: string }) => Promise<{ exitCode: number; stdout: string; stderr: string }> }).exec =
+      async (cmd: string) => {
+        execCmds.push(cmd);
+        if (cmd.includes('cat "$CODEX_HOME/config.toml"')) {
+          return { exitCode: 1, stdout: '', stderr: 'cat: config.toml: Permission denied' };
+        }
+        return { exitCode: 0, stdout: 'ok', stderr: '' };
+      };
+
+    const result = await ensureRemoteCodexMcpBridge(host, {
+      ensureBridgeStarted: async () => ({ port: 38080, serverNames: SERVERS, bridgeInstanceId: 'bridge-1' }),
+      hasLiveTurnOnHost: () => false,
+    });
+    expect(result.ok).toBe(false); // 读失败折叠为失败, 不进入写路径
+    expect(result.reason).toContain('read remote config.toml failed');
+    expect(execCmds.join('\n')).not.toContain('base64 -d'); // 没写任何东西
+
+    // cmd 形态:有 -f 存在性检查, 不再 2>/dev/null || true 吞错。
+    const readCmd = execCmds.find((c) => c.includes('cat "$CODEX_HOME/config.toml"'));
+    expect(readCmd).toContain('[ -f "$CODEX_HOME/config.toml" ]');
+    expect(readCmd).not.toContain('|| true');
+  });
+});

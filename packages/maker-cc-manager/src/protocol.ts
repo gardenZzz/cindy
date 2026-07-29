@@ -51,6 +51,8 @@ export type RpcErrorCode =
   | 'NOT_INITIALIZED'
   | 'SESSION_NOT_FOUND'
   | 'SESSION_ALREADY_EXISTS'
+  /** forceful kill 终止窗口 (inputQueue 已 end, consume loop 未退出) — 可重试。 */
+  | 'SESSION_KILL_PENDING'
   | 'SDK_ERROR'
   | 'INTERNAL';
 
