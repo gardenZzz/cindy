@@ -483,6 +483,12 @@ describe('CodexAgent permissions', () => {
       input: { command: 'rm -rf build' },
       suggestions: undefined,
     });
+    if (!handle.setPermissionMode) throw new Error('expected setPermissionMode');
+    await handle.setPermissionMode('ask');
+    expect(host.request).toHaveBeenCalledWith(Method.TurnInterrupt, {
+      threadId: 'start-thread-id',
+      turnId: 'turn-wechat-policy',
+    });
     await handle.close();
   });
 
@@ -4507,7 +4513,7 @@ describe('CodexAgent MCP thread context hooks', () => {
     await handle.close();
   });
 
-  it('falls back to untrusted for remote non-subscription sessions (Auto)', async () => {
+  it('falls back to user approvals for remote non-subscription sessions (Auto)', async () => {
     // gateway / 第三方 provider 的 reviewer 模型路由仍未验证 — 远程同样回退。
     const agent = new CodexAgent(createDeps());
     const host = installFakeHost(agent);
@@ -4524,8 +4530,10 @@ describe('CodexAgent MCP thread context hooks', () => {
       approvalPolicy?: string;
       approvalsReviewer?: string;
     };
-    expect(startParams.approvalPolicy).toBe('untrusted');
-    expect(startParams).not.toHaveProperty('approvalsReviewer');
+    expect(startParams).toMatchObject({
+      approvalPolicy: 'on-request',
+      approvalsReviewer: 'user',
+    });
     await handle.close();
   });
 
@@ -4600,7 +4608,48 @@ describe('CodexAgent MCP thread context hooks', () => {
     await handle.close();
   });
 
-  it('falls back to untrusted approvals on XD and interrupts the active turn when tightened to Ask', async () => {
+  it('maps Ask to the explicit user reviewer on a supported app-server', async () => {
+    const agent = new CodexAgent(createDeps());
+    const host = installFakeHost(agent, (method) => {
+      if (method === Method.TurnStart) {
+        return { turn: { id: 'turn-user-approval-policy' } };
+      }
+      return undefined;
+    });
+    const handle = await agent.startSession({
+      sessionId: 'session-user-approval-policy',
+      model: 'gpt-5.5',
+      providerId: 'openai',
+      workingDir: '/repo',
+      permissionMode: 'ask',
+    });
+
+    const startParams = host.request.mock.calls.find(([method]) => method === Method.ThreadStart)?.[1] as {
+      approvalPolicy?: string;
+      approvalsReviewer?: string;
+      sandbox?: string;
+    };
+    expect(startParams).toMatchObject({
+      approvalPolicy: 'on-request',
+      approvalsReviewer: 'user',
+      sandbox: 'workspace-write',
+    });
+
+    await handle.send({ type: 'user', content: 'hello' });
+    const turnParams = host.request.mock.calls.find(([method]) => method === Method.TurnStart)?.[1] as {
+      approvalPolicy?: string;
+      approvalsReviewer?: string;
+      sandboxPolicy?: { type?: string };
+    };
+    expect(turnParams).toMatchObject({
+      approvalPolicy: 'on-request',
+      approvalsReviewer: 'user',
+      sandboxPolicy: { type: 'workspaceWrite' },
+    });
+    await handle.close();
+  });
+
+  it('falls back to user approvals on XD without interrupting when the UI switches to Ask', async () => {
     const agent = new CodexAgent(createDeps());
     const host = installFakeHost(agent, (method) => {
       if (method === Method.TurnStart) {
@@ -4622,10 +4671,10 @@ describe('CodexAgent MCP thread context hooks', () => {
       sandbox?: string;
     };
     expect(startParams).toMatchObject({
-      approvalPolicy: 'untrusted',
+      approvalPolicy: 'on-request',
+      approvalsReviewer: 'user',
       sandbox: 'workspace-write',
     });
-    expect(startParams).not.toHaveProperty('approvalsReviewer');
 
     await handle.send({ type: 'user', content: 'hello' });
     const turnParams = host.request.mock.calls.find(([method]) => method === Method.TurnStart)?.[1] as {
@@ -4634,20 +4683,51 @@ describe('CodexAgent MCP thread context hooks', () => {
       sandboxPolicy?: { type?: string };
     };
     expect(turnParams).toMatchObject({
-      approvalPolicy: 'untrusted',
+      approvalPolicy: 'on-request',
+      approvalsReviewer: 'user',
       sandboxPolicy: { type: 'workspaceWrite' },
     });
-    expect(turnParams).not.toHaveProperty('approvalsReviewer');
-    if (!handle.setPermissionMode) throw new Error('expected setPermissionMode');
-    await handle.setPermissionMode('ask');
-    expect(host.request).toHaveBeenCalledWith(Method.TurnInterrupt, {
+    const handlers = host.getThreadHandlers();
+    if (!handlers?.commandExecutionApproval) throw new Error('expected commandExecutionApproval handler');
+    await expect(handlers.commandExecutionApproval({
       threadId: 'start-thread-id',
       turnId: 'turn-xd-auto-fallback',
+      itemId: 'cmd-no-resolver',
+      command: 'curl https://example.com',
+      cwd: '/repo',
+    })).resolves.toEqual({ decision: 'decline' });
+    if (!handle.setPermissionMode) throw new Error('expected setPermissionMode');
+    await handle.setPermissionMode('ask');
+    expect(host.request.mock.calls.filter(([method]) => method === Method.TurnInterrupt)).toHaveLength(0);
+    await handle.close();
+  });
+
+  it('overrides a resumed thread with the user reviewer when Auto falls back on XD', async () => {
+    const agent = new CodexAgent(createDeps());
+    const host = installFakeHost(agent);
+    const handle = await agent.startSession({
+      sessionId: 'session-xd-auto-fallback-resume',
+      model: 'gpt-5.5',
+      providerId: 'xd',
+      workingDir: '/repo',
+      permissionMode: 'auto',
+      resumeSessionId: '123e4567-e89b-12d3-a456-426614174000',
+    });
+
+    const resumeParams = host.request.mock.calls.find(([method]) => method === Method.ThreadResume)?.[1] as {
+      approvalPolicy?: string;
+      approvalsReviewer?: string;
+      sandbox?: string;
+    };
+    expect(resumeParams).toMatchObject({
+      approvalPolicy: 'on-request',
+      approvalsReviewer: 'user',
+      sandbox: 'workspace-write',
     });
     await handle.close();
   });
 
-  it('falls back to untrusted approvals without reviewer fields on an older app-server', async () => {
+  it('falls back to on-request approvals without reviewer fields on an older app-server', async () => {
     const agent = new CodexAgent(createDeps());
     const host = installFakeHost(agent, (method) => {
       if (method === Method.TurnStart) {
@@ -4667,7 +4747,7 @@ describe('CodexAgent MCP thread context hooks', () => {
       approvalPolicy?: string;
       approvalsReviewer?: string;
     };
-    expect(startParams.approvalPolicy).toBe('untrusted');
+    expect(startParams.approvalPolicy).toBe('on-request');
     expect(startParams).not.toHaveProperty('approvalsReviewer');
 
     await handle.send({ type: 'user', content: 'hello' });
@@ -4675,7 +4755,7 @@ describe('CodexAgent MCP thread context hooks', () => {
       approvalPolicy?: string;
       approvalsReviewer?: string;
     };
-    expect(turnParams.approvalPolicy).toBe('untrusted');
+    expect(turnParams.approvalPolicy).toBe('on-request');
     expect(turnParams).not.toHaveProperty('approvalsReviewer');
     await handle.close();
   });
@@ -4835,7 +4915,7 @@ describe('CodexAgent MCP thread context hooks', () => {
       approvalsReviewer?: string;
     };
     expect(turnParams.approvalPolicy).toBe('on-request');
-    expect(turnParams).not.toHaveProperty('approvalsReviewer');
+    expect(turnParams.approvalsReviewer).toBe('user');
     expect(classifierUnavailable).toHaveBeenCalledWith({
       sessionId: 'session-guardian-timeout-runtime',
       agentKind: 'codex',
