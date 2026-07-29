@@ -9,6 +9,7 @@ import { z } from 'zod';
 import type { XdtHelperToolRegistry } from '../lizi_xdtHelperToolRegistry.js';
 import type { ControlResult } from '../lizi_xdtHelperMcpServer.js';
 import { okPayload, errorPayload } from './_payload.js';
+import type { AgentKind } from '@cindy/maker-core';
 
 export interface ModelDescriptor {
   id: string;
@@ -41,7 +42,7 @@ function tagTier(models: ModelDescriptor[] | undefined): TaggedModel[] | undefin
 
 export interface ListAvailableModelsDeps {
   listAvailableModels: (params: {
-    agent?: 'claude-code' | 'codex';
+    agent?: AgentKind;
   }) => Promise<ControlResult<{
     codex?: ModelDescriptor[];
     claude_code?: ModelDescriptor[];

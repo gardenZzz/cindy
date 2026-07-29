@@ -18,7 +18,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import matter from 'gray-matter';
-import type { AgentCustomization, Maker } from '@cindy/maker-core';
+import type { AgentCustomization, Maker, AgentKind } from '@cindy/maker-core';
 import { registryService, type StoredInstall } from './registry';
 import { isIgnoredSkillPackagePath } from './packageIgnore';
 
@@ -50,9 +50,9 @@ export interface Skill {
    */
   urlKey: string;
   /** 来自哪个 agent 引擎。 */
-  engine: 'claude-code' | 'codex';
+  engine: AgentKind;
   /** 发现该 skill 的所有引擎专属路径（去重后）。~/.agents/ 通用路径不算引擎。 */
-  linkedEngines: Array<{ engine: 'claude-code' | 'codex'; label: string }>;
+  linkedEngines: Array<{ engine: AgentKind; label: string }>;
   kind: SkillKind;
   scope: SkillScope;
   /** Folder name for kind=skill; basename without `.md` for kind=command/agent. */

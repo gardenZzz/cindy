@@ -3,8 +3,11 @@ import { i18n } from '@/i18n';
 import type { CreateSessionOptions, RemoteDirectoryEntry } from '@/device-link/mobileMakerTransport';
 import { reconcileEffortForModel, type ProviderModelRow } from './providerModelSections';
 import type { RemoteSession } from './types';
+import type { AgentKind } from '@cindy/maker-shared';
+import { mobileAgentShortLabel, toDbAgentKind, toMakerAgentKind } from './sessionAgentSwitch';
 
-export type NewSessionAgentKind = 'claude-code' | 'codex';
+/** 新建会话选择面覆盖已注册 runtime（含 Cursor）。 */
+export type NewSessionAgentKind = AgentKind;
 export type NewSessionWorkspaceKind = 'project' | 'dialogue';
 
 export interface NewSessionDraft {
@@ -90,7 +93,7 @@ export function parseNewSessionDeviceOptions(
 }
 
 export function normalizeNewSessionAgentKind(value: unknown): NewSessionAgentKind | null {
-  return value === 'claude-code' || value === 'codex' ? value : null;
+  return value === 'claude-code' || value === 'codex' || value === 'cursor' ? value : null;
 }
 
 export function pickNewSessionDefaultDevice(input: {
@@ -124,6 +127,8 @@ export const DEFAULT_NEW_SESSION_DRAFT: NewSessionDraft = {
 const DEFAULT_MODELS: Record<NewSessionAgentKind, string> = {
   'claude-code': 'claude-sonnet-4-6',
   codex: 'gpt-5.4',
+  // 与桌面 New Maker cursor 默认对齐（ACP Auto）。
+  cursor: 'auto',
 };
 
 /** 新建交互式会话的权限种子默认；两种 agent 都保留 Auto-review。 */
@@ -180,7 +185,7 @@ export function summarizeNewSessionDraft(
   content: NewSessionDraftContentState = {},
 ): NewSessionDraftSummary {
   const validationMessage = validateNewSessionDraft(draft, content);
-  const agentLabel = draft.agentKind === 'codex' ? 'Codex' : 'Claude';
+  const agentLabel = mobileAgentShortLabel(draft.agentKind);
   const model = draft.model.trim() || i18n.t('session.new.noModelSelected');
   const effort = draft.effort.trim();
   const workspaceLabel = draft.workspaceKind === 'dialogue'
@@ -288,7 +293,7 @@ export interface NewSessionRuntime {
  * 从现有会话列表挑"最近一次"的整套运行配置(agent + model + effort),用于新建对话默认跟随最近会话。
  * 过滤:排除 status==='deleted'、无 model;可选 `deviceId`(只看该设备——模型列表 per-device,跨设备 model 可能
  * 在目标设备不存在);可选 `agentKind`(只看该 agent)。排序:按活动时间(userSendAt ?? updatedAt ?? createdAt)
- * 降序取第一条。映射 `RemoteSession.agentKind`('cc'|'codex') → NewSessionDraft 的 'claude-code'|'codex'。无匹配→null。
+ * 降序取第一条。映射 `RemoteSession.agentKind`('cc'|'codex'|'cursor') → NewSessionDraft 的 AgentKind。无匹配→null。
  * deviceId 过滤口径对齐 buildRecentWorkspaceOptions:仅当 session 带了 deviceLinkDeviceId 且与目标不符才排除。
  */
 export function pickMostRecentSessionRuntime(
@@ -301,7 +306,7 @@ export function pickMostRecentSessionRuntime(
     const model = session.model?.trim();
     if (!model) continue;
     if (options.deviceId && session.deviceLinkDeviceId && session.deviceLinkDeviceId !== options.deviceId) continue;
-    const agentKind: NewSessionAgentKind = session.agentKind === 'codex' ? 'codex' : 'claude-code';
+    const agentKind: NewSessionAgentKind = toMakerAgentKind(session.agentKind);
     if (options.agentKind && agentKind !== options.agentKind) continue;
     const activityAt = session.userSendAt ?? session.updatedAt ?? session.createdAt;
     if (!best || activityAt.localeCompare(best.activityAt) > 0) {
@@ -465,7 +470,7 @@ export function sessionFromCreateResult(
     permissionMode: fallback.permissionMode,
     fastMode: fallback.fastMode,
     status: 'active',
-    agentKind: fallback.agentKind === 'codex' ? 'codex' : 'cc',
+    agentKind: toDbAgentKind(fallback.agentKind),
     userSendAt: iso,
     createdAt: iso,
     updatedAt: iso,

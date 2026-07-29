@@ -83,6 +83,7 @@ function createDeps(overrides: Partial<OrcaWorkerCreationDeps> = {}) {
         name: 'XD Gateway',
         models: ['gpt-5.5', 'gpt-5.4', 'gpt-5.4-mini', 'codex/budget', 'gpt-no-fast'],
       }],
+      cursor: [],
     })),
     readClaudeApiKey: vi.fn((): string | null => 'sk-test'),
     reserveWorkerCreation: vi.fn(async ({ label }) => {
@@ -355,7 +356,8 @@ describe('OrcaWorkerCreationService', () => {
       getProviderRoutingContext: vi.fn(async () => providerRoutingContext({
         'claude-code': [{ id: 'xd', name: 'XD Gateway', models: ['claude-sonnet-4-6'] }],
         codex: [],
-      })),
+        cursor: [],
+    })),
     });
 
     await expect(
@@ -379,7 +381,7 @@ describe('OrcaWorkerCreationService', () => {
 
   it('rejects worker creation when no agent has a connected provider, without an agent suggestion', async () => {
     const { deps, service } = createDeps({
-      getProviderRoutingContext: vi.fn(async () => providerRoutingContext({ 'claude-code': [], codex: [] })),
+      getProviderRoutingContext: vi.fn(async () => providerRoutingContext({ 'claude-code': [], codex: [], cursor: [] })),
     });
 
     const result = await service.createWorker({
@@ -451,7 +453,8 @@ describe('OrcaWorkerCreationService', () => {
       getProviderRoutingContext: vi.fn(async () => providerRoutingContext({
         'claude-code': [],
         codex: [{ id: 'openai', name: 'OpenAI', models: ['gpt-5.5'] }],
-      })),
+        cursor: [],
+    })),
       readClaudeApiKey: vi.fn((): string | null => null),
     });
 
@@ -477,7 +480,8 @@ describe('OrcaWorkerCreationService', () => {
       getProviderRoutingContext: vi.fn(async () => providerRoutingContext({
         'claude-code': [],
         codex: [{ id: 'openai', name: 'OpenAI', models: ['gpt-5.5'] }],
-      })),
+        cursor: [],
+    })),
       readClaudeApiKey: vi.fn((): string | null => null),
     });
 
@@ -837,7 +841,8 @@ describe('OrcaWorkerCreationService', () => {
       getProviderRoutingContext: vi.fn(async () => providerRoutingContext({
         'claude-code': [],
         codex: [{ id: 'custom-codex', name: 'Custom Codex', models: ['codex/budget'] }],
-      })),
+        cursor: [],
+    })),
       readClaudeApiKey: vi.fn((): string | null => null),
     });
 
@@ -863,7 +868,8 @@ describe('OrcaWorkerCreationService', () => {
       getProviderRoutingContext: vi.fn(async () => providerRoutingContext({
         'claude-code': [],
         codex: [{ id: 'xd', name: 'XD Gateway', models: ['gpt-5.4'] }],
-      })),
+        cursor: [],
+    })),
     });
 
     await expect(service.createWorker({
@@ -893,7 +899,8 @@ describe('OrcaWorkerCreationService', () => {
           models: ['gpt-5.4'],
           requiresExplicitRoute: true,
         }],
-      })),
+        cursor: [],
+    })),
     });
 
     await expect(service.createWorker({
@@ -939,6 +946,7 @@ describe('OrcaWorkerCreationService', () => {
         { id: 'custom-codex', name: 'Custom Codex', models: ['gpt-5.5'] },
         { id: 'xd', name: 'XD Gateway', models: ['gpt-5.4'] },
       ],
+      cursor: [],
     } satisfies Record<AgentKind, OrcaWorkerProviderSnapshot[]>;
     const { deps, service } = createDeps({
       getWorkerDefaults: vi.fn(() => ({ model: 'gpt-5.5', providerId: 'custom-codex' })),
@@ -973,7 +981,8 @@ describe('OrcaWorkerCreationService', () => {
           models: ['gpt-5.4'],
           requiresExplicitRoute: true,
         }],
-      })),
+        cursor: [],
+    })),
     });
 
     await expect(service.createWorker({
@@ -1003,7 +1012,8 @@ describe('OrcaWorkerCreationService', () => {
           models: ['codex/budget'],
           requiresExplicitRoute: true,
         }],
-      })),
+        cursor: [],
+    })),
       readClaudeApiKey: vi.fn((): string | null => null),
     });
 
@@ -1030,7 +1040,8 @@ describe('OrcaWorkerCreationService', () => {
       getProviderRoutingContext: vi.fn(async () => providerRoutingContext({
         'claude-code': [],
         codex: [{ id: 'custom-codex', name: 'Custom Codex', models: ['gpt-5.5'] }],
-      })),
+        cursor: [],
+    })),
     });
 
     await expect(service.createWorker({
@@ -1054,7 +1065,8 @@ describe('OrcaWorkerCreationService', () => {
       getProviderRoutingContext: vi.fn(async () => providerRoutingContext({
         'claude-code': [],
         codex: [{ id: 'custom-codex', name: 'Custom Codex', models: ['gpt-5.5'] }],
-      })),
+        cursor: [],
+    })),
     });
 
     await expect(service.createWorker({
@@ -1211,6 +1223,7 @@ describe('buildNoProviderMessage', () => {
     const msg = buildNoProviderMessage('codex', {
       'claude-code': [{ id: 'xd', name: 'XD Gateway', models: ['claude-sonnet-4-6'] }],
       codex: [],
+      cursor: [],
     });
     expect(msg).toContain('Codex 当前没有可用的模型供应商');
     expect(msg).toContain('改用');
@@ -1218,7 +1231,7 @@ describe('buildNoProviderMessage', () => {
   });
 
   it('omits the agent suggestion when no agent has a connected provider', () => {
-    const msg = buildNoProviderMessage('claude-code', { 'claude-code': [], codex: [] });
+    const msg = buildNoProviderMessage('claude-code', { 'claude-code': [], codex: [], cursor: [] });
     expect(msg).toContain('Claude Code 当前没有可用的模型供应商');
     expect(msg).toContain('设置 → 模型供应商');
     expect(msg).not.toContain('改用');
@@ -1232,7 +1245,8 @@ describe('buildNoProviderMessage', () => {
           { id: 'xd', name: 'XD Gateway', models: ['gpt-5.5'] },
           { id: 'openai', name: 'OpenAI', models: ['gpt-5.5'] },
         ],
-      })),
+        cursor: [],
+    })),
     });
 
     // 显式 model 且未显式来源时既有语义是强制默认路由(providerId=null);
@@ -1281,6 +1295,7 @@ describe('buildNoProviderMessage', () => {
         { id: 'xd', name: 'XD Gateway', models: ['gpt-5.5'], fastModels: [] },
         { id: 'openai', name: 'OpenAI', models: ['gpt-5.5'], fastModels: ['gpt-5.5'] },
       ],
+      cursor: [],
     });
     const supportsFastByUnion = (supported: boolean) => vi.fn((agent: AgentKind) => (
       agent === 'codex'
@@ -1348,6 +1363,7 @@ describe('buildNoProviderMessage', () => {
             },
           },
         ],
+        cursor: [],
       })),
     });
 
@@ -1380,7 +1396,8 @@ describe('buildNoProviderMessage', () => {
           effortMetaByModel: { 'gpt-5.5': { efforts: [], defaultEffort: null } },
         },
       ],
-    });
+        cursor: [],
+      });
 
     const rejected = createDeps({ getProviderRoutingContext: vi.fn(async () => routing()) });
     await expect(rejected.service.createWorker({
@@ -1430,6 +1447,7 @@ describe('buildNoProviderMessage', () => {
             'gpt-5.5': { efforts: ['low', 'medium', 'high', 'xhigh'], defaultEffort: 'high' },
           },
         }],
+        cursor: [],
       })),
     });
 
@@ -1477,6 +1495,7 @@ describe('buildNoProviderMessage', () => {
           models: ['gpt-5.5', 'gpt-5.4', 'gpt-5.4-mini', 'codex/budget'],
           effortMetaByModel: { 'gpt-5.5': { efforts: ['low'], defaultEffort: 'low' } },
         }],
+        cursor: [],
       })),
     });
 
@@ -1499,7 +1518,8 @@ describe('buildNoProviderMessage', () => {
           { id: 'xd', name: 'XD Gateway', models: ['gpt-5.5'] },
           { id: 'openai', name: 'OpenAI', models: ['gpt-5.4'] },
         ],
-      })),
+        cursor: [],
+    })),
     });
 
     await expect(service.createWorker({
@@ -1521,7 +1541,8 @@ describe('buildNoProviderMessage', () => {
       getProviderRoutingContext: vi.fn(async () => providerRoutingContext({
         'claude-code': [],
         codex: [{ id: 'custom-codex', name: 'Custom Codex', models: ['codex/budget'] }],
-      })),
+        cursor: [],
+    })),
       readClaudeApiKey: vi.fn((): string | null => null),
     });
 

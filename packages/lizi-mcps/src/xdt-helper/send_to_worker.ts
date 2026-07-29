@@ -10,6 +10,7 @@ import { z } from 'zod';
 import type { XdtHelperToolRegistry } from '../lizi_xdtHelperToolRegistry.js';
 import type { ControlResult } from '../lizi_xdtHelperMcpServer.js';
 import { errorPayload, okPayload } from './_payload.js';
+import type { AgentKind } from '@cindy/maker-core';
 
 export interface SendToWorkerDeps {
   getSessionContext?: () => {
@@ -22,7 +23,7 @@ export interface SendToWorkerDeps {
   }) => Promise<
     ControlResult<
       {
-        agentKind: 'claude-code' | 'codex';
+        agentKind: AgentKind;
         wakeKind: 'resumed' | 'already-active' | 'queued';
         targetTitle: string | null;
         targetLastUserSendAt: string | null;

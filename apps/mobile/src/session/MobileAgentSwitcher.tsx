@@ -1,5 +1,5 @@
 /**
- * ModelPickerSheet 顶部的 Claude / Codex 两段 Agent 浏览器。
+ * ModelPickerSheet 顶部的 Claude / Codex / Cursor 三段 Agent 浏览器。
  * 切段只改变正在浏览的模型目录；选中目标模型后才登记切换意图。
  */
 import { useState } from 'react';
@@ -16,6 +16,7 @@ import type { MobileSessionAgentKind } from './sessionAgentSwitch';
 const AGENTS: readonly { kind: MobileSessionAgentKind; label: string }[] = [
   { kind: 'claude-code', label: 'Claude' },
   { kind: 'codex', label: 'Codex' },
+  { kind: 'cursor', label: 'Cursor' },
 ];
 
 const makeStyles = (colors: ThemeColors) => StyleSheet.create({
@@ -66,7 +67,7 @@ export interface MobileAgentSwitcherProps {
   value: MobileSessionAgentKind;
 }
 
-/** 两段切换器；异步确认期间锁住重复点击。 */
+/** 三段切换器；异步确认期间锁住重复点击。 */
 export function MobileAgentSwitcher({ disabled = false, onChange, value }: MobileAgentSwitcherProps) {
   const styles = useThemedStyles(makeStyles);
   const { colors } = useTheme();

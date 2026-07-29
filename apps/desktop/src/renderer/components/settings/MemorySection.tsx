@@ -25,10 +25,10 @@ import { CodexMark } from '@/components/icons/CodexMark';
 import { createLogger } from '@/lib/logger';
 import { useMemorySettings } from '@/hooks/useMemorySettings';
 import { DefaultOverrideControls } from './DefaultOverrideControls';
+import type { AgentKind } from '@cindy/maker-core';
 
 const log = createLogger('MemorySection');
 
-type AgentKind = 'claude-code' | 'codex';
 
 interface AgentDescriptor {
   kind: AgentKind;
@@ -68,6 +68,8 @@ export function MemorySection() {
   const [slots, setSlots] = useState<Record<AgentKind, MemorySlotState>>({
     'claude-code': INITIAL,
     codex: INITIAL,
+    // Type-slot only (#5); AGENTS list above excludes cursor so UI is unchanged.
+    cursor: INITIAL,
   });
   // pending 飞行中跳过 reload — 否则 toggle/reset 飞行期间 focus 触发 reload 会
   // 把用户刚改的乐观值或回滚状态覆盖掉。任一 slot pending 都跳过整轮 reload。

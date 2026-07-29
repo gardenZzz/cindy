@@ -299,7 +299,7 @@ interface ModelSelectorProps {
   /** 非选中模型行的 effort/fast 全局预设读写器(按本机 / 被控设备隔离)。 */
   modelMemory?: ModelMemoryAccessors;
   /** When provided, only models with this vendorKey are shown in the dropdown. */
-  vendorKey?: 'cc' | 'codex';
+  vendorKey?: 'cc' | 'codex' | 'cursor';
   /** device-link 远程会话所属被控端 id;非空 = 列被控端的模型 + 退化为纯列表(不分供应商段)。 */
   deviceId?: string;
   /**
@@ -373,7 +373,7 @@ interface ModelSelectorProps {
     /** 进入非当前 Agent 浏览态前确认；false 时保持原分段，什么都不改。 */
     confirmBrowseSwitch?: () => Promise<boolean>;
     onSwitch: (
-      targetAgentKind: 'claude-code' | 'codex',
+      targetAgentKind: AgentKind,
       modelId: string,
       providerId: string | null,
     ) => void | Promise<void>;
@@ -388,7 +388,7 @@ interface ModelSelectorContentProps {
   fastMode?: boolean;
   onFastModeChange?: (enabled: boolean) => void | Promise<void>;
   modelMemory?: ModelMemoryAccessors;
-  vendorKey?: 'cc' | 'codex';
+  vendorKey?: 'cc' | 'codex' | 'cursor';
   /** device-link 远程会话所属被控端 id(列被控端模型)。 */
   deviceId?: string;
   /** SSH 远程会话隐藏订阅直连模型(语义同 ModelSelectorProps 同名字段)。 */
@@ -429,16 +429,17 @@ interface ModelSelectorContentProps {
     currentVendor: 'cc' | 'codex';
     confirmBrowseSwitch?: () => Promise<boolean>;
     onSwitch: (
-      targetAgentKind: 'claude-code' | 'codex',
+      targetAgentKind: AgentKind,
       modelId: string,
       providerId: string | null,
     ) => void | Promise<void>;
   };
 }
 
-function vendorKeyToAgentKind(v?: 'cc' | 'codex'): AgentKind | null {
+function vendorKeyToAgentKind(v?: 'cc' | 'codex' | 'cursor'): AgentKind | null {
   if (v === 'cc') return 'claude-code';
   if (v === 'codex') return 'codex';
+  if (v === 'cursor') return 'cursor';
   return null;
 }
 
@@ -478,7 +479,7 @@ function ModelSelectorContentView({
   // session-agent-switch:两步式引擎切换的浏览态。browseVendor 初始 = 会话当前引擎;
   // 切到另一家 tab 只是「浏览目标引擎的模型」,选中模型行才真正触发切换事务。
   const [browseVendor, setBrowseVendor] = useState<'cc' | 'codex'>(
-    agentSwitch?.currentVendor ?? vendorKey ?? 'cc',
+    agentSwitch?.currentVendor ?? (vendorKey === 'codex' ? 'codex' : 'cc'),
   );
   const browseSwitchPendingRef = useRef(false);
   const handleBrowseVendorChange = async (next: 'cc' | 'codex') => {
@@ -504,9 +505,10 @@ function ModelSelectorContentView({
     ? vendorKeyToAgentKind(browseVendor)
     : vendorKeyToAgentKind(vendorKey);
   const browseTargetLabel = browseVendor === 'codex' ? 'Codex' : 'Claude Code';
-  // 同时拉两个 agent —— vendorKey 不传时把两边模型一起展示。hooks 必须按固定顺序调用。
+  // 同时拉三个 agent —— vendorKey 不传时把 cc+codex 一起展示。hooks 必须按固定顺序调用。
   const cc = useAgentCapabilities('claude-code', deviceId);
   const codex = useAgentCapabilities('codex', deviceId);
+  const cursor = useAgentCapabilities('cursor', deviceId);
   // 本机折扣 GPT 仍按本机 API key gate；device-link 必须只看被控端 provider 状态。
   // 旧被控端不支持 provider:list 时按远端 capabilities 退化，不得误用控制端 key。
   const { hasSavedKey } = useApiKey();
@@ -602,8 +604,9 @@ function ModelSelectorContentView({
     [],
   );
 
-  // 模型清单来源:本机会话从 live providers 派生(builtin + 自定义合集);device-link 远程会话
-  // 必须列**被控端**模型(cc/codex.capabilities.availableModels,deviceId 作用域),不读控制端本地
+  // 模型清单来源:本机会话从 live providers 派生(provider-first,
+  // 含自定义供应商),与重构后的本地行为逐字节一致;Cursor 无 Cindy provider,
+  // 本机/远程都走 capabilities.availableModels。
   // catalog —— 见 selectVisibleModels 的「以被控端为准」契约。merged 入口(无 vendorKey)cc+codex 去重。
   const visibleModels = useMemo(
     () =>
@@ -613,6 +616,7 @@ function ModelSelectorContentView({
         providers,
         deviceCcModels: cc.capabilities?.availableModels ?? [],
         deviceCodexModels: codex.capabilities?.availableModels ?? [],
+        deviceCursorModels: cursor.capabilities?.availableModels ?? [],
         excludeSubscriptionDirect,
         excludeChatBridgedCodex,
       }),
@@ -622,6 +626,7 @@ function ModelSelectorContentView({
       providers,
       cc.capabilities,
       codex.capabilities,
+      cursor.capabilities,
       excludeSubscriptionDirect,
       excludeChatBridgedCodex,
     ],
@@ -651,9 +656,11 @@ function ModelSelectorContentView({
         ? (cc.capabilities?.effortLevels ?? [])
         : currentAgentKind === 'codex'
           ? (codex.capabilities?.effortLevels ?? [])
-          : [];
+          : currentAgentKind === 'cursor'
+            ? (cursor.capabilities?.effortLevels ?? [])
+            : [];
     return new Map(levels.map((e) => [e.id, e.displayName]));
-  }, [currentAgentKind, cc.capabilities, codex.capabilities]);
+  }, [currentAgentKind, cc.capabilities, codex.capabilities, cursor.capabilities]);
   // 档名多语言:i18n 词表(effortLevels.*) → 模型级 effortDisplayNames →
   // capabilities displayName(未知档兜底) → 原 id。
   const effortLabelFor = (m: RowModel, e: Effort) => modelEffortLabel(t, m, e, effortMeta.get(e));
@@ -662,8 +669,9 @@ function ModelSelectorContentView({
   const hasFastModeCap = useMemo(() => {
     if (currentAgentKind === 'claude-code') return !!cc.capabilities?.hasFastMode;
     if (currentAgentKind === 'codex') return !!codex.capabilities?.hasFastMode;
+    if (currentAgentKind === 'cursor') return !!cursor.capabilities?.hasFastMode;
     return false;
-  }, [currentAgentKind, cc.capabilities, codex.capabilities]);
+  }, [currentAgentKind, cc.capabilities, codex.capabilities, cursor.capabilities]);
   // ── 来源(供应商)栏 ──────────────────────────────────────────────────────
   // 本机 + device-link 远程会话都支持来源分段:providers 已按 deviceId 切到被控端目录,
   // 远程切来源经隧道 set-model(providerId)生效(见 ChatInput.handleProviderChange 的远程分支)。
@@ -698,6 +706,8 @@ function ModelSelectorContentView({
   // cc / codex 同一套门控,仅各供应商的配置数据不同。
   const fastEditable = (providerId: string | null, m: RowModel): boolean => {
     if (!onFastModeChange || !hasFastModeCap || !currentAgentKind) return false;
+    // Cursor 无 Cindy provider；以目录 descriptors.supportsFastMode 为准。
+    if (currentAgentKind === 'cursor') return m.supportsFastMode === true;
     const provider = connected.find((p) => p.id === (providerId ?? activeSourceId));
     return modelSupportsFastMode(provider, m.id, currentAgentKind);
   };
@@ -730,6 +740,8 @@ function ModelSelectorContentView({
     return modelPricePresentation(displayQuote, undefined);
   };
   const modelDisabledOf = (id: string): boolean => {
+    // Cursor 订阅直连，不经 Cindy provider 连接态门控。
+    if (currentAgentKind === 'cursor') return false;
     if (!deviceId) return id.startsWith('codex/') && !hasSavedKey;
     if (remoteProviders.loading) return true;
     if (remoteProviders.error) return false;
@@ -809,6 +821,13 @@ function ModelSelectorContentView({
       browsing && agentKind
         ? visibleModels.filter((m) => sourcesForModel(providers, m.id, agentKind).length > 0)
         : visibleModels;
+    // Cursor 无 Cindy provider 目录；capabilities 列表即最终可见集，不做 provider 可见性过滤。
+    if (currentAgentKind === 'cursor') {
+      if (!q) return base;
+      return base.filter(
+        (m) => m.displayName.toLowerCase().includes(q) || m.id.toLowerCase().includes(q),
+      );
+    }
     // 本地 flat 入口（子代理模型、Worker 等）没有 provider sections 帮忙过滤，必须显式复用
     // 会话选择器 / IM `/model` 的同一套「已连接来源 × 用户可见模型」规则。否则设置页里
     // 已忽略或仅由断开来源提供的目录项仍会被列出来，选中后没有可用路由。
@@ -846,6 +865,7 @@ function ModelSelectorContentView({
     query,
     browsing,
     agentKind,
+    currentAgentKind,
     providers,
     deviceId,
     visibilityVersion,
@@ -1367,8 +1387,10 @@ function ModelSelectorContentView({
 
   // 0 个可连来源:整张引导卡取代列表(仅 providers 加载完成后判,避免拉取期闪空态)。
   // device-link 远程会话不显示该引导(控制端无法替被控端连来源)→ 退化为扁平兜底列表。
+  // Cursor 无 Cindy provider，直接走 capabilities 扁平列表，永不进此空态。
   const emptyState =
     sourcesEnabled &&
+    currentAgentKind !== 'cursor' &&
     !deviceId &&
     currentAgentKind &&
     !providersLoading &&
@@ -1617,6 +1639,7 @@ export function ModelSelector({
   const agentKind = vendorKeyToAgentKind(vendorKey);
   const cc = useAgentCapabilities('claude-code', deviceId);
   const codex = useAgentCapabilities('codex', deviceId);
+  const cursor = useAgentCapabilities('cursor', deviceId);
   const pricing = useModelPricing();
   // trigger 的来源 icon / 当前模型也按来源取:device-link 用被控端供应商目录(否则控制端本地
   // 查不到被控端独有模型 → currentModel undefined → label 退成 "Select model")。
@@ -1631,6 +1654,7 @@ export function ModelSelector({
         providers,
         deviceCcModels: cc.capabilities?.availableModels ?? [],
         deviceCodexModels: codex.capabilities?.availableModels ?? [],
+        deviceCursorModels: cursor.capabilities?.availableModels ?? [],
         excludeSubscriptionDirect,
         excludeChatBridgedCodex,
       }),
@@ -1640,6 +1664,7 @@ export function ModelSelector({
       providers,
       cc.capabilities,
       codex.capabilities,
+      cursor.capabilities,
       excludeSubscriptionDirect,
       excludeChatBridgedCodex,
     ],
@@ -1677,9 +1702,11 @@ export function ModelSelector({
         ? (cc.capabilities?.effortLevels ?? [])
         : currentAgentKind === 'codex'
           ? (codex.capabilities?.effortLevels ?? [])
-          : [];
+          : currentAgentKind === 'cursor'
+            ? (cursor.capabilities?.effortLevels ?? [])
+            : [];
     return new Map(levels.map((e) => [e.id, e.displayName]));
-  }, [currentAgentKind, cc.capabilities, codex.capabilities]);
+  }, [currentAgentKind, cc.capabilities, codex.capabilities, cursor.capabilities]);
   // 档名多语言(与列表侧 effortLabelFor 同序):i18n 词表 → 模型级覆盖 → capabilities 英文名 → id。
   const labelOf = (e: Effort) => modelEffortLabel(t, currentModel, e, effortMeta.get(e));
 
@@ -1692,14 +1719,16 @@ export function ModelSelector({
   // 此模型”的供应商作兜底。
   const activeSourceId = useMemo<string | null>(
     () =>
-      currentAgentKind
+      currentAgentKind && currentAgentKind !== 'cursor'
         ? effectiveSourceIdForModel(providers, currentProviderId, modelId, currentAgentKind)
         : null,
     [providers, currentAgentKind, currentProviderId, modelId],
   );
   // 空態:当前模型一个已连接来源都没有 → trigger 改「连接来源」CTA。
   // device-link 远程会话不走此 CTA(控制端无法替被控端连来源;hasConnectedSource 是本机口径)。
+  // Cursor 无 Cindy provider 连接态，永不进此 CTA。
   const noSource =
+    currentAgentKind !== 'cursor' &&
     !!onProviderChange &&
     !!onNavigateToProviders &&
     !deviceId &&

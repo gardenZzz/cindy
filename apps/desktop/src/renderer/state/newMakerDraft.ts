@@ -147,6 +147,15 @@ function defaultVendorPrefs(vendor: MakerVendor): VendorPrefs {
       providerId: null,
     };
   }
+  if (vendor === 'cursor') {
+    return {
+      model: 'auto',
+      effort: 'medium',
+      permissionMode: 'auto',
+      planMode: false,
+      providerId: null,
+    };
+  }
   return {
     model: getDefaultModelForVendor('cc').id,
     effort: 'medium',
@@ -177,6 +186,7 @@ function makeDefault(): NewMakerDraft {
       cc: defaultVendorPrefs('cc'),
       orca: defaultVendorPrefs('orca'),
       codex: defaultVendorPrefs('codex'),
+      cursor: defaultVendorPrefs('cursor'),
     },
     modelChosenByVendor: {},
   };
@@ -208,7 +218,7 @@ function sanitize(raw: unknown): NewMakerDraft {
   // F-COLLAB (2026-05): 'orca' vendor 已被 ChatInput 底部的 toggle 取代,
   // sanitize 时把历史 localStorage 残留的 'orca' 自动迁移到 'cc',避免空白入口。
   const vendor: MakerVendor =
-    r.vendor === 'codex' ? 'codex' : 'cc';
+    r.vendor === 'codex' ? 'codex' : r.vendor === 'cursor' ? 'cursor' : 'cc';
   const workingDir = normalizeDraftWorkingDir(r.workingDir);
   const remoteHostId =
     typeof r.remoteHostId === 'string' && r.remoteHostId.trim().length > 0
@@ -302,7 +312,7 @@ function sanitize(raw: unknown): NewMakerDraft {
       ? (r.modelChosenByVendor as Record<string, unknown>)
       : {};
   const modelChosenByVendor: Partial<Record<MakerVendor, boolean>> = {};
-  for (const v of ['cc', 'orca', 'codex'] as const) {
+  for (const v of ['cc', 'orca', 'codex', 'cursor'] as const) {
     if (modelChosenRaw[v] === true) modelChosenByVendor[v] = true;
   }
   return {
@@ -320,6 +330,7 @@ function sanitize(raw: unknown): NewMakerDraft {
       cc: sanitizeVendorPrefs(lastByVendorRaw.cc, 'cc'),
       orca: sanitizeVendorPrefs(lastByVendorRaw.orca, 'orca'),
       codex: sanitizeVendorPrefs(lastByVendorRaw.codex, 'codex'),
+      cursor: sanitizeVendorPrefs(lastByVendorRaw.cursor, 'cursor'),
     },
     modelChosenByVendor,
   };

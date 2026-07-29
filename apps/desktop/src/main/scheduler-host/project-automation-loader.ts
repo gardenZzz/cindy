@@ -18,6 +18,7 @@ import { projectAutomationConsentToRow } from '../localDb/mapper';
 import { PROJECT_AUTOMATION_REL_SEGMENTS } from '../../shared/projectAutomationPaths';
 import { migrateLegacyXdmakerDir } from '../utils/legacyXdmakerMigration';
 import type { DrizzleScheduleStorage, SchedulerDrizzleDb } from './storage';
+import type { AgentKind } from '@cindy/maker-core';
 
 /**
  * ProjectAutomationLoader reads .cindy/automations/schedules.json and syncs it
@@ -47,7 +48,7 @@ export interface ProjectScheduleConfig {
   recurring?: boolean;
   manual?: boolean;
   intervalMs?: number;
-  agentKind?: 'claude-code' | 'codex';
+  agentKind?: AgentKind;
   model?: string;
   /** 可选：显式来源(供应商)id。省略 → 走原生默认来源（与旧配置字节级一致）。详见 Schedule.providerId。 */
   providerId?: string;

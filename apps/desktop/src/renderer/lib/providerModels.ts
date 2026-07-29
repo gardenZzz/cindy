@@ -161,7 +161,7 @@ export function deriveModelsFromProviders(
  *    含自定义供应商),与重构后的本地行为逐字节一致。
  *
  * `agentKind` 锁定时取单边;为 null 时 cc + codex 按 id 首见去重并集(与历史合并口径一致)。
- * device 侧两个数组由调用方传 `cc/codex.capabilities.availableModels ?? []`(可空 → 空数组)。
+ * device 侧数组由调用方传 `cc/codex/cursor.capabilities.availableModels ?? []`(可空 → 空数组)。
  */
 export function selectVisibleModels(params: {
   agentKind: AgentKind | null;
@@ -169,6 +169,8 @@ export function selectVisibleModels(params: {
   providers: ProviderView[];
   deviceCcModels: ModelDescriptor[];
   deviceCodexModels: ModelDescriptor[];
+  /** Cursor 无 Cindy provider 目录；本机/远程都走 capabilities.availableModels。 */
+  deviceCursorModels?: ModelDescriptor[];
   /**
    * 过滤订阅直连模型(chatgpt/ / xai/,经本地 compat-proxy 的 responses-bridge 翻译)。
    * SSH 远程会话(remoteHostId)必须传 true:远程模式走 remoteEndpoint、不经本地 loopback
@@ -184,7 +186,16 @@ export function selectVisibleModels(params: {
    */
   excludeChatBridgedCodex?: boolean;
 }): ModelDescriptor[] {
-  const { agentKind, deviceId, providers, deviceCcModels, deviceCodexModels, excludeSubscriptionDirect, excludeChatBridgedCodex } = params;
+  const {
+    agentKind,
+    deviceId,
+    providers,
+    deviceCcModels,
+    deviceCodexModels,
+    deviceCursorModels = [],
+    excludeSubscriptionDirect,
+    excludeChatBridgedCodex,
+  } = params;
   const drop = (list: ModelDescriptor[]): ModelDescriptor[] =>
     excludeSubscriptionDirect ? list.filter((m) => !isSubscriptionDirectModel(m.id)) : list;
   const codexDeriveOpts = excludeChatBridgedCodex
@@ -192,8 +203,11 @@ export function selectVisibleModels(params: {
     : undefined;
   const cc = drop(deviceId ? deviceCcModels : deriveModelsFromProviders(providers, 'claude-code'));
   const codex = drop(deviceId ? deviceCodexModels : deriveModelsFromProviders(providers, 'codex', codexDeriveOpts));
+  // Cursor:本机也走 capabilities（无 provider.models.cursor）；远程同样用被控端 capabilities。
+  const cursor = drop(deviceCursorModels);
   if (agentKind === 'claude-code') return cc;
   if (agentKind === 'codex') return codex;
+  if (agentKind === 'cursor') return cursor;
   const merged = [...cc];
   const seen = new Set(merged.map((m) => m.id));
   for (const m of codex) {

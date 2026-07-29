@@ -14,9 +14,10 @@ import { i18n } from '@/i18n';
 import { toast } from './toast';
 
 import type { ProviderErrorCode } from '../../shared/providerErrors';
+import type { AgentKind } from '@cindy/maker-core';
 
 interface ProviderUpstreamErrorPayload {
-  agent: 'claude-code' | 'codex';
+  agent: AgentKind;
   providerId: string;
   providerName?: string;
   code: ProviderErrorCode;

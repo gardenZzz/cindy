@@ -50,6 +50,7 @@ import {
   syntheticTriggerKind,
 } from '../../shared/interruptedTurn.js';
 import { attachSessionReferenceMetadata } from '../../shared/sessionReferenceMetadata.js';
+import type { AgentKind } from '@cindy/maker-core';
 
 const log = createLogger('maker-input-coordinator');
 const SESSION_RUNNING_RETRY_DELAY_MS = 250;
@@ -124,7 +125,7 @@ export interface AgentInputCoordinatorDeps {
    */
   reconcileTurnIdle?: (sessionId: string) => void;
   hasPendingInteraction: (sessionId: string) => boolean;
-  getAgentKind: (sessionId: string) => 'claude-code' | 'codex' | null;
+  getAgentKind: (sessionId: string) => AgentKind | null;
   getSdkSessionId: (sessionId: string) => Promise<string | undefined>;
   /**
    * interrupted-turn-resume:判断某条已派发 user 消息之后 agent 是否已产出内容

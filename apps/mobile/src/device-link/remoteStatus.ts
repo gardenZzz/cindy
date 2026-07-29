@@ -1,6 +1,7 @@
 import {
   describeRemoteError as describeRemoteErrorShared,
   humanizeRemoteError as humanizeRemoteErrorShared,
+  isCursorUnsupportedRemoteError,
   isDeviceUnresponsiveRemoteError,
 } from '@cindy/maker-shared/device-link-contract';
 import { i18n } from '@/i18n';
@@ -10,6 +11,7 @@ export {
   connectionIssueTitle,
   describeAgentAuthError,
   formatRemoteError,
+  isCursorUnsupportedRemoteError,
   isPreconditionFailedRemoteError,
   relayStatusHint,
   relayStatusLabel,
@@ -34,5 +36,20 @@ export function describeRemoteError(error: string | null): string | null {
   if (error?.includes('DEVICE_UNRESPONSIVE')) {
     return i18n.t('deviceLink.deviceUnresponsiveHint');
   }
+  if (isCursorUnsupportedRemoteError(error)) {
+    return i18n.t('session.screen.cursorUnsupportedOnDesktop');
+  }
   return describeRemoteErrorShared(error);
+}
+
+/**
+ * 新建 / 切换 Cursor 被旧电脑端拒绝时的可读错误。
+ * `requestedAgentKind` 用于「错误原文未点名 cursor」的语境判定。
+ */
+export function describeCursorHostError(
+  error: string | null | undefined,
+  requestedAgentKind?: string | null,
+): string | null {
+  if (!isCursorUnsupportedRemoteError(error, requestedAgentKind)) return null;
+  return i18n.t('session.screen.cursorUnsupportedOnDesktop');
 }

@@ -140,6 +140,10 @@
 
 指不更换 TestFlight 或商店安装包、可通过 OTA 下发的 JS 与资源更新。当前先采用四语直译并登记为待讨论术语，避免与整包更新或测试版本更新混称。
 
+### Cursor
+
+经官方 ACP 通道接入的第三个 Agent（上游产品 Cursor 的编码 agent；二进制名 cursor-agent 是实现细节）。产品面统一称 Cursor，kind 标识为 cursor。四语保留英文原词，避免自造「光标 / Cursor Agent / Cursor CLI」等说法。
+
 ### Device Code
 
 OAuth 2.0 Device Authorization Grant 中由用户在另一设备验证页输入的一次性代码。当前先采用各语言直译，作为待产品裁决术语登记，避免后续界面出现“设备代码／配对码／认证码”等多套说法。

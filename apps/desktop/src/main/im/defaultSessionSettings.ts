@@ -19,6 +19,7 @@ import {
 import {
   IM_DEFAULT_EFFORT_OVERRIDES,
   IM_DEFAULT_SETTINGS,
+  type ImDefaultAgentKind,
   type ImDefaultAgentSettings,
   type ImDefaultSettingsChannel,
 } from '../../shared/imDefaultSettings.js';
@@ -111,11 +112,11 @@ export async function resolveDefaultProviderIdForModel(
 }
 
 function pickModel(
-  requestedAgent: AgentKind,
+  requestedAgent: ImDefaultAgentKind,
   settings: ImDefaultAgentSettings,
   config: ImOrchestratorConfig,
   providers: ProviderView[] | null,
-): { agentKind: AgentKind; modelId: string } {
+): { agentKind: ImDefaultAgentKind; modelId: string } {
   if (hasModel(requestedAgent, settings.model, providers)) {
     return { agentKind: requestedAgent, modelId: settings.model };
   }
@@ -146,7 +147,10 @@ function pickModel(
       fallbackAgent: config.agentKind,
       fallbackModel: config.defaultModel,
     });
-    return { agentKind: config.agentKind, modelId: config.defaultModel };
+    // IM 渠道配置不含 cursor (#5); 窄化到 ImDefaultAgentKind。
+    const fallbackAgent: ImDefaultAgentKind =
+      config.agentKind === 'codex' ? 'codex' : 'claude-code';
+    return { agentKind: fallbackAgent, modelId: config.defaultModel };
   }
 
   log.warn('im default: all model sources exhausted; using hardcoded system default', {

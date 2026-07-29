@@ -1,4 +1,6 @@
-export type ImDefaultAgentKind = 'claude-code' | 'codex';
+import type { AgentKind } from '@cindy/maker-core';
+/** IM 新会话默认设置只覆盖已注册 runtime；cursor 未进 IM 面 (#5)。 */
+export type ImDefaultAgentKind = Exclude<AgentKind, 'cursor'>;
 export type ImDefaultEffort = 'minimal' | 'low' | 'medium' | 'high' | 'xhigh' | 'max' | 'ultra';
 /** IM channel scopes that keep independent new-conversation routing preferences. */
 export type ImDefaultSettingsChannel = 'feishu' | 'slack' | 'discord';

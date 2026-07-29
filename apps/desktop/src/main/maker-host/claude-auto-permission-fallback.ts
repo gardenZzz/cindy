@@ -6,7 +6,7 @@
  * 调用继续 fail-closed。
  */
 
-import type { PermissionMode } from '@cindy/maker-core';
+import type { PermissionMode, AgentKind } from '@cindy/maker-core';
 import type { ResponseObserver, ResponseObserverCtx } from '@cindy/anthropic-compat-proxy';
 
 const CLASSIFIER_SYSTEM_PREFIX = 'You are a security monitor for autonomous AI coding agents.';
@@ -15,7 +15,7 @@ const CLASSIFIER_SYSTEM_PREFIX = 'You are a security monitor for autonomous AI c
 export interface ClaudeAutoClassifierUnavailableSignal {
   sessionId: string;
   /** Legacy proxy signals omit this and default to Claude. */
-  agentKind?: 'claude-code' | 'codex';
+  agentKind?: AgentKind;
   status: number;
 }
 

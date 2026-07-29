@@ -280,9 +280,9 @@ vi.mock('@/lib/providerModels', () => ({
   // #245 新增:ModelSelector 渲染路径直接调用;fixture providers 无 routing,按不过滤透传。
   isChatBridgedCodexProvider: () => false,
   filterChatBridgedCodexProviders: (providers: unknown[]) => providers,
-  resolveVisibleModelAgentKind: ({ agentKind }: { agentKind: 'claude-code' | 'codex' | null }) =>
+  resolveVisibleModelAgentKind: ({ agentKind }: { agentKind: AgentKind | null }) =>
     agentKind ?? 'claude-code',
-  selectVisibleModels: ({ agentKind }: { agentKind: 'claude-code' | 'codex' | null }) => {
+  selectVisibleModels: ({ agentKind }: { agentKind: AgentKind | null }) => {
     if (visibleModelsRef.models) return visibleModelsRef.models;
     return [
       {
@@ -354,6 +354,7 @@ import {
   modelListMaxHeightForRows,
 } from '@/components/new-chat/ModelSelector';
 import { makerChatStore } from '@/lib/makerChatStore';
+import type { AgentKind } from '@cindy/maker-core';
 
 const requestProviderModelsAutoRefresh = vi.fn(async () => ({ ok: true as const }));
 

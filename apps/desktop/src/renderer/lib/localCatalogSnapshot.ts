@@ -22,7 +22,7 @@ import {
 const log = createLogger('localCatalogSnapshot');
 let refreshGeneration = 0;
 
-/** 联合刷新 providers + Claude/Codex capabilities，并只提交最新的完整结果。 */
+/** 联合刷新 providers + Claude/Codex/Cursor capabilities，并只提交最新的完整结果。 */
 export async function refreshLocalCatalogSnapshot(): Promise<boolean> {
   const generation = ++refreshGeneration;
   const providersGeneration = beginProvidersRefresh();

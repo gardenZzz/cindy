@@ -1,3 +1,4 @@
+import type { AgentKind } from '@cindy/maker-core';
 /**
  * newMakerDefaultsCache —— renderer "New Maker" 面板用户当前选择的 main 端缓存。
  *
@@ -67,7 +68,7 @@ export interface WorkerDefaultsFromNewMaker {
  * 缓存未就绪 / 该 vendor 没有偏好 → 返回空对象, 调用方按自己的兜底规则处理。
  */
 export function getWorkerDefaultsFromNewMaker(
-  workerAgent: 'claude-code' | 'codex',
+  workerAgent: AgentKind,
 ): WorkerDefaultsFromNewMaker {
   if (!cache) return {};
   const vendor: VendorKey = workerAgent === 'claude-code' ? 'cc' : 'codex';
@@ -115,7 +116,7 @@ export interface RemoteNewMakerDefaults {
 }
 
 export function getRemoteNewMakerDefaults(
-  agentKind: 'claude-code' | 'codex',
+  agentKind: AgentKind,
 ): RemoteNewMakerDefaults {
   // providerModelMemory(草稿列表行真实读源)与「该 vendor 是否选过模型」无关:即便 cache 未就绪 /
   // 该 vendor 无选中模型(lastByVendor 空),只要被控端有模型级预设就要全量回给控制端,

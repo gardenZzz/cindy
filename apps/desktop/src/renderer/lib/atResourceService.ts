@@ -1,4 +1,5 @@
 import { createLogger } from '@/lib/logger';
+import type { AgentKind } from '@cindy/maker-core';
 
 const log = createLogger('AtResourceService');
 /**
@@ -43,7 +44,7 @@ export interface ScanResult {
   truncated: boolean;
 }
 
-export type PaletteAgentKind = 'claude-code' | 'codex';
+export type PaletteAgentKind = AgentKind;
 
 /**
  * Load candidate @-resources from the active agent/workspace. Returns `success:false`

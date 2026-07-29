@@ -23,6 +23,7 @@ import { DefaultOverrideControls } from './DefaultOverrideControls';
 import { StorageManagementCard } from './StorageManagementCard';
 import { CURRENT_CINDY_REGION } from '../../../shared/brandRegion';
 import { LEGAL_LINKS } from '../../../shared/legalLinks';
+import type { AgentKind } from '@cindy/maker-core';
 
 interface AgentVersionState {
   loading: boolean;
@@ -53,7 +54,7 @@ const DESKTOP_SOCIAL_LINKS = [
   },
 ] as const;
 
-function useAgentBinaryVersion(kind: 'claude-code' | 'codex'): AgentVersionState {
+function useAgentBinaryVersion(kind: AgentKind): AgentVersionState {
   const [state, setState] = useState<AgentVersionState>(INITIAL);
 
   useEffect(() => {

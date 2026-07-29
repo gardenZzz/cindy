@@ -14,7 +14,7 @@ import { describe, it, expect } from 'vitest';
 
 import { BUNDLED_CATALOG } from '@cindy/model-providers';
 import type { Catalog, CatalogModel } from '@cindy/model-providers';
-import type { ModelDescriptor } from '@cindy/maker-core';
+import type { ModelDescriptor, AgentKind } from '@cindy/maker-core';
 
 import { deriveAvailableModels, refreshCatalogDerivedModels } from '../catalog-to-descriptors.js';
 
@@ -134,7 +134,7 @@ describe('deriveAvailableModels — dynamic-first catalog contract', () => {
     const claudeRef = claudeModels;
     const codexRef = codexModels;
     const target = {
-      getCapabilities(agent: 'claude-code' | 'codex') {
+      getCapabilities(agent: AgentKind) {
         return { availableModels: agent === 'claude-code' ? claudeModels : codexModels };
       },
     };

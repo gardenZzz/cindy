@@ -163,7 +163,9 @@ export function basenameOf(p?: string | null): string | null {
  * 'codex' → 'Codex'（保持 OpenAI 原品牌名）。
  */
 export function humanizeAgentKind(k: AgentKind): string {
-  return k === 'codex' ? 'Codex' : 'Claude';
+  if (k === 'codex') return 'Codex';
+  if (k === 'cursor') return 'Cursor';
+  return 'Claude';
 }
 
 /**

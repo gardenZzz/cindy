@@ -382,7 +382,9 @@ export function budgetModelRequiresApiKeyMessage(model: string): string {
 
 /** agent 的人类可读名,用于 preflight 失败信息。 */
 function agentDisplayName(agent: AgentKind): string {
-  return agent === 'codex' ? 'Codex' : 'Claude Code';
+  if (agent === 'codex') return 'Codex';
+  if (agent === 'cursor') return 'Cursor';
+  return 'Claude Code';
 }
 
 /**

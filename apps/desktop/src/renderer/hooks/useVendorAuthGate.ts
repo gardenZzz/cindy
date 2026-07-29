@@ -219,6 +219,36 @@ export function useVendorAuthGate(): UseVendorAuthGateReturn {
         return { proceed: false };
       }
 
+      // Cursor:不走 provider 来源门禁；只看本机 cursor-agent 是否已装（登录属 T7）。
+      if (vendor === 'cursor') {
+        if (options?.deviceId) {
+          await confirm({
+            title: t('settings.providers.cursor.title'),
+            description: t('settings.providers.cursor.missingDescription'),
+            confirmText: t('logic.confirm.gotIt'),
+            showCancel: false,
+            autoFocusConfirm: true,
+          });
+          return { proceed: false };
+        }
+        let installed = false;
+        try {
+          installed = (await window.electronAPI.maker.agent.getCursorBinaryStatus()).installed;
+        } catch {
+          installed = false;
+        }
+        if (installed) return { proceed: true };
+        const ok = await confirm({
+          title: t('settings.providers.cursor.title'),
+          description: t('settings.providers.cursor.missingDescription'),
+          confirmText: t('logic.confirm.goToSettings'),
+          cancelText: t('logic.confirm.cancel'),
+          autoFocusConfirm: true,
+        });
+        if (ok) navigate('/settings?tab=providers');
+        return { proceed: false };
+      }
+
       // device-link:远程草稿 / 远程会话 → 就绪态以**被控端**为准(控制端本机配置无关)。
       // 两条隧道查询并行:provider:list 提供与本地 / 手机同源的来源判定(唯一真相),
       // agent:status 提供 codex binary 轴 + 老被控端的 authReady 回退口径。

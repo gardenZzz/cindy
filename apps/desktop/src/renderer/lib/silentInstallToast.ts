@@ -21,12 +21,13 @@
 import { i18n } from '@/i18n';
 
 import { toast } from './toast';
+import type { RemoteAgentKind } from '@cindy/maker-remote-ssh';
 
 const TOAST_DURATION_FAILED_MS = 8000;
 
 interface ToastKey {
   hostId: string;
-  agentKind: 'codex' | 'claude-code';
+  agentKind: RemoteAgentKind;
 }
 
 function makeKey(k: ToastKey): string {
@@ -36,7 +37,7 @@ function makeKey(k: ToastKey): string {
 /** in-flight toast id 表; phase=started 写入, done/failed 清除。 */
 const activeToastIds = new Map<string, string>();
 
-function friendlyAgentName(agentKind: 'codex' | 'claude-code'): string {
+function friendlyAgentName(agentKind: RemoteAgentKind): string {
   return agentKind === 'codex' ? 'Codex' : 'Claude Code';
 }
 
@@ -44,7 +45,7 @@ function friendlyAgentName(agentKind: 'codex' | 'claude-code'): string {
  * 根据上一条 InstallProgressEvent.kind 决定 toast 副文案。only 切到两个"明显
  * 阶段"避免抖动; 其它 kind 不改文案 (返回 null = "保持上次")。
  */
-function phaseText(eventKind: string | undefined, hostId: string, agentKind: 'codex' | 'claude-code'): string | null {
+function phaseText(eventKind: string | undefined, hostId: string, agentKind: RemoteAgentKind): string | null {
   switch (eventKind) {
     case 'node-install-start':
     case 'node-download':

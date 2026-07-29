@@ -17,6 +17,7 @@ import {
   readAgentInputReferences,
   type AgentInputReference,
 } from '@cindy/maker-shared/agent-input-projection';
+import type { AgentKind } from '@cindy/maker-core';
 
 export type { AgentInputReference } from '@cindy/maker-shared/agent-input-projection';
 
@@ -101,7 +102,7 @@ export interface AgentInputChatMessage {
 }
 
 export interface AgentInputCreateOpts {
-  agentKind: 'claude-code' | 'codex';
+  agentKind: AgentKind;
   workingDir: string;
   model: string;
   providerId?: string | null;

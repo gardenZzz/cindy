@@ -19,7 +19,7 @@
  */
 
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import type { Effort } from '@cindy/maker-core';
+import type { Effort, AgentKind } from '@cindy/maker-core';
 import type { CatalogModel, ProviderView } from '@cindy/model-providers';
 
 const h = vi.hoisted(() => {
@@ -227,7 +227,7 @@ function catalogModel(id: string, name = id): CatalogModel {
 function connectedProvider(
   id: string,
   models: CatalogModel[],
-  agentKind: 'claude-code' | 'codex' = 'claude-code',
+  agentKind: AgentKind = 'claude-code',
 ): ProviderView {
   return {
     id,

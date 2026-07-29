@@ -337,7 +337,7 @@ function createProgramWithSources(
     [makerCoreSessionFixturePath, `
       declare module '@cindy/maker-core' {
         export type AgentEvent = unknown;
-        export type AgentKind = 'cc' | 'claude-code' | 'codex' | string;
+        export type AgentKind = 'cc' | AgentKind | string;
         export type SessionSendResult =
           | { accepted: true }
           | { accepted: false; reason: string };

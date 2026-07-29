@@ -1,5 +1,6 @@
 import type { MobileSessionAgentSwitchIntent } from '@cindy/maker-shared/device-link-contract';
 import type { AgentInputReference } from '@cindy/maker-shared/agent-input-projection';
+import type { AgentKind } from '@cindy/maker-shared';
 
 export type RemoteSessionStatus = 'active' | 'archived' | 'deleted';
 export type RemoteMessageRole =
@@ -51,7 +52,7 @@ export interface RemoteSession {
   activeTurnStartedAt?: number | null;
   lastTurnEndedAt?: number | null;
   status: RemoteSessionStatus;
-  agentKind: 'cc' | 'codex';
+  agentKind: 'cc' | 'codex' | 'cursor';
   /** main 进程内的下一条消息跨 Agent 切换意图；null = 已确认没有。 */
   agentSwitchIntent?: MobileSessionAgentSwitchIntent | null;
   source?: string;
@@ -169,7 +170,7 @@ export interface QueuedRemoteMessage {
   sessionReferencesRequireTrustedSnapshot?: boolean;
   userName?: string;
   createOpts: {
-    agentKind: 'claude-code' | 'codex';
+    agentKind: AgentKind;
     workingDir: string;
     model: string;
     effort?: string;

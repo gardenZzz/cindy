@@ -945,7 +945,7 @@ export async function createMessage(
      * agentMeta 需要它;main 侧 SDK 事件落库路径必传,renderer pending echo 等
      * 无 SDK 元信息的行留空(null 回落 session.agentKind)。
      */
-    agentKind?: 'cc' | 'codex' | null;
+    agentKind?: 'cc' | 'codex' | 'cursor' | null;
     createdAt?: number;
   },
   opts?: {
@@ -1680,8 +1680,10 @@ export interface ParkedEngineSession {
  */
 export async function findParkedEngineSession(
   sessionId: string,
-  targetDbKind: 'cc' | 'codex',
+  targetDbKind: 'cc' | 'codex' | 'cursor',
 ): Promise<ParkedEngineSession | null> {
+  // Cursor 一期不做会话内引擎切换 / 停泊续接。
+  if (targetDbKind === 'cursor') return null;
   const db = getDbClient().drizzle;
   const [sessRow] = await db
     .select({ clearedAt: sessions.clearedAt })

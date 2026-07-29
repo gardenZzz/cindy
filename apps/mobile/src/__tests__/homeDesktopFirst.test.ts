@@ -120,10 +120,14 @@ describe('mobile home desktop-first surface', () => {
     );
     // 2026-07-20 双端 Agent mark 同步为 Claude Code 像素脸 / Codex CLI `>_` 花形。
     // ——箭头统一后依赖图标区分 agent 类型的场景(创建自动化 chips / 侧栏混排)全部失效。
+    // T2 (#6): desktop VendorIcon 扩成 cc | codex | cursor 三路;断言锁住与 mobile 身份槽同步。
     expect(desktopVendorIconSource).toContain('ClaudeMark');
     expect(desktopVendorIconSource).toContain('CodexMark');
-    expect(desktopVendorIconSource).toContain("vendor === 'codex' ? <CodexMark size={size} /> : <ClaudeMark size={size} />");
-    expect(desktopVendorIconSource).toContain("vendor: 'cc' | 'codex'");
+    expect(desktopVendorIconSource).toContain('CursorMark');
+    expect(desktopVendorIconSource).toContain("vendor: 'cc' | 'codex' | 'cursor'");
+    expect(desktopVendorIconSource).toContain(
+      "vendor === 'codex' ? (\n      <CodexMark size={size} />\n    ) : vendor === 'cursor' ? (\n      <CursorMark size={size} />\n    ) : (\n      <ClaudeMark size={size} />\n    )",
+    );
     expect(desktopVendorIconSource).toContain('session-status-breathing');
     expect(vendorIconSource).not.toContain('XD_SYMBOL_PATHS');
     expect(vendorIconSource).not.toContain('XD_INC_MARK_ASPECT_RATIO');
@@ -134,6 +138,7 @@ describe('mobile home desktop-first surface', () => {
     expect(vendorPathsSource).toContain('CLAUDE_AGENT_PATH');
     expect(vendorPathsSource).toContain('CODEX_AGENT_FLOWER_PATH');
     expect(vendorPathsSource).toContain('CODEX_AGENT_PROMPT_PATH');
+    expect(vendorPathsSource).toContain('CURSOR_AGENT_PATH');
     expect(agentMarkSource).not.toContain('ANTHROPIC_PROVIDER_PATH');
     expect(agentMarkSource).not.toContain('OPENAI_PROVIDER_PATH');
     expect(providerMarkSource).toContain('ANTHROPIC_PROVIDER_PATH');
@@ -141,7 +146,11 @@ describe('mobile home desktop-first surface', () => {
     expect(providerMarkSource).not.toContain('CLAUDE_AGENT_PATH');
     expect(providerMarkSource).not.toContain('CODEX_AGENT_FLOWER_PATH');
     expect(vendorIconSource).toContain("import { MobileAgentMark } from './MobileAgentMark';");
-    expect(vendorIconSource).toContain("agentKind={vendor === 'codex' ? 'codex' : 'claude-code'}");
+    // T9 (#13): mobile 身份槽与 desktop VendorIcon 同步为三路（含 cursor）。
+    expect(vendorIconSource).toContain("vendor: 'cc' | 'codex' | 'cursor' | string");
+    expect(agentMarkSource).toContain("agentKind === 'codex' ? (");
+    expect(agentMarkSource).toContain("agentKind === 'cursor' ? (");
+    expect(agentMarkSource).toContain('CURSOR_AGENT_PATH');
     expect(vendorIconSource).not.toContain('viewBox="136 137 282 158"');
     expect(vendorIconSource).not.toContain('transform="translate(');
     expect(vendorIconSource).toContain('Easing.inOut(Easing.ease)');
@@ -156,7 +165,7 @@ describe('mobile home desktop-first surface', () => {
     expect(homeSource).toContain('width: iconSize.md');
     expect(homeSource).toContain('size={cindyList ? iconSize.sm : isClaudeCodeAgentKind(item.session.agentKind) ? 19 : iconSize.lg}');
     expect(homeSource).toContain("function isClaudeCodeAgentKind(agentKind: string): boolean");
-    expect(homeSource).toContain("return agentKind !== 'codex';");
+    expect(homeSource).toContain("return agentKind === 'cc' || agentKind === 'claude-code';");
     expect(homeSource).not.toContain('sessionAttentionDot: {\n    backgroundColor: colors.statusAccent,\n    borderColor: colors.surface');
     expect(homeSource).not.toContain('sessionAttentionDot: {\n    backgroundColor: colors.statusAccent,\n    borderRadius: 3,\n    borderWidth: 1');
   });

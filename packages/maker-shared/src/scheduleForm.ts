@@ -407,6 +407,7 @@ function hasTemplateParam(params: Record<string, string>, key: string): boolean 
 }
 
 function defaultModelFor(agentKind: RemoteScheduleAgentKind): string {
+  // #13 (T9): cursor 默认模型尚未接入；未知/未注册 kind 保持既有 Claude 兜底。
   return agentKind === 'codex' ? DEFAULT_CODEX_MODEL : DEFAULT_CLAUDE_MODEL;
 }
 

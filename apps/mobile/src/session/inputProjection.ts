@@ -101,7 +101,11 @@ export function buildQueuedTextMessage(
   const workingDir = session.workingDir || '';
   const effort = session.effort || '';
   const permissionMode = permissionModeOrAsk(session.permissionMode);
-  const agentKind = session.agentKind === 'codex' ? 'codex' : 'claude-code';
+  const agentKind = session.agentKind === 'codex'
+    ? 'codex'
+    : session.agentKind === 'cursor'
+      ? 'cursor'
+      : 'claude-code';
   const persistedContent = stringifyUserContent(
     trimmed,
     persistedImageRefs,

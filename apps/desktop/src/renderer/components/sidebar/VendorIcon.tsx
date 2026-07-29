@@ -16,9 +16,10 @@
 import { cn } from '@/lib/utils';
 import { ClaudeMark } from '@/components/icons/ClaudeMark';
 import { CodexMark } from '@/components/icons/CodexMark';
+import { CursorMark } from '@/components/icons/CursorMark';
 
 interface VendorIconProps {
-  vendor: 'cc' | 'codex';
+  vendor: 'cc' | 'codex' | 'cursor';
   size?: number;
   /** true → 切 Thinking Orange + 呼吸动画,复用 .session-status-breathing */
   running?: boolean;
@@ -44,9 +45,14 @@ export function VendorIcon({
     className,
   );
 
-  return (
-    <span className={wrapperClassName}>
-      {vendor === 'codex' ? <CodexMark size={size} /> : <ClaudeMark size={size} />}
-    </span>
-  );
+  const mark =
+    vendor === 'codex' ? (
+      <CodexMark size={size} />
+    ) : vendor === 'cursor' ? (
+      <CursorMark size={size} />
+    ) : (
+      <ClaudeMark size={size} />
+    );
+
+  return <span className={wrapperClassName}>{mark}</span>;
 }

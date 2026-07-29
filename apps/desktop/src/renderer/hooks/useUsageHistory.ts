@@ -29,9 +29,10 @@ import {
   zeroUsageMoney,
   type RegionalMoney,
 } from '../../shared/regionalMoney';
+import type { AgentKind } from '@cindy/maker-core';
 
 export interface UsageHistoryModel {
-  agentKind: 'claude-code' | 'codex';
+  agentKind: AgentKind;
   model: string;
   money: RegionalMoney;
   estimatedMoney: RegionalMoney | null;
@@ -44,7 +45,7 @@ export interface UsageHistoryModel {
 /** 每日 × 模型明细 — 右栏堆叠柱状图分段。 */
 export interface UsageHistoryModelDay {
   day: string;
-  agentKind: 'claude-code' | 'codex';
+  agentKind: AgentKind;
   model: string;
   money: RegionalMoney;
   apiMoney: RegionalMoney;

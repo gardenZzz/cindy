@@ -15,6 +15,7 @@ import { z } from 'zod';
 
 import type { XdtHelperToolRegistry } from '../lizi_xdtHelperToolRegistry.js';
 import { errorPayload, okPayload } from './_payload.js';
+import type { AgentKind } from '@cindy/maker-core';
 
 /** host 确认 + 提交成功后的返回。 */
 export interface SubmitGithubIssueHostOk {
@@ -48,7 +49,7 @@ export type SubmitGithubIssueHostResult =
 export interface SubmitGithubIssueDeps {
   getSessionContext: () => {
     sessionId?: string;
-    agentKind: 'claude-code' | 'codex';
+    agentKind: AgentKind;
     workingDir: string;
   };
   /** host 回调:弹确认卡片 → 用户确认后提交到 server。 */

@@ -16,8 +16,10 @@ import { app } from 'electron';
 import claudeLatest from '../../../../../tools/claude/latest.json';
 import codexLatest from '../../../../../tools/codex/latest.json';
 import { download, type ProgressEvent } from '../downloader/index.js';
+import type { AgentKind } from '@cindy/maker-core';
 
-export type LinuxRuntimeFallbackKind = 'claude-code' | 'codex';
+// cursor 不进 Linux runtime fallback 安装面 (#5 type-slot only)。
+export type LinuxRuntimeFallbackKind = Exclude<AgentKind, 'cursor'>;
 
 interface RuntimeConfig {
   commandName: string;

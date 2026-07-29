@@ -89,9 +89,17 @@ describe('mobile session main layer desktop-first noise budget', () => {
     expect(source).toContain('const collaborationLabel = sessionCollaborationLabel(session);');
     expect(source).toContain('if (collaborationLabel) return collaborationLabel;');
     // 写编排(设置/队列/fork-rewind/interaction)仍用写 read-only reason,不被放开。
+    // T9 (#13): Cursor 一期不支持 fork/rewind，额外按 sessionAgentKind === 'cursor' 降级隐藏。
     expect(source).toContain('readOnlyReason={collaborationReadOnlyReason}');
-    expect(source).toContain('onForkMessage={collaborationReadOnlyReason ? undefined : forkAtMessage}');
-    expect(source).toContain('onPreviewRewind={collaborationReadOnlyReason ? undefined : previewRewindAtMessage}');
+    expect(source).toContain('collaborationReadOnlyReason || sessionAgentKind === \'cursor\'');
+    expect(source).toContain('forkAtMessage');
+    expect(source).toContain('previewRewindAtMessage');
+    expect(source).toMatch(
+      /onForkMessage=\{\s*collaborationReadOnlyReason\s*\|\|\s*sessionAgentKind\s*===\s*'cursor'\s*\?\s*undefined\s*:\s*forkAtMessage\s*\}/,
+    );
+    expect(source).toMatch(
+      /onPreviewRewind=\{\s*collaborationReadOnlyReason\s*\|\|\s*sessionAgentKind\s*===\s*'cursor'\s*\?\s*undefined\s*:\s*previewRewindAtMessage\s*\}/,
+    );
   });
 
   it('resyncs sessions from connection recovery or target availability, not every presence tick', () => {

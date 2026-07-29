@@ -1,5 +1,7 @@
 export type RemoteScheduleStatus = 'active' | 'paused' | 'expired';
-export type RemoteScheduleAgentKind = 'claude-code' | 'codex';
+/** Agent runtime kind — kept in sync with maker-core / model-providers / maker-scheduler. */
+export type AgentKind = 'claude-code' | 'codex' | 'cursor';
+export type RemoteScheduleAgentKind = AgentKind;
 export type RemoteScheduleWorkspaceKind = 'project' | 'dialogue';
 export type RemoteScheduleRunStatus = 'running' | 'success' | 'failed' | 'aborted' | 'interrupted' | 'skipped';
 export type RemoteScheduleExecutionMode = 'agent' | 'script';

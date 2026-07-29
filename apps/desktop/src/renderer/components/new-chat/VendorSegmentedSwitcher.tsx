@@ -7,12 +7,13 @@
  *   - segment:pill,padding [6,14],fill_container,justifyContent center,gap 6
  *     · Active : Light Card #ffffff + 1px Board #d7d7d4 / Dark #3c3c3a
  *     · Inactive: 透明,文字 Stone #737373
- *   - icon: 14×14 Agent 身份 mark (Claude Code / Codex CLI)
+ *   - icon: 14×14 Agent 身份 mark (Claude Code / Codex CLI / Cursor)
  *   - 文字: Inter 14, active weight 500,inactive weight 400
  *
  * F-COLLAB (2026-05): 原本第 3 个 "协同模式" tab 已被 ChatInput 底部的
  * CollaborationModeToggle 取代 — 用户先选 Claude 走单 session,需要时再 toggle
  * 召集 Worker。删 tab 后整体回到 2-tab 220 宽,与历史版本视觉对齐。
+ * T2: New Maker 可经 includeCursor 翻开 Cursor 第三段。
  */
 
 import type { ComponentType } from 'react';
@@ -20,6 +21,7 @@ import { cn } from '@/lib/utils';
 import type { MakerVendor } from '@/lib/ccAgent.types';
 import { CodexMark } from '@/components/icons/CodexMark';
 import { ClaudeMark } from '@/components/icons/ClaudeMark';
+import { CursorMark } from '@/components/icons/CursorMark';
 
 interface VendorSegmentedSwitcherProps {
   value: MakerVendor;
@@ -50,6 +52,11 @@ interface VendorSegmentedSwitcherProps {
    * 的名字,否则读屏用户听到的全是同一个英文兜底,行与行无法分辨。
    */
   ariaLabel?: string;
+  /**
+   * T2: New Maker 在探测到本机 cursor-agent 时翻开 Cursor 段。
+   * 默认 false —— scheduler / Orca worker / IM / 会话内切换等面保持关闭。
+   */
+  includeCursor?: boolean;
 }
 
 interface SegmentOption {
@@ -59,10 +66,16 @@ interface SegmentOption {
   iconClassName?: string;
 }
 
-const OPTIONS: readonly SegmentOption[] = [
+const BASE_OPTIONS: readonly SegmentOption[] = [
   { vendor: 'cc', label: 'Claude', Mark: ClaudeMark },
   { vendor: 'codex', label: 'Codex', Mark: CodexMark },
 ] as const;
+
+const CURSOR_OPTION: SegmentOption = {
+  vendor: 'cursor',
+  label: 'Cursor',
+  Mark: CursorMark,
+};
 
 export function VendorSegmentedSwitcher({
   value,
@@ -75,8 +88,10 @@ export function VendorSegmentedSwitcher({
   visualVariant = 'default',
   reselectEmitsChange = false,
   ariaLabel,
+  includeCursor = false,
 }: VendorSegmentedSwitcherProps) {
   const isCreateAgentVariant = visualVariant === 'create-agent';
+  const OPTIONS = includeCursor ? [...BASE_OPTIONS, CURSOR_OPTION] : BASE_OPTIONS;
   return (
     <div
       className={cn(

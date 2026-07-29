@@ -228,6 +228,14 @@ export interface AgentDeps {
   ) => void | Promise<void>;
 
   /**
+   * Cursor 专用：session/new（及后续 set_config_option 丰富）上报的运行时模型目录。
+   * maker-core 只负责调用时机；如何映射进产品目录 / 广播由 host 决定。
+   */
+  onCursorLocalModelsListed?: (
+    listing: import('./cursor/models.js').CursorModelsListing,
+  ) => void | Promise<void>;
+
+  /**
    * Host-owned Auto permission fallback. A vendor reviewer timeout/unavailable
    * result has already blocked the current action; the host persists this session
    * from Auto to Ask and broadcasts the selector/toast update. Fire-and-forget:
@@ -235,7 +243,7 @@ export interface AgentDeps {
    */
   onAutoPermissionClassifierUnavailable?: (args: {
     sessionId: string;
-    agentKind: 'claude-code' | 'codex';
+    agentKind: AgentKind;
     /** HTTP status when available; Codex reviewer timeout/failure use synthetic 408/500. */
     status: number;
   }) => void;

@@ -88,7 +88,7 @@ export interface ScheduleFormState {
   recurring: boolean;
   /** 手动模式:true → 创建后永不自动 fire,只能 Run now。UI 上需要 recurring=false 才能勾。 */
   manual: boolean;
-  agentKind: 'claude-code' | 'codex';
+  agentKind: AgentKind;
   model: string;
   /**
    * 显式选定的来源(供应商)id。'' = 跟随该 agent 原生默认来源（no-break，与未升级

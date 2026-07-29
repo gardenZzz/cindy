@@ -83,6 +83,8 @@ function defaultScheduleFormPrefs(): ScheduleFormPrefs {
     lastByAgent: {
       'claude-code': EMPTY_AGENT_PREFS,
       codex: EMPTY_AGENT_PREFS,
+      // Type-slot only (#5); schedule AgentTabs 不展示 cursor。
+      cursor: EMPTY_AGENT_PREFS,
     },
   };
 }
@@ -104,6 +106,7 @@ function loadScheduleFormPrefs(): ScheduleFormPrefs {
       lastByAgent: {
         'claude-code': sanitizeAgentPrefs(parsed.lastByAgent?.['claude-code']),
         codex: sanitizeAgentPrefs(parsed.lastByAgent?.codex),
+        cursor: sanitizeAgentPrefs(parsed.lastByAgent?.cursor),
       },
     };
   } catch {
@@ -358,7 +361,10 @@ export function useScheduleForm(initial: Schedule | null = null): UseScheduleFor
       const next: ScheduleFormState = {
         ...f,
         targetSessionId: session.id,
-        agentKind: sessionAgentKindToScheduleAgentKind(session.agentKind),
+        // Scheduler 一期不含 Cursor;会话若是 cursor 按 cc 映射占位(选择器仍关掉)。
+        agentKind: sessionAgentKindToScheduleAgentKind(
+          session.agentKind === 'codex' ? 'codex' : 'cc',
+        ),
         model: '',
         // 绑定会话 = 跟随其模型/来源,providerId 一并清空(与 model/effort 同语义)。
         providerId: '',

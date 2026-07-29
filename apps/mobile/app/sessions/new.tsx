@@ -58,7 +58,7 @@ import type {
   MobileSlashCommand,
   RemoteDirectoryEntry,
 } from '@/device-link/mobileMakerTransport';
-import { describeAgentAuthError, formatRemoteError } from '@/device-link/remoteStatus';
+import { describeAgentAuthError, describeCursorHostError, describeRemoteError, formatRemoteError } from '@/device-link/remoteStatus';
 import { agentAuthGateHint, agentAuthGateVerdict } from '@/session/agentAuthGate';
 import { connectedProvidersForAgent, getModel } from '@cindy/model-providers/registry';
 import { withTransientRemoteRetry } from '@/device-link/remoteRetry';
@@ -148,6 +148,7 @@ import {
   type NewSessionDeviceOption,
   type NewSessionStoredPreferences,
 } from '@/session/newSession';
+import { mobileAgentShortLabel, toDbAgentKind } from '@/session/sessionAgentSwitch';
 import { newSessionText } from '@/session/newSessionMessages';
 import { i18n } from '@/i18n';
 import { useTranslation } from 'react-i18next';
@@ -257,10 +258,11 @@ import { rowFastEditable } from '@/session/modelPickerRows';
 import { useTheme, useThemedStyles, type ThemeColors } from '@/theme';
 import { fontWeight, iconSize, iconStroke, lineHeight, radius, spacing, typeScale } from '@/theme/tokens';
 
-// 一等公民两个 agent(DEFAULT_MODELS 两者都有);无"某 agent 不可用"信号时都展示。
+// 一等公民三个 agent(DEFAULT_MODELS 三者都有);无"某 agent 不可用"信号时都展示。
 const AGENT_OPTIONS: readonly { kind: NewSessionAgentKind; label: string }[] = [
   { kind: 'claude-code', label: 'Claude' },
   { kind: 'codex', label: 'Codex' },
+  { kind: 'cursor', label: 'Cursor' },
 ];
 const COMPOSER_INPUT_MULTILINE_CONTENT_THRESHOLD = 34;
 const COMPOSER_VOICE_CARET_GAP = 2;
@@ -752,7 +754,7 @@ export default function NewRemoteSessionScreen() {
     [draft.workspaceKind, draft.workingDir, t],
   );
   const WorkspaceIcon = draft.workspaceKind === 'dialogue' ? MessageCircle : Folder;
-  const agentLabel = draft.agentKind === 'codex' ? 'Codex' : 'Claude';
+  const agentLabel = mobileAgentShortLabel(draft.agentKind);
   const createValidation = useMemo(
     () => validateNewSessionDraft(draft, draftContent),
     [draft, draftContent],
@@ -2355,7 +2357,12 @@ export default function NewRemoteSessionScreen() {
       // agent 未鉴权(电脑端没配 key / 没登录)是新会话失败的高频原因,
       // 换成带引导的中文提示;其它错误维持原文。
       const raw = formatRemoteError(err);
-      setError(describeAgentAuthError(raw) ?? raw);
+      setError(
+        describeAgentAuthError(raw)
+          ?? describeCursorHostError(raw, draft.agentKind)
+          ?? describeRemoteError(raw)
+          ?? raw,
+      );
     } finally {
       if (!handedOff) {
         creatingRef.current = false;
@@ -2567,7 +2574,7 @@ export default function NewRemoteSessionScreen() {
                   style={({ pressed }) => [styles.selectorRow, pressed && styles.pressed]}
                   testID="newSession.agentSelector"
                 >
-                  <MobileVendorIcon vendor={draft.agentKind === 'codex' ? 'codex' : 'cc'} size={iconSize.lg} />
+                  <MobileVendorIcon vendor={toDbAgentKind(draft.agentKind)} size={iconSize.lg} />
                   <Text style={styles.selectorText} numberOfLines={1}>{agentLabel}</Text>
                   <ChevronsUpDown color={colors.borderStrong} size={iconSize.sm} strokeWidth={iconStroke.regular} />
                 </Pressable>
@@ -2587,7 +2594,7 @@ export default function NewRemoteSessionScreen() {
                           testID="newSession.agentOption"
                         >
                           <MobileVendorIcon
-                            vendor={option.kind === 'codex' ? 'codex' : 'cc'}
+                            vendor={toDbAgentKind(option.kind)}
                             size={iconSize.action}
                           />
                           <Text style={styles.agentOptionText} numberOfLines={1}>{option.label}</Text>

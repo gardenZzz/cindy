@@ -6,9 +6,10 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { ErrorBanner } from '../ErrorBanner';
 import { useCodexAuth } from '@/hooks/useCodexAuth';
 import { useCodexSessionExpiredPrompt } from '@/hooks/useCodexSessionExpiredPrompt';
+import type { AgentKind } from '@cindy/maker-core';
 
 type AuthStateChangedPayload = {
-  agentKind: 'claude-code' | 'codex';
+  agentKind: AgentKind;
   authenticated: boolean;
   identity?: string;
   expiresAt?: number;

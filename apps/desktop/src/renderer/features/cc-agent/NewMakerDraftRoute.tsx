@@ -67,6 +67,7 @@ import {
   useNewMakerDraft,
   switchVendor,
   getDraft,
+  getCurrentVendorPrefs,
   patchDraft,
   patchCollab,
   patchCurrentVendorPrefs,
@@ -172,6 +173,7 @@ import {
 import { resolveNewMakerDraftEffort } from './newMakerDraftModelPrefs';
 import { closeAllTabs as closeRightSidebarTabs } from '@/features/right-sidebar/store';
 import { revealOrcaWorkersTab } from '@/features/right-sidebar/plugins/orca-workers/actions';
+import type { AgentKind } from '@cindy/maker-core';
 
 const log = createLogger('NewMakerDraftRoute');
 const IS_MAC_PLATFORM = typeof window !== 'undefined' && window.electronAPI?.platform === 'darwin';
@@ -218,7 +220,7 @@ function draftEnableOrcaOptions(
   providers: ProviderView[],
   providersReady: boolean,
 ) {
-  const workerAgent: 'claude-code' | 'codex' = collab.worker === 'codex' ? 'codex' : 'claude-code';
+  const workerAgent: AgentKind = collab.worker === 'codex' ? 'codex' : 'claude-code';
   const cfg = collab.workerConfig;
   if (!cfg) return { workerAgent };
   // 草稿里持久化的来源在发送时按 live 目录重新收窄(已连接 + 提供该模型 + 未被可见性
@@ -377,6 +379,28 @@ export function NewMakerDraftRoute() {
   const { createSession } = useCCSessions();
   const vendorAuthGate = useVendorAuthGate();
   const refreshWorktrees = useRefreshWorktrees();
+  // T2: 仅本机已装 cursor-agent 时翻开 New Maker 的 Cursor 段。
+  const [includeCursor, setIncludeCursor] = useState(false);
+  useEffect(() => {
+    let cancelled = false;
+    void window.electronAPI.maker.agent
+      .getCursorBinaryStatus()
+      .then((status) => {
+        if (!cancelled) setIncludeCursor(status.installed);
+      })
+      .catch(() => {
+        if (!cancelled) setIncludeCursor(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+  // 探测结果回来前若草稿停在 cursor，先回落到 cc，避免未注册 agent 建会话。
+  useEffect(() => {
+    if (!includeCursor && draft.vendor === 'cursor') {
+      switchVendor('cc', getCurrentVendorPrefs());
+    }
+  }, [includeCursor, draft.vendor]);
 
   // 「添加远程项目」入口:gate = 至少一台 ready SSH 主机 或 一台可控 device-link 设备。
   // 入口渲染在 mode pill 的 FolderPickerPopover 里(Globe 项),点开下面这个弹窗。
@@ -402,9 +426,15 @@ export function NewMakerDraftRoute() {
   // 当前 vendor 对应的 prefs(切 vendor 后这里自动重算 → 透传到 ChatInput initial*)
   const currentPrefs = draft.lastByVendor[draft.vendor];
   const chatPrefs = currentPrefs;
-  const persistedAgentKind: 'cc' | 'codex' = draft.vendor === 'codex' ? 'codex' : 'cc';
-  const authVendor: 'cc' | 'codex' = persistedAgentKind;
-  const capabilityAgentKind = persistedAgentKind === 'codex' ? 'codex' : 'claude-code';
+  const persistedAgentKind: 'cc' | 'codex' | 'cursor' =
+    draft.vendor === 'codex' ? 'codex' : draft.vendor === 'cursor' ? 'cursor' : 'cc';
+  const authVendor: 'cc' | 'codex' | 'cursor' = persistedAgentKind;
+  const capabilityAgentKind =
+    persistedAgentKind === 'codex'
+      ? 'codex'
+      : persistedAgentKind === 'cursor'
+        ? 'cursor'
+        : 'claude-code';
 
   // 品牌区跟随当前主题；icon / logo 的固定布局统一由 ThemeBrandLockup 负责。
   const [activeColorTheme, setActiveColorTheme] = useState<ColorTheme | null>(() =>
@@ -993,6 +1023,10 @@ export function NewMakerDraftRoute() {
   const handleRemoteProjectAdded = useCallback(
     async (target: RemoteProjectTarget) => {
       // vendor 由外层 VendorSegmentedSwitcher (draft.vendor) 单一决策 —— dialog 不再让用户选。
+      // Cursor 一期不做 remote-ssh / device-link（ADR）。
+      if (draft.vendor === 'cursor') {
+        throw new Error('Cursor does not support remote projects yet');
+      }
       const draftVendor: 'cc' | 'codex' = draft.vendor === 'codex' ? 'codex' : 'cc';
 
       if (target.kind === 'device-link') {
@@ -1117,7 +1151,7 @@ export function NewMakerDraftRoute() {
         }
         if (effectivePlanMode) patchCurrentVendorPrefs({ planMode: false });
         makerChatStore.setSessionRuntime(newSession.id, {
-          agentKind: draftVendor === 'codex' ? 'codex' : 'claude-code',
+          agentKind: capabilityAgentKind,
           fastMode: sshFastMode,
           planModeEnabled: effectivePlanMode,
         });
@@ -1449,6 +1483,10 @@ export function NewMakerDraftRoute() {
           // sessionId 建会话;sessionId 两步共用,被控端 close-session 时才能按
           // worktreeStore 绑定回收 worktree。
           if (isDeviceLinkDraft && effectiveDeviceLinkDeviceId && effectiveWorkingDir) {
+            // Cursor 一期不做 device-link（ADR）。
+            if (persistedAgentKind === 'cursor') {
+              throw new Error('Cursor does not support remote projects yet');
+            }
             const deviceId = effectiveDeviceLinkDeviceId;
             const deviceName = effectiveDeviceLinkDeviceName ?? deviceId;
             const wt = wtRef.current;
@@ -1514,8 +1552,9 @@ export function NewMakerDraftRoute() {
                 // workspaceKind 恒 'project'(归属一致)+ agentKind 归一,见 buildDeviceLinkCreateArgs。
                 // extraDirs 一并透传(与本地 create 对齐):被控端 bootstrapSession 按 set-extra-dirs
                 // 同款 validateExtraDirs 校验后只存通过的子集,控制端镜像随被控端真相回流。
+                // Cursor 一期不做 device-link（ADR）;上文 UI 已拒,此处再收窄类型。
                 buildDeviceLinkCreateArgs({
-                  agentKind: persistedAgentKind,
+                  agentKind: persistedAgentKind === 'codex' ? 'codex' : 'cc',
                   // 远程 worktree:workingDir 换成刚建好的 worktree 路径(真实存在,被控端
                   // remote-workdir-guard 按"存在的目录"放行);id 与 worktree 绑定同值。
                   // 非 worktree 流程两者保持原值 / 缺省。
@@ -1575,7 +1614,7 @@ export function NewMakerDraftRoute() {
             if (wd && !isRemoteProjectDraft) {
               const r = await crossAgentConvertService.detect(
                 wd,
-                persistedAgentKind === 'codex' ? 'codex' : 'claude-code',
+                capabilityAgentKind,
               );
               if (r.items.length > 0) {
                 // 阻塞等弹窗关闭（用户点不要 / 完成转换 / 失败）—— 都视为流程结束
@@ -1645,7 +1684,7 @@ export function NewMakerDraftRoute() {
               log.warn('[draft worktree send] touchUserSend failed', err);
             });
             makerChatStore.setSessionRuntime(newSession.id, {
-              agentKind: persistedAgentKind === 'codex' ? 'codex' : 'claude-code',
+              agentKind: capabilityAgentKind,
               fastMode: effectiveFastMode,
               planModeEnabled: effectivePlanMode,
             });
@@ -1827,7 +1866,7 @@ export function NewMakerDraftRoute() {
           // seed store,否则勾了计划模式的首条消息可能以 planMode:false 发出
           // (worktree 路径同款 seed;bot review P2)。
           makerChatStore.setSessionRuntime(newSession.id, {
-            agentKind: persistedAgentKind === 'codex' ? 'codex' : 'claude-code',
+            agentKind: capabilityAgentKind,
             fastMode: effectiveFastMode,
             planModeEnabled: effectivePlanMode,
           });
@@ -1989,6 +2028,10 @@ export function NewMakerDraftRoute() {
         if (!effectiveDeviceLinkDeviceId || !effectiveWorkingDir) {
           throw new Error(t('ccAgent.draft.createSessionFailed'));
         }
+        // Cursor 一期不做 device-link（ADR）。
+        if (persistedAgentKind === 'cursor') {
+          throw new Error('Cursor does not support remote projects yet');
+        }
         const deviceId = effectiveDeviceLinkDeviceId;
         const deviceName = effectiveDeviceLinkDeviceName ?? deviceId;
         const createResult = await window.electronAPI.deviceLink.invoke(
@@ -1996,7 +2039,7 @@ export function NewMakerDraftRoute() {
           'maker:create-session',
           [
             buildDeviceLinkCreateArgs({
-              agentKind: persistedAgentKind,
+              agentKind: persistedAgentKind === 'codex' ? 'codex' : 'cc',
               workingDir: effectiveWorkingDir,
               model: draftInitialModel,
               effort: draftInitialEffort,
@@ -2034,7 +2077,7 @@ export function NewMakerDraftRoute() {
         // autoNameSession 对位:先立即用目标文案截断占位(Codex 式,侧边栏不停留在
         // 'New Maker'),再经隧道生成智能标题窄口径覆盖。fire-and-forget;
         // 覆盖前 re-read,仅在标题仍是占位/默认时落盘(用户手动改名 wins)。
-        const titleAgentKind = persistedAgentKind === 'codex' ? 'codex' : 'claude-code';
+        const titleAgentKind = capabilityAgentKind;
         // 先折叠空白并 trim 再截断,避免前导空白吃满 40 字符得到空占位(PR #296 review)。
         const placeholderTitle = objective.replace(/\s+/g, ' ').trim().slice(0, 40).trimEnd();
         void (async () => {
@@ -2447,7 +2490,13 @@ export function NewMakerDraftRoute() {
                     onEffortDidChange={handleEffortDidChange}
                     onPermissionModeDidChange={handlePermissionModeDidChange}
                     onProviderDidChange={handleProviderDidChange}
-                    vendorKey={draft.vendor === 'codex' ? 'codex' : 'cc'}
+                    vendorKey={
+                      draft.vendor === 'codex'
+                        ? 'codex'
+                        : draft.vendor === 'cursor'
+                          ? 'cursor'
+                          : 'cc'
+                    }
                     folderPickerOpen={folderPickerOpen}
                     onFolderPickerOpenChange={handleFolderPickerOpenChange}
                     showFolderPicker={false}
@@ -2455,11 +2504,12 @@ export function NewMakerDraftRoute() {
                       <VendorSegmentedSwitcher
                         value={draft.vendor}
                         onChange={handleVendorChange}
-                        width={150}
+                        width={includeCursor ? 210 : 150}
                         dense
                         visualVariant="create-agent"
                         className="shrink-0"
                         disabled={wtCreating}
+                        includeCursor={includeCursor}
                       />
                     }
                     // 协同 toggle(与对话界面同一控件):仅本地项目 draft 可用 —— 对话模式(无
@@ -2505,12 +2555,13 @@ export function NewMakerDraftRoute() {
                       <VendorSegmentedSwitcher
                         value={draft.vendor}
                         onChange={handleVendorChange}
-                        width={72}
+                        width={includeCursor ? 96 : 72}
                         dense
                         iconOnly
                         visualVariant="create-agent"
                         className="shrink-0"
                         disabled={wtCreating}
+                        includeCursor={includeCursor}
                       />
                     }
                     narrowToolbar={isDraftToolbarNarrow}
