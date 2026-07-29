@@ -5807,7 +5807,7 @@
         "activityDesc": "최근 활성순",
         "activityAsc": "오래된 활성순"
       },
-      "filterAria": "검색 필터(상태: {{status}}, 에이전트: {{agent}}, 최근 활성: {{lastActivity}}, 프로젝트: {{projects}})",
+      "filterAria": "검색 필터 및 정렬(정렬: {{sort}}, 상태: {{status}}, 에이전트: {{agent}}, 최근 활성: {{lastActivity}}, 프로젝트: {{projects}})",
       "filter": {
         "label": "필터",
         "active": "필터 {{count}}개",

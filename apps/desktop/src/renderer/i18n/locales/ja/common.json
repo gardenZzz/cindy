@@ -5807,7 +5807,7 @@
         "activityDesc": "最近アクティブ",
         "activityAsc": "古いアクティブ順"
       },
-      "filterAria": "検索フィルター（状態：{{status}}、エージェント：{{agent}}、最近のアクティビティ：{{lastActivity}}、プロジェクト：{{projects}}）",
+      "filterAria": "検索フィルターと並び順（並び順：{{sort}}、状態：{{status}}、エージェント：{{agent}}、最近のアクティビティ：{{lastActivity}}、プロジェクト：{{projects}}）",
       "filter": {
         "label": "フィルター",
         "active": "フィルター {{count}} 件",

@@ -5807,7 +5807,7 @@
         "activityDesc": "最近活跃",
         "activityAsc": "最早活跃"
       },
-      "filterAria": "搜索筛选（状态：{{status}}，Agent：{{agent}}，最近活跃：{{lastActivity}}，项目：{{projects}}）",
+      "filterAria": "搜索筛选与排序（排序：{{sort}}，状态：{{status}}，Agent：{{agent}}，最近活跃：{{lastActivity}}，项目：{{projects}}）",
       "filter": {
         "label": "筛选",
         "active": "筛选 {{count}}",

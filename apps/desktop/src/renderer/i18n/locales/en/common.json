@@ -5817,7 +5817,7 @@
         "activityDesc": "Recently active",
         "activityAsc": "Oldest active"
       },
-      "filterAria": "Search filters (Status: {{status}}, Agent: {{agent}}, Last activity: {{lastActivity}}, Projects: {{projects}})",
+      "filterAria": "Search filters and sort (Sort: {{sort}}, Status: {{status}}, Agent: {{agent}}, Last activity: {{lastActivity}}, Projects: {{projects}})",
       "filter": {
         "label": "Filters",
         "active": "{{count}} filters",
