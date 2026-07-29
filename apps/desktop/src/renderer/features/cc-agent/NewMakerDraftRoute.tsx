@@ -2689,6 +2689,9 @@ export function NewMakerDraftRoute() {
           }}
           title={t('orca.createWorker.enableCollabTitle')}
           submitLabel={t('orca.createWorker.enableCollabSubmit')}
+          // SSH 远程草稿(draft.remoteHostId):worker 在远端 spawn,模型清单按 SSH
+          // 口径过滤,与本路由 ChatInput 候选及 main 侧 remote-worker guard 同口径。
+          sshRemote={!!effectiveRemoteHostId}
         />
 
         {/* 添加远程项目弹窗 (入口在 mode pill 的 FolderPickerPopover 里, gate 走 hasAnyRemoteTarget =

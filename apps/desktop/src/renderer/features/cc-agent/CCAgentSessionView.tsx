@@ -3533,6 +3533,10 @@ export function CCAgentSessionView({
         title={t('orca.createWorker.enableCollabTitle')}
         submitLabel={t('orca.createWorker.enableCollabSubmit')}
         deviceId={remoteDeviceId}
+        // SSH 远程 Lead:worker 在远端 spawn,模型清单按 SSH 口径过滤(订阅直连 /
+        // openai-chat 桥接 Codex 只挂在本地 proxy),与 main 侧 remote-worker
+        // guard 同规则(codex review R28)。
+        sshRemote={!!session?.remoteHostId}
       />
 
       {/* 来自 Automations 的入口浮动返回按钮：固定在聊天区左上角，
