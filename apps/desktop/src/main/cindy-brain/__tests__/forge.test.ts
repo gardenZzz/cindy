@@ -533,6 +533,13 @@ describe('FORGE_GUIDE', () => {
       '发布到官方插件仓的额外门禁',
       'makecindy/cindy-official-plugins',
       '四语言 locale 缺一不可',
+      // 2026-07-29 寄存通道(#784):§2 的 media 类目 + §4.0.1 章节,
+      // 以及 §6 沙箱红线里"改图只认名下媒体"的口径更新。
+      "kind: 'deposit_media'",
+      "kind: 'release_media'",
+      '"cindy": { "media": ["deposit"] }',
+      '每意识配额 512MB',
+      '寄存物不是产物',
     ]) {
       expect(FORGE_GUIDE).toContain(marker);
     }

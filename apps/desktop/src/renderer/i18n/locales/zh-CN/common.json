@@ -2650,6 +2650,8 @@
         "cindyImageEdit": "图像编辑(请 Cindy 代办，仅限它自己生成的图)",
         "cindyVideoGenerate": "视频生成(请 Cindy 代办)",
         "cindyVideoEdit": "图生视频(请 Cindy 代办，参考图仅限它名下的图)",
+        "cindyMediaDeposit": "可将它手中的图片、视频或音频存入你的媒体库",
+        "cindyMediaDepositDetail": "用于让你在插件里粘贴或拖入的素材也能被 AI 加工。存入的内容记在这个插件名下，最多占用 {{quota}} MB，卸载插件时一并清理。",
         "agentUserAction": "用户点击插件卡片后，可让 Agent 开始新一轮工作",
         "agentUserActionDetail": "每次点击只允许启动一次，并且只能使用这张卡所属的对话。",
         "agentBackground": "可在后台自动让 Agent 开始新一轮工作",
