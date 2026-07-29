@@ -71,6 +71,7 @@ export interface EnsureRemoteCodexMcpResult {
   ok: boolean;
   /** 失败原因 (bridge-unavailable / token-unavailable / forward-failed / ...)。 */
   reason?: string;
+  daemonRebootstrapped?: boolean;
 }
 
 // ── per-host 固定 remotePort 与已生效指纹持久化 ─────────────────────────────
@@ -577,7 +578,7 @@ export function stripRemoteCodexMcpConfig(
   host: RemoteHost,
   deps?: { hasLiveTurnOnHost?: (hostId: string) => boolean },
 ): Promise<void> {
-  return withHostSerial(host.id, () => doStripRemoteCodexMcpConfig(host, deps));
+  return withHostSerial(host.id, () => doStripRemoteCodexMcpConfig(host, deps)).then(() => undefined);
 }
 
 /**
@@ -588,10 +589,10 @@ export function stripRemoteCodexMcpConfig(
 async function doStripRemoteCodexMcpConfig(
   host: RemoteHost,
   deps?: { hasLiveTurnOnHost?: (hostId: string) => boolean },
-): Promise<void> {
+): Promise<{ daemonRebootstrapped: boolean }> {
   {
     try {
-      if (deps?.hasLiveTurnOnHost?.(host.id)) return;
+      if (deps?.hasLiveTurnOnHost?.(host.id)) return { daemonRebootstrapped: false };
       const existing = await readRemoteConfig(host);
       const { next, changed } = mergeManagedMcpBlock(existing, '', { serverNames: [] });
       if (changed) {
@@ -607,15 +608,19 @@ async function doStripRemoteCodexMcpConfig(
         log.info('remote codex daemon rebootstrapped with empty MCP env on bridge shutdown', {
           host: host.id,
         });
+        clearHostAppliedFingerprint(host.id);
+        await releaseRemoteMcpForwardIfAny(host);
+        return { daemonRebootstrapped: true };
       }
       if (changed || applied) clearHostAppliedFingerprint(host.id);
-      // 清理生效后拆 MCP forward (R21 P2 语义:live turn 已在上面整体跳过)。
       await releaseRemoteMcpForwardIfAny(host);
+      return { daemonRebootstrapped: false };
     } catch (err) {
       log.warn('strip remote codex MCP config on bridge shutdown failed', {
         host: host.id,
         error: err instanceof Error ? err.message : String(err),
       });
+      return { daemonRebootstrapped: false };
     }
   }
 }
@@ -706,6 +711,7 @@ async function doEnsureRemoteCodexMcpBridge(
   },
 ): Promise<EnsureRemoteCodexMcpResult> {
   try {
+    let daemonRebootstrapped = false;
     const bridge = await deps.ensureBridgeStarted();
     if (!bridge) {
       // bridge 起不来时清理场景 (collab 全局禁用 / token 失效 / 曾注入过)
@@ -724,8 +730,8 @@ async function doEnsureRemoteCodexMcpBridge(
           hasToken: Boolean(token),
         });
         // 已在 per-host 串行锁内 (ensure 持锁), 直调无锁核心 (R27 P2 自死锁修正)。
-        await doStripRemoteCodexMcpConfig(host, { hasLiveTurnOnHost: deps.hasLiveTurnOnHost });
-        return { ok: true };
+        const stripResult = await doStripRemoteCodexMcpConfig(host, { hasLiveTurnOnHost: deps.hasLiveTurnOnHost });
+        return { ok: true, daemonRebootstrapped: stripResult.daemonRebootstrapped };
       }
       log.warn('remote MCP injection skipped: http bridge unavailable', { host: host.id });
       return { ok: false, reason: 'bridge-unavailable' };
@@ -840,10 +846,11 @@ async function doEnsureRemoteCodexMcpBridge(
       log.warn('remote MCP daemon bootstrap deferred: live turn in progress on host', {
         host: host.id,
       });
-      return { ok: true };
+      return { ok: true, daemonRebootstrapped: false };
     }
     if (!daemonRunning || needApply) {
       await bootstrapDaemon(host, effectiveToken);
+      daemonRebootstrapped = true;
       // 防御:bootstrap 若覆盖了 config.toml (managed_install 行为未文档化),
       // 管理段丢失时补写一次并再次 bootstrap。最多两轮,避免无限循环。
       // 仅注入路径 (serverNames 非空):清理路径本来就要管理段不存在,
@@ -853,6 +860,7 @@ async function doEnsureRemoteCodexMcpBridge(
         log.warn('managed mcp block lost after bootstrap — rewriting once', { host: host.id });
         await writeRemoteConfig(host, next);
         await bootstrapDaemon(host, effectiveToken);
+        daemonRebootstrapped = true;
       }
       // bootstrap 确认完成才落已生效指纹;失败/中断不落 → 下次 ensure
       // driftUnapplied 仍成立, 强制重试 (跨 app 重启同样成立)。
@@ -869,7 +877,7 @@ async function doEnsureRemoteCodexMcpBridge(
         configChanged: changed,
       });
     }
-    return { ok: true };
+    return { ok: true, daemonRebootstrapped };
   } catch (err) {
     log.error('ensureRemoteCodexMcpBridge failed', {
       host: host.id,

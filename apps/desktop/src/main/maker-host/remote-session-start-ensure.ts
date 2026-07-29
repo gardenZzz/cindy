@@ -13,10 +13,14 @@
 
 import type { AgentKind } from '@cindy/maker-core';
 
+export interface RemoteSessionStartEnsureResult {
+  remoteCodexDaemonRebootstrapped?: true;
+}
+
 export type RemoteSessionStartEnsure = (params: {
   session?: { agentKind: AgentKind; remoteHostId: string | null } | null;
   createOpts?: unknown;
-}) => Promise<void>;
+}) => Promise<void | RemoteSessionStartEnsureResult>;
 
 let impl: RemoteSessionStartEnsure | null = null;
 

@@ -7,7 +7,7 @@ import { describe, expect, it, vi, beforeEach } from 'vitest';
 import type { RemoteHost } from '@cindy/maker-remote-ssh';
 
 vi.mock('../../remote-ssh/codex-remote-mcp.js', () => ({
-  ensureRemoteCodexMcpBridge: vi.fn(async () => ({ ok: true })),
+  ensureRemoteCodexMcpBridge: vi.fn(async () => ({ ok: true, daemonRebootstrapped: true })),
 }));
 
 import {
@@ -42,7 +42,7 @@ function makeDeps(overrides?: Partial<Parameters<typeof refreshRemoteCodexMcpAft
 describe('refreshRemoteCodexMcpAfterBridgeRecreate', () => {
   beforeEach(() => {
     ensureMock.mockClear();
-    ensureMock.mockResolvedValue({ ok: true });
+    ensureMock.mockResolvedValue({ ok: true, daemonRebootstrapped: true });
   });
 
   it('ensures every active remote codex host with the shared live-turn checker', () => {
@@ -93,6 +93,17 @@ describe('refreshRemoteCodexMcpAfterBridgeRecreate', () => {
     refreshRemoteCodexMcpAfterBridgeRecreate(deps);
     await vi.waitFor(() => {
       expect(ensureMock).toHaveBeenCalledTimes(2);
+    });
+    expect(detachMock).not.toHaveBeenCalled();
+  });
+
+  it('does not detach when ensure succeeds without rebootstrap (transport is still valid)', async () => {
+    ensureMock.mockResolvedValue({ ok: true, daemonRebootstrapped: false });
+    const { deps } = makeDeps({ listRemoteCodexHostIds: () => ['host-a'] });
+    const detachMock = deps.detachRemoteCodexSessionsOnHost as ReturnType<typeof vi.fn>;
+    refreshRemoteCodexMcpAfterBridgeRecreate(deps);
+    await vi.waitFor(() => {
+      expect(ensureMock).toHaveBeenCalledTimes(1);
     });
     expect(detachMock).not.toHaveBeenCalled();
   });
