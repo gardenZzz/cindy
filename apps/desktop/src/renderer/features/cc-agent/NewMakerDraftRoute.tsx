@@ -108,6 +108,7 @@ import { getCollaborationStartErrorMessage } from './collaborationErrors';
 import { useCollabProjectPolicy } from './hooks/useCollabProjectPolicy';
 import { CrossAgentConvertDialog } from '@/components/ui/cross-agent-convert-dialog';
 import type { MakerVendor, Session } from '@/lib/ccAgent.types';
+import { agentKindToDraftPushSlot } from '../../../shared/agentKindDraftVendor';
 import { remoteProjectsStore } from '@/features/device-link/remoteProjectsStore';
 import {
   ChevronDown,
@@ -829,7 +830,7 @@ export function NewMakerDraftRoute() {
   // (驱动镜像 effect + 选中行还原)。控制端是纯显示,这里只更新显示态、不回写被控端。
   useEffect(() => {
     if (!isDeviceLinkDraft || !effectiveDeviceLinkDeviceId) return;
-    const vendorSlot = capabilityAgentKind === 'codex' ? 'codex' : 'claudeCode';
+    const vendorSlot = agentKindToDraftPushSlot(capabilityAgentKind);
     return window.electronAPI.deviceLink.onRemotePush((push) => {
       if (push.deviceId !== effectiveDeviceLinkDeviceId) return;
       if (push.channel !== 'maker:new-maker-draft:changed') return;

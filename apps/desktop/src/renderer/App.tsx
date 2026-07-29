@@ -46,6 +46,7 @@ import {
   patchVendorPrefs,
   patchVendorPrefsPreservingModelChoice,
 } from '@/state/newMakerDraft';
+import { agentKindToDraftVendor } from '../shared/agentKindDraftVendor';
 import {
   snapshotForSeed,
   setProviderModelChoice,
@@ -137,7 +138,7 @@ export function App() {
       });
       // main 缓存两用途:① collab worker spawn 读 model/effort/fastMode;② device-link 远程
       // 草稿镜像读全量(model/effort/fast/permission/source)。故 lastByVendor 每项带上
-      // permissionMode + providerId(worker spawn 不消费这两项,远程草稿镜像才用)。仅 cc/codex,
+      // permissionMode + providerId(worker spawn 不消费这两项,远程草稿镜像才用)。含 cc/codex/cursor,
       // 不带 orca。fire-and-forget。
       window.electronAPI.syncNewMakerDraft({
         lastByVendor: {
@@ -152,6 +153,12 @@ export function App() {
             effort: draft.lastByVendor.codex.effort,
             permissionMode: draft.lastByVendor.codex.permissionMode,
             providerId: draft.lastByVendor.codex.providerId ?? null,
+          },
+          cursor: {
+            model: draft.lastByVendor.cursor.model,
+            effort: draft.lastByVendor.cursor.effort,
+            permissionMode: draft.lastByVendor.cursor.permissionMode,
+            providerId: draft.lastByVendor.cursor.providerId ?? null,
           },
         },
         fastModeByModel: draft.fastModeByModel,
@@ -178,7 +185,7 @@ export function App() {
   useEffect(() => {
     const offDraft = window.electronAPI.onMakerDraftPrefApply(
       ({ agent, providerId, modelId, active, effort, fast, markModelChoice }) => {
-        const vendor = agent === 'claude-code' ? 'cc' : 'codex';
+        const vendor = agentKindToDraftVendor(agent);
         if (active) {
           const patch = markModelChoice === false ? patchVendorPrefsPreservingModelChoice : patchVendorPrefs;
           const shouldPatchActiveModel = markModelChoice !== false || effort !== undefined;

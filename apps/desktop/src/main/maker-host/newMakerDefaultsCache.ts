@@ -1,4 +1,9 @@
 import type { AgentKind } from '@cindy/maker-core';
+import {
+  agentKindToDraftVendor,
+  type DraftPushSlot,
+  type DraftVendorKey,
+} from '../../shared/agentKindDraftVendor.js';
 /**
  * newMakerDefaultsCache —— renderer "New Maker" 面板用户当前选择的 main 端缓存。
  *
@@ -9,10 +14,11 @@ import type { AgentKind } from '@cindy/maker-core';
  * 不再用 hardcode 默认值,优先读这份缓存 —— worker 实际启动参数 = "用户在 New Maker
  * 面板里该 vendor 当前的选择";旧 renderer 未推 providerId 时,创建服务才回退 Lead 来源。
  *
- * Vendor 名称差异: renderer 用 'cc' / 'codex' / 'orca'; worker spawn 路径用
- * 'claude-code' / 'codex'。getWorkerDefaultsFromNewMaker 内部做映射。
+ * Vendor 名称差异: renderer 用 'cc' / 'codex' / 'cursor' / 'orca'; worker spawn 路径用
+ * 'claude-code' / 'codex' / 'cursor'。getWorkerDefaultsFromNewMaker 经
+ * agentKindToDraftVendor 做唯一映射（禁止再写二元 cc/codex 兜底）。
  */
-type VendorKey = 'cc' | 'codex';
+type VendorKey = DraftVendorKey;
 
 interface VendorPrefsSnapshot {
   model?: string;
@@ -71,7 +77,7 @@ export function getWorkerDefaultsFromNewMaker(
   workerAgent: AgentKind,
 ): WorkerDefaultsFromNewMaker {
   if (!cache) return {};
-  const vendor: VendorKey = workerAgent === 'claude-code' ? 'cc' : 'codex';
+  const vendor = agentKindToDraftVendor(workerAgent);
   const prefs = cache.lastByVendor[vendor];
   if (!prefs?.model) return {};
   const model = prefs.model;
@@ -123,7 +129,7 @@ export function getRemoteNewMakerDefaults(
   // 否则 req1「完整镜像被控端草稿模型列表」在这条边界上回落 capabilities 默认。故在所有早返回里都带上它。
   const providerModelMemory = providerMemoryCache ?? undefined;
   if (!cache) return providerModelMemory ? { providerModelMemory } : {};
-  const vendor: VendorKey = agentKind === 'claude-code' ? 'cc' : 'codex';
+  const vendor = agentKindToDraftVendor(agentKind);
   const prefs = cache.lastByVendor[vendor];
   if (!prefs?.model) return providerModelMemory ? { providerModelMemory } : {};
   const model = prefs.model;
@@ -136,5 +142,20 @@ export function getRemoteNewMakerDefaults(
     effortByModel: cache.effortByModel,
     fastModeByModel: cache.fastModeByModel,
     providerModelMemory,
+  };
+}
+
+/**
+ * device-link NEW_MAKER_DRAFT_CHANGED 的全量 per-agent 镜像。三槽齐全
+ * （含 cursor）；旧控制端忽略未知键即可。
+ */
+export function buildNewMakerDraftChangedPayload(): Record<
+  DraftPushSlot,
+  RemoteNewMakerDefaults
+> {
+  return {
+    claudeCode: getRemoteNewMakerDefaults('claude-code'),
+    codex: getRemoteNewMakerDefaults('codex'),
+    cursor: getRemoteNewMakerDefaults('cursor'),
   };
 }

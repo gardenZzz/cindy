@@ -701,8 +701,9 @@ export function CCAgentSessionView({
     const deviceId = remoteDeviceId;
     const scopeKey = remoteModelMemoryScopeKey;
     const agent = toMakerAgentKind(session?.agentKind);
-    // NEW_MAKER_DRAFT_CHANGED 目前只 fan-out claudeCode / codex 槽;cursor 尚无对应
-    // 槽位(T4 模型目录前)→ 不读 claudeCode 冒充,保持空镜像降级。
+    // NEW_MAKER_DRAFT_CHANGED 现在已 fan-out cursor 槽(见 buildNewMakerDraftChangedPayload),
+    // 但远程 Cursor **会话内**的模型记忆镜像尚未接线,故仍保持空镜像降级 —— 关键是不读
+    // claudeCode 冒充。接线属独立范围,不在本 PR。
     const vendorSlot = agent === 'codex' ? 'codex' : agent === 'claude-code' ? 'claudeCode' : null;
     let cancelled = false;
 
