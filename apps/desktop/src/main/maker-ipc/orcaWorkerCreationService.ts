@@ -653,19 +653,18 @@ export function createOrcaWorkerCreationService(deps: OrcaWorkerCreationDeps): O
             'subscription-direct models require the local proxy path — pick an SSH-compatible model',
         };
       }
-      // 默认路由 (resolved.providerId=null) 同样要闸:budgetRouteProviderId
-      // 已按显式来源 → 模型默认路由 → 缓存兜底顺序解析出实际落点
-      // (codex-connector R23 P2), 不能只查显式选择。
-      const remoteRouteProviderId = resolved.providerId ?? budgetRouteProviderId;
-      const remoteRouteProvider = remoteRouteProviderId !== null
-        ? agentProviders.find((candidate) => candidate.id === remoteRouteProviderId)
-        : undefined;
-      if (remoteRouteProvider?.chatBridgedCodex === true) {
+      // 默认路由 (resolved.providerId=null) 同样要闸 — 且必须按
+      // routeProviderId/routeProvider (上方 583 行) 判定:它已经
+      // 「显式来源 → resolved → resolveDefaultProviderIdForModel」解析出
+      // 实际落点;budgetRouteProviderId 在 worker 未显式传 model 时仍为
+      // null, 只查它会让默认路由的 chat-bridged 漏过 (codex-connector
+      // R24 P2)。
+      if (routeProvider?.chatBridgedCodex === true) {
         return {
           ok: false,
           errorCode: 'INVALID_PARAMS',
           message:
-            `provider "${remoteRouteProvider.id}" is not available for SSH remote workers: ` +
+            `provider "${routeProvider.id}" is not available for SSH remote workers: ` +
             'chat-bridged Codex providers require the local proxy path — pick an SSH-compatible provider',
         };
       }

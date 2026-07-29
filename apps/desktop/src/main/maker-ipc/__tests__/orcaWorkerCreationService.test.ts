@@ -1761,3 +1761,43 @@ describe('SSH remote worker model/provider compatibility gate (R23 P2)', () => {
       message: expect.stringContaining('not available for SSH remote workers'),
     });
   });
+
+  it('rejects chat-bridged providers resolved for an inherited (lead) model with no explicit worker model/provider (R24 P2)', async () => {
+    // R24 P2 回归:worker 不传 model/provider 时 resolved.providerId 与
+    // budgetRouteProviderId 均为 null — 兼容闸必须按 routeProviderId
+    // (resolveDefaultProviderIdForModel 解析的实际落点) 判定。
+    const { service } = createDeps({
+      getLeadSessionRow: vi.fn(async () => ({
+        id: 'lead-1',
+        agentKind: 'codex' as const,
+        workingDir: '/srv/repo',
+        model: 'deepseek-v4',
+        effort: 'medium',
+        permissionMode: 'default',
+        fastMode: false,
+        providerId: 'deepseek',
+        remoteHostId: 'remote-host-1',
+      })),
+      getAvailableModels: vi.fn(() => [
+        { id: 'deepseek-v4', efforts: ['low', 'medium', 'high', 'xhigh'], defaultEffort: 'high', supportsFastMode: true },
+      ]),
+      getProviderRoutingContext: vi.fn(async () => providerRoutingContext({
+        'claude-code': [],
+        codex: [{ id: 'deepseek', name: 'DeepSeek', models: ['deepseek-v4'], chatBridgedCodex: true }],
+      })),
+    });
+
+    await expect(
+      service.createWorker({
+        leadSessionId: 'lead-1',
+        role: 'reviewer',
+        agent: 'codex',
+        label: 'reviewer',
+        // 不传 model / providerId — 继承 lead 的 deepseek-v4 + 默认路由。
+      }),
+    ).resolves.toMatchObject({
+      ok: false,
+      errorCode: 'INVALID_PARAMS',
+      message: expect.stringContaining('not available for SSH remote workers'),
+    });
+  });

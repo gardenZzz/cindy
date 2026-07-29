@@ -346,8 +346,13 @@ function codexDaemonCmd(subArgs: string[], opts?: { envFromStdin?: boolean }): s
 }
 
 function readConfigCmd(): string {
+  // 只有「文件不存在」按空 config 处理;存在但读失败 (权限 / 瞬时 IO)
+  // 必须 exit 非 0 让 readRemoteConfig 抛错 — 否则空 stdout 被当成缺席,
+  // 后续 merge/write 会把用户已有 config (含 MCP/provider 配置与 secret)
+  // 整个替换成只剩受管段 (codex-connector R24 P2, 数据丢失类)。
   return `bash -c ${shellQuoteSh(
-    `${codexHomePrefix(DEFAULT_INSTALL_ROOT)}; cat "$CODEX_HOME/config.toml" 2>/dev/null || true`,
+    `${codexHomePrefix(DEFAULT_INSTALL_ROOT)}; ` +
+      `if [ -f "$CODEX_HOME/config.toml" ]; then cat "$CODEX_HOME/config.toml"; fi`,
   )}`;
 }
 
