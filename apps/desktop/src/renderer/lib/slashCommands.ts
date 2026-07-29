@@ -85,13 +85,13 @@ export function filterSlashCommands(
  * 拉三路 IPC, 合并成 UnifiedCommand[]。
  *
  * - 任何一路失败按空列表处理(已在 main 端做 try/catch + 返回 success:false), 不阻塞 palette。
- * - workingDir=undefined 表示本地无项目:Claude 仍扫描全局 skills。
- * - workingDir=null 表示显式禁用扫描(SSH remote):避免读取控制端本机 skills。
+ * - workingDir 为空时 Claude 仍扫描全局 skills。
+ * - SSH remote 由 opts.skipAgentSkills 显式禁用扫描,避免读取控制端本机 skills。
  */
 export async function loadAllCommands(
   agentKind: AgentKind,
   workingDir: string | null | undefined,
-  opts?: { forceReload?: boolean },
+  opts?: { forceReload?: boolean; skipAgentSkills?: boolean },
   deviceId?: string,
 ): Promise<UnifiedCommand[]> {
   const api = window.electronAPI.maker;
@@ -109,7 +109,7 @@ export async function loadAllCommands(
       ? (window.electronAPI.deviceLink.invoke(deviceId, 'maker:list-agent-commands', [agentKind]) as Promise<CmdRes>)
       : api.listAgentCommands(agentKind)
   ).catch(() => ({ success: false }));
-  const shouldLoadSkills = workingDir !== null && (agentKind === 'claude-code' || Boolean(workingDir));
+  const shouldLoadSkills = !opts?.skipAgentSkills && (agentKind === 'claude-code' || Boolean(workingDir));
   const skillParams = {
     ...(workingDir ? { workingDir } : {}),
     ...(opts?.forceReload !== undefined ? { forceReload: opts.forceReload } : {}),
