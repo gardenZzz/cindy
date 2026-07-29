@@ -170,6 +170,9 @@ export class DesktopCursorAuthAdapter implements AuthAdapter {
         spawn(this.binaryPath, args, {
           env: options.env,
           stdio: ['ignore', 'pipe', 'pipe'],
+          // POSIX: 自成进程组，killProcessTree 的 kill(-pid) 才能连 CLI 后代一起收割。
+          // Windows 忽略 detached，树杀走 taskkill /T（见 proc-util）。
+          detached: process.platform !== 'win32',
         }));
     this.loginTimeoutMs = deps.loginTimeoutMs ?? LOGIN_TIMEOUT_MS;
     this.forceSettleMs = deps.forceSettleMs ?? LOGIN_FORCE_SETTLE_MS;
@@ -214,19 +217,39 @@ export class DesktopCursorAuthAdapter implements AuthAdapter {
 
     let stdoutBuf = '';
     let emittedUrl = false;
-    let settled = false;
+    /** 用户态 login Promise 是否已返回（timeout 可先于进程收口）。 */
+    let userResolved = false;
+    /** 进程 cleanup reservation（activeLogin）是否已释放。 */
+    let cleanupReleased = false;
+    let forceSettleTimer: ReturnType<typeof setTimeout> | null = null;
     let resolveExit!: () => void;
 
-    const settle = () => {
-      if (settled) return;
-      settled = true;
-      if (this.activeLogin?.child === child) this.activeLogin = null;
-      const waiters = this.loginWaiters.splice(0);
-      for (const w of waiters) w();
+    const resolveUser = () => {
+      if (userResolved) return;
+      userResolved = true;
       resolveExit();
     };
 
-    this.activeLogin = { child, settle };
+    /**
+     * 释放 cleanup reservation：清 activeLogin、唤醒 logout/新 login 等待者，
+     * 并顺带解开用户态 Promise（若尚未因 timeout 返回）。
+     * timeout 路径只调 resolveUser，必须等 close / kill onSettled→force settle 才到这里。
+     */
+    const releaseCleanup = () => {
+      if (cleanupReleased) return;
+      cleanupReleased = true;
+      if (forceSettleTimer) {
+        clearTimeout(forceSettleTimer);
+        this.forceSettleTimers.delete(forceSettleTimer);
+        forceSettleTimer = null;
+      }
+      if (this.activeLogin?.child === child) this.activeLogin = null;
+      const waiters = this.loginWaiters.splice(0);
+      for (const w of waiters) w();
+      resolveUser();
+    };
+
+    this.activeLogin = { child, settle: releaseCleanup };
 
     const exitPromise = new Promise<void>((resolve) => {
       resolveExit = resolve;
@@ -255,25 +278,25 @@ export class DesktopCursorAuthAdapter implements AuthAdapter {
       log.warn('cursor login process error', {
         error: err instanceof Error ? err.message : String(err),
       });
-      settle();
+      releaseCleanup();
     });
     child.once('close', (code) => {
       log.info('cursor login process exited', {
         code: code ?? -1,
         urlEmitted: emittedUrl,
       });
-      settle();
+      releaseCleanup();
     });
 
-    let forceSettleTimer: ReturnType<typeof setTimeout> | null = null;
     const armForceSettleAfterKill = () => {
-      if (forceSettleTimer || settled) return;
+      // 只能在 killProcessTree onSettled 里武装（见 proc-util），不能与 kill 并行起跑。
+      if (forceSettleTimer || cleanupReleased) return;
       forceSettleTimer = setTimeout(() => {
         this.forceSettleTimers.delete(forceSettleTimer!);
         forceSettleTimer = null;
-        if (!settled) {
+        if (!cleanupReleased) {
           log.warn('cursor login force-settled after kill without close');
-          settle();
+          releaseCleanup();
         }
       }, this.forceSettleMs);
       forceSettleTimer.unref?.();
@@ -283,19 +306,16 @@ export class DesktopCursorAuthAdapter implements AuthAdapter {
     const timeout = setTimeout(() => {
       log.warn('cursor login timed out; terminating child');
       this.terminateLoginChild(child, armForceSettleAfterKill);
-      // deadline 自行结算，不依赖 close
-      settle();
+      // deadline 只结算用户态 Promise；activeLogin 留到 close / force settle。
+      resolveUser();
     }, this.loginTimeoutMs);
 
     try {
       await exitPromise;
     } finally {
       clearTimeout(timeout);
-      if (forceSettleTimer) {
-        clearTimeout(forceSettleTimer);
-        this.forceSettleTimers.delete(forceSettleTimer);
-      }
-      settle();
+      // 不在此处 clear forceSettleTimer / releaseCleanup：
+      // timeout 后用户态已返回，但 kill 可能仍在收敛，reservation 须留到收口。
     }
 
     const state = await this.getState();
