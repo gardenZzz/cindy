@@ -74,6 +74,10 @@ export interface EnsureRemoteCodexMcpResult {
   daemonRebootstrapped?: boolean;
 }
 
+export interface StripRemoteCodexMcpConfigResult {
+  daemonRebootstrapped: boolean;
+}
+
 // ── per-host 固定 remotePort 与已生效指纹持久化 ─────────────────────────────
 
 type PortPrefs = Record<string, { remotePort: number; appliedFingerprint?: string; bridgeLocalPort?: number }>;
@@ -577,8 +581,8 @@ export function ensureRemoteMcpForward(
 export function stripRemoteCodexMcpConfig(
   host: RemoteHost,
   deps?: { hasLiveTurnOnHost?: (hostId: string) => boolean },
-): Promise<void> {
-  return withHostSerial(host.id, () => doStripRemoteCodexMcpConfig(host, deps)).then(() => undefined);
+): Promise<StripRemoteCodexMcpConfigResult> {
+  return withHostSerial(host.id, () => doStripRemoteCodexMcpConfig(host, deps));
 }
 
 /**
@@ -589,7 +593,7 @@ export function stripRemoteCodexMcpConfig(
 async function doStripRemoteCodexMcpConfig(
   host: RemoteHost,
   deps?: { hasLiveTurnOnHost?: (hostId: string) => boolean },
-): Promise<{ daemonRebootstrapped: boolean }> {
+): Promise<StripRemoteCodexMcpConfigResult> {
   {
     try {
       if (deps?.hasLiveTurnOnHost?.(host.id)) return { daemonRebootstrapped: false };

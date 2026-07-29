@@ -359,11 +359,20 @@ export function handleCodexEnvironmentShutdownForRemote(): void {
     if (host?.getStatus() !== 'ready') continue;
     void stripRemoteCodexMcpConfig(host, {
       hasLiveTurnOnHost: liveTurnChecker ?? undefined,
-    });
-    // strip 的 bootstrap (清 env 重启 daemon) 同样杀死旧 transport —
-    // live-turn 豁免内已在 strip 里跳过, 这里 detach 剩余活跃 session
-    // (codex-connector R26 P1 同源)。
-    detachActiveRemoteCodexSessions(hostId, 'bridge-shutdown-strip');
+    })
+      .then((result) => {
+        if (!result.daemonRebootstrapped) return;
+        // strip 的 bootstrap (清 env 重启 daemon) 同样杀死旧 transport —
+        // live-turn 豁免内已在 strip 里跳过, 这里 detach 剩余活跃 session
+        // (codex-connector R26 P1 同源)。
+        detachActiveRemoteCodexSessions(hostId, 'bridge-shutdown-strip');
+      })
+      .catch((err) => {
+        desktopMakerLogger.warn('remote codex MCP strip on bridge shutdown failed', {
+          hostId,
+          error: err instanceof Error ? err.message : String(err),
+        });
+      });
   }
 }
 

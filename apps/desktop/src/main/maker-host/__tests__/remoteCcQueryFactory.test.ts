@@ -104,6 +104,27 @@ describe('remoteCcQueryFactory cleanup wiring', () => {
   });
 });
 
+describe('codex bridge shutdown strip detach gating (Greptile R30 P1)', () => {
+  it('detaches idle remote codex sessions only after strip reboots the daemon', () => {
+    const fnStart = source.indexOf('export function handleCodexEnvironmentShutdownForRemote');
+    expect(fnStart).toBeGreaterThan(-1);
+    const fnEnd = source.indexOf('export async function ensureCodexMcpBridgeStartedForRemote', fnStart);
+    expect(fnEnd).toBeGreaterThan(fnStart);
+    const body = source.slice(fnStart, fnEnd);
+
+    const stripCall = body.indexOf('stripRemoteCodexMcpConfig(host,');
+    expect(stripCall).toBeGreaterThan(-1);
+    const thenBlock = body.indexOf('.then((result) => {', stripCall);
+    expect(thenBlock).toBeGreaterThan(stripCall);
+    const gate = body.indexOf('if (!result.daemonRebootstrapped) return;', thenBlock);
+    expect(gate).toBeGreaterThan(thenBlock);
+    const detach = body.indexOf("detachActiveRemoteCodexSessions(hostId, 'bridge-shutdown-strip')", gate);
+    expect(detach).toBeGreaterThan(gate);
+    const detachCalls = body.match(/detachActiveRemoteCodexSessions\(hostId, 'bridge-shutdown-strip'\)/g) ?? [];
+    expect(detachCalls).toHaveLength(1);
+  });
+});
+
 describe('remoteCcQueryFactory stale-invalidation freshness (R22 P2)', () => {
   it('forces fresh for invalidated sessions even when nothing is injected this round', () => {
     // collab 禁用等场景:invalidate 过的 session 重建时无 server 可注
