@@ -309,26 +309,33 @@ type CodexPermissionConfig = {
   approvalsReviewer?: ApprovalsReviewer;
 };
 function mapPermissionToCodex(
-  permissionMode?: string,
-  approvalsReviewerSupported = true,
+  permissionMode: string | undefined,
+  approvalsReviewerProtocolSupported: boolean,
+  approvalsReviewerRouteSupported: boolean,
 ): CodexPermissionConfig {
+  const manualApprovalConfig: CodexPermissionConfig = {
+    approvalPolicy: 'on-request',
+    sandbox: 'workspace-write',
+    ...(approvalsReviewerProtocolSupported ? { approvalsReviewer: 'user' } : {}),
+  };
   // 严格 kebab-case (v2.rs serde rename_all="kebab-case"), camelCase 会被 server -32600 reject
   switch (permissionMode) {
     case 'bypassPermissions':
       return { approvalPolicy: 'never', sandbox: 'danger-full-access' };
     case 'auto':
-      if (!approvalsReviewerSupported) {
-        // 旧 app-server 或未验证 reviewer 模型路由时回退到原生 untrusted:
-        // 可信命令自动执行,其余请求交给用户。既不能发送未知字段,也不能让
-        // 首个越界动作撞上 provider 不支持的隐藏审核模型。
-        return { approvalPolicy: 'untrusted', sandbox: 'workspace-write' };
+      if (!approvalsReviewerProtocolSupported || !approvalsReviewerRouteSupported) {
+        // 旧 app-server 或未验证 reviewer 模型路由时回退到人工 on-request。
+        // 不能用 untrusted:它拒绝 require_escalated,即使用户批准普通命令,
+        // 网络/沙箱外写入仍会留在受限 sandbox 内。新版协议显式写 user,
+        // 还可覆盖恢复 thread 中 sticky 的 auto_review;旧版则安全省略未知字段。
+        return manualApprovalConfig;
       }
       // Codex app-server 原生 auto_review 与 Claude Auto 的分工一致:
       // 常规 workspace 动作直接执行,越界动作交给内置 reviewer 判断,而不是交给 UI。
       // workspace-write 仍是硬安全边界; auto_review 只替换审批者,不扩大沙箱。
       return { approvalPolicy: 'on-request', sandbox: 'workspace-write', approvalsReviewer: 'auto_review' };
     default:
-      return { approvalPolicy: 'on-request', sandbox: 'workspace-write' };
+      return manualApprovalConfig;
   }
 }
 
@@ -2295,8 +2302,9 @@ export class CodexAgent extends BaseAgent {
     // model through the session's model provider. Cindy's gateway, third-party
     // providers, and other non-subscription credentials do not have a verified
     // route for that model. Keep Auto usable on those routes by falling back to
-    // Codex's native `untrusted` policy instead of letting the first write fail
-    // in the reviewer.
+    // manual on-request approvals instead of letting the first write fail in the
+    // reviewer. Remote OAuth subscriptions use the daemon's synced subscription
+    // credential and keep the verified reviewer route.
     const approvalsReviewerRouteSupported = sessionCredentialMode === 'oauth-bearer';
     const approvalsReviewerSupported =
       approvalsReviewerProtocolSupported && approvalsReviewerRouteSupported;
@@ -2309,12 +2317,13 @@ export class CodexAgent extends BaseAgent {
       );
     }
     if (mutablePermissionMode === 'auto' && !approvalsReviewerSupported) {
-      log.warn('Codex Auto falling back to untrusted approvals: automatic reviewer is unavailable on this route', {
+      log.warn('Codex Auto falling back to user approvals: automatic reviewer is unavailable on this route', {
         userAgent: initResp.userAgent,
         providerId: opts.providerId ?? null,
         credentialMode: sessionCredentialMode ?? 'unknown',
         remote: Boolean(opts.remoteHostId),
         protocolSupported: approvalsReviewerProtocolSupported,
+        routeSupported: approvalsReviewerRouteSupported,
       });
     }
     // 闭包 capture 一次, 整个 session 复用 — codexHome 是 server 进程级常量, host 不变就不变。
@@ -2400,7 +2409,11 @@ export class CodexAgent extends BaseAgent {
       }
     };
     function currentApprovalConfig(): CodexPermissionConfig {
-      return mapPermissionToCodex(mutablePermissionMode, approvalsReviewerSupported);
+      return mapPermissionToCodex(
+        mutablePermissionMode,
+        approvalsReviewerProtocolSupported,
+        approvalsReviewerRouteSupported,
+      );
     }
 
     function shouldUseReadonlyReferencesProfile(): boolean {
@@ -3169,8 +3182,9 @@ export class CodexAgent extends BaseAgent {
         (req.kind === 'permission' &&
           forceTurnConfirmation(req.toolName, req.input));
       // Full access 的普通审批不应打断用户。Auto 在已验证路由上由 app-server
-      // auto_review 负责；降级路由则由 untrusted 把越界请求发回客户端。两条路径
-      // 只要收到请求都走 UI，不能绕过 reviewer / 降级审批直接放行。forcePrompt 高风险 MCP inner tool
+      // auto_review 负责；降级路由则由 user reviewer 把越界请求发回客户端。
+      // 两条路径只要收到请求都走 UI，不能绕过 reviewer / 降级审批直接放行。
+      // forcePrompt 高风险 MCP inner tool
       // (如 contacts delete/merge/系统回写)在任何模式下都必须拿到用户的逐次确认。
       if (
         !forcePrompt &&
@@ -3299,9 +3313,9 @@ export class CodexAgent extends BaseAgent {
     let pendingTightenInterrupt = false;
     /**
      * 最近一次 send 的 turn 是否以无人值守策略发射 (覆盖在飞与运行中两个阶段)。
-     * Auto (auto_review 或 untrusted 降级) / never 发射的 turn 在收紧时需要中断;
-     * user reviewer 发射的 turn 审批请求照常流经本地、收紧即时生效,即使期间 UI
-     * 短暂切过宽松档也不得误杀。
+     * auto_review / never / Auto policy turn 在收紧时需要中断;普通 user reviewer
+     * 发射的 turn 审批请求照常流经本地、收紧即时生效,即使期间 UI 短暂切过
+     * 宽松档也不得误杀。
      */
     let turnLaunchedUnattended = false;
     /**
@@ -4885,10 +4899,14 @@ export class CodexAgent extends BaseAgent {
           if (sendOpts?.throwOnStartFailure) throw new Error(message);
           return;
         }
-        const { approvalPolicy } = turnWorkspaceConfig;
-        // 记录本 turn 是否由无人值守策略发射。Auto 即使因路由能力降级为
-        // untrusted,切回 Ask 时也必须中断当前 turn,避免旧策略继续执行 trusted 操作。
-        turnLaunchedUnattended = mutablePermissionMode === 'auto' || approvalPolicy === 'never';
+        const { approvalPolicy, approvalsReviewer } = turnWorkspaceConfig;
+        // 记录本 turn 是否由无人值守策略发射。普通降级路由显式使用 user reviewer,
+        // 与 Ask 权限等价；policy turn 则以 untrusted + read-only 发射，并由 host
+        // 自动接受非强制回调，仍属于无人值守执行。
+        turnLaunchedUnattended =
+          approvalPolicy === 'never' ||
+          approvalsReviewer === 'auto_review' ||
+          (activeTurnPermissionPolicy !== null && mutablePermissionMode === 'auto');
         if (!turnLaunchedUnattended) {
           pendingTightenInterrupt = false;
         }
@@ -5445,8 +5463,8 @@ export class CodexAgent extends BaseAgent {
       async setPermissionMode(newMode: PermissionMode) {
         log.debug('setPermissionMode', { from: mutablePermissionMode, to: newMode });
         // Full access 才能批量放行挂起的 ask。切到 Auto 时，已有请求不能绕过
-        // reviewer / untrusted 降级审批，先 fail-closed 关闭；后续重试按当前路由能力
-        // 选择 auto_review 或 untrusted。
+        // reviewer / 人工降级审批，先 fail-closed 关闭；后续重试按当前路由能力
+        // 选择 auto_review 或 user reviewer。
         const allowPending = newMode === 'bypassPermissions';
         dismissAllPending(`permission_mode_changed_to_${newMode}`, allowPending ? 'allow' : 'deny');
         const wasAuto = mutablePermissionMode === 'auto';
@@ -5465,8 +5483,9 @@ export class CodexAgent extends BaseAgent {
         if (!tightensCurrentTurn) {
           pendingTightenInterrupt = false;
         } else if (!closed && turnLaunchedUnattended) {
-          // 只中断 Auto (含 untrusted 降级) / never 发射的 turn; user reviewer 发射的
-          // turn 审批请求照常流经本地、收紧即时生效,期间 UI 短暂切过宽松档不构成中断理由。
+          // 只中断 auto_review / never / Auto policy turn;普通 user reviewer 发射的
+          // turn 审批请求照常流经本地、收紧即时生效,期间 UI 短暂切过宽松档
+          // 不构成中断理由。
           if (currentTurnId !== null) {
             await interruptTurnForPermissionTighten(currentTurnId);
           } else if (isTurnStartPending) {
