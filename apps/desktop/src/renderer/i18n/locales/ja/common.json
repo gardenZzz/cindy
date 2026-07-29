@@ -7553,6 +7553,7 @@
       "poolDetail": "使用済み {{used}} · 合計 {{total}}",
       "remaining": "残り",
       "progressLabel": "{{label}}の使用量",
+      "noPlanCredits": "有効なサブスクリプションがないため、サブスクリプションクレジットはありません。",
       "historyUnavailable": "使用履歴が完全ではないため、残りのクレジットのみ表示しています。",
       "detailsUnavailable": "使用量の詳細を取得できないため、現在の残高のみ表示しています。",
       "promotionalDetails": {
@@ -7596,8 +7597,7 @@
     "catalog": {
       "errorTitle": "プランを取得できません",
       "errorDescription": "接続を確認して再試行してください。ローカルの代替プランは表示しません。",
-      "emptyTitle": "プランはまだありません",
-      "emptyDescription": "サーバーで公開中のプランはまだありません。",
+      "emptyTitle": "近日公開予定です。お楽しみに。",
       "currentPlan": "現在のプラン",
       "unavailableReasons": {
         "OFFER_COMING_SOON": "近日提供",

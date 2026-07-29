@@ -7553,6 +7553,7 @@
       "poolDetail": "사용 {{used}} · 전체 {{total}}",
       "remaining": "잔여",
       "progressLabel": "{{label}} 사용량",
+      "noPlanCredits": "활성 구독이 없어 구독 크레딧이 없습니다.",
       "historyUnavailable": "사용 기록이 완전하지 않아 잔여 크레딧만 표시합니다.",
       "detailsUnavailable": "사용량 상세를 불러올 수 없어 현재 잔액만 표시합니다.",
       "promotionalDetails": {
@@ -7596,8 +7597,7 @@
     "catalog": {
       "errorTitle": "요금제를 불러올 수 없습니다",
       "errorDescription": "네트워크를 확인하고 다시 시도하세요. 로컬 대체 요금제는 표시하지 않습니다.",
-      "emptyTitle": "요금제가 없습니다",
-      "emptyDescription": "서버에서 공개한 요금제가 아직 없습니다.",
+      "emptyTitle": "곧 출시됩니다. 기대해 주세요.",
       "currentPlan": "현재 요금제",
       "unavailableReasons": {
         "OFFER_COMING_SOON": "출시 예정",

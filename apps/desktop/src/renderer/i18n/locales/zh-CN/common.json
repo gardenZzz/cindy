@@ -7553,6 +7553,7 @@
       "poolDetail": "已用 {{used}} · 总额 {{total}}",
       "remaining": "剩余",
       "progressLabel": "{{label}}使用进度",
+      "noPlanCredits": "当前无生效订阅，因此没有订阅点数。",
       "historyUnavailable": "历史记录不完整，暂时仅显示剩余余额。",
       "detailsUnavailable": "用量明细暂时不可用，当前仅显示各类余额。",
       "promotionalDetails": {
@@ -7596,8 +7597,7 @@
     "catalog": {
       "errorTitle": "暂时无法获取套餐",
       "errorDescription": "请检查网络后重试。不会使用本地套餐替代。",
-      "emptyTitle": "当前暂无套餐",
-      "emptyDescription": "服务端尚未配置公开的套餐。",
+      "emptyTitle": "即将上线，敬请期待",
       "currentPlan": "当前套餐",
       "unavailableReasons": {
         "OFFER_COMING_SOON": "敬请期待",
