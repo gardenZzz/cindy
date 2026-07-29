@@ -65,12 +65,13 @@ export function sessionAgentKind(session: Pick<RemoteSession, 'agentKind'>): Mob
   return toMakerAgentKind(session.agentKind);
 }
 
-/** 手机是否应展示 Agent 分段；远程 SSH / Orca / Cursor 会话继续保持单 Agent。 */
+/** 手机是否应展示 Agent 分段；远程 SSH / Orca / Cursor 源会话继续保持单 Agent。
+ * 切「到」Cursor 由 desktop handler 支持；从 Cursor 会话切走仍不支持。 */
 export function supportsMobileSessionAgentSwitch(
   session: Pick<RemoteSession, 'remoteHostId' | 'orcaRole' | 'agentKind'>,
   capabilities: MobileAgentCapabilities | null,
 ): boolean {
-  // Cursor 一期不做会话内引擎切换（与 desktop GET_CAPABILITIES / switch handler 对齐）。
+  // 从 Cursor 会话切走一期仍不支持（与 desktop switch handler 对齐）。
   if (session.agentKind === 'cursor') return false;
   return capabilities?.supportsSessionAgentSwitch === true
     && !session.remoteHostId
