@@ -74,10 +74,11 @@ Desktop 的 model-access 身份由 `(userId, sessionRealm)` 共同确定。登�
 同账号切换 realm 时，客户端立即清空旧 XD 动态模型清单，作废旧身份在途的凭据与
 `/models` 响应，并从当前 realm 重新同步；迟到响应不得写回凭据或覆盖新区域模型。
 
-XD 静态媒体能力属于 `buildRegion` 产品能力，不随组织 `sessionRealm` 跨区扩张。
-Global 构建保留目录中的完整图像与视频清单；中国大陆和 dev 构建不暴露图像模型，
-视频仅暴露 `seedance-fast` 与 `seedance-pro`。设置页、模型停用成员校验和 Cindy
-媒体运行时都消费 main 侧同一投影策略，Renderer 不另做隐藏。
+XD 媒体能力属于 `buildRegion` 产品能力，不随组织 `sessionRealm` 跨区扩张。
+Global 构建保留目录中的完整图像与视频清单；中国大陆和 dev 构建会同时投影动态
+agent 清单里的媒体能力组与静态媒体清单：不暴露图像模型，视频仅暴露
+`seedance-fast` 与 `seedance-pro`。设置页、模型停用成员校验和 Cindy 媒体运行时
+都消费 main 侧同一投影策略，Renderer 不另做隐藏。
 
 ## Mobile 推送撤销
 

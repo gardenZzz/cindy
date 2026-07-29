@@ -32,7 +32,14 @@ function provider(id: string, models: CatalogModel[]): Provider {
 }
 
 function catalog(): Catalog {
-  const xd = provider('xd', [model('shared-model'), model('xd-only-model')]);
+  const xd = provider('xd', [
+    model('shared-model'),
+    model('xd-only-model'),
+    { ...model('gpt-image-2'), group: 'image' },
+    { ...model('seedance-fast'), group: 'video' },
+    { ...model('seedance-pro'), group: 'video' },
+    { ...model('happyhorse'), group: 'video' },
+  ]);
   xd.imageModels = [
     { id: 'gpt-image-2', name: 'GPT Image 2' },
     { id: 'gemini-image', name: 'Gemini Image' },
@@ -101,6 +108,12 @@ describe('provider access policy', () => {
         standard: 'seedance-fast',
         best: 'seedance-pro',
       });
+      expect(xd?.models['claude-code']?.map((item) => item.id)).toEqual([
+        'shared-model',
+        'xd-only-model',
+        'seedance-fast',
+        'seedance-pro',
+      ]);
     },
   );
 });
