@@ -160,6 +160,14 @@ describe('mobile schedule form model', () => {
     expect(buildMobileScheduleInput({ ...claude, name: 'Claude', prompt: 'run' })).not.toHaveProperty('fastMode');
   });
 
+  it('defaults cursor schedules to auto when switching agent kind', () => {
+    const draft = updateDraftAgentKind(createMobileScheduleDraft(null), 'cursor');
+    expect(buildMobileScheduleInput({ ...draft, name: 'Cursor', prompt: 'run' })).toMatchObject({
+      agentKind: 'cursor',
+      model: 'auto',
+    });
+  });
+
   it('validates required fields and supported interval-style cron presets', () => {
     const draft = createMobileScheduleDraft(null);
     expect(validateMobileScheduleDraft(draft)).toMatchObject({ field: 'name' });

@@ -83,7 +83,6 @@ function defaultScheduleFormPrefs(): ScheduleFormPrefs {
     lastByAgent: {
       'claude-code': EMPTY_AGENT_PREFS,
       codex: EMPTY_AGENT_PREFS,
-      // Type-slot only (#5); schedule AgentTabs 不展示 cursor。
       cursor: EMPTY_AGENT_PREFS,
     },
   };
@@ -95,7 +94,12 @@ function loadScheduleFormPrefs(): ScheduleFormPrefs {
     const raw = window.localStorage.getItem(SCHEDULE_FORM_PREFS_KEY);
     if (!raw) return defaultScheduleFormPrefs();
     const parsed = JSON.parse(raw) as Partial<ScheduleFormPrefs>;
-    const agentKind = parsed.agentKind === 'codex' ? 'codex' : 'claude-code';
+    const agentKind =
+      parsed.agentKind === 'codex'
+        ? 'codex'
+        : parsed.agentKind === 'cursor'
+          ? 'cursor'
+          : 'claude-code';
     const workingDir = typeof parsed.workingDir === 'string' ? parsed.workingDir : '';
     const workspaceKind = normalizePrefsWorkspaceKind(parsed.workspaceKind, workingDir);
     return {
@@ -154,7 +158,9 @@ export function getScheduleAgentPrefs(agentKind: ScheduleFormState['agentKind'])
  * 的事故见 2026-06 踩坑:任务里看着选了 Opus 4.8,实际每次跑 4.7)。
  */
 export function schedulerFallbackModel(agentKind: ScheduleFormState['agentKind']): string {
-  return agentKind === 'codex' ? 'gpt-5.5' : 'claude-sonnet-4-6';
+  if (agentKind === 'codex') return 'gpt-5.5';
+  if (agentKind === 'cursor') return 'auto';
+  return 'claude-sonnet-4-6';
 }
 
 /**
@@ -167,7 +173,9 @@ export function schedulerFallbackModel(agentKind: ScheduleFormState['agentKind']
 export function getScheduleDefaultModel(agentKind: ScheduleFormState['agentKind']): string {
   const prefs = getScheduleAgentPrefs(agentKind);
   if (prefs.model.trim()) return prefs.model;
-  const chatLast = getPersistedVendorModel(agentKind === 'codex' ? 'codex' : 'cc');
+  const chatVendor =
+    agentKind === 'codex' ? 'codex' : agentKind === 'cursor' ? 'cursor' : 'cc';
+  const chatLast = getPersistedVendorModel(chatVendor);
   if (chatLast.trim()) return chatLast;
   return schedulerFallbackModel(agentKind);
 }
@@ -361,10 +369,7 @@ export function useScheduleForm(initial: Schedule | null = null): UseScheduleFor
       const next: ScheduleFormState = {
         ...f,
         targetSessionId: session.id,
-        // Scheduler 一期不含 Cursor;会话若是 cursor 按 cc 映射占位(选择器仍关掉)。
-        agentKind: sessionAgentKindToScheduleAgentKind(
-          session.agentKind === 'codex' ? 'codex' : 'cc',
-        ),
+        agentKind: sessionAgentKindToScheduleAgentKind(session.agentKind),
         model: '',
         // 绑定会话 = 跟随其模型/来源,providerId 一并清空(与 model/effort 同语义)。
         providerId: '',

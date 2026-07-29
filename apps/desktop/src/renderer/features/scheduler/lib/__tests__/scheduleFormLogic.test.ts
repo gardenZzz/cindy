@@ -450,17 +450,20 @@ describe('hasRealBinding / agentKind 映射', () => {
   it('sessionAgentKindToScheduleAgentKind 映射', () => {
     expect(sessionAgentKindToScheduleAgentKind('cc')).toBe('claude-code');
     expect(sessionAgentKindToScheduleAgentKind('codex')).toBe('codex');
+    expect(sessionAgentKindToScheduleAgentKind('cursor')).toBe('cursor');
   });
 });
 
 describe('resolveTemplateAgentFields', () => {
   const defaults = {
     getDefaultModel: (agentKind: ScheduleFormState['agentKind']) =>
-      agentKind === 'codex' ? 'gpt-5.5' : 'claude-sonnet-4-6',
+      agentKind === 'codex' ? 'gpt-5.5' : agentKind === 'cursor' ? 'auto' : 'claude-sonnet-4-6',
     getAgentPrefs: (agentKind: ScheduleFormState['agentKind']) =>
       agentKind === 'codex'
         ? { providerId: 'openai', effort: 'high' as const, fastMode: true }
-        : { providerId: 'anthropic', effort: 'medium' as const, fastMode: false },
+        : agentKind === 'cursor'
+          ? { providerId: '', effort: 'medium' as const, fastMode: false }
+          : { providerId: 'anthropic', effort: 'medium' as const, fastMode: false },
   };
 
   it('模板跨 agent 且未显式给 model 时,重建目标 agent 的 model/provider/effort/fast 组合', () => {

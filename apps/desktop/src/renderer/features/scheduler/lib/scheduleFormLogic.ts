@@ -261,11 +261,13 @@ export function applyRunMode(
   return unchanged ? form : next;
 }
 
-/** renderer Session.agentKind('cc'|'codex')→ schedule agentKind 映射。 */
+/** renderer Session.agentKind('cc'|'codex'|'cursor')→ schedule agentKind 映射。 */
 export function sessionAgentKindToScheduleAgentKind(
-  kind: 'cc' | 'codex',
+  kind: 'cc' | 'codex' | 'cursor',
 ): ScheduleFormState['agentKind'] {
-  return kind === 'codex' ? 'codex' : 'claude-code';
+  if (kind === 'codex') return 'codex';
+  if (kind === 'cursor') return 'cursor';
+  return 'claude-code';
 }
 
 interface TemplateAgentDefaults {
