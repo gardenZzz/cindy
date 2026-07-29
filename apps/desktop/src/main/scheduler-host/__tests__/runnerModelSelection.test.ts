@@ -293,6 +293,19 @@ describe('MakerScheduleRunner model selection', () => {
       expect(opts.model).toBe('gpt-5.5');
     });
 
+    it('schedule.model 留空时 Cursor 兜底 auto', async () => {
+      const h = createSessionHarness();
+      const harness = createRunnerHarness(h);
+
+      const opts = await fireToCompletion(
+        harness,
+        h,
+        baseSchedule({ model: undefined, agentKind: 'cursor' }),
+      );
+
+      expect(opts.model).toBe('auto');
+    });
+
     it('schedule.model 显式设置时原样透传', async () => {
       const h = createSessionHarness();
       const harness = createRunnerHarness(h);

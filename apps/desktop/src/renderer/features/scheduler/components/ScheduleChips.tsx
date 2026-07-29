@@ -159,21 +159,20 @@ export function ProjectChip({
   );
 }
 
-/** Visible agent tabs only — cursor is a type-slot (#5), not selectable until registered. */
-const VISIBLE_AGENT_KINDS: readonly AgentKind[] = ['claude-code', 'codex'];
+/** Agent tabs: Claude Code / Codex / Cursor (T8). */
+const VISIBLE_AGENT_KINDS: readonly AgentKind[] = ['claude-code', 'codex', 'cursor'];
 
-const AGENT_META: Record<AgentKind, { label: string; vendor: 'cc' | 'codex' }> = {
+const AGENT_META: Record<AgentKind, { label: string; vendor: 'cc' | 'codex' | 'cursor' }> = {
   'claude-code': { label: 'Claude Code', vendor: 'cc' },
   codex: { label: 'Codex', vendor: 'codex' },
-  // Neutral placeholder; not in VISIBLE_AGENT_KINDS so AgentTabs never renders it.
-  cursor: { label: 'Cursor', vendor: 'cc' },
+  cursor: { label: 'Cursor', vendor: 'cursor' },
 };
 
 export function AgentTabs({ value, onChange, disabled }: { value: AgentKind; onChange: (v: AgentKind) => void; disabled?: boolean }) {
   return (
     <div
       className={cn(
-        'flex h-[34px] w-[78px] shrink-0 items-center gap-0.5 rounded-full p-[3px]',
+        'flex h-[34px] w-[117px] shrink-0 items-center gap-0.5 rounded-full p-[3px]',
         'bg-[var(--chat-input-chip-bg)] dark:border dark:border-[var(--cmd-palette-border)] dark:bg-[var(--cmd-palette-bg)]',
         disabled && 'pointer-events-none opacity-50',
       )}
@@ -1142,7 +1141,8 @@ export function ModelEffortChip({
       : t('scheduler.chips.model.default');
 
   // railSources 仅用于 nativeDefault 归一化(下拉宽度由 ModelSelectorContent 内容自适应,见 w-auto)。
-  const vendorKey = agentKind === 'codex' ? 'codex' : 'cc';
+  const vendorKey =
+    agentKind === 'codex' ? 'codex' : agentKind === 'cursor' ? 'cursor' : 'cc';
   const railSources = useMemo(
     () => connectedProvidersForAgent(providers, agentKind),
     [providers, agentKind],
@@ -1321,7 +1321,12 @@ export function ThreadPickerInline({ value, onSelect, onOpen, reference }: {
             )}
             {sessions.map((s) => (
               <option key={s.id} value={s.id}>
-                {s.title} · {s.agentKind === 'cc' ? 'Claude Code' : 'Codex'}
+                {s.title} ·{' '}
+                {s.agentKind === 'cc'
+                  ? 'Claude Code'
+                  : s.agentKind === 'cursor'
+                    ? 'Cursor'
+                    : 'Codex'}
               </option>
             ))}
           </select>

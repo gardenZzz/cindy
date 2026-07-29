@@ -5,9 +5,9 @@
  *   1. 上次建自动化任务时选的模型(scheduleFormPrefs.lastByAgent)优先
  *   2. 没有 → 跟随对话上次选择(newMakerDraft localStorage **真实持久化值**,
  *      不吃 sanitize 的默认回填 —— 全新用户不能被对话侧的 Opus 默认顶掉)
- *   3. 都没有 → 成本保守冷启动兜底:cc → claude-sonnet-4-6, codex → gpt-5.5
- *      (与 scheduler-host/runner.ts defaultModelFor 同步,两边漂移会复现
- *      "UI 显示 X 实际跑 Y" 的 2026-06 事故)
+ *   3. 都没有 → 成本保守冷启动兜底:cc → claude-sonnet-4-6, codex → gpt-5.5,
+ *      cursor → auto (与 scheduler-host/model-defaults.ts defaultModelFor 同步,
+ *      两边漂移会复现 "UI 显示 X 实际跑 Y" 的 2026-06 事故)
  *
  * 项目 vitest env=node,无 window。与 newMakerDraft.test.ts 同款:
  * vi.stubGlobal 注入最小 localStorage,避免新增 jsdom 依赖。
@@ -162,6 +162,11 @@ describe('getScheduleDefaultModel 三级回退', () => {
     expect(getScheduleDefaultModel('codex')).toBe('gpt-5.5');
   });
 
+  it('cursor 冷启动兜底 auto', async () => {
+    const { getScheduleDefaultModel } = await loadModule();
+    expect(getScheduleDefaultModel('cursor')).toBe('auto');
+  });
+
   it('损坏的 localStorage JSON → 静默回退兜底,不抛错', async () => {
     memStorage.setItem(CHAT_DRAFT_KEY, '{not json');
     memStorage.setItem(SCHEDULE_PREFS_KEY, '{not json');
@@ -171,9 +176,10 @@ describe('getScheduleDefaultModel 三级回退', () => {
 
   it('schedulerFallbackModel 与 runner defaultModelFor 的约定值一致(防漂移锚点)', async () => {
     const { schedulerFallbackModel } = await loadModule();
-    // scheduler-host/runner.ts defaultModelFor 必须返回同样的值;
+    // scheduler-host/model-defaults.ts defaultModelFor 必须返回同样的值;
     // runner 侧的等价断言见 runnerModelSelection.test.ts。
     expect(schedulerFallbackModel('claude-code')).toBe('claude-sonnet-4-6');
     expect(schedulerFallbackModel('codex')).toBe('gpt-5.5');
+    expect(schedulerFallbackModel('cursor')).toBe('auto');
   });
 });

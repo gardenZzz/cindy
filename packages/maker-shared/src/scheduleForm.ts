@@ -58,6 +58,8 @@ const DEFAULT_CRON = '0 9 * * *';
 const DEFAULT_TIMEZONE = 'Asia/Shanghai';
 const DEFAULT_CLAUDE_MODEL = 'claude-sonnet-4-6';
 const DEFAULT_CODEX_MODEL = 'gpt-5.5';
+/** Cursor 产品面 Auto；与 desktop model-defaults / CURSOR_PRODUCT_AUTO_MODEL_ID 对齐。 */
+const DEFAULT_CURSOR_MODEL = 'auto';
 
 export function createMobileScheduleDraft(
   schedule?: RemoteSchedule | null,
@@ -407,8 +409,9 @@ function hasTemplateParam(params: Record<string, string>, key: string): boolean 
 }
 
 function defaultModelFor(agentKind: RemoteScheduleAgentKind): string {
-  // #13 (T9): cursor 默认模型尚未接入；未知/未注册 kind 保持既有 Claude 兜底。
-  return agentKind === 'codex' ? DEFAULT_CODEX_MODEL : DEFAULT_CLAUDE_MODEL;
+  if (agentKind === 'codex') return DEFAULT_CODEX_MODEL;
+  if (agentKind === 'cursor') return DEFAULT_CURSOR_MODEL;
+  return DEFAULT_CLAUDE_MODEL;
 }
 
 function validateIntervalMinutes(value: string): string | null {
