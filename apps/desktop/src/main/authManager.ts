@@ -56,6 +56,7 @@ import {
 } from './authRefreshFailure';
 import { awaitWithStartupTimeout } from './authStartupGate';
 import { syncCanaryFlagAfterAuth } from './canaryFlagSync';
+import { canRestoreAuthSessionForMembership } from './authRealmPolicy';
 import {
   createAuthBrowserAuthorizationSlot,
   createAuthLoopbackDevBridgeSlot,
@@ -1876,8 +1877,6 @@ export async function initialize(options: AuthInitializeOptions = {}): Promise<A
   }
   try {
     await loadClientEndpointsForRealm(persistedSession.realm);
-    activateClientEndpointRealm(persistedSession.realm);
-    activeAuthRealm = persistedSession.realm;
   } catch (error) {
     // 对端区域清单暂不可用时保留原子凭据；退回构建区 refresh 会把有效 token
     // 当成非法凭据，因此本次仅以未登录放行 UI，下一次 initialize/重启可重试。
@@ -2024,6 +2023,19 @@ async function runColdStartRefreshFlow(
     }
 
     const refreshData = refreshResult.data as RefreshResponse;
+    if (
+      !canRestoreAuthSessionForMembership(AUTH_REGION, storedRealm, refreshData.membership.kind)
+    ) {
+      // refresh token 可能已由 auth-server 轮换。即使当前构建不能接受这枚个人
+      // 会话，也必须把新 token 写回原 realm，供拥有该 realm 的实例继续使用。
+      writePersistedAuthSession(refreshData.refreshToken, storedRealm);
+      resetActiveAuthRealmToBuild();
+      log.warn(
+        `cold-start refresh rejected cross-realm personal session realm=${storedRealm} buildRegion=${AUTH_REGION}`,
+      );
+      commitActiveAppSession('signed-out');
+      return snapshotLoggedOutAuthState();
+    }
     if (accountSwitchTeardown) {
       // Cold-start refresh may outlive initialize()'s startup timeout. Keep
       // the owner boundary held for the entire late commit sequence so stale
@@ -2046,7 +2058,11 @@ async function runColdStartRefreshFlow(
       releaseBoundary = null;
       return snapshotAuthState();
     }
-    writePersistedAuthSession(refreshData.refreshToken);
+    if (storedRealm !== activeAuthRealm) {
+      activateClientEndpointRealm(storedRealm);
+      activeAuthRealm = storedRealm;
+    }
+    writePersistedAuthSession(refreshData.refreshToken, storedRealm);
     lastAcceptedRefreshToken = refreshData.refreshToken;
 
     accessToken = refreshData.accessToken;
@@ -2090,6 +2106,7 @@ async function runColdStartRefreshFlow(
         clearTimeout(refreshTimer);
         refreshTimer = null;
       }
+      resetActiveAuthRealmToBuild();
     }
     releaseBoundary?.();
     releaseBoundary = null;
@@ -2716,6 +2733,23 @@ export async function refresh(): Promise<boolean> {
 
       const authRealmChanged = refreshRealm !== activeAuthRealm;
       const data = result.data as RefreshResponse;
+      if (!canRestoreAuthSessionForMembership(AUTH_REGION, refreshRealm, data.membership.kind)) {
+        // Preserve a rotated token in the realm that issued it, but never publish
+        // the incompatible personal identity or activate that realm's business endpoints.
+        writePersistedAuthSession(data.refreshToken, refreshRealm);
+        log.warn(
+          `runtime refresh rejected cross-realm personal session realm=${refreshRealm} buildRegion=${AUTH_REGION}`,
+        );
+        if (currentUser !== null) {
+          await expireRuntimeAuth(currentUser.id, 'replaced-elsewhere', {
+            preservePersistedRefreshToken: true,
+          });
+        } else {
+          resetActiveAuthRealmToBuild();
+          commitActiveAppSession('signed-out');
+        }
+        return false;
+      }
       const needsIdentityCheck =
         replacementRetries > 0 ||
         persistedRefreshTokenNeedsIdentityCheck ||
