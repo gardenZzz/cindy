@@ -6,8 +6,8 @@
  *
  * 覆盖: initialize / session/new / session/load / session/prompt / session/cancel /
  * session/update (agent_message_chunk + usage_update + tool_call*) /
- * session/request_permission / session/set_config_option。
- * plan 等留给后续票。
+ * session/request_permission / session/set_config_option / session/set_mode。
+ * Cursor vendor 扩展方法常量见 CursorMethod（实现在 agents/cursor/）。
  */
 
 export type JsonRpcId = number | string;
@@ -46,7 +46,23 @@ export const Method = {
   SessionRequestPermission: 'session/request_permission',
   /** Cursor / ACP 参数化配置（model / effort / fast / …）。 */
   SessionSetConfigOption: 'session/set_config_option',
+  /** ACP 会话模式（agent / plan / ask）；Cindy 产品面只暴露 plan ↔ agent。 */
+  SessionSetMode: 'session/set_mode',
 } as const;
+
+/** Cursor ACP vendor 扩展方法（blocking request；agent 侧 update_todos 亦走 request）。 */
+export const CursorMethod = {
+  AskQuestion: 'cursor/ask_question',
+  CreatePlan: 'cursor/create_plan',
+  UpdateTodos: 'cursor/update_todos',
+} as const;
+
+export type CursorAcpModeId = 'agent' | 'plan' | 'ask';
+
+export interface SetSessionModeParams {
+  sessionId: string;
+  modeId: CursorAcpModeId | string;
+}
 
 /** ACP protocolVersion integer — Cursor 实测协商为 1。 */
 export const ACP_PROTOCOL_VERSION = 1;

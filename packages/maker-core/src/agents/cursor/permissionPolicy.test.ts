@@ -71,6 +71,7 @@ describe('CursorAgent capabilities — permission modes', () => {
     const ids = agent.capabilities.permissionModes.map((p) => p.id);
     expect(ids).toEqual(['ask', 'auto', 'bypassPermissions']);
     expect(agent.capabilities.setPermissionModeMidSession).toEqual({ supported: true });
+    expect(agent.capabilities.planMode).toEqual({ supported: true });
   });
 });
 

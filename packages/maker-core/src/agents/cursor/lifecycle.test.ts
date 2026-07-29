@@ -212,6 +212,16 @@ async function bootWithTransport(
       );
       return;
     }
+    if (msg.method === Method.SessionSetMode) {
+      queueMicrotask(() =>
+        transport.emit({
+          jsonrpc: JSONRPC_VERSION,
+          id: msg.id,
+          result: {},
+        }),
+      );
+      return;
+    }
     if (msg.method === Method.SessionPrompt) {
       // Hang by default — tests complete/cancel explicitly.
       return;
