@@ -2,8 +2,9 @@ import { describe, expect, it } from 'vitest';
 
 import {
   ACP_AUTO_ALLOW_KINDS,
-  autoClassifierAllowsKind,
+  classifyAcpAutoPermission,
   findPermissionOption,
+  isSensitiveAutoPermissionPath,
   sessionAllowKeyFromToolCall,
   toInteractionRequest,
   toRequestPermissionResult,
@@ -88,14 +89,61 @@ describe('ACP permission mapping', () => {
       outcome: { outcome: 'selected', optionId: 'reject-once' },
     });
   });
+});
 
-  it('auto classifier allows only read/search/think', () => {
+describe('classifyAcpAutoPermission (path-aware Auto classifier)', () => {
+  it('candidate kinds alone are not sufficient — execute/edit still ask', () => {
     expect(ACP_AUTO_ALLOW_KINDS.has('read')).toBe(true);
-    expect(autoClassifierAllowsKind('read')).toBe(true);
-    expect(autoClassifierAllowsKind('search')).toBe(true);
-    expect(autoClassifierAllowsKind('think')).toBe(true);
-    expect(autoClassifierAllowsKind('execute')).toBe(false);
-    expect(autoClassifierAllowsKind('edit')).toBe(false);
-    expect(autoClassifierAllowsKind(undefined)).toBe(false);
+    expect(
+      classifyAcpAutoPermission({
+        toolName: 'exec',
+        input: { command: 'ls' },
+        kind: 'execute',
+      }),
+    ).toBe('ask');
+    expect(
+      classifyAcpAutoPermission({
+        toolName: 'edit',
+        input: { path: 'src/a.ts' },
+        kind: 'edit',
+      }),
+    ).toBe('ask');
+  });
+
+  it('allows safe workspace reads but asks for ssh keys and credential files', () => {
+    expect(
+      classifyAcpAutoPermission({
+        toolName: 'read',
+        input: { path: 'src/index.ts' },
+        kind: 'read',
+      }),
+    ).toBe('allow');
+    expect(
+      classifyAcpAutoPermission({
+        toolName: 'read',
+        input: { path: '~/.ssh/id_rsa' },
+        kind: 'read',
+      }),
+    ).toBe('ask');
+    expect(
+      classifyAcpAutoPermission({
+        toolName: 'read',
+        input: { file_path: '/Users/me/.aws/credentials' },
+        kind: 'read',
+      }),
+    ).toBe('ask');
+    expect(
+      classifyAcpAutoPermission({
+        toolName: 'read',
+        input: { path: '/repo/.env' },
+        kind: 'read',
+      }),
+    ).toBe('ask');
+  });
+
+  it('flags sensitive path helpers for private keys and credential dirs', () => {
+    expect(isSensitiveAutoPermissionPath('~/.ssh/id_rsa')).toBe(true);
+    expect(isSensitiveAutoPermissionPath('/home/u/.gnupg/secring.gpg')).toBe(true);
+    expect(isSensitiveAutoPermissionPath('src/app.ts')).toBe(false);
   });
 });

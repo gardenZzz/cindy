@@ -44,7 +44,6 @@ import { UsageTracker } from '../shared/usage-tracker.js';
 import {
   AcpClient,
   ACP_PROTOCOL_VERSION,
-  autoClassifierAllowsKind,
   cancelledPermissionResult,
   createAcpStdioTransport,
   CursorMethod,
@@ -57,6 +56,8 @@ import {
   sessionAllowKeyFromToolCall,
   toInteractionRequest,
   toRequestPermissionResult,
+  toolInputFromAcpToolCall,
+  toolNameFromAcpToolCall,
   translateAcpError,
   translateSessionUpdate,
   type AcpConfigOption,
@@ -105,6 +106,33 @@ import {
   type CursorListedModel,
 } from './models.js';
 import { CURSOR_ONESHOT_DEFAULT_MODEL, runCursorOneShot } from './oneShot.js';
+
+/** Auto 分类器超时（与 Codex Guardian 不可用时的 408 语义对齐）。 */
+const AUTO_PERMISSION_CLASSIFIER_TIMEOUT_MS = 8_000;
+
+function raceAutoPermissionClassifier(
+  classify: Promise<'allow' | 'ask'>,
+  timeoutMs: number,
+): Promise<'allow' | 'ask'> {
+  return new Promise<'allow' | 'ask'>((resolve, reject) => {
+    const timer = setTimeout(() => {
+      const err = new Error('auto permission classifier timed out');
+      Object.assign(err, { status: 408 });
+      reject(err);
+    }, timeoutMs);
+    timer.unref?.();
+    classify.then(
+      (verdict) => {
+        clearTimeout(timer);
+        resolve(verdict);
+      },
+      (err: unknown) => {
+        clearTimeout(timer);
+        reject(err);
+      },
+    );
+  });
+}
 
 const UNSUPPORTED = {
   rewind: {
@@ -632,7 +660,7 @@ export class CursorAgent extends BaseAgent {
       }
     };
 
-    const notifyAutoClassifierUnavailable = () => {
+    const notifyAutoClassifierUnavailable = (status: number) => {
       if (autoFallbackNotified) return;
       autoFallbackNotified = true;
       const notify = this.deps.onAutoPermissionClassifierUnavailable;
@@ -641,7 +669,7 @@ export class CursorAgent extends BaseAgent {
         notify({
           sessionId: opts.sessionId ?? sessionId,
           agentKind: 'cursor',
-          status: 500,
+          status,
         });
       } catch (e) {
         log.warn('onAutoPermissionClassifierUnavailable threw', {
@@ -662,6 +690,8 @@ export class CursorAgent extends BaseAgent {
       const toolCall = permissionToolCall(permParams);
       const sessionAllowKey = sessionAllowKeyFromToolCall(toolCall);
       const options = Array.isArray(permParams.options) ? permParams.options : [];
+      const toolName = toolNameFromAcpToolCall(toolCall);
+      const toolInput = toolInputFromAcpToolCall(toolCall);
 
       // Full access: 静默放行 (只回 allow-once, 不写机器级 allowlist)
       if (mutablePermissionMode === 'bypassPermissions') {
@@ -679,21 +709,43 @@ export class CursorAgent extends BaseAgent {
         );
       }
 
-      // Auto: 客户端 kind 分类器
+      // Auto: 调用注入的分类器（tool 名 + 完整 input）；缺失/超时/抛错 → Ask + fallback hook
       if (mutablePermissionMode === 'auto') {
-        try {
-          if (autoClassifierAllowsKind(toolCall.kind)) {
-            return toRequestPermissionResult(
-              { kind: 'permission', behavior: 'allow' },
-              options,
-            );
-          }
-        } catch (e) {
-          log.warn('auto classifier failed — falling back to ask', {
-            message: (e as Error).message,
-          });
-          notifyAutoClassifierUnavailable();
+        const classify = this.deps.classifyAutoPermission;
+        if (!classify) {
+          log.warn('auto classifier missing — falling back to ask');
+          notifyAutoClassifierUnavailable(500);
           mutablePermissionMode = 'ask';
+        } else {
+          try {
+            const verdict = await raceAutoPermissionClassifier(
+              Promise.resolve(
+                classify({
+                  toolName,
+                  input: toolInput,
+                  kind: typeof toolCall.kind === 'string' ? toolCall.kind : null,
+                }),
+              ),
+              AUTO_PERMISSION_CLASSIFIER_TIMEOUT_MS,
+            );
+            if (verdict === 'allow') {
+              return toRequestPermissionResult(
+                { kind: 'permission', behavior: 'allow' },
+                options,
+              );
+            }
+          } catch (e) {
+            const status =
+              e && typeof e === 'object' && 'status' in e && typeof (e as { status: unknown }).status === 'number'
+                ? (e as { status: number }).status
+                : 500;
+            log.warn('auto classifier failed — falling back to ask', {
+              message: e instanceof Error ? e.message : String(e),
+              status,
+            });
+            notifyAutoClassifierUnavailable(status);
+            mutablePermissionMode = 'ask';
+          }
         }
       }
 

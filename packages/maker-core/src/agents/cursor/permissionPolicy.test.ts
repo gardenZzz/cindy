@@ -6,22 +6,27 @@ import { describe, expect, it, vi } from 'vitest';
 
 import { createConsoleLogger } from '../../interfaces/logger.js';
 import type { AuthAdapter } from '../../interfaces/auth-adapter.js';
+import type { InteractionRequest } from '../../types/events.js';
 import { CursorAgent } from './index.js';
-import type { Transport, LineHandler, CloseHandler } from '../acp/transport.js';
+import type { Transport, LineHandler, CloseHandler, StderrHandler } from '../acp/transport.js';
 import { AcpClient } from '../acp/client.js';
 import {
-  autoClassifierAllowsKind,
+  classifyAcpAutoPermission,
   sessionAllowKeyFromToolCall,
   toInteractionRequest,
   toRequestPermissionResult,
 } from '../acp/permissions.js';
-import type { PermissionOption } from '../acp/protocol.js';
+import { JSONRPC_VERSION, Method, type PermissionOption } from '../acp/protocol.js';
 
 const OPTIONS: PermissionOption[] = [
   { optionId: 'allow-once', name: 'Allow once', kind: 'allow_once' },
   { optionId: 'allow-always', name: 'Allow always', kind: 'allow_always' },
   { optionId: 'reject-once', name: 'Reject', kind: 'reject_once' },
 ];
+
+type ClassifyAutoPermission = NonNullable<
+  ConstructorParameters<typeof CursorAgent>[0]['classifyAutoPermission']
+>;
 
 function createAuthStub(): AuthAdapter {
   return {
@@ -34,17 +39,22 @@ function createAuthStub(): AuthAdapter {
 
 class FakeTransport implements Transport {
   lines: string[] = [];
+  written: unknown[] = [];
   private lineHandler: LineHandler | null = null;
   private closeHandler: CloseHandler | null = null;
 
   async writeLine(line: string): Promise<void> {
     this.lines.push(line);
+    this.written.push(JSON.parse(line));
   }
   onLine(handler: LineHandler): () => void {
     this.lineHandler = handler;
     return () => {
       if (this.lineHandler === handler) this.lineHandler = null;
     };
+  }
+  onStderr(_handler: StderrHandler): () => void {
+    return () => undefined;
   }
   onClose(handler: CloseHandler): () => void {
     this.closeHandler = handler;
@@ -58,6 +68,97 @@ class FakeTransport implements Transport {
   emitLine(msg: unknown): void {
     this.lineHandler?.(typeof msg === 'string' ? msg : JSON.stringify(msg));
   }
+  findResponse(id: number | string): unknown {
+    for (const msg of this.written) {
+      if (
+        typeof msg === 'object' &&
+        msg !== null &&
+        'id' in msg &&
+        (msg as { id: unknown }).id === id &&
+        'result' in msg
+      ) {
+        return (msg as { result: unknown }).result;
+      }
+    }
+    return undefined;
+  }
+}
+
+async function bootCursorSession(args: {
+  transport: FakeTransport;
+  classifyAutoPermission?: ClassifyAutoPermission;
+  onAutoPermissionClassifierUnavailable?: (a: {
+    sessionId: string;
+    agentKind: string;
+    status: number;
+  }) => void;
+  permissionMode?: 'ask' | 'auto' | 'bypassPermissions';
+  interactionResolver?: (req: InteractionRequest) => Promise<{
+    kind: 'permission';
+    behavior: 'allow' | 'deny';
+  }>;
+}) {
+  const agent = new CursorAgent({
+    auth: createAuthStub(),
+    runtimeConfig: {},
+    binaryPath: '/tmp/fake-cursor-agent',
+    logger: createConsoleLogger('cursor-perm-test'),
+    classifyAutoPermission: args.classifyAutoPermission,
+    onAutoPermissionClassifierUnavailable: args.onAutoPermissionClassifierUnavailable,
+  });
+
+  const origWrite = args.transport.writeLine.bind(args.transport);
+  args.transport.writeLine = async (line: string) => {
+    await origWrite(line);
+    const msg = JSON.parse(line) as Record<string, unknown>;
+    if (typeof msg.id !== 'number' && typeof msg.id !== 'string') return;
+    if (msg.method === Method.Initialize) {
+      queueMicrotask(() =>
+        args.transport.emitLine({
+          jsonrpc: JSONRPC_VERSION,
+          id: msg.id,
+          result: {
+            protocolVersion: 1,
+            agentCapabilities: { loadSession: true },
+            authMethods: [],
+          },
+        }),
+      );
+      return;
+    }
+    if (msg.method === Method.SessionNew) {
+      queueMicrotask(() =>
+        args.transport.emitLine({
+          jsonrpc: JSONRPC_VERSION,
+          id: msg.id,
+          result: {
+            sessionId: 'sess-perm',
+            models: {
+              currentModelId: 'default',
+              availableModels: [{ modelId: 'default', name: 'Auto' }],
+            },
+          },
+        }),
+      );
+    }
+  };
+
+  const handle = await agent.startSession({
+    workingDir: '/tmp',
+    model: 'default',
+    sessionId: 'biz-session-perm',
+    permissionMode: args.permissionMode ?? 'auto',
+    vendorOptions: { createAcpTransport: () => args.transport },
+  });
+  if (args.interactionResolver) {
+    handle.setInteractionResolver(async (req) => {
+      if (req.kind !== 'permission') {
+        return { kind: 'permission', behavior: 'deny' };
+      }
+      return args.interactionResolver!(req);
+    });
+  }
+  return { agent, handle };
 }
 
 describe('CursorAgent capabilities — permission modes', () => {
@@ -95,9 +196,29 @@ describe('Cursor permission policy outcomes (client strategy)', () => {
     expect(sessionGrant.outcome).toEqual({ outcome: 'selected', optionId: 'allow-once' });
   });
 
-  it('Auto classifier distinguishes safe vs risky kinds', () => {
-    expect(autoClassifierAllowsKind('read')).toBe(true);
-    expect(autoClassifierAllowsKind('execute')).toBe(false);
+  it('Auto classifier asks for sensitive paths even when kind is read', () => {
+    // 替换旧断言 read=true：kind 白名单不够，必须看 path。
+    expect(
+      classifyAcpAutoPermission({
+        toolName: 'read',
+        input: { path: '~/.ssh/id_rsa' },
+        kind: 'read',
+      }),
+    ).toBe('ask');
+    expect(
+      classifyAcpAutoPermission({
+        toolName: 'exec',
+        input: { command: 'ls' },
+        kind: 'execute',
+      }),
+    ).toBe('ask');
+    expect(
+      classifyAcpAutoPermission({
+        toolName: 'read',
+        input: { path: 'README.md' },
+        kind: 'read',
+      }),
+    ).toBe('allow');
   });
 
   it('InteractionRequest carries sessionAllowKey for Cindy-layer memory', () => {
@@ -120,6 +241,153 @@ describe('Cursor permission policy outcomes (client strategy)', () => {
       expect(req.suggestions).toEqual([
         { destination: 'session', sessionAllowKey: 'execute:rm' },
       ]);
+    }
+  });
+});
+
+describe('CursorAgent Auto classifier injection', () => {
+  async function emitPermission(
+    transport: FakeTransport,
+    toolCall: Record<string, unknown>,
+    id = 7,
+  ): Promise<unknown> {
+    transport.emitLine({
+      jsonrpc: '2.0',
+      id,
+      method: Method.SessionRequestPermission,
+      params: {
+        sessionId: 'sess-perm',
+        toolCall,
+        options: OPTIONS,
+      },
+    });
+    await vi.waitFor(() => expect(transport.findResponse(id)).toBeDefined());
+    return transport.findResponse(id);
+  }
+
+  it('asks (does not silent-allow) when reading ssh private key under Auto', async () => {
+    const transport = new FakeTransport();
+    const seen: InteractionRequest[] = [];
+    await bootCursorSession({
+      transport,
+      permissionMode: 'auto',
+      classifyAutoPermission: async (args) => classifyAcpAutoPermission(args),
+      interactionResolver: async (req) => {
+        seen.push(req);
+        return { kind: 'permission', behavior: 'deny' };
+      },
+    });
+
+    const result = await emitPermission(transport, {
+      toolCallId: 't-ssh',
+      kind: 'read',
+      title: 'Read id_rsa',
+      rawInput: { path: '~/.ssh/id_rsa' },
+    });
+    expect(seen).toHaveLength(1);
+    expect(seen[0]).toMatchObject({
+      kind: 'permission',
+      toolName: 'read',
+      input: { path: '~/.ssh/id_rsa' },
+    });
+    expect(result).toEqual({
+      outcome: { outcome: 'selected', optionId: 'reject-once' },
+    });
+  });
+
+  it('classifier throw → Ask path + unavailable hook', async () => {
+    const transport = new FakeTransport();
+    const classifierUnavailable = vi.fn();
+    const seen: InteractionRequest[] = [];
+    await bootCursorSession({
+      transport,
+      permissionMode: 'auto',
+      classifyAutoPermission: async () => {
+        throw new Error('classifier boom');
+      },
+      onAutoPermissionClassifierUnavailable: classifierUnavailable,
+      interactionResolver: async (req) => {
+        seen.push(req);
+        return { kind: 'permission', behavior: 'deny' };
+      },
+    });
+
+    await emitPermission(transport, {
+      toolCallId: 't1',
+      kind: 'read',
+      title: 'Read',
+      rawInput: { path: 'src/a.ts' },
+    });
+    expect(classifierUnavailable).toHaveBeenCalledWith({
+      sessionId: 'biz-session-perm',
+      agentKind: 'cursor',
+      status: 500,
+    });
+    expect(seen).toHaveLength(1);
+  });
+
+  it('classifier missing → Ask path + unavailable hook', async () => {
+    const transport = new FakeTransport();
+    const classifierUnavailable = vi.fn();
+    const seen: InteractionRequest[] = [];
+    await bootCursorSession({
+      transport,
+      permissionMode: 'auto',
+      // deliberately omit classifyAutoPermission
+      onAutoPermissionClassifierUnavailable: classifierUnavailable,
+      interactionResolver: async (req) => {
+        seen.push(req);
+        return { kind: 'permission', behavior: 'deny' };
+      },
+    });
+
+    await emitPermission(transport, {
+      toolCallId: 't1',
+      kind: 'think',
+      title: 'Think',
+      rawInput: {},
+    });
+    expect(classifierUnavailable).toHaveBeenCalledWith({
+      sessionId: 'biz-session-perm',
+      agentKind: 'cursor',
+      status: 500,
+    });
+    expect(seen).toHaveLength(1);
+  });
+
+  it('classifier timeout → Ask path + unavailable hook with 408', async () => {
+    vi.useFakeTimers();
+    const transport = new FakeTransport();
+    const classifierUnavailable = vi.fn();
+    const seen: InteractionRequest[] = [];
+    try {
+      await bootCursorSession({
+        transport,
+        permissionMode: 'auto',
+        classifyAutoPermission: () => new Promise(() => {}),
+        onAutoPermissionClassifierUnavailable: classifierUnavailable,
+        interactionResolver: async (req) => {
+          seen.push(req);
+          return { kind: 'permission', behavior: 'deny' };
+        },
+      });
+
+      const pending = emitPermission(transport, {
+        toolCallId: 't-timeout',
+        kind: 'read',
+        title: 'Read',
+        rawInput: { path: 'src/a.ts' },
+      });
+      await vi.advanceTimersByTimeAsync(8_000);
+      await pending;
+      expect(classifierUnavailable).toHaveBeenCalledWith({
+        sessionId: 'biz-session-perm',
+        agentKind: 'cursor',
+        status: 408,
+      });
+      expect(seen).toHaveLength(1);
+    } finally {
+      vi.useRealTimers();
     }
   });
 });

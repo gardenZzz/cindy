@@ -16,19 +16,108 @@ import type {
   RequestPermissionParams,
   RequestPermissionResult,
   ToolCallUpdate,
-  ToolKind,
 } from './protocol.js';
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
 }
 
-/** Auto 档客户端分类器：这些 kind 静默放行，其余询问。 */
+/**
+ * Auto 档**候选** kind：仅这些 kind 有资格进入静默放行评估。
+ * 最终是否放行还必须看 tool 名与完整 input（尤其 path）——见
+ * {@link classifyAcpAutoPermission}。绝不能只凭 kind 放行。
+ */
 export const ACP_AUTO_ALLOW_KINDS: ReadonlySet<string> = new Set([
   'read',
   'search',
   'think',
 ]);
+
+/** Auto 分类器裁决：allow = 静默放行；ask = 弹权限卡（会话仍可留在 Auto）。 */
+export type AutoPermissionVerdict = 'allow' | 'ask';
+
+export interface AutoPermissionClassifyArgs {
+  toolName: string;
+  input: Record<string, unknown>;
+  /** ACP toolCall.kind；缺失或不在候选集 → ask。 */
+  kind?: string | null;
+}
+
+const PATH_INPUT_KEYS = [
+  'path',
+  'file_path',
+  'filePath',
+  'target',
+  'target_directory',
+  'targetDirectory',
+  'directory',
+  'dir',
+  'cwd',
+] as const;
+
+const PRIVATE_KEY_BASENAME_RE = /^id_(?:rsa|dsa|ecdsa|ed25519)$/i;
+const SENSITIVE_EXTENSION_RE = /\.(?:pem|key|p12|pfx|jks|keystore|kdbx)$/i;
+const SENSITIVE_DIR_RE = /(?:^|\/|\\)(?:\.ssh|\.aws|\.gnupg|\.kube|\.azure|\.docker)(?:\/|\\|$)/i;
+const SENSITIVE_BASENAME_RE =
+  /(?:^|\/|\\)(?:\.env(?:\..+)?|\.npmrc|\.pypirc|\.netrc|\.git-credentials|credentials(?:\.json)?|service-account\.json)$/i;
+
+/** 从 tool input 收集可能是路径的字符串（含嵌套一层的常见字段）。 */
+function collectPathCandidates(input: Record<string, unknown>): string[] {
+  const out: string[] = [];
+  const push = (v: unknown) => {
+    if (typeof v === 'string' && v.trim()) out.push(v.trim());
+  };
+  for (const key of PATH_INPUT_KEYS) {
+    push(input[key]);
+  }
+  // 常见嵌套：{ file: { path } } / { target_file: '...' }
+  push(input.target_file);
+  push(input.targetFile);
+  if (isRecord(input.file)) {
+    for (const key of PATH_INPUT_KEYS) push(input.file[key]);
+  }
+  return out;
+}
+
+/** 高置信敏感路径：ssh 私钥、凭证目录、常见密钥扩展名等。 */
+export function isSensitiveAutoPermissionPath(pathValue: string): boolean {
+  const normalized = pathValue.replace(/\\/g, '/');
+  const lower = normalized.toLowerCase();
+  const base = lower.includes('/') ? lower.slice(lower.lastIndexOf('/') + 1) : lower;
+  if (PRIVATE_KEY_BASENAME_RE.test(base)) return true;
+  if (SENSITIVE_EXTENSION_RE.test(base)) return true;
+  if (SENSITIVE_DIR_RE.test(normalized)) return true;
+  if (SENSITIVE_BASENAME_RE.test(normalized)) return true;
+  if (/(?:^|\/)(?:secrets?|credentials?)\//i.test(normalized)) return true;
+  return false;
+}
+
+function inputTouchesSensitivePath(input: Record<string, unknown>): boolean {
+  for (const candidate of collectPathCandidates(input)) {
+    if (isSensitiveAutoPermissionPath(candidate)) return true;
+  }
+  return false;
+}
+
+/**
+ * Cindy 侧 Auto 权限分类器（Cursor ACP 用）。
+ *
+ * Claude Auto 走 SDK 远程 security monitor；Codex Auto 走 Guardian。
+ * Cursor 无 vendor 分类器，因此在客户端用 tool 名 + 完整 input 做保守裁决：
+ * 仅 read/search/think 且未触及敏感路径时 allow，其余一律 ask。
+ */
+export function classifyAcpAutoPermission(
+  args: AutoPermissionClassifyArgs,
+): AutoPermissionVerdict {
+  const kind = args.kind;
+  if (typeof kind !== 'string' || !kind || !ACP_AUTO_ALLOW_KINDS.has(kind)) {
+    return 'ask';
+  }
+  if (inputTouchesSensitivePath(args.input)) {
+    return 'ask';
+  }
+  return 'allow';
+}
 
 export function findPermissionOption(
   options: readonly PermissionOption[] | undefined,
@@ -177,9 +266,4 @@ export function toRequestPermissionResult(
 
 export function cancelledPermissionResult(): RequestPermissionResult {
   return { outcome: { outcome: 'cancelled' } };
-}
-
-export function autoClassifierAllowsKind(kind: ToolKind | null | undefined): boolean {
-  if (typeof kind !== 'string' || !kind) return false;
-  return ACP_AUTO_ALLOW_KINDS.has(kind);
 }
