@@ -95,6 +95,7 @@ import {
 import {
   TurnRetryTracker,
   buildBackendUnreachableMessage,
+  type OutboundPathFact,
 } from './retry-escalation.js';
 import { extractNonSecretErrorSignals } from '@cindy/maker-shared/error-redaction';
 import { AppServerHost, type ThreadEventHandlers, type ThreadSubscription } from './app-server/host.js';
@@ -4754,18 +4755,39 @@ export class CodexAgent extends BaseAgent {
                   });
                 });
               }
+              // 出站路径快照只对本地有意义 (远端 daemon 自己出网, 见
+              // buildBackendUnreachableMessage 注释)。必须带 threadId: host 侧靠它
+              // 定位本次请求实际打的上游 (codex 的出口随会话 provider 变), 查不到就
+              // 返回 null 而不是拿「最近一条」凑。读取按 best-effort: 诊断绝不能反过来
+              // 把已经在收口的错误路径搞崩。
+              let outboundPath = null as OutboundPathFact | null;
+              if (!opts.remoteHostId && this.deps.getOutboundPathFact) {
+                try {
+                  outboundPath = this.deps.getOutboundPathFact({
+                    threadId: params.threadId,
+                  }) ?? null;
+                } catch (e) {
+                  log.warn('outbound path fact lookup failed (best-effort)', {
+                    error: e instanceof Error ? e.message : String(e),
+                  });
+                }
+              }
               const message = buildBackendUnreachableMessage({
                 isRemote: Boolean(opts.remoteHostId),
                 remoteHostId: opts.remoteHostId,
                 retryCount: decision.retryCount,
                 elapsedMs: decision.elapsedMs,
                 lastError: rawMessage,
+                outboundPath,
               });
               log.error('codex retry-loop escalated to terminal error (backend unreachable)', {
                 threadId: params.threadId,
                 turnId: params.turnId,
                 retryCount: decision.retryCount,
                 elapsedMs: decision.elapsedMs,
+                // 与用户看到的消息同源;`at` 让排查者判断这条判定有多新
+                // (系统代理判定有 TTL 缓存, 陈旧快照要按陈旧解读)。
+                ...(outboundPath ? { outboundPath } : {}),
               });
               effectiveParams = { ...params, willRetry: false, error: { message } };
               isTerminalError = true;
