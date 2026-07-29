@@ -5,7 +5,11 @@
 import { describe, expect, it } from 'vitest';
 import process from 'node:process';
 
-import { createAcpStdioTransport } from './stdioTransport.js';
+import {
+  createAcpStdioTransport,
+  killWindowsTree,
+  type TaskkillHandle,
+} from './stdioTransport.js';
 
 function processAlive(pid: number): boolean {
   try {
@@ -130,6 +134,73 @@ describe('createAcpStdioTransport orphan cleanup', () => {
     },
     20_000,
   );
+
+  /**
+   * Windows 分支在开发机 (macOS) 与 CI (ubuntu-latest) 上都跑不到，只能注入
+   * spawner 验证。关键是 'exit' 非零那条：Node 的 'error' **只**表示 taskkill
+   * 自身起不来 (ENOENT)，而访问被拒 / 进程表竞态是正常启动后返回非零，只走
+   * 'exit' —— 只听 error 会让 close() 伪成功、ACP 树残留。
+   */
+  describe('killWindowsTree fallback', () => {
+    interface FakeKiller extends TaskkillHandle {
+      fire(event: 'error' | 'exit', code?: number | null): void;
+    }
+
+    function fakeKiller(): FakeKiller {
+      const listeners = new Map<string, Array<(code?: number | null) => void>>();
+      return {
+        on(event: 'error' | 'exit', listener: (code?: number | null) => void): unknown {
+          const bucket = listeners.get(event) ?? [];
+          bucket.push(listener);
+          listeners.set(event, bucket);
+          return this;
+        },
+        fire(event: 'error' | 'exit', code?: number | null): void {
+          for (const l of listeners.get(event) ?? []) l(code);
+        },
+      };
+    }
+
+    it('falls back to child.kill when taskkill exits non-zero', () => {
+      const killer = fakeKiller();
+      const killed: NodeJS.Signals[] = [];
+      killWindowsTree(1234, 'SIGTERM', (s) => killed.push(s), () => killer);
+
+      expect(killed, 'must not fall back before taskkill settles').toEqual([]);
+      killer.fire('exit', 1);
+      expect(killed, 'non-zero taskkill exit must trigger fallback').toEqual(['SIGTERM']);
+    });
+
+    it('falls back when taskkill itself cannot spawn', () => {
+      const killer = fakeKiller();
+      const killed: NodeJS.Signals[] = [];
+      killWindowsTree(1234, 'SIGKILL', (s) => killed.push(s), () => killer);
+      killer.fire('error');
+      expect(killed).toEqual(['SIGKILL']);
+    });
+
+    it('falls back when the spawner throws synchronously', () => {
+      const killed: NodeJS.Signals[] = [];
+      killWindowsTree(1234, 'SIGTERM', (s) => killed.push(s), () => {
+        throw new Error('EACCES');
+      });
+      expect(killed).toEqual(['SIGTERM']);
+    });
+
+    it('does not fall back when taskkill succeeds, and never falls back twice', () => {
+      const killer = fakeKiller();
+      const killed: NodeJS.Signals[] = [];
+      killWindowsTree(1234, 'SIGTERM', (s) => killed.push(s), () => killer);
+
+      killer.fire('exit', 0);
+      expect(killed, 'exit 0 means the tree is gone').toEqual([]);
+
+      // 幂等：即便再来一次失败事件也只回落一次。
+      killer.fire('error');
+      killer.fire('exit', 1);
+      expect(killed).toEqual(['SIGTERM']);
+    });
+  });
 
   it('close() is idempotent', async () => {
     const transport = createAcpStdioTransport({
