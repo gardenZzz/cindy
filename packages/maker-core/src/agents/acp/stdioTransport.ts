@@ -38,6 +38,58 @@ export interface AcpStdioTransportOptions {
   sigkillWaitMs?: number;
 }
 
+/**
+ * taskkill 子进程里本函数用到的那部分（避免为测试引入 ChildProcess 全量类型）。
+ * 单签名而非按事件重载：真实 ChildProcess 的 `on(event: string, ...)` 重载可赋值
+ * 给它，而假对象也能用一个实现同时满足——重载会让后者无法通过类型检查。
+ * `code` 可选是为了让 'error' 监听器也匹配同一签名。
+ */
+export interface TaskkillHandle {
+  on(event: 'error' | 'exit', listener: (code?: number | null) => void): unknown;
+}
+
+export type TaskkillSpawner = (pid: number) => TaskkillHandle;
+
+const defaultTaskkillSpawner: TaskkillSpawner = (pid) =>
+  spawn('taskkill', ['/pid', String(pid), '/T', '/F'], {
+    windowsHide: true,
+    stdio: 'ignore',
+  });
+
+/**
+ * Windows 树杀：一次 `taskkill /PID <pid> /T /F`，失败回落单进程 kill。
+ *
+ * 两条失败路径都必须接：`'error'` **只**在 taskkill 自身起不来时触发 (ENOENT 等)，
+ * 而真正常见的失败——正常启动但因访问被拒 / 进程表竞态返回非零——只走 `'exit'`
+ * (实测 exit 7 时 error 不触发)。只听 error 会让 close() 伪成功、ACP 树残留。
+ *
+ * 抽成独立导出是为了能在非 Windows 机器上注入 spawner 验证回落：该分支在开发机
+ * (macOS) 与 CI (ubuntu-latest) 上都永远跑不到，不给缝就等于没有测试。
+ */
+export function killWindowsTree(
+  pid: number,
+  signal: NodeJS.Signals,
+  killDirect: (signal: NodeJS.Signals) => void,
+  spawnTaskkill: TaskkillSpawner = defaultTaskkillSpawner,
+): void {
+  let fellBack = false;
+  const fallback = (): void => {
+    if (fellBack) return;
+    fellBack = true;
+    killDirect(signal);
+  };
+  try {
+    const killer = spawnTaskkill(pid);
+    killer.on('error', fallback);
+    killer.on('exit', (code) => {
+      if (code !== 0) fallback();
+    });
+  } catch {
+    // spawn 同步抛。
+    fallback();
+  }
+}
+
 function waitForChildExit(
   child: ChildProcessWithoutNullStreams,
   timeoutMs: number,
@@ -89,9 +141,10 @@ export function createAcpStdioTransport(opts: AcpStdioTransportOptions): Transpo
    * 只 kill 直系子进程是不够的: `cursor-agent acp` 会 fork 出 worker-server,
    * 父进程死后它挂到 PPID=1，实测存活 3–5 分钟 (RSS ~190MB) 才自行退出。
    * Windows 没有 POSIX 进程组语义、负 pid kill 不可用，改用 `taskkill /T /F`
-   * 树杀 (与 desktop scheduler-host/proc-util 同款结论)。注意那边必须**第一次就用**
-   * taskkill: Windows 上 `child.kill()` 会立刻干掉父进程，树随即失去锚点，
-   * 再想按父 pid 找后代就晚了，所以 Windows 分支没有「先温和后强制」两段。
+   * 树杀 (与 desktop scheduler-host/proc-util 同款结论，实现见 killWindowsTree)。
+   * 注意那边必须**第一次就用** taskkill: Windows 上 `child.kill()` 会立刻干掉
+   * 父进程，树随即失去锚点，再想按父 pid 找后代就晚了，所以 Windows 分支没有
+   * 「先温和后强制」两段。
    */
   const useProcessGroup = process.platform !== 'win32';
 
@@ -113,18 +166,10 @@ export function createAcpStdioTransport(opts: AcpStdioTransportOptions): Transpo
         return;
       } catch { /* 组已消失，退回单进程 */ }
     } else {
-      // ⚠️ 未在 Windows 上实测过（开发机为 macOS）。taskkill 拉不起来时
-      // ('error' 事件) 回落单进程 kill，至少不比修复前差。
-      try {
-        const killer = spawn('taskkill', ['/pid', String(pid), '/T', '/F'], {
-          windowsHide: true,
-          stdio: 'ignore',
-        });
-        killer.on('error', () => {
-          try { child.kill(signal); } catch { /* swallow */ }
-        });
-        return;
-      } catch { /* spawn 同步抛，回落单进程 */ }
+      killWindowsTree(pid, signal, (s) => {
+        try { child.kill(s); } catch { /* swallow */ }
+      });
+      return;
     }
     try { child.kill(signal); } catch { /* swallow */ }
   };
