@@ -1,4 +1,5 @@
 import { contextBridge, ipcRenderer, webUtils } from 'electron';
+import type { MobileCodexRateLimitsResult } from '@cindy/maker-shared/device-link-contract';
 import {
   AGENT_ISLAND_GET_DISPLAY_OPTIONS_CHANNEL,
   AGENT_ISLAND_PREVIEW_SOUND_CHANNEL,
@@ -296,7 +297,6 @@ const fanOutComputerPermissionGuideStatusChanged = createIpcFanOut(
 const fanOutAppUpdateProgress = createIpcFanOut('app-update-progress');
 const fanOutAuthStateChange = createIpcFanOut('auth:state-change');
 const fanOutAuthSessionExpired = createIpcFanOut('auth:session-expired');
-const fanOutTapdbDailyActive = createIpcFanOut('tapdb:daily-active');
 // 使用统计(TapDB)的同意状态 / 开关变化;renderer 据此即时 init 或 opt-out
 const fanOutAnalyticsSettingsChange = createIpcFanOut(ANALYTICS_SETTINGS_CHANGE_CHANNEL);
 const fanOutFullscreenChange = createIpcFanOut('fullscreen-change');
@@ -374,6 +374,8 @@ const fanOutFeishuBotConflict = createIpcFanOut('feishuBot:conflict');
 const fanOutFeishuBotRegistrationStatus = createIpcFanOut('feishuBot:registration-status');
 // Discord Bot：本机凭证模式；这里只暴露 @cindy/im DiscordIM 的 transport 状态。
 const fanOutDiscordBotStatusChange = createIpcFanOut('discordBot:status-change');
+// Personal WeChat: main owns auth/polling and broadcasts a credential-free state snapshot.
+const fanOutWechatBotStateChange = createIpcFanOut('wechatBot:state-changed');
 const fanOutVoiceInputEvent = createIpcFanOut('voice-input:event');
 const fanOutVoiceInputGlobalShortcutTrigger = createIpcFanOut('voice-input:global-shortcut-trigger');
 const fanOutVoiceInputGlobalOverlayCommand = createIpcFanOut('voice-input:global-overlay-command');
@@ -1345,16 +1347,6 @@ contextBridge.exposeInMainWorld('electronAPI', {
   }): Promise<{ ok: true }> => ipcRenderer.invoke('profile:update', params),
   onAuthStateChange: fanOutAuthStateChange,
   onAuthSessionExpired: fanOutAuthSessionExpired,
-  onTapdbDailyActive: (callback: (payload: { date: string }) => void): (() => void) =>
-    fanOutTapdbDailyActive((payload) => {
-      if (
-        payload &&
-        typeof payload === 'object' &&
-        typeof (payload as { date?: unknown }).date === 'string'
-      ) {
-        callback(payload as { date: string });
-      }
-    }),
 
   // ── 使用统计(TapDB)同意闸 ──
   // 真相在 main(<userData>/analytics-settings.json);renderer 只读结论、只提交
@@ -1366,7 +1358,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
   /** 恢复默认:删掉开关 override,同意事实保留。 */
   resetAnalyticsEnabled: (): Promise<AnalyticsSettingsPayload> =>
     ipcRenderer.invoke('analytics:settings-reset-enabled'),
-  /** 登录页协议门放行时调用一次(含游客);幂等。 */
+  /** 登录页协议门放行时调用一次(个人账号登录链路;SSO 与跳过登录豁免不调用);幂等。 */
   acceptPrivacyConsent: (): Promise<AnalyticsSettingsPayload> =>
     ipcRenderer.invoke('analytics:consent-accept'),
   onAnalyticsSettingsChange: (
@@ -1472,6 +1464,47 @@ contextBridge.exposeInMainWorld('electronAPI', {
     checkSessionAuth: (): Promise<DiscordBotSessionAuthCheckWire> =>
       ipcRenderer.invoke('discordBot:check-session-auth'),
     onStatusChange: fanOutDiscordBotStatusChange,
+  },
+
+  // ── Personal WeChat (Settings → IM Bot → Personal) ──
+  // Renderer receives state only. Authorization URLs and credentials never
+  // cross preload; main opens the Tencent page in the system browser.
+  wechatBot: {
+    getState: (): Promise<{
+      phase:
+        | 'disconnected'
+        | 'authorizing'
+        | 'waiting_confirmation'
+        | 'connected'
+        | 'reconnecting'
+        | 'needs_reauth'
+        | 'disabled_by_policy'
+        | 'error';
+      bound: boolean;
+      connectedAt?: number;
+      lastInboundAt?: number;
+      queuedTasks: number;
+      errorCode?: string;
+    }> => ipcRenderer.invoke('wechatBot:get-state'),
+    authorize: (): Promise<{ started: true }> => ipcRenderer.invoke('wechatBot:authorize'),
+    cancelAuthorization: (): Promise<{ ok: true }> =>
+      ipcRenderer.invoke('wechatBot:cancel-authorization'),
+    unbind: (): Promise<{ ok: true }> => ipcRenderer.invoke('wechatBot:unbind'),
+    getChannelSettings: (): Promise<{
+      version: 1;
+      workingDir: string | null;
+      workingDirAvailable: boolean;
+    }> => ipcRenderer.invoke('wechatBot:get-channel-settings'),
+    chooseWorkingDirectory: (): Promise<{
+      canceled: boolean;
+      state: { version: 1; workingDir: string | null; workingDirAvailable: boolean };
+    }> => ipcRenderer.invoke('wechatBot:choose-working-directory'),
+    resetWorkingDirectory: (): Promise<{
+      version: 1;
+      workingDir: string | null;
+      workingDirAvailable: boolean;
+    }> => ipcRenderer.invoke('wechatBot:reset-working-directory'),
+    onStateChange: fanOutWechatBotStateChange,
   },
 
   // Renderer → main 的 "用户已登录 + localDb 已就绪" 信号。LocalDbGate 在
@@ -2590,6 +2623,19 @@ contextBridge.exposeInMainWorld('electronAPI', {
     truncated?: boolean;
   }> => ipcRenderer.invoke('read-file-for-attachment', params),
 
+  /**
+   * Read a local file's raw bytes (Uint8Array) under the same path policy /
+   * size cap as readFileForAttachment, gated to the trusted app renderer. For
+   * in-app renderers that want bytes directly (PDF preview → pdf.js
+   * getDocument({ data })) without a base64 round-trip. Rejects with an
+   * IpcError (PERMISSION_DENIED / INVALID_PARAMS / NOT_FOUND /
+   * PRECONDITION_FAILED / INTERNAL) on failure — no partial/fallback payload.
+   */
+  readFileBytes: (params: {
+    filePath: string;
+    maxSize?: number;
+  }): Promise<{ bytes: Uint8Array; size: number }> => ipcRenderer.invoke('read-file-bytes', params),
+
   // File header peek IPC (F-FI-8 fallback inference)
   peekFileHeader: (params: {
     filePath: string;
@@ -2904,6 +2950,10 @@ contextBridge.exposeInMainWorld('electronAPI', {
         statusChangedAt: number;
         /** Phase D — 启动时是否自动连接 (本地 prefs, 不写入 ~/.ssh/config). */
         autoConnect: boolean;
+        /** Agent 流量经 SSH 隧道走本地 Proxy (本地 prefs); 未开启 → null. */
+        agentProxy: { enabled: boolean; localHost: string; localPort: number } | null;
+        /** 隧道实时状态 (内存态); 无记录 → null. */
+        agentProxyTunnel: { active: boolean; remotePort?: number; lastError?: string } | null;
       }>;
     }> => ipcRenderer.invoke('maker:remote-ssh:list'),
     reloadConfig: (): Promise<{ hosts: unknown[] }> =>
@@ -2915,6 +2965,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
       user: string;
       authMethod?: 'agent' | 'key';
       identityFile?: string;
+      agentProxy?: { enabled: boolean; localHost: string; localPort: number } | null;
     }): Promise<{ host: unknown }> => ipcRenderer.invoke('maker:remote-ssh:add', host),
     update: (host: {
       id: string;
@@ -2923,6 +2974,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
       user: string;
       authMethod?: 'agent' | 'key';
       identityFile?: string;
+      agentProxy?: { enabled: boolean; localHost: string; localPort: number } | null;
     }): Promise<{ host: unknown }> => ipcRenderer.invoke('maker:remote-ssh:update', host),
     remove: (id: string): Promise<{ ok: true }> =>
       ipcRenderer.invoke('maker:remote-ssh:remove', { id }),
@@ -3637,6 +3689,16 @@ contextBridge.exposeInMainWorld('electronAPI', {
     // 模型供应商目录（只读）—— 内置目录元数据 + 各供应商实时连接状态。
     listProviders: (): Promise<{ providers: import('@cindy/model-providers').ProviderView[] }> =>
       ipcRenderer.invoke('maker:provider:list'),
+    /** Refresh one built-in provider through its existing main-process discovery source. */
+    refreshBuiltinProviderModels: (
+      providerId: import('../shared/providerModelRefresh').BuiltinRefreshableProviderId,
+    ): Promise<import('../shared/providerModelRefresh').ProviderModelRefreshResult> =>
+      ipcRenderer.invoke('maker:provider:models-refresh', providerId),
+    /** Hint Main to silently refresh connected built-in providers when stale. */
+    requestProviderModelsAutoRefresh: (
+      trigger: import('../shared/providerModelRefresh').ProviderModelAutoRefreshRendererTrigger,
+    ): Promise<import('../shared/providerModelRefresh').ProviderModelAutoRefreshResult> =>
+      ipcRenderer.invoke('maker:provider:models-auto-refresh', trigger),
 
     // 自定义供应商配置 CRUD（配置与 runtime 密钥均由 main 原子排队）。
     createCustomProvider: (
@@ -3780,6 +3842,19 @@ contextBridge.exposeInMainWorld('electronAPI', {
      */
     syncModelVisibility: (map: Record<string, boolean>): Promise<void> =>
       ipcRenderer.invoke('maker:model-visibility:sync', map),
+    /**
+     * 「模型 / 供应商停用」override 写入(main 侧持久化真源 model-disable-store)。
+     * 成功后 main 广播 PROVIDER_CHANGED,renderer 经 useProviders 快照刷新拿到
+     * 烘焙了 suspended / model.disabled 标志的新视图。
+     */
+    setModelDisable: (
+      input:
+        | { kind: 'model'; providerId: string; modelIds: string[]; disabled: boolean }
+        | { kind: 'provider'; providerId: string; disabled: boolean }
+        // reset = 恢复默认:删除该供应商整组停用 override(含陈旧条目),遵循
+        // configuration-and-overrides.md §4 的「删 override 跟随默认」语义。
+        | { kind: 'reset'; providerId: string },
+    ): Promise<{ ok: true }> => ipcRenderer.invoke('maker:model-disable:set', input),
 
     // 「在新窗口打开」会话多开 —— 新建一个完整窗口定位到该 session。
     openSessionInNewWindow: (sessionId: string): Promise<void> =>
@@ -4571,6 +4646,9 @@ contextBridge.exposeInMainWorld('electronAPI', {
         ipcRenderer.invoke('maker:usage:today', agentKind),
       getAccount: (agentKind: 'claude-code' | 'codex'): Promise<unknown> =>
         ipcRenderer.invoke('maker:usage:account', agentKind),
+      /** Codex app-server authoritative windows and banked reset-credit metadata. */
+      getCodexRateLimits: (): Promise<MobileCodexRateLimitsResult> =>
+        ipcRenderer.invoke('maker:usage:codex-rate-limits'),
       /** Claude 订阅账号余量 (5h/周/分模型窗口, cached-first, main 侧按需后台刷新)。 */
       getClaudeSubscription: (): Promise<unknown | null> =>
         ipcRenderer.invoke('maker:usage:claude-subscription'),
