@@ -3786,7 +3786,8 @@ export class CodexAgent extends BaseAgent {
      * 分片计时,片尾核对真实耗时。不能用一个 30 分钟的长定时器直接判定 —— Electron 被
      * 系统挂起(合盖睡眠)期间没有任何事件,定时器一旦在唤醒后到期就立刻开火,一次午休
      * 就能让看门狗中断一条完全健康的 turn(review #944 第十二轮 P1,与 Session 层的
-     * armTurnStallSlice、scheduler 的 absorbSuspendGap 同源)。
+     * armTurnStallSlice、claude-code 的 armUpstreamResponseIdleSlice、scheduler 的
+     * absorbSuspendGap 同源)。
      */
     function armUpstreamIdleSlice(): void {
       const slice = Math.min(upstreamIdleRemainingMs, CODEX_UPSTREAM_IDLE_SLICE_MS);
