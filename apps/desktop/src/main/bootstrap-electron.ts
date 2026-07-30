@@ -213,7 +213,11 @@ import {
 } from './device-link/remoteMediaProtocol';
 import { localFileSchemePrivilege, registerLocalFileProtocolHandler } from './localFileProtocol';
 import { audioFileSchemePrivilege, registerAudioFileProtocolHandler } from './audioFileProtocol';
-import { buildSystemPathBlocklist, isPathAllowedAgainst } from './filePathPolicy';
+import {
+  buildSystemPathBlocklist,
+  getSensitiveMediaBlocklist,
+  isPathAllowedAgainst,
+} from './filePathPolicy';
 import { readFileThumbnail } from './fileThumbnail';
 import { resolveShellOpenPathTarget } from './shellOpenPath';
 import { cindyGhostSchemePrivilege } from './cindy-brain/runtime/electronSandboxAdapter';
@@ -265,6 +269,7 @@ import {
   markAppContentWindow,
 } from './windowFocusClassifier.js';
 import { assertTrustedAppRendererEvent } from './security/trustedAppRenderer.js';
+import { readFileBytesForPreview } from './fileReadBytes.js';
 import { initHeartbeatService } from './heartbeatService';
 import { initAnalyticsSettingsService, noteAuthColdStartState } from './analyticsSettingsService';
 import { WindowManualDragController } from './windowManualDrag';
@@ -521,13 +526,14 @@ import { registerRemoteCmdIpc } from './commands/remoteCmdIpc.js';
 import {
   resolvePreferredSystemLocale,
   resolveSystemLocale,
-  type SupportedLocale,
 } from '../shared/locale.js';
 import {
   IM_DEFAULT_SETTINGS,
   isImDefaultAgentKind,
   isImDefaultEffort,
+  isImDefaultPermissionMode,
   isImDefaultSettingsChannel,
+  isWechatUnsupportedPermissionMode,
   type ImDefaultAgentKind,
   type ImDefaultAgentSettings,
   type ImDefaultSettingsChannel,
@@ -1886,7 +1892,7 @@ app.on('open-url', (event, url) => {
   handleIncomingDeepLink(url, 'open-url');
 });
 
-// macOS Finder "打开方式 → XDMaker" 入口:声明 CFBundleDocumentTypes 接受
+// macOS Finder "打开方式 → Cindy" 入口:声明 CFBundleDocumentTypes 接受
 // public.folder 后,Finder 把目录路径通过 open-file 事件推过来 (冷启动 / 已运行
 // 都走此路径)。事件也可能被文件触发:.cindy 意识走双击装入,其余文件
 // 静默忽略。
@@ -2004,7 +2010,7 @@ if (
   }
 }
 
-// 冷启动 argv 扫描 — Windows 上首次点链接 / 右键 "通过 XDMaker 打开" 启动 app
+// 冷启动 argv 扫描 — Windows 上首次点链接 / 右键 "通过 Cindy 打开" 启动 app
 // 时, URL 或 --open-folder 在 process.argv 末尾。macOS deep link 走 open-url
 // (已在上面 attach), 这里扫到也不会重复 dispatch; --open-folder 是 Windows-only
 // 入口 (mac 走 LSItemContentTypes / open-file 事件), 也不会在 mac argv 出现。
@@ -2252,14 +2258,14 @@ const createWindow = () => {
   // 那之后 Renderer 的 visibilityState 就不再反映真实可见性,细节见模块头注释。
   installWindowHiddenBroadcast(mainWindow);
 
-  // App badge: 用户把任意 XDMaker 窗口点回前台(Dock 点击 / taskbar / alt-tab / 点窗口)即视为
+  // App badge: 用户把任意 Cindy 窗口点回前台(Dock 点击 / taskbar / alt-tab / 点窗口)即视为
   // 「已查看」,直接清空整个 dock 红点。badge 是 app 级状态,不该依赖当前停在哪个
   // 路由 / 开没开会话 —— 之前清除逻辑寄生在 cc-agent sidebar 且只清 activeSessionId,
   // 离开会话页(设置 / skillhub)或红点属于后台会话时就清不掉。clearAllSessionAttention
   // 只清 app 级 badge,不向 Agent Island 转发逐 session 已读;in-app 的会话小圆点仍由
   // renderer 自行管理(点进会话才消),随后通过 clearSessionAttention 显式同步。
   // Agent Island smart suppression 同样按 app 级焦点判断:主窗 blur 到「在新窗口打开」
-  // 的会话副窗时,用户仍在 XDMaker 内,不能把 appFocused 置 false。
+  // 的会话副窗时,用户仍在 Cindy 内,不能把 appFocused 置 false。
 
   // Find-in-page: forward Chromium's match results back to the renderer overlay.
   // The renderer drives findInPage / stopFindInPage via IPC (see registerIpcHandlers).
@@ -2533,7 +2539,11 @@ const registerIpcHandlers = () => {
     MAKER_IPC_INVOKE.IM_DEFAULT_SETTINGS_SET,
     async (_e, patch: unknown, rawChannel: unknown) => {
       const channel = parseImDefaultSettingsChannel(rawChannel);
-      writeImDefaultSettingsPatch(parseImDefaultSettingsPatch(patch), channel);
+      const parsedPatch = parseImDefaultSettingsPatch(patch);
+      if (channel === 'wechat' && isWechatUnsupportedPermissionMode(parsedPatch.permissionMode)) {
+        throwIpcError('INVALID_PARAMS', 'personal WeChat does not support this permission mode');
+      }
+      writeImDefaultSettingsPatch(parsedPatch, channel);
       return imDefaultSettingsWire(channel);
     },
   );
@@ -4299,6 +4309,60 @@ const registerIpcHandlers = () => {
     },
   );
 
+  // Read a local file's raw bytes for in-app rendering (currently PDF preview).
+  // Returns a Uint8Array over structured clone instead of base64: pdf.js
+  // getDocument({ data }) wants bytes, and skipping base64 avoids a large
+  // transient string plus a main-thread atob/charCodeAt decode loop in the
+  // renderer. Same 30MB cap as read-file-for-attachment.
+  //
+  // Path policy is the SENSITIVE-MEDIA blocklist, not the system one used by the
+  // attachment IPCs: this channel replaces the xdt-file:// protocol as the byte
+  // source for PDF preview, and that protocol denies credential / browser-profile
+  // dirs (localFileProtocol.ts). Previewing files out of an agent-writable
+  // workdir means the click authorizes "show this PDF", not "read wherever this
+  // symlink points", so the stricter list is the right one — a workdir
+  // `leak.pdf -> ~/.ssh/id_rsa` must not reach the renderer here when the
+  // protocol it replaced would have refused it. Sibling ImagePreview still goes
+  // through xdt-file://, so this keeps one policy across the file browser.
+  ipcMain.handle(
+    'read-file-bytes',
+    async (
+      event: Electron.IpcMainInvokeEvent,
+      params: { filePath: string; maxSize?: number },
+    ): Promise<{ bytes: Uint8Array; size: number }> => {
+      // Reject any caller that is not the trusted main app renderer — an
+      // auxiliary window / child frame / webview bearing the shared preload
+      // must not be able to pull raw file bytes. Mirrors the shell:open-path
+      // policy (assertTrusted + isPathAllowed) for a path-taking privileged IPC.
+      assertTrustedAppRendererEvent(event);
+      // Validation + policy + regular-file + size-cap + exact-copy live in the
+      // injectable core (fileReadBytes.ts) so they are unit-tested without
+      // Electron; failures throw a sanitized IpcError that rejects the invoke().
+      // O_NOFOLLOW on the final component: the core opens the realpath'd target,
+      // whose last segment is a real file — so a legit open succeeds, but if the
+      // final component was swapped to a symlink in the realpath→open race it
+      // fails (ELOOP) instead of following into a denied file. Falls back to 0
+      // where the platform lacks the flag (Windows), matching saveChatAttachment.
+      const noFollow =
+        typeof fs.constants.O_NOFOLLOW === 'number' ? fs.constants.O_NOFOLLOW : 0;
+      return readFileBytesForPreview(params, {
+        isPathAllowed: (p) => isPathAllowedAgainst(p, getSensitiveMediaBlocklist()),
+        realpath: (p) => fs.promises.realpath(p),
+        // bigint stats: dev/ino identity must not be rounded (see FileIdentityStat).
+        stat: (p) => fs.promises.stat(p, { bigint: true }),
+        open: async (p) => {
+          const handle = await fs.promises.open(p, fs.constants.O_RDONLY | noFollow);
+          return {
+            stat: () => handle.stat({ bigint: true }),
+            read: (buffer, offset, length, position) =>
+              handle.read(buffer, offset, length, position),
+            close: () => handle.close(),
+          };
+        },
+      });
+    },
+  );
+
   // ── File header peek IPC (F-FI-8 fallback inference) ──
   // Read at most `bytes` (default 8192, hard-cap 64KB) from the head of a file
   // for the renderer to run magic-bytes + UTF-8 sniffing on. Independent from
@@ -5878,6 +5942,12 @@ function parseImDefaultSettingsPatch(raw: unknown): ImDefaultSettingsPatch {
       throwIpcError('INVALID_PARAMS', 'im default agentKind invalid');
     }
     patch.agentKind = input.agentKind;
+  }
+  if ('permissionMode' in input) {
+    if (!isImDefaultPermissionMode(input.permissionMode)) {
+      throwIpcError('INVALID_PARAMS', 'im default permissionMode invalid');
+    }
+    patch.permissionMode = input.permissionMode;
   }
   if ('agents' in input) {
     if (!input.agents || typeof input.agents !== 'object' || Array.isArray(input.agents)) {

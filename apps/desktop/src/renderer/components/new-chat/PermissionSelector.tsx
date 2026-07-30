@@ -47,6 +47,8 @@ interface PermissionSelectorProps {
    * VendorSegmentedSwitcher.ariaLabel 同一动机;单实例的 composer 不传,行为不变。
    */
   ariaContext?: string;
+  /** Disable individual modes without forking the shared permission picker. */
+  disabledModes?: Partial<Record<PermissionMode, string>>;
 }
 
 /**
@@ -105,6 +107,7 @@ export function PermissionSelector({
   visualVariant = 'default',
   triggerVariant = 'chip',
   ariaContext,
+  disabledModes,
 }: PermissionSelectorProps) {
   const { t } = useTranslation();
   const [open, setOpen] = useState(false);
@@ -293,10 +296,11 @@ export function PermissionSelector({
           const selectedTone = isSelected ? getModeTone(option.id) : null;
           const label = labelOf(option, option.id);
           const description = descriptionOf(option, option.id);
+          const disabledReason = disabledModes?.[option.id];
           return (
             <Tip
               key={option.id}
-              text={description}
+              text={disabledReason ?? description}
               side="right"
               contentClassName="max-w-[280px] whitespace-normal break-words text-left"
             >
@@ -306,7 +310,10 @@ export function PermissionSelector({
                 // MorphPopover 打开后优先聚焦当前选中项；否则会聚焦列表首项，
                 // 触发“默认权限”的 focus tooltip，造成介绍与当前权限不一致。
                 data-morph-autofocus={isSelected ? '' : undefined}
+                aria-disabled={Boolean(disabledReason)}
+                disabled={Boolean(disabledReason) && !isSelected}
                 onClick={() => {
+                  if (disabledReason) return;
                   onPermissionModeChange(option.id);
                   setOpen(false);
                 }}
@@ -324,6 +331,7 @@ export function PermissionSelector({
                   selectedTone === 'auto' && 'text-[var(--perm-auto-selected-text)]',
                   selectedTone === 'bypassPermissions' &&
                     'text-[var(--perm-bypass-selected-text)]',
+                  disabledReason && 'cursor-not-allowed opacity-45 hover:bg-transparent',
                 )}
               >
                 <Icon
