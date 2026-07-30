@@ -582,11 +582,11 @@
       "fallbackName": "User",
       "avatarAlt": "{{name}} avatar",
       "local": {
-        "exitFailed": "Failed to exit local mode, please try again",
-        "name": "Local mode",
+        "exitFailed": "Failed to exit the not-signed-in state, please try again",
+        "name": "Not signed in",
         "description": "Data stays on this device without Cindy account services",
         "signIn": "Sign in to Cindy",
-        "exit": "Exit local mode"
+        "exit": "Exit the not-signed-in state"
       },
       "copyUserId": {
         "action": "Copy user ID",
@@ -756,7 +756,7 @@
       "serviceSource": {
         "label": "Voice service",
         "hint": "Uses the Cindy voice service by default. You can instead connect a realtime ASR service with separate voice credentials.",
-        "localHint": "Local mode does not use Cindy account services; connect a realtime ASR service with separate voice credentials.",
+        "localHint": "Cindy account services are unavailable while not signed in; connect a realtime ASR service with separate voice credentials.",
         "ariaLabel": "Voice service source",
         "options": {
           "cindy": "Cindy official service",
@@ -3137,7 +3137,7 @@
     "ssoRequired": "This organization requires SSO sign-in",
     "ssoEntry": "Sign in with enterprise SSO",
     "localModeEntry": "Skip Sign-In",
-    "localModeOpening": "Opening local mode…",
+    "localModeOpening": "Skipping sign-in…",
     "localModeDescription": "No Cindy account required. Data stays on this device; cloud models, cross-device access, and marketplace services are unavailable.",
     "consentStatement": "I have read and agree to the <terms>Terms of Service</terms> and <privacy>Privacy Policy</privacy>",
     "consentDialog": {

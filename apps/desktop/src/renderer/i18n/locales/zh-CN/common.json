@@ -582,11 +582,11 @@
       "fallbackName": "用户",
       "avatarAlt": "{{name}} 的头像",
       "local": {
-        "exitFailed": "退出本地模式失败，请重试",
-        "name": "本地模式",
+        "exitFailed": "退出未登录状态失败，请重试",
+        "name": "未登录",
         "description": "数据仅保存在本机，不使用 Cindy 账号服务",
         "signIn": "登录 Cindy",
-        "exit": "退出本地模式"
+        "exit": "退出未登录状态"
       },
       "copyUserId": {
         "action": "复制用户 ID",
@@ -756,7 +756,7 @@
       "serviceSource": {
         "label": "语音服务",
         "hint": "默认使用 Cindy 语音服务；也可以连接支持实时 ASR 的服务，并使用独立的语音凭证。",
-        "localHint": "本地模式不使用 Cindy 账号服务；请连接支持实时 ASR 的服务并配置独立语音凭证。",
+        "localHint": "未登录状态不使用 Cindy 账号服务；请连接支持实时 ASR 的服务并配置独立语音凭证。",
         "ariaLabel": "语音服务来源选择",
         "options": {
           "cindy": "Cindy 官方服务",
@@ -3136,7 +3136,7 @@
     "ssoRequired": "该企业要求通过 SSO 登录",
     "ssoEntry": "使用企业 SSO 登录",
     "localModeEntry": "跳过登录",
-    "localModeOpening": "正在打开本地模式…",
+    "localModeOpening": "正在跳过登录…",
     "localModeDescription": "无需 Cindy 账号，数据保存在本机。云模型、跨设备与市场服务不可用。",
     "consentStatement": "我已阅读并同意 <terms>服务条款</terms> 和 <privacy>隐私协议</privacy>",
     "consentDialog": {

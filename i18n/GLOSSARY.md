@@ -156,6 +156,10 @@ OAuth 2.0 Device Authorization Grant 中由用户在另一设备验证页输入�
 
 灵动岛角色皮肤名(设置页「图标皮肤」列表)。角色专名,四语统一保留拉丁原词,不做音译(避免「艾莉卡 / エリカ / 에리카」多套写法)。
 
+### Not signed in
+
+跳过登录后应用内的账号状态名（侧边栏账号胶囊、设置页资料卡、语音服务提示，以及 main 侧不走 locale 的 model-visible 文案——已知 mcp-integrations/ghost.ts 的 GHOST_NOT_FOUND tool result，它会被模型读到并可能回显进对话，#907 review 补上）。**约束范围不限于 locale JSON**：guard 只扫 locale 文件，这类硬编码文案要人工找（见 engineering-conventions §5.1「Slack / IM 侧的文案不在任何 locale 文件里」同类问题）。2026-07-29 产品口径：面向用户只说「未登录」，不再叫「本地模式」——后者听起来像另一种服务端连接方式，实际只是没有登录 Cindy 账号。「本地」仅用于描述数据落在本机（如资料卡副文案「数据仅保存在本机」），不作为状态名。代码内部标识（AuthState mode='local'、authEnterLocal IPC、data owner）不受本条约束，仍用 local。en 侧统一走 not signed in 一种说法（含 settings.userProfile.local 的 exit / exitFailed 两条当前无引用的文案：the not-signed-in state），不与 unauthenticated 混用——PR #907 review 指出过同一状态两种英文说法会让日后启用这些文案时 UI 自相矛盾。status 仍为 proposed：Not signed in 作为状态名尚未与设计侧正式过一遍。
+
 ### OpenClaw
 
 腾讯授权页可能展示的外部产品名称，客户端仅按原品牌名展示；先登记为 proposed，待产品术语评审后再决定是否固化。
@@ -179,6 +183,10 @@ OAuth 2.0 Device Authorization Grant 中由用户在另一设备验证页输入�
 dev 版登录页区域徽标上的标签值（DESIGN.md §16.3），四语同值、不翻译，理由同 region-code-cn。与 CN 不同的是 dev 还是个普通技术词：豁免的两条文案里“Always on in dev mode.”“dev builds may be authorized…”“dev 模式下始终开启”指的是开发模式而非本区域标签，小写本就正确（四语同 key 一并覆盖）。用 exempt 精确豁免这两条、而不是整条关掉 checkCase，是为了保住徽标值本身的大小写约束——这正是本条存在的意义。2026-07-28 起同一代号也用于 submit_github_issue 的提交确认卡片与 issue 正文（`issueAgent.confirm.regionCodeDev`）与侧栏用户卡片版本行（`sidebar.user.regionCodeDev`），口径与徽标完全一致：global 不标；「哪些区域要标」的唯一事实源是 `apps/desktop/src/shared/regionCode.ts`。
 
 已确定禁用：`开发版（仅当英文含 Dev）`（zh-CN）、`開発版（仅当英文含 Dev）`（ja）、`개발판（仅当英文含 Dev）`（ko）
+
+### Skip Sign-In
+
+登录页免账号入口的动作名（面板内文字按钮 + 登录服务不可用时的 error 步逃生按钮，#697 起取代原游客圆钮）。与 not-signed-in 成对：动作叫「跳过登录」，进入后的状态叫「未登录」。历史说法「本地模式」「游客登录」已废弃——前者暗示另一种服务端连接方式，后者在本产品里没有对应的 guest 账号概念（代码里 GuestRoute 等内部标识不受本条约束）。先登记 proposed：en 的 Title Case 形态（Skip Sign-In）与本仓其它按钮的句首大写风格不一致，待随登录页文案统一时裁决。
 
 ### Voice dictionary
 
