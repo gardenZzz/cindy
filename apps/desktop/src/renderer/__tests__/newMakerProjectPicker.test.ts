@@ -13,9 +13,10 @@ import { resolve } from 'node:path';
 import { describe, expect, it } from 'vitest';
 
 // 本仓 core.autocrlf=true 时 Windows checkout 出来的源文件是 CRLF,而下面的快照断言
-// 统一按 LF 书写;读入时归一化行尾,让断言不绑定 checkout 端的行尾配置。
+// 统一按 LF 书写;读入时归一化行尾(CRLF 与孤立 CR 都归一为 LF),让断言不绑定
+// checkout 端的行尾配置。
 const readSource = (...segments: string[]): string =>
-  readFileSync(resolve(__dirname, '..', ...segments), 'utf8').replaceAll('\r\n', '\n');
+  readFileSync(resolve(__dirname, '..', ...segments), 'utf8').replace(/\r\n?/g, '\n');
 
 const newMakerDraftRouteSource = readSource('features', 'cc-agent', 'NewMakerDraftRoute.tsx');
 
