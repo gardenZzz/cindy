@@ -234,6 +234,41 @@ describe('createAcpStdioTransport orphan cleanup', () => {
     await expectDeadWithin(pid, 3000, 'child after hung taskkill');
   }, 20_000);
 
+  /**
+   * Windows 上 taskkill 是唯一的树杀原语；它没成功时我们只能杀 leader，孙进程
+   * 可能残留。这种情况**必须**在 close reason 里能看出来——否则调用方收到的
+   * reason 与干净关闭不可区分，等于把「只杀了 leader」报成「整树已收口」。
+   */
+  it('close() reports unconfirmed tree-kill on Windows instead of a clean reason', async () => {
+    const reasons: string[] = [];
+    const transport = createAcpStdioTransport({
+      binaryPath: process.execPath,
+      args: ['-e', 'setInterval(()=>{},1000)'],
+      sigtermGraceMs: 60,
+      sigkillWaitMs: 60,
+      platformOverride: 'win32',
+      // taskkill 正常起来但以非零退出（Windows 上访问被拒 / 进程表竞态的实际形态）。
+      taskkillSpawner: () => ({
+        on: (event: 'error' | 'exit', listener: (code?: number | null) => void) => {
+          if (event === 'exit') setTimeout(() => listener(1), 5);
+          return undefined;
+        },
+      }),
+    });
+    transport.onClose(({ reason }) => reasons.push(reason));
+
+    const pid = transport.getPid?.() as number;
+    await transport.close('teardown');
+
+    expect(reasons.length, 'close must fire exactly one close event').toBe(1);
+    expect(
+      reasons[0],
+      `close reason must flag the unconfirmed tree-kill, got: ${reasons[0]}`,
+    ).toContain('tree-kill unconfirmed');
+
+    try { process.kill(pid, 'SIGKILL'); } catch { /* already gone */ }
+  }, 20_000);
+
   it('close() is idempotent', async () => {
     const transport = createAcpStdioTransport({
       binaryPath: process.execPath,
