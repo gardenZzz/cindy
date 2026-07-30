@@ -413,9 +413,24 @@ export function NewMakerDraftRoute() {
   // Icon-only mode is reserved for the tighter toolbar state, not merely a
   // moderately narrow content rail (for example, when attachments are present).
   const isDraftToolbarNarrow = draftContentWidth < 600;
-  const { createSession } = useCCSessions();
+  const { createSession, error: createSessionError } = useCCSessions();
   const vendorAuthGate = useVendorAuthGate();
   const refreshWorktrees = useRefreshWorktrees();
+
+  /** createSession 失败 toast:远端路由错误按 code 给可操作文案,其余回退通用文案。 */
+  const toastCreateSessionFailed = (err?: unknown) => {
+    const code = (err as { code?: string } | null | undefined)?.code
+      ?? (createSessionError as { code?: string } | null)?.code;
+    const key =
+      code === 'REMOTE_PROVIDER_UPDATING'
+        ? 'ccAgent.draft.remoteProviderUpdating'
+        : code === 'REMOTE_PROVIDER_UNSUPPORTED'
+          ? 'ccAgent.draft.remoteProviderUnsupported'
+          : code === 'REMOTE_NATIVE_OAUTH_UNAVAILABLE'
+            ? 'ccAgent.draft.remoteNativeOauthUnavailable'
+            : 'ccAgent.draft.createSessionFailed';
+    toast.error(t(key));
+  };
 
   // 「添加远程项目」入口:gate = 至少一台 ready SSH 主机 或 一台可控 device-link 设备。
   // 入口渲染在 mode pill 的 FolderPickerPopover 里(Globe 项),点开下面这个弹窗。
@@ -2048,6 +2063,8 @@ export function NewMakerDraftRoute() {
             const created = createResult as { sessionId?: string; workDir?: string } | null;
             const remoteSessionId = created?.sessionId;
             if (!remoteSessionId) {
+              // device-link 创建失败:错误来自被控端 RPC,与 useCCSessions().error 无关,
+              // 不应读 state 里的 REMOTE_* code(copilot review #1035)。
               toast.error(t('ccAgent.draft.createSessionFailed'));
               return;
             }
@@ -2148,7 +2165,7 @@ export function NewMakerDraftRoute() {
               providerId,
             });
             if (!newSession) {
-              toast.error(t('ccAgent.draft.createSessionFailed'));
+              toastCreateSessionFailed();
               return;
             }
             // 计划模式是一次性选择:随本次发送被消耗,草稿勾选同步熄灭,
@@ -2339,7 +2356,7 @@ export function NewMakerDraftRoute() {
             providerId,
           });
           if (!newSession) {
-            toast.error(t('ccAgent.draft.createSessionFailed'));
+            toastCreateSessionFailed();
             return;
           }
           // 计划模式是一次性选择:随本次发送被消耗,草稿勾选同步熄灭。
