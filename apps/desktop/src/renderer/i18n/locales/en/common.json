@@ -1491,7 +1491,18 @@
         "installSuccess": "Cursor installed",
         "installFailed": "Couldn't install Cursor",
         "installNotDetected": "Install finished, but cursor-agent wasn't found. Try refreshing, or install from a terminal.",
-        "unsupportedPlatform": "The official cursor-agent installer supports macOS and Linux only."
+        "unsupportedPlatform": "The official cursor-agent installer supports macOS and Linux only.",
+        "models": {
+          "emptyState": "No Cursor model catalog yet. Click \"Refresh models\" to fetch one (requires Cursor sign-in).",
+          "refreshCta": "Refresh models",
+          "refreshing": "Probed {{done}} / {{total}}",
+          "refreshUnavailableInstalled": "Install cursor-agent first",
+          "refreshUnavailableAuth": "Sign in to Cursor first",
+          "autoHint": "fallback",
+          "autoAlwaysOn": "always shown",
+          "effortHint_one": "{{count}} effort tier",
+          "effortHint_other": "{{count}} effort tiers"
+        }
       },
       "wizard": {
         "title": "Add provider",
