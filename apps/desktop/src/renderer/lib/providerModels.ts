@@ -190,10 +190,11 @@ export function selectVisibleModels(params: {
   /** Cursor 无 Cindy provider 目录；本机/远程都走 capabilities.availableModels。 */
   deviceCursorModels?: ModelDescriptor[];
   /**
-   * 过滤订阅直连模型(chatgpt/ / xai/,经本地 compat-proxy 的 responses-bridge 翻译)。
-   * SSH 远程会话(remoteHostId)必须传 true:远程模式走 remoteEndpoint、不经本地 loopback
-   * proxy,bridge 前缀模型送出去不会被翻译,选了必失败。device-link 远程不受影响
-   * (被控端跑完整 app,其本地 proxy 上 bridge 可用,模型清单本就来自被控端)。
+   * SSH 远程会话(remoteHostId)传 true:订阅直连模型(chatgpt/ / xai/)不再被过滤,
+   * 而是保留在清单中由调用方按 isSubscriptionDirectModel 标记禁用(置灰 + 原因提示)。
+   * 远端 cc 不经本地 compat-proxy 的 responses-bridge,选了必失败;静默消失会让用户
+   * 误以为订阅掉了。device-link 远程不受影响(被控端跑完整 app,其本地 proxy 上
+   * bridge 可用,模型清单本就来自被控端)。
    */
   excludeSubscriptionDirect?: boolean;
   /**
@@ -214,15 +215,16 @@ export function selectVisibleModels(params: {
     excludeSubscriptionDirect,
     excludeChatBridgedCodex,
   } = params;
-  const drop = (list: ModelDescriptor[]): ModelDescriptor[] =>
-    excludeSubscriptionDirect ? list.filter((m) => !isSubscriptionDirectModel(m.id)) : list;
+  // excludeSubscriptionDirect 不再过滤(见参数文档):行保留,准入由调用方按
+  // isSubscriptionDirectModel 打 disabled。保留参数是为了不破坏既有调用签名。
+  const pass = (list: ModelDescriptor[]): ModelDescriptor[] => list;
   const codexDeriveOpts = excludeChatBridgedCodex
     ? { excludeProvider: isChatBridgedCodexProvider }
     : undefined;
-  const cc = drop(deviceId ? deviceCcModels : deriveModelsFromProviders(providers, 'claude-code'));
-  const codex = drop(deviceId ? deviceCodexModels : deriveModelsFromProviders(providers, 'codex', codexDeriveOpts));
+  const cc = pass(deviceId ? deviceCcModels : deriveModelsFromProviders(providers, 'claude-code'));
+  const codex = pass(deviceId ? deviceCodexModels : deriveModelsFromProviders(providers, 'codex', codexDeriveOpts));
   // Cursor:本机也走 capabilities（无 provider.models.cursor）；远程同样用被控端 capabilities。
-  const cursor = drop(deviceCursorModels);
+  const cursor = pass(deviceCursorModels);
   if (agentKind === 'claude-code') return cc;
   if (agentKind === 'codex') return codex;
   if (agentKind === 'cursor') return cursor;
