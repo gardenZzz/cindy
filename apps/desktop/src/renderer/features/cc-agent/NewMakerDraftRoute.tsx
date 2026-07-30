@@ -465,8 +465,16 @@ export function NewMakerDraftRoute() {
   const vendorAuthGate = useVendorAuthGate();
   const refreshWorktrees = useRefreshWorktrees();
   // T2: 仅本机已装 cursor-agent 时翻开 New Maker 的 Cursor 段。
+  // device-link 远程草稿不在控制端翻 Cursor 段:被控端是否装了 cursor-agent 是另一回事,
+  // 用本机能力判断被控端会为没装的设备建 Cursor 会话;能力应按被控端上报(留待 device-link
+  // 契约一期,本处先最小关掉)。见 issue #3 收尾。
   const [includeCursor, setIncludeCursor] = useState(false);
   useEffect(() => {
+    // 远程草稿:不翻开 Cursor 段。
+    if (draft.deviceLinkDeviceId != null) {
+      setIncludeCursor(false);
+      return;
+    }
     let cancelled = false;
     void window.electronAPI.maker.agent
       .getCursorBinaryStatus()
@@ -479,7 +487,7 @@ export function NewMakerDraftRoute() {
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [draft.deviceLinkDeviceId]);
   // 探测结果回来前若草稿停在 cursor，先回落到 cc，避免未注册 agent 建会话。
   useEffect(() => {
     if (!includeCursor && draft.vendor === 'cursor') {
