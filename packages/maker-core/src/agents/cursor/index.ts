@@ -730,8 +730,11 @@ export class CursorAgent extends BaseAgent {
       return options.length > 0 ? options : latestConfigOptions;
     };
 
-    const applyConfigEnrichment = async (productModelId: string, options: AcpConfigOption[]) => {
-      enrichCursorModelFromConfigOptions(this.listedModels, productModelId, options);
+    // 会话内只同步自身状态（effort / fast / thinking），不把读回的 config 合并进
+    // 模型目录、也不再广播目录变更（spec #21/#27：目录唯一写入方是设置页刷新）。
+    // ACP 的 effort / fast 是 per-model，切模型即重置成目标模型自己的记录值，所以
+    // 每次 set_config_option 回包后仍必须按读回值刷新会话状态，否则会话与上游错位。
+    const applyConfigSessionState = (options: AcpConfigOption[]) => {
       const effortOpt = findCursorEffortOption(options);
       const effortVal = effortOpt ? toCursorEffort(effortOpt.currentValue) : null;
       if (effortVal) mutableEffort = effortVal;
@@ -743,7 +746,6 @@ export class CursorAgent extends BaseAgent {
       if (options.some((o) => o.id === 'thinking')) {
         mutableThinkingMode = true;
       }
-      await this.publishListedModels(productModelId);
     };
 
     const applyModelsFromSessionPayload = async (
@@ -751,26 +753,11 @@ export class CursorAgent extends BaseAgent {
     ) => {
       const parsed = parseCursorModelsState(payload.models);
       if (parsed) {
-        const prevById = new Map(this.listedModels.map((m) => [m.id, m]));
-        this.listedModels = parsed.models.map((m) => {
-          const prev = prevById.get(m.id);
-          return prev
-            ? {
-                ...m,
-                efforts: prev.efforts.length > 0 ? prev.efforts : m.efforts,
-                defaultEffort: prev.defaultEffort ?? m.defaultEffort,
-                supportsFastMode: prev.supportsFastMode ?? m.supportsFastMode,
-                supportsThinkingMode: prev.supportsThinkingMode ?? m.supportsThinkingMode,
-                contextWindow: prev.contextWindow !== 200_000 ? prev.contextWindow : m.contextWindow,
-              }
-            : m;
-        });
         mutableModel = parsed.currentModelId;
       } else {
         log.warn('cursor session models missing or empty; keeping Auto fallback');
       }
       latestConfigOptions = parseAcpConfigOptions(payload.configOptions);
-      await this.publishListedModels(mutableModel);
     };
 
     const trackToolActivityFromUpdate = (params: unknown): void => {
@@ -1294,11 +1281,11 @@ export class CursorAgent extends BaseAgent {
         if (desiredModel !== mutableModel) {
           const options = await setConfigOption('model', toCursorAcpModelId(desiredModel));
           mutableModel = desiredModel;
-          await applyConfigEnrichment(mutableModel, options);
+          applyConfigSessionState(options);
         } else if (desiredModel !== CURSOR_AUTO_MODEL.id) {
           try {
             const options = await setConfigOption('model', toCursorAcpModelId(desiredModel));
-            await applyConfigEnrichment(desiredModel, options);
+            applyConfigSessionState(options);
           } catch (err) {
             log.warn('cursor refresh model config failed', {
               message: err instanceof Error ? err.message : String(err),
@@ -1315,7 +1302,7 @@ export class CursorAgent extends BaseAgent {
       if (initialEffortOpt && initialEffortValue) {
         try {
           const options = await setConfigOption(initialEffortOpt.id, initialEffortValue);
-          await applyConfigEnrichment(mutableModel, options);
+          applyConfigSessionState(options);
         } catch (err) {
           log.warn('cursor initial setEffort failed', {
             effort: opts.effort,
@@ -1329,7 +1316,7 @@ export class CursorAgent extends BaseAgent {
       ) {
         try {
           const options = await setConfigOption('fast', opts.fastMode ? 'true' : 'false');
-          await applyConfigEnrichment(mutableModel, options);
+          applyConfigSessionState(options);
         } catch (err) {
           log.warn('cursor initial setFastMode failed', {
             fastMode: opts.fastMode,
@@ -1340,7 +1327,7 @@ export class CursorAgent extends BaseAgent {
       if (latestConfigOptions.some((o) => o.id === 'thinking')) {
         try {
           const options = await setConfigOption('thinking', 'true');
-          await applyConfigEnrichment(mutableModel, options);
+          applyConfigSessionState(options);
         } catch (err) {
           log.warn('cursor initial setThinkingMode failed', {
             thinkingMode: true,
@@ -1672,12 +1659,12 @@ export class CursorAgent extends BaseAgent {
         const productId = toCursorProductModelId(newModel);
         if (productId === mutableModel) {
           const options = await setConfigOption('model', toCursorAcpModelId(productId));
-          await applyConfigEnrichment(productId, options);
+          applyConfigSessionState(options);
         } else {
           log.debug('setModel', { from: mutableModel, to: productId });
           const options = await setConfigOption('model', toCursorAcpModelId(productId));
           mutableModel = productId;
-          await applyConfigEnrichment(productId, options);
+          applyConfigSessionState(options);
         }
         // 切模后若新模型暴露 thinking 且上游非 true，强制开。
         if (latestConfigOptions.some((o) => o.id === 'thinking')) {
@@ -1685,7 +1672,7 @@ export class CursorAgent extends BaseAgent {
           if (thinkingVal !== 'true') {
             try {
               const options = await setConfigOption('thinking', 'true');
-              await applyConfigEnrichment(mutableModel, options);
+              applyConfigSessionState(options);
             } catch (err) {
               log.warn('cursor setModel force thinking failed', {
                 message: err instanceof Error ? err.message : String(err),
@@ -1699,7 +1686,7 @@ export class CursorAgent extends BaseAgent {
         if (closed) throw new Error('Cursor session is closed');
         if (!findCursorEffortOption(latestConfigOptions)) {
           const refreshed = await setConfigOption('model', toCursorAcpModelId(mutableModel));
-          await applyConfigEnrichment(mutableModel, refreshed);
+          applyConfigSessionState(refreshed);
         }
         const effortOpt = findCursorEffortOption(latestConfigOptions);
         if (!effortOpt) {
@@ -1720,14 +1707,14 @@ export class CursorAgent extends BaseAgent {
         }
         log.debug('setEffort', { from: mutableEffort, to: newEffort, configId: effortOpt.id });
         const options = await setConfigOption(effortOpt.id, value);
-        await applyConfigEnrichment(mutableModel, options);
+        applyConfigSessionState(options);
       },
 
       async setFastMode(enabled: boolean) {
         if (closed) throw new Error('Cursor session is closed');
         if (!latestConfigOptions.some((o) => o.id === 'fast')) {
           const refreshed = await setConfigOption('model', toCursorAcpModelId(mutableModel));
-          await applyConfigEnrichment(mutableModel, refreshed);
+          applyConfigSessionState(refreshed);
         }
         if (!latestConfigOptions.some((o) => o.id === 'fast')) {
           throw new NotSupportedError('fastMode', {
@@ -1738,7 +1725,7 @@ export class CursorAgent extends BaseAgent {
         }
         log.debug('setFastMode', { from: mutableFastMode, to: enabled });
         const options = await setConfigOption('fast', enabled ? 'true' : 'false');
-        await applyConfigEnrichment(mutableModel, options);
+        applyConfigSessionState(options);
       },
 
       getFastMode() {
