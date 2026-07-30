@@ -598,8 +598,11 @@ function workerToRecord(
 }
 
 function fromDbAgentKind(agentKind: string): MakerAgentKind {
-  // #13 (T9): DB enum 仍是 claude-code|codex；cursor 映射留给后续票。
-  return agentKind === 'codex' ? 'codex' : 'claude-code';
+  // DB 存 'cc' | 'codex' | 'cursor'（偶发历史 'claude-code'）；与
+  // sessionAgentSwitchHandler.toMakerAgentKind 同口径，禁止再二元塌缩。
+  if (agentKind === 'codex') return 'codex';
+  if (agentKind === 'cursor') return 'cursor';
+  return 'claude-code';
 }
 
 function msToIso(ms: number | null | undefined): string | null {
