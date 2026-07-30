@@ -6,9 +6,11 @@ import {
   cursorAutoModelFallback,
   cursorListingToDescriptors,
   enrichCursorModelFromConfigOptions,
+  findCursorEffortOption,
   parseAcpConfigOptions,
   parseCursorModelsState,
   toCursorAcpModelId,
+  toCursorConfigEffortValue,
   toCursorProductModelId,
   type CursorListedModel,
 } from './models.js';
@@ -112,6 +114,47 @@ describe('enrichCursorModelFromConfigOptions', () => {
       contextWindow: 300_000,
     });
     expect(cursorListingToDescriptors(models)[1]?.supportsFastMode).toBe(true);
+  });
+
+  // GPT / Kimi / GLM 家族把推理强度挂在 `reasoning` 上，拼写也和 Claude 家族不同：
+  // 只认 `effort` + 只认 xhigh 拼写的话，这半边模型在选择器里没有推理强度可选。
+  it('reads GPT-family reasoning option and normalizes extra-high / none', () => {
+    const models: CursorListedModel[] = [
+      { id: 'gpt-5.5', displayName: 'GPT-5.5', contextWindow: 200_000, efforts: [], defaultEffort: null },
+    ];
+    const options = parseAcpConfigOptions([
+      {
+        id: 'reasoning',
+        name: 'Reasoning',
+        currentValue: 'medium',
+        options: [
+          { value: 'none', name: 'None' },
+          { value: 'low', name: 'Low' },
+          { value: 'medium', name: 'Medium' },
+          { value: 'high', name: 'High' },
+          { value: 'extra-high', name: 'Extra High' },
+        ],
+      },
+      {
+        id: 'context',
+        name: 'Context',
+        currentValue: '272k',
+        options: [{ value: '272k', name: '272K' }, { value: '1m', name: '1M' }],
+      },
+    ]);
+    enrichCursorModelFromConfigOptions(models, 'gpt-5.5', options);
+    expect(models[0]).toMatchObject({
+      efforts: ['minimal', 'low', 'medium', 'high', 'xhigh'],
+      defaultEffort: 'medium',
+      contextWindow: 272_000,
+    });
+
+    // 回写时必须发回该模型自己的拼写，否则上游 Invalid value。
+    const effortOpt = findCursorEffortOption(options)!;
+    expect(effortOpt.id).toBe('reasoning');
+    expect(toCursorConfigEffortValue(effortOpt, 'xhigh')).toBe('extra-high');
+    expect(toCursorConfigEffortValue(effortOpt, 'minimal')).toBe('none');
+    expect(toCursorConfigEffortValue(effortOpt, 'max')).toBeNull();
   });
 
   it('clears effort when option absent', () => {
