@@ -71,7 +71,9 @@ export function SessionStatusIcon({
   // primitive 订阅(性能不变量同下方 attention hooks)。
   const isGhostBusy = useGhostSessionBusy(session.id);
   const isRunning = isAgentRunning || isGhostBusy;
-  const vendor = session.agentKind === 'codex' ? 'codex' : 'cc';
+  // 未知 / 老客户端 kind 一律走 Claude 兜底（VendorIcon 默认 ClaudeMark）。
+  const vendor =
+    session.agentKind === 'codex' ? 'codex' : session.agentKind === 'cursor' ? 'cursor' : 'cc';
   const isOrcaLead = isOrcaLeadSession(session);
   const isArchived = session.status === 'archived';
   // 角标 tone:error(含定时任务失败的 urgency context)红 > awaiting 蓝 > 完成未读绿。
