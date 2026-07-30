@@ -277,8 +277,8 @@ describe('缓存端点的受信任域约束(安全边界)', () => {
 });
 
 describe('缓存读取只接受常规文件(阻断路径不能被挂住)', () => {
-  it('symlink 指向合法缓存也拒绝(statSync 会跟随,lstatSync 不会)', () => {
-    if (!canSymlink) return; // Windows 无 symlink 权限时跳过
+  // skipIf: 无 symlink 权限时报告为 skipped 而不是假 passed
+  it.skipIf(!canSymlink)('symlink 指向合法缓存也拒绝(statSync 会跟随,lstatSync 不会)', () => {
     const real = path.join(dir, 'real-cache.json');
     fs.writeFileSync(real, JSON.stringify(ENTRY), 'utf8');
     fs.symlinkSync(real, cacheFile());
@@ -338,8 +338,8 @@ describe('缓存写入的临时文件必须唯一且独占创建', () => {
     expect(readEndpointManifestCache(dir)).toEqual(ENTRY);
   });
 
-  it('target 被换成 symlink 时 rename 替换掉它本身,不写穿到链接目标', () => {
-    if (!canSymlink) return; // Windows 无 symlink 权限时跳过
+  // skipIf: 无 symlink 权限时报告为 skipped 而不是假 passed
+  it.skipIf(!canSymlink)('target 被换成 symlink 时 rename 替换掉它本身,不写穿到链接目标', () => {
     const outside = path.join(dir, 'outside.txt');
     fs.writeFileSync(outside, 'untouched', 'utf8');
     fs.symlinkSync(outside, cacheFile());
