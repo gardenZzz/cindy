@@ -4209,6 +4209,7 @@
         "agent": {
           "claudeCode": "Claude Code",
           "codex": "Codex",
+          "cursor": "Cursor",
           "pending": "Next: {{agent}}"
         }
       },
@@ -5272,6 +5273,9 @@
       "waiting": "Just wait…",
       "working": "Working…",
       "running": "Running…",
+      "starting": "Starting…",
+      "cancelled": "Cancelled",
+      "error": "Failed",
       "turnStart": "{{status}}",
       "issueTip": "{{name}}, try /issue to send us feedback or suggestions",
       "runningTool": "{{tool}} running…"

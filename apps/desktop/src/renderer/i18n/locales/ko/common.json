@@ -4208,6 +4208,7 @@
         "agent": {
           "claudeCode": "Claude Code",
           "codex": "Codex",
+          "cursor": "Cursor",
           "pending": "다음: {{agent}}"
         }
       },
@@ -5262,6 +5263,9 @@
       "waiting": "잠시만 기다려 주세요…",
       "working": "작업 중…",
       "running": "실행 중…",
+      "starting": "시작 중…",
+      "cancelled": "취소됨",
+      "error": "실행 실패",
       "turnStart": "{{name}}님, 처리 중이에요…",
       "issueTip": "{{name}}님, /issue로 피드백이나 제안을 보내 주세요",
       "runningTool": "{{tool}} 실행 중…"

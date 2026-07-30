@@ -66,17 +66,22 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null;
 }
 
+/**
+ * status 事件的文案字段名是 `status` —— 全链路消费方(renderer handleStatusUpdate、
+ * agent-island、完成通知的 `status === 'Done'` 判定)都读这个 key。曾误写成 `text`,
+ * 结果 Cursor 会话的 agentStatus.status 恒为 undefined(状态栏本地化崩、完成通知不发)。
+ */
 function pushStatus(
   events: AgentEvent[],
   ctx: AcpTranslateContext,
-  opts: { isRunning: boolean; text: string },
+  opts: { isRunning: boolean; status: string },
 ): void {
   const snap: UsageSnapshot = ctx.usage.snapshot();
   events.push({
     type: 'status',
     data: {
       isRunning: opts.isRunning,
-      text: opts.text,
+      status: opts.status,
       ...snap,
     },
     source: ctx.source ?? 'cursor',
@@ -135,7 +140,7 @@ function translateAgentMessageChunk(
   const events: AgentEvent[] = [];
   if (!ctx.rt.statusRunningEmitted) {
     ctx.rt.statusRunningEmitted = true;
-    pushStatus(events, ctx, { isRunning: true, text: 'Generating...' });
+    pushStatus(events, ctx, { isRunning: true, status: 'Generating...' });
   }
   ctx.rt.textBuf += delta;
   events.push({
@@ -216,7 +221,7 @@ function translateToolCallUpdate(
   const events: AgentEvent[] = [];
   if (!ctx.rt.statusRunningEmitted) {
     ctx.rt.statusRunningEmitted = true;
-    pushStatus(events, ctx, { isRunning: true, text: 'Running...' });
+    pushStatus(events, ctx, { isRunning: true, status: 'Running...' });
   }
 
   const meta = mergeToolMeta(ctx.rt, update);
@@ -298,7 +303,7 @@ function translateUsageUpdate(update: UsageUpdate, ctx: AcpTranslateContext): Ag
   const events: AgentEvent[] = [];
   pushStatus(events, ctx, {
     isRunning: true,
-    text: ctx.rt.statusRunningEmitted ? 'Generating...' : 'Running...',
+    status: ctx.rt.statusRunningEmitted ? 'Generating...' : 'Running...',
   });
   return events;
 }
@@ -369,7 +374,7 @@ export function finishPromptTurn(
     type: 'status',
     data: {
       isRunning: false,
-      text: response.stopReason === 'cancelled' ? 'Cancelled' : 'Done',
+      status: response.stopReason === 'cancelled' ? 'Cancelled' : 'Done',
       ...snap,
     },
     source: ctx.source ?? 'cursor',
@@ -401,7 +406,7 @@ export function translateAcpError(
       type: 'status',
       data: {
         isRunning: false,
-        text: 'Error',
+        status: 'Error',
         ...ctx.usage.snapshot(),
       },
       source: ctx.source ?? 'cursor',
