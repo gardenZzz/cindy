@@ -171,4 +171,29 @@ describe('CursorAgent ACP MCP injection', () => {
     expect(transport.findRequest(Method.SessionNew)?.mcpServers).toEqual([]);
     await handle.close();
   });
+
+  it('setVendorOptions mutates the same vendorOptions object passed to prepareAcpMcpServers', async () => {
+    // enableOrca → setLeadVendorOptions 依赖 in-place 合并；否则 bridge ctx 永远读不到 orcaRole。
+    const transport = new FakeTransport();
+    let capturedVo: Record<string, unknown> | undefined;
+    const prepare = vi.fn(async (args: { vendorOptions?: Record<string, unknown> }) => {
+      capturedVo = args.vendorOptions as Record<string, unknown>;
+      return { servers: [ORCA_SERVER] };
+    });
+    const handle = await boot(transport, prepare);
+    expect(capturedVo).toBeDefined();
+    expect(capturedVo?.orcaRole).toBe('worker');
+
+    await handle.setVendorOptions?.({
+      orcaRole: 'lead',
+      orcaWorkflowId: 'team-1',
+      orcaLeadSessionId: 'biz-1',
+    });
+    expect(capturedVo).toMatchObject({
+      orcaRole: 'lead',
+      orcaWorkflowId: 'team-1',
+      orcaLeadSessionId: 'biz-1',
+    });
+    await handle.close();
+  });
 });

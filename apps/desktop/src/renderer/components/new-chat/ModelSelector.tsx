@@ -17,6 +17,7 @@ import { Popover, PopoverAnchor, PopoverContent, PopoverTrigger } from '@/compon
 import { MorphPopover } from '@/components/ui/morph-popover';
 import { AnthropicMark } from '@/components/icons/AnthropicMark';
 import { OpenAIMark } from '@/components/icons/OpenAIMark';
+import { CursorMark } from '@/components/icons/CursorMark';
 import { XDIncMark } from '@/components/icons/XDIncMark';
 import { hasProviderLogo, ProviderLogoMark } from '@/components/icons/ProviderLogoMark';
 import { FastModeToggle } from './FastModeToggle';
@@ -1407,7 +1408,7 @@ function ModelSelectorContentView({
             )}
           >
             <span className="flex min-w-0 flex-1 items-center gap-2.5">
-              {provider && (
+              {provider ? (
                 <ModelIconMark
                   icon={model.icon}
                   providerId={provider.id}
@@ -1418,7 +1419,14 @@ function ModelSelectorContentView({
                   withMargin={false}
                   dense
                 />
-              )}
+              ) : currentAgentKind === 'cursor' ? (
+                // Cursor 无 Cindy provider 目录；flat 列表用 CursorMark 作身份前缀。
+                // 未知 agent 不猜图标（保持无前缀 = 历史客户端视觉）。
+                <CursorMark
+                  size={12.3}
+                  className="shrink-0 text-[var(--text-secondary)]"
+                />
+              ) : null}
               <span className="flex min-w-0 flex-1 items-center gap-1.5">
                 <span className="flex min-w-0 flex-1 items-center gap-1.5">
                   <span className="truncate text-14 font-medium leading-5 text-[var(--model-item-text)]">
@@ -2091,8 +2099,9 @@ export function ModelSelector({
       ) : (
         <>
           {/* 图标统一规则:模型条目 icon(AI Gateway / 目录设定)优先,缺省回落
-                  当前真正路由的来源标(activeSourceId)——客户端不按 model id 猜厂牌。 */}
-          {activeSourceId && (
+                  当前真正路由的来源标(activeSourceId)——客户端不按 model id 猜厂牌。
+                  Cursor 无供应商来源:用 CursorMark 作身份前缀。 */}
+          {activeSourceId ? (
             <ModelIconMark
               icon={triggerModelIcon}
               providerId={activeSourceId}
@@ -2103,7 +2112,17 @@ export function ModelSelector({
                 isCreateAgentVariant ? 'text-[var(--create-agent-control-icon)]' : undefined
               }
             />
-          )}
+          ) : currentAgentKind === 'cursor' || agentIdentity?.vendorKey === 'cursor' ? (
+            <CursorMark
+              size={isCreateAgentVariant ? 11 : 13}
+              className={cn(
+                'mr-0.5 shrink-0',
+                isCreateAgentVariant
+                  ? 'text-[var(--create-agent-control-icon)]'
+                  : 'text-[var(--text-primary)]',
+              )}
+            />
+          ) : null}
           {agentIdentityPrefix}
           <span
             className={cn(

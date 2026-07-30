@@ -1331,6 +1331,12 @@ export class CursorAgent extends BaseAgent {
       }
     };
 
+    // mutable vendorOptions —— host bridge / setVendorOptions 必须共享同一引用。
+    // enableOrca 后 setLeadVendorOptions 靠 Object.assign 原地写入 orcaRole/workflow;
+    // 若传 opts.vendorOptions 的浅拷贝，bridge registerSessionCtx 抓到的对象永远读不到
+    // 运行时补丁，Lead 协同工具面会按无角色 fail-closed（与 Claude/Codex 同契约）。
+    const vo: Record<string, unknown> = { ...(opts.vendorOptions ?? {}) };
+
     // MCP (协同工具面) 经 host 的 HTTP bridge 注入 —— ACP 消费不了 in-process
     // McpServer instance。host 未接线 / 失败时按「无 MCP」降级,不阻断会话。
     let mcpServers: unknown[] = [];
@@ -1340,7 +1346,7 @@ export class CursorAgent extends BaseAgent {
         const prepared = await this.deps.prepareAcpMcpServers({
           sessionId: opts.sessionId,
           workingDir: opts.workingDir,
-          vendorOptions: opts.vendorOptions,
+          vendorOptions: vo,
         });
         mcpServers = prepared.servers;
         mcpCleanup = prepared.cleanup;
@@ -1634,6 +1640,12 @@ export class CursorAgent extends BaseAgent {
 
       isTurnRunning(): boolean {
         return turnInFlight;
+      },
+
+      async setVendorOptions(patch: Record<string, unknown>) {
+        // in-place 合并：prepareAcpMcpServers / bridge ctx 闭包抓的是同一 vo 引用。
+        Object.assign(vo, patch);
+        log.debug('setVendorOptions', { patchKeys: Object.keys(patch) });
       },
 
       async setModel(newModel: string) {
