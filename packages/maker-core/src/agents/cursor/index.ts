@@ -661,8 +661,8 @@ export class CursorAgent extends BaseAgent {
     let mutableModel = toCursorProductModelId(opts.model || CURSOR_AUTO_MODEL.id);
     let mutableEffort: Effort | undefined = opts.effort;
     let mutableFastMode = opts.fastMode === true;
-    // Thinking 默认开（Cursor Opus 自报 currentValue=true）；仅当 start 显式传 false 时关闭。
-    let mutableThinkingMode = opts.thinkingMode !== false;
+    // Thinking 非可选：有 ACP thinking option 时始终 true（对齐 Codex/CC，忽略 start false）。
+    let mutableThinkingMode = true;
     let latestConfigOptions: AcpConfigOption[] = [];
     const sessionAllowKeys = new Set<string>();
     let autoFallbackNotified = false;
@@ -739,9 +739,9 @@ export class CursorAgent extends BaseAgent {
       if (fastVal === 'true' || fastVal === 'false') {
         mutableFastMode = fastVal === 'true';
       }
-      const thinkingVal = readConfigOptionValue(options, 'thinking');
-      if (thinkingVal === 'true' || thinkingVal === 'false') {
-        mutableThinkingMode = thinkingVal === 'true';
+      // 有 thinking option 时本地状态恒 true；上游 currentValue=false 也忽略。
+      if (options.some((o) => o.id === 'thinking')) {
+        mutableThinkingMode = true;
       }
       await this.publishListedModels(productModelId);
     };
@@ -1337,19 +1337,13 @@ export class CursorAgent extends BaseAgent {
           });
         }
       }
-      if (
-        opts.thinkingMode !== undefined &&
-        latestConfigOptions.some((o) => o.id === 'thinking')
-      ) {
+      if (latestConfigOptions.some((o) => o.id === 'thinking')) {
         try {
-          const options = await setConfigOption(
-            'thinking',
-            opts.thinkingMode ? 'true' : 'false',
-          );
+          const options = await setConfigOption('thinking', 'true');
           await applyConfigEnrichment(mutableModel, options);
         } catch (err) {
           log.warn('cursor initial setThinkingMode failed', {
-            thinkingMode: opts.thinkingMode,
+            thinkingMode: true,
             message: err instanceof Error ? err.message : String(err),
           });
         }
@@ -1679,12 +1673,26 @@ export class CursorAgent extends BaseAgent {
         if (productId === mutableModel) {
           const options = await setConfigOption('model', toCursorAcpModelId(productId));
           await applyConfigEnrichment(productId, options);
-          return;
+        } else {
+          log.debug('setModel', { from: mutableModel, to: productId });
+          const options = await setConfigOption('model', toCursorAcpModelId(productId));
+          mutableModel = productId;
+          await applyConfigEnrichment(productId, options);
         }
-        log.debug('setModel', { from: mutableModel, to: productId });
-        const options = await setConfigOption('model', toCursorAcpModelId(productId));
-        mutableModel = productId;
-        await applyConfigEnrichment(productId, options);
+        // 切模后若新模型暴露 thinking 且上游非 true，强制开。
+        if (latestConfigOptions.some((o) => o.id === 'thinking')) {
+          const thinkingVal = readConfigOptionValue(latestConfigOptions, 'thinking');
+          if (thinkingVal !== 'true') {
+            try {
+              const options = await setConfigOption('thinking', 'true');
+              await applyConfigEnrichment(mutableModel, options);
+            } catch (err) {
+              log.warn('cursor setModel force thinking failed', {
+                message: err instanceof Error ? err.message : String(err),
+              });
+            }
+          }
+        }
       },
 
       async setEffort(newEffort: Effort) {
@@ -1750,8 +1758,19 @@ export class CursorAgent extends BaseAgent {
             message: `Cursor model ${mutableModel} does not expose thinking mode`,
           });
         }
-        log.debug('setThinkingMode', { from: mutableThinkingMode, to: enabled });
-        const options = await setConfigOption('thinking', enabled ? 'true' : 'false');
+        // 产品语义：有 thinking 则强制开；false 为 no-op，不向 ACP 下发关闭。
+        if (!enabled) {
+          log.debug('setThinkingMode ignored false (thinking forced on)', {
+            model: mutableModel,
+          });
+          if (!mutableThinkingMode) {
+            const options = await setConfigOption('thinking', 'true');
+            await applyConfigEnrichment(mutableModel, options);
+          }
+          return;
+        }
+        log.debug('setThinkingMode', { from: mutableThinkingMode, to: true });
+        const options = await setConfigOption('thinking', 'true');
         await applyConfigEnrichment(mutableModel, options);
       },
 

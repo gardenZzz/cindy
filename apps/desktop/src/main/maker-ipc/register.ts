@@ -4394,7 +4394,7 @@ export function registerMakerIpc(maker: Maker, options: RegisterMakerIpcOptions)
       model: row.model,
       effort: row.effort as CreateOpts['effort'],
       fastMode: !!row.fastMode,
-      thinkingMode: row.thinkingMode !== false,
+      thinkingMode: true, // ponytail: Cursor thinking 非可选，createOpts 恒 true
       permissionMode: row.permissionMode as CreateOpts['permissionMode'],
       title: row.title,
       resumeSessionId: row.sdkSessionId ?? undefined,
@@ -4820,7 +4820,7 @@ export function registerMakerIpc(maker: Maker, options: RegisterMakerIpcOptions)
         providerId: row.providerId ?? undefined,
         effort: (row.effort ?? undefined) as CreateOpts['effort'],
         fastMode: !!row.fastMode,
-        thinkingMode: row.thinkingMode !== false,
+        thinkingMode: true, // ponytail: Cursor thinking 非可选，createOpts 恒 true
         permissionMode: (row.permissionMode ?? 'ask') as CreateOpts['permissionMode'],
         planMode: false,
         title: row.title ?? undefined,
@@ -5170,7 +5170,7 @@ export function registerMakerIpc(maker: Maker, options: RegisterMakerIpcOptions)
             model: meta.model,
             effort: (row?.effort ?? undefined) as SendToSessionCreateDefaults['effort'],
             fastMode: !!row?.fastMode,
-            thinkingMode: row?.thinkingMode !== false,
+            thinkingMode: true, // ponytail: Cursor thinking 非可选，createOpts 恒 true
             providerId: row?.providerId ?? undefined,
             // working_dir 覆盖时强制继承来源会话的权限档(review 反馈):把新目录
             // 以 Full access 打开是相对 dispatcher 的权限升级,跨项目 handoff
@@ -5199,7 +5199,7 @@ export function registerMakerIpc(maker: Maker, options: RegisterMakerIpcOptions)
           model: inherited.model,
           effort: inherited.effort as CreateOpts['effort'],
           fastMode: !!inherited.fastMode,
-          thinkingMode: inherited.thinkingMode !== false,
+          thinkingMode: true, // ponytail: Cursor thinking 非可选，createOpts 恒 true
           providerId: inherited.providerId ?? undefined,
           title: newTitle,
           permissionMode: inherited.permissionMode ?? 'bypassPermissions',
@@ -5819,7 +5819,7 @@ export function registerMakerIpc(maker: Maker, options: RegisterMakerIpcOptions)
       resumeSessionId: meta.sdkSessionId,
       effort: (row.effort ?? undefined) as CreateOpts['effort'],
       fastMode: !!row.fastMode,
-      thinkingMode: row.thinkingMode !== false,
+      thinkingMode: true, // ponytail: Cursor thinking 非可选，createOpts 恒 true
       permissionMode: permissionModeOrAsk(row.permissionMode),
       planMode: false,
       title: row.title ?? undefined,
@@ -8009,6 +8009,11 @@ export function registerMakerIpc(maker: Maker, options: RegisterMakerIpcOptions)
     if (typeof sessionId !== 'string' || typeof enabled !== 'boolean') {
       throwIpcError('INVALID_PARAMS', 'sessionId + enabled required');
     }
+    // 产品语义：Thinking 非可选；false 永不 live push。
+    if (!enabled) {
+      log.debug('set-thinking-mode: false ignored (thinking forced on)', { sessionId });
+      return;
+    }
     const sess = maker.getSession(sessionId);
     if (!sess) {
       log.debug('set-thinking-mode: session not found, no-op', { sessionId });
@@ -8025,7 +8030,7 @@ export function registerMakerIpc(maker: Maker, options: RegisterMakerIpcOptions)
       log.debug('set-thinking-mode: skipped live push (pending credential switch)', { sessionId });
       return;
     }
-    await sess.setThinkingMode(enabled);
+    await sess.setThinkingMode(true);
   });
 
   // renderer → main 单向镜像「模型显示/隐藏」override(整张快照,fire-and-forget,不落盘)。

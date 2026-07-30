@@ -337,9 +337,6 @@ interface ModelSelectorProps {
   /** Fast Mode 状态 + 回调(从工具栏搬进 Edit 配置列)。不传 → 配置列不显示 Fast 开关。 */
   fastMode?: boolean;
   onFastModeChange?: (enabled: boolean) => void | Promise<void>;
-  /** Cursor Thinking 开关;仅模型 supportsThinkingMode 时显示。 */
-  thinkingMode?: boolean;
-  onThinkingModeChange?: (enabled: boolean) => void | Promise<void>;
   /** 非选中模型行的 effort/fast 全局预设读写器(按本机 / 被控设备隔离)。 */
   modelMemory?: ModelMemoryAccessors;
   /** When provided, only models with this vendorKey are shown in the dropdown. */
@@ -437,8 +434,6 @@ interface ModelSelectorContentProps {
   onEffortChange: (effort: Effort) => void;
   fastMode?: boolean;
   onFastModeChange?: (enabled: boolean) => void | Promise<void>;
-  thinkingMode?: boolean;
-  onThinkingModeChange?: (enabled: boolean) => void | Promise<void>;
   modelMemory?: ModelMemoryAccessors;
   vendorKey?: 'cc' | 'codex' | 'cursor';
   /** device-link 远程会话所属被控端 id(列被控端模型)。 */
@@ -516,8 +511,6 @@ function ModelSelectorContentView({
   onEffortChange,
   fastMode = false,
   onFastModeChange,
-  thinkingMode = true,
-  onThinkingModeChange,
   modelMemory,
   vendorKey,
   deviceId,
@@ -783,11 +776,7 @@ function ModelSelectorContentView({
     return modelSupportsFastMode(provider, m.id, currentAgentKind);
   };
 
-  // Thinking 仅 Cursor + 当前选中模型 + supportsThinkingMode。
-  const thinkingEditable = (m: RowModel | null): boolean => {
-    if (!onThinkingModeChange || !currentAgentKind || currentAgentKind !== 'cursor') return false;
-    return m?.supportsThinkingMode === true;
-  };
+  // Thinking 已去掉可选 UI（spec #14）：Cursor 有 thinking option 时由 runtime 强制开。
 
   // ── 模型单价 ─────────────────────────────────────────────────────────────
   // providerId 是价格索引的一部分。同模型经 XD / OpenAI / Anthropic 等来源出现时，
@@ -1098,8 +1087,6 @@ function ModelSelectorContentView({
     (editingIsActive || (!!modelMemory && !!currentAgentKind && !!editingProviderId));
   const editShowFast =
     canConfigure && !!editingModel && fastEditable(editingProviderId, editingModel);
-  const editShowThinking =
-    canConfigure && editingIsActive && thinkingEditable(editingModel);
   const editHasEfforts = canConfigure && (editingModel?.efforts.length ?? 0) > 0;
 
   // 配置列当前 effort 值(选中 → live;否则记忆/默认)。
@@ -1138,11 +1125,6 @@ function ModelSelectorContentView({
         modelMemory?.setFast(currentAgentKind, editing.providerId, editingModel.id, enabled);
       }
     }
-    bump();
-  };
-  const handleEditThinking = (enabled: boolean) => {
-    if (!editing || !editingModel || !editingIsActive) return;
-    void onThinkingModeChange?.(enabled);
     bump();
   };
 
@@ -1188,23 +1170,7 @@ function ModelSelectorContentView({
           </span>
         )}
       </div>
-      {(editShowThinking || editShowFast || editHasEfforts) && (
-        <div className="mx-1 my-1 h-px bg-[var(--model-dropdown-border)]" />
-      )}
-      {editShowThinking && (
-        <div className="px-0.5">
-          <FastModeToggle
-            enabled={thinkingMode}
-            onToggle={() => handleEditThinking(!thinkingMode)}
-            hideIcon
-            label={t('newChat.modelSelector.thinkingLabel')}
-            ariaLabel={t('newChat.modelSelector.thinkingLabel')}
-            accentVar="var(--text-primary)"
-            thumbVar="var(--surface-on-card)"
-          />
-        </div>
-      )}
-      {editShowThinking && (editShowFast || editHasEfforts) && (
+      {(editShowFast || editHasEfforts) && (
         <div className="mx-1 my-1 h-px bg-[var(--model-dropdown-border)]" />
       )}
       {editShowFast && (
@@ -1718,8 +1684,6 @@ export function ModelSelector({
   onEffortChange,
   fastMode,
   onFastModeChange,
-  thinkingMode = true,
-  onThinkingModeChange,
   modelMemory,
   vendorKey,
   agentIdentity,
@@ -2259,8 +2223,6 @@ export function ModelSelector({
       onEffortChange={onEffortChange}
       fastMode={fastMode}
       onFastModeChange={onFastModeChange}
-      thinkingMode={thinkingMode}
-      onThinkingModeChange={onThinkingModeChange}
       modelMemory={modelMemory}
       vendorKey={vendorKey}
       deviceId={deviceId}

@@ -31,6 +31,8 @@ class FakeTransport implements Transport {
   /** 为 true 时 session/set_mode 不自动回应，id 记入 pendingSetModeIds。 */
   hangSessionSetMode = false;
   pendingSetModeIds: Array<number | string> = [];
+  /** session/new|load 附带的 ACP configOptions（thinking/fast/effort 等）。 */
+  sessionConfigOptions: unknown[] | null = null;
 
   async writeLine(line: string): Promise<void> {
     this.written.push(JSON.parse(line));
@@ -203,7 +205,13 @@ async function bootWithTransport(
         transport.emit({
           jsonrpc: JSONRPC_VERSION,
           id: msg.id,
-          result: { sessionId: 'fresh-session-id', models },
+          result: {
+            sessionId: 'fresh-session-id',
+            models,
+            ...(transport.sessionConfigOptions
+              ? { configOptions: transport.sessionConfigOptions }
+              : {}),
+          },
         }),
       );
       return;
@@ -239,17 +247,35 @@ async function bootWithTransport(
         transport.emit({
           jsonrpc: JSONRPC_VERSION,
           id: msg.id,
-          result: { models },
+          result: {
+            models,
+            ...(transport.sessionConfigOptions
+              ? { configOptions: transport.sessionConfigOptions }
+              : {}),
+          },
         });
       });
       return;
     }
     if (msg.method === Method.SessionSetConfigOption) {
+      const params = msg.params as { configId?: string; value?: string } | undefined;
+      let configOptions = transport.sessionConfigOptions ?? [];
+      if (
+        params?.configId === 'thinking' &&
+        Array.isArray(transport.sessionConfigOptions) &&
+        transport.sessionConfigOptions.length > 0
+      ) {
+        configOptions = transport.sessionConfigOptions.map((raw) => {
+          if (!isRecord(raw) || raw.id !== 'thinking') return raw;
+          return { ...raw, currentValue: params.value ?? 'true' };
+        });
+        transport.sessionConfigOptions = configOptions;
+      }
       queueMicrotask(() =>
         transport.emit({
           jsonrpc: JSONRPC_VERSION,
           id: msg.id,
-          result: { configOptions: [] },
+          result: { configOptions },
         }),
       );
       return;
@@ -644,6 +670,68 @@ describe('CursorAgent lifecycle (FakeTransport)', () => {
         },
       }),
     ).rejects.toBeInstanceOf(AgentNotAuthenticatedError);
+  });
+
+  it('forces thinking=true when model exposes thinking even if start opts say false', async () => {
+    const transport = new FakeTransport();
+    transport.sessionConfigOptions = [
+      {
+        id: 'thinking',
+        name: 'Thinking',
+        currentValue: 'false',
+        options: [
+          { value: 'false', name: 'Off' },
+          { value: 'true', name: 'On' },
+        ],
+      },
+    ];
+    const opusModels = {
+      currentModelId: 'claude-opus-5',
+      availableModels: [
+        { modelId: 'default', name: 'Auto' },
+        { modelId: 'claude-opus-5', name: 'Opus 5' },
+      ],
+    };
+    const { agent, handle, userDataPath } = await bootWithTransport(
+      transport,
+      { thinkingMode: false, model: 'claude-opus-5' },
+      opusModels,
+    );
+    try {
+      const thinkingSets = transport.written.filter((msg) => {
+        if (!isRecord(msg) || msg.method !== Method.SessionSetConfigOption) return false;
+        const params = msg.params as { configId?: string; value?: string } | undefined;
+        return params?.configId === 'thinking';
+      }) as Array<{ params: { configId: string; value: string } }>;
+      expect(thinkingSets.length).toBeGreaterThan(0);
+      expect(thinkingSets.every((m) => m.params.value === 'true')).toBe(true);
+      expect(handle.getThinkingMode?.()).toBe(true);
+
+      await handle.setThinkingMode?.(false);
+      expect(handle.getThinkingMode?.()).toBe(true);
+      const afterFalse = transport.written.filter((msg) => {
+        if (!isRecord(msg) || msg.method !== Method.SessionSetConfigOption) return false;
+        const params = msg.params as { configId?: string; value?: string } | undefined;
+        return params?.configId === 'thinking' && params.value === 'false';
+      });
+      expect(afterFalse).toEqual([]);
+    } finally {
+      await handle.close().catch(() => undefined);
+      await agent.dispose().catch(() => undefined);
+      rmSync(userDataPath, { recursive: true, force: true });
+    }
+  });
+
+  it('skips thinking config when model has no thinking option', async () => {
+    await withBootedSession(async ({ transport, handle }) => {
+      const thinkingSets = transport.written.filter((msg) => {
+        if (!isRecord(msg) || msg.method !== Method.SessionSetConfigOption) return false;
+        const params = msg.params as { configId?: string } | undefined;
+        return params?.configId === 'thinking';
+      });
+      expect(thinkingSets).toEqual([]);
+      expect(handle.getThinkingMode?.()).toBe(true);
+    });
   });
 });
 
