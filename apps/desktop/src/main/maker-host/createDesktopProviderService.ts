@@ -50,6 +50,7 @@ import {
   refreshAnthropicModelsFromHttp,
 } from './model-discovery/anthropic.js';
 import { createProviderService, type ProviderService } from './provider-service.js';
+import { readModelDisableOverrides } from './model-disable-store.js';
 import { listCustomProviders } from './custom-provider-store.js';
 import { setCustomProviderKeyReader, setOAuthTokenReader, setProviderOAuthTokenReader } from './provider-route.js';
 import { setDiagnosticsKeyReader, setDiagnosticsOAuthTokenReader } from './provider-diagnostics.js';
@@ -59,7 +60,7 @@ import {
   readCachedGenericOAuthAccessToken,
   resetGenericOAuthMemoryCache,
 } from './generic-oauth.js';
-import { genericOAuthSecretIo, setProviderSecretsClearedListener } from '../secrets/providerSecretStore.js';
+import { genericOAuthSecretIo, addProviderSecretsClearedListener } from '../secrets/providerSecretStore.js';
 import { readClaudeApiKey, desktopCodexAuthAdapter } from './auth-adapters.js';
 import { readCustomProviderKey } from '../secrets/providerSecretStore.js';
 import { hasClaudeAiOAuth, hasClaudeAiOAuthUnbound } from './claude-credentials-store.js';
@@ -71,8 +72,12 @@ import {
 } from './grok-oauth-login.js';
 import { getAuthState } from '../authManager.js';
 import { getActiveAppSession } from '../appSessionState.js';
-import { filterProviderCatalogForAccount } from './provider-access-policy.js';
+import {
+  filterProviderCatalogForAccount,
+  projectProviderCatalogForBuildRegion,
+} from './provider-access-policy.js';
 import { getAppCapabilities } from '../appCapabilities.js';
+import { CURRENT_CINDY_REGION } from '../../shared/brandRegion.js';
 import {
   claimDetectedNativeProviderAuth,
   migrateLegacyNativeProviderAuthBindings,
@@ -226,7 +231,7 @@ export function ensureActiveCatalogLoaded(): Promise<Catalog> {
   });
   // 账号切换清空本机密钥后,同步失效 generic-oauth 的内存缓存——
   // 不失效的话磁盘 blob 已删但缓存还热,B 账号会继续用 A 的 token 路由(串号)。
-  setProviderSecretsClearedListener(() => {
+  addProviderSecretsClearedListener(() => {
     resetGenericOAuthMemoryCache();
     resetGrokOAuthMemoryCache();
   });
@@ -431,7 +436,11 @@ let singleton: ProviderService | null = null;
  * Cindy account session keeps the full active catalog.
  */
 export function getDesktopSelectableCatalog(): Catalog {
-  return filterProviderCatalogForAccount(getActiveCatalog(), {
+  const regionCatalog = projectProviderCatalogForBuildRegion(
+    getActiveCatalog(),
+    CURRENT_CINDY_REGION,
+  );
+  return filterProviderCatalogForAccount(regionCatalog, {
     canUseCindyGateway: getAppCapabilities().canUseCindyGateway,
   });
 }
@@ -504,6 +513,9 @@ export function getDesktopProviderService(): ProviderService {
     // 同步的 `security` 子进程，同一次 listProviders 不该为此阻塞主线程两回（PR #548 review）。
     modelDiscoveryFailure: (providerId, connected) =>
       providerId === 'anthropic' ? getAnthropicModelDiscoveryFailure(connected) : null,
+    // 「模型 / 供应商停用」override:main 侧持久化真源,烘焙进 ProviderView 后
+    // renderer / IM / Orca / device-link 全部消费同一份准入事实。
+    getModelAccess: readModelDisableOverrides,
   });
   return singleton;
 }
