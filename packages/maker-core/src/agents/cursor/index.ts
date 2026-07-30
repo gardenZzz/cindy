@@ -463,6 +463,8 @@ export class CursorAgent extends BaseAgent {
     signal?: AbortSignal;
     /** 单测注入 FakeTransport；缺省 spawn 真 cursor-agent。 */
     createTransport?: () => Transport;
+    /** 每探完一个模型后回调(含当前模型);用于设置页「已探 n / 总数」进度。 */
+    onProgress?: (done: number, total: number) => void;
   }): Promise<void> {
     const log = this.deps.logger.child('cursor/model-discovery');
     const authState = await this.deps.auth.getState();
@@ -526,6 +528,8 @@ export class CursorAgent extends BaseAgent {
           : { ...m };
       });
       const sessionId = created.sessionId;
+      const total = this.listedModels.length;
+      let done = 0;
       for (const model of this.listedModels) {
         if (opts.signal?.aborted) break;
         try {
@@ -544,6 +548,12 @@ export class CursorAgent extends BaseAgent {
             model: model.id,
             message: err instanceof Error ? err.message : String(err),
           });
+        }
+        done += 1;
+        try {
+          opts.onProgress?.(done, total);
+        } catch {
+          // 进度回调失败不影响探测本身。
         }
       }
       await this.publishListedModels(parsed.currentModelId);

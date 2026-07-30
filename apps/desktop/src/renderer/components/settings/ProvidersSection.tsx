@@ -1087,6 +1087,12 @@ function CursorDetail() {
   const [auth, setAuth] = useState<CursorAuthView>({ kind: 'loading' });
   const [installing, setInstalling] = useState(false);
   const [authBusy, setAuthBusy] = useState(false);
+  // 刷新模型编排态(spec #21 / #28):进度 / 取消 / 进行中互斥。
+  const [refreshState, setRefreshState] = useState<{
+    running: boolean;
+    done: number;
+    total: number;
+  }>({ running: false, done: 0, total: 0 });
   const platform = window.electronAPI.platform;
   const installSupported = platform === 'darwin' || platform === 'linux';
 
@@ -1107,6 +1113,52 @@ function CursorDetail() {
       // Agent 未注册(极少见:探测说已装但 Maker 未挂 Cursor)→ 按未登录降级。
       setAuth({ kind: 'unauthenticated' });
     }
+  }, []);
+
+  const handleRefreshModels = useCallback(async () => {
+    if (refreshState.running) return;
+    const api = window.electronAPI?.maker?.agent;
+    if (!api?.refreshCursorModels) return;
+    setRefreshState({ running: true, done: 0, total: 0 });
+    try {
+      const result = await api.refreshCursorModels();
+      if (!result.started) {
+        // 进行中互斥:再点无效(按钮本就禁用,此路径极少见)。
+        setRefreshState((prev) => ({ ...prev, running: true }));
+      }
+    } catch (err) {
+      setRefreshState({ running: false, done: 0, total: 0 });
+      const ipc = extractIpcError(err);
+      if (ipc?.code === 'UNSUPPORTED_CAPABILITY') {
+        toast.error(t('settings.providers.cursor.models.refreshUnavailableInstalled'));
+      } else {
+        toast.error(t('settings.providers.cursor.models.refreshFailed'));
+      }
+    }
+  }, [refreshState.running, t]);
+
+  const handleCancelRefresh = useCallback(async () => {
+    try {
+      await window.electronAPI?.maker?.agent?.cancelCursorModelRefresh?.();
+    } catch {
+      /* ignore */
+    }
+  }, []);
+
+  useEffect(() => {
+    const api = window.electronAPI?.maker?.agent;
+    if (!api?.onCursorModelRefreshProgress) return;
+    const off = api.onCursorModelRefreshProgress((progress) => {
+      setRefreshState({
+        running: progress.running,
+        done: progress.done,
+        total: progress.total,
+      });
+      if (!progress.running && progress.done === 0 && progress.total === 0) {
+        // 结束收口:不 toast(成功 / 取消 / 失败由目录变更 / 日志侧呈现)。
+      }
+    });
+    return () => off();
   }, []);
 
   const refresh = useCallback(async () => {
@@ -1212,6 +1264,8 @@ function CursorDetail() {
       if (state.authenticated) {
         setAuth({ kind: 'authenticated', identity: state.identity });
         toast.success(t('settings.providers.cursor.loginSuccess'));
+        // 登录成功后自动探一次目录(spec #21 / #29);人就在设置页,看得到进度。
+        void handleRefreshModels();
       } else {
         setAuth({ kind: 'unauthenticated' });
         if (state.errorReason !== 'login_cancelled') {
@@ -1224,7 +1278,7 @@ function CursorDetail() {
     } finally {
       setAuthBusy(false);
     }
-  }, [authBusy, t]);
+  }, [authBusy, handleRefreshModels, t]);
 
   const handleCancelLogin = useCallback(async () => {
     try {
@@ -1381,14 +1435,12 @@ function CursorDetail() {
         {/* 模型清单 + 显示开关（spec #21 / #26）。已安装才列；探测编排由 #28 接线。 */}
         {probe.kind === 'installed' && !loginUrl && (
           <CursorModelList
-            onRefresh={() => {
-              // T1 暂为占位:实际探测编排在 #28 落进 cursor-model-discovery 模块后接通。
-              // 现在点按钮是 no-op,按钮可见性 / 禁用态已由 refresh 状态正确反映。
-            }}
+            onRefresh={() => void handleRefreshModels()}
+            onCancel={() => void handleCancelRefresh()}
             refresh={{
-              running: false,
-              done: 0,
-              total: 0,
+              running: refreshState.running,
+              done: refreshState.done,
+              total: refreshState.total,
               unavailableReason:
                 probe.kind !== 'installed'
                   ? 'not-installed'
