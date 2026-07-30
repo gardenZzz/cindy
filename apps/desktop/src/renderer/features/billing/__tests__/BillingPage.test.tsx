@@ -76,6 +76,7 @@ vi.mock('qrcode', () => ({
 }));
 
 import { BillingPage } from '../BillingPage';
+import * as QRCode from 'qrcode';
 
 beforeEach(() => {
   uiMocks.confirm.mockReset().mockResolvedValue(false);
@@ -706,7 +707,12 @@ describe('BillingPage remote catalog rendering', () => {
 
     const view = render(<BillingPage />);
     // 服务端仍下发的动作以服务端为准展示，不用本地时钟提前藏码。
-    expect(await screen.findByAltText('billing.checkout.qrAlt')).toBeTruthy();
+    const qrCode = await screen.findByAltText('billing.checkout.qrAlt');
+    expect(qrCode.parentElement?.querySelectorAll('img')).toHaveLength(2);
+    expect(vi.mocked(QRCode.toDataURL)).toHaveBeenCalledWith(
+      order.paymentAction.value,
+      expect.objectContaining({ errorCorrectionLevel: 'H', margin: 4, width: 320 }),
+    );
     expect(screen.queryByText('billing.checkout.actionExpiredBody')).toBeNull();
 
     // 服务端判定过期后轮询响应把动作置空：切换为过期提示，不再显示二维码。
