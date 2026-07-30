@@ -51,6 +51,19 @@ image block。做不到就把 capability 置 false 让 UI 降级,不得静默替
 **C4 · 超限在编码前拦截。** 单图上限按 **resize 之后**的字节数判定,且必须在
 base64 之前检查(base64 会再放大 4/3),超限给可读错误而非静默截断或发出坏图。
 
+> **适用判据**:与 C1 同一个结构原因——只对**内联字节**的协议成立。它预设客户端
+> 手里有字节、且下一步要 base64;传路径的协议客户端从不读文件,没有"编码前"这个
+> 时点可拦,上限由上游读文件时自行执行。
+>
+> 现状:只有 Cursor 实现了这两道检查(`cursor/index.ts` 对 resize 后文件 `fs.stat`
+> 比上限 + 读出后 `buf.byteLength` 比上限,均在 `toString('base64')` 之前)。
+> Claude Code 与 Codex 只把 resize 后的路径交给上游,**没有**客户端侧的 post-resize
+> size guard,属结构上不适用。
+>
+> 遗留观察(非本 ADR 要求,记录备查):resizer 降级返回原路径时(转换失败 / sharp
+> 不可用),传路径的两个 Agent 会把一个可能很大的原图路径直接交给上游,客户端侧
+> 无任何提示。是否需要为它们加一道纯 stat 级的软告警,留待需要时另开票判断。
+
 **C5 · 远程图不落这条链。** `http://` / `https://` 开头的路径按 URI 直传上游,
 不下载、不缩放、不改 MIME。
 
@@ -68,8 +81,14 @@ C1 的回归测试必须用**真正触发转换**的 fixture(大于 resizer 的 
 - 新接入的 Agent 若上游协议没有结构化 image 通道,按 C3 直接把 capability 置
   false,不做「转成文本描述」这类兼容——那是 1 的原始形态。
 - 本 ADR 是**前瞻要求**(新增或改动任何 Agent 的图片路径都要对齐),不是在宣称
-  现有三个都已逐条落实。按 C1 的适用判据,Claude Code 与 Codex 是**结构上不适用**
-  而非违规;C2 / C4 / C5 三条它们与 Cursor 一致。
+  现有三个都已逐条落实。逐条现状:
+  - **C1 / C4**:带适用判据,只对内联字节的协议成立。Cursor 已实现;Claude Code
+    与 Codex 传路径,**结构上不适用**而非违规。
+  - **C2**(异步读取):三者一致——都在 send 路径上用 `resizer.process()` 异步缩图,
+    无 `readFileSync`。
+  - **C3**(capability 不撒谎):三者一致,均真发结构化 image 通道(Cursor 内联
+    block,Claude 走 @mention 文件引用,Codex 走 localImage/image),无文本占位降级。
+  - **C5**(远程图 URI 直传):三者一致,`http(s)://` 一律不下载不缩放。
 - resizer 未来若改成按源格式选择输出容器(而非统一 WebP),C1 的实现无需改动:
   判据是「是否返回了替代路径」,不是「是不是 WebP」。
 - C2 对 mobile 侧不直接适用(不在 Electron Main),但异步读取仍是默认要求。
