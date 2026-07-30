@@ -6,6 +6,7 @@ import { useCallback, useEffect, useRef, useState, type Dispatch, type SetStateA
 import { createLogger } from '@/lib/logger';
 import { orcaWorkflowsFor, subscribeOrcaWorkerChanged } from '@/lib/makerTransport';
 import { isActiveWorkerStatus, type OrcaWorkerStatus } from '../../../../shared/orca-worker-status';
+import { normalizeOrcaDisplayAgentKind } from '../lib/orcaAgentDisplay';
 import type { AgentKind } from '@cindy/maker-core';
 
 const log = createLogger('useWorkers');
@@ -63,7 +64,7 @@ function mapWorkerRecord(raw: Record<string, unknown>): WorkerInfo {
     workerId: raw.id as string,
     sessionId: raw.sessionId as string,
     role: (raw.role as string) ?? 'developer',
-    agent: session?.agentKind === 'codex' ? 'codex' : 'claude-code',
+    agent: normalizeOrcaDisplayAgentKind(session?.agentKind),
     model: (session?.model as string) ?? 'claude-sonnet-4-6',
     effort: (session?.effort as string | null) ?? null,
     label: (raw.label as string | null) ?? null,
