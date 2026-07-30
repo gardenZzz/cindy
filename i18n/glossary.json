@@ -400,6 +400,39 @@
       "note": "计费点数用「点数」。清理前中文「额度」同时对应 Balance / Credits / Quota 三个英文概念，是计费面板里最容易误导用户的一处：同一个 billing 页面里「点数」和「额度」并存，而「额度」在别处又指配额。裁决把三者拆开——Credits =「点数」、Quota =「配额」、Balance =「余额」，「额度」整体退出。「额度」的禁用按英文源拆成三条条件禁用,分别挂在 credits / quota / balance 下。不能无条件禁:同一个「额度」在不同 key 里分别对应 Credits / Quota / Balance,目标译法不唯一,无条件禁只会让自动替换随机挑一个——xAI 的 subscription quota 就是这样被改成「订阅点数」的。第三方原生 credits 与 reset credits 属不同概念，走 alsoAllowed。whenEn 写单数 Credit:匹配本来就带可选复数 s,单数能同时覆盖 Credit / Credits,写成复数反而漏掉全部单数用法(Promotional Credit Details、credit snapshot 等 8 个 key 原先完全不受约束)。"
     },
     {
+      "id": "device",
+      "status": "proposed",
+      "en": "Device",
+      "translations": {
+        "zh-CN": "设备",
+        "ja": "デバイス",
+        "ko": "기기"
+      },
+      "checkCase": false,
+      "alsoAllowed": {
+        "zh-CN": [
+          {
+            "text": "电脑",
+            "when": "指代桌面端那台物理机本身而非「可选目标」这一维度（「在电脑上安装并打开 Cindy」「正在从电脑导出…」「电脑端正在等待确认」）"
+          }
+        ],
+        "ja": [
+          {
+            "text": "パソコン",
+            "when": "同上 —— デスクトップ実機そのものを指す場合"
+          }
+        ],
+        "ko": [
+          {
+            "text": "컴퓨터",
+            "when": "同上 —— 데스크톱 실물 기기 자체를 가리키는 경우"
+          }
+        ]
+      },
+      "note": "device-link 里「可以选择在哪台机器上运行」这一维度，两端统一叫「设备」。desktop 的 machineSwitcher 本来就是 This device / このデバイス / 이 기기，mobile 原先用 computer 系（选择电脑 / パソコンを選択 / 컴퓨터 선택），2026-07 裁决为向 device 系对齐，与既有 device-code（设备码 / デバイスコード / 기기 코드）同口径。alsoAllowed 保留「电脑」系：指代桌面端物理机的文案（安装、导出、等待确认）换成「设备」反而不通中文，那是 desktop/PC 的意思，不是这里的目标维度。",
+      "exempt": []
+    },
+    {
       "id": "device-code",
       "status": "proposed",
       "en": "Device Code",

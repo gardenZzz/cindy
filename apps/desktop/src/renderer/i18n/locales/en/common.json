@@ -4131,7 +4131,9 @@
         "addFailed": "Failed to add project",
         "pathEmpty": "Please enter a project path",
         "pathIsFile": "{{path}} is a file, not a directory"
-      }
+      },
+      "selectTargetPlaceholder": "Choose a target…",
+      "requestedDeviceUnavailable": "The requested device isn't available right now — pick another target"
     },
     "projectPicker": {
       "addRemoteProject": "Add remote project"
@@ -4454,6 +4456,14 @@
       "alwaysAllowScopedHint": "Applies to the whole session, and only to what is listed here.",
       "alwaysAllowSessionHint": "Applies to the whole session, not just this one request.",
       "ruleSeparator": ", "
+    },
+    "deviceSwitcher": {
+      "label": "Device",
+      "localHint": "Runs on this computer",
+      "onlineHint": "Connected — available",
+      "offlineHint": "Offline — available once connected",
+      "attachmentsDropped": "Removed {{count}} attachment(s) — they live on the previous device",
+      "attachmentsRemoteUnsupported": "File attachments aren't supported on a remote device — skipped {{count}} (images are fine)"
     }
   },
   "onboarding": {
@@ -5325,7 +5335,8 @@
       "worktreeMissingRepo": "Cannot create worktree: missing repository root for the current directory",
       "worktreeRepoHint": "Try re-selecting the working directory and wait for the folder badge to refresh, then retry",
       "sessionInactive": "Session is no longer active",
-      "remoteProjectBanner": "New session in {{project}} on {{device}}"
+      "remoteProjectBanner": "New session in {{project}} on {{device}}",
+      "remoteDialogueBanner": "New dialogue on {{device}} (no project)"
     },
     "jumpSession": {
       "emptyId": "Enter a sessionId to jump to",
@@ -7361,7 +7372,8 @@
       "start": "Start",
       "starting": "Starting…",
       "cancel": "Cancel",
-      "failed": "Failed to create goal"
+      "failed": "Failed to create goal",
+      "busy": "Another creation is already in progress. Please try again in a moment."
     },
     "usageLimitedUntil": "resumes {{time}}",
     "capacityRetryAt": "Retrying at {{time}}",
