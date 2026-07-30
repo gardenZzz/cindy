@@ -53,7 +53,7 @@ export interface ProjectScheduleConfig {
   /** 可选：显式来源(供应商)id。省略 → 走原生默认来源（与旧配置字节级一致）。详见 Schedule.providerId。 */
   providerId?: string;
   effort?: string;
-  /** Codex Fast 模式开关，仅 Codex 有意义。详见 Schedule.fastMode。 */
+  /** Fast 模式开关，对 Codex / Cursor 有意义。详见 Schedule.fastMode。 */
   fastMode?: boolean;
   useWorktree?: boolean;
   persistentSession?: boolean;

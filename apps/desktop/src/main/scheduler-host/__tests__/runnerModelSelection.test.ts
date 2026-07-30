@@ -185,7 +185,14 @@ interface RunnerHarness {
 
 function createRunnerHarness(
   h: FakeSessionHarness,
-  meta: { model?: string; effort?: string; workDir?: string; sdkSessionId?: string } | null = null,
+  meta: {
+    model?: string;
+    effort?: string;
+    workDir?: string;
+    sdkSessionId?: string;
+    agentKind?: Session['agentKind'];
+    fastMode?: boolean;
+  } | null = null,
   opts: {
     sessionAlive?: boolean;
     activeSessions?: Session[];
@@ -227,12 +234,16 @@ async function fireToCompletion(
   harness: RunnerHarness,
   h: FakeSessionHarness,
   schedule: Schedule,
-): Promise<{ model: string; effort?: string }> {
+): Promise<{ model: string; effort?: string; fastMode?: boolean }> {
   const firePromise = harness.runner.fire(schedule, createFireContext());
   await vi.waitFor(() => expect(h.send).toHaveBeenCalled());
   h.emit({ type: 'done', data: {} });
   await firePromise;
-  return harness.createSession.mock.calls[0][0] as { model: string; effort?: string };
+  return harness.createSession.mock.calls[0][0] as {
+    model: string;
+    effort?: string;
+    fastMode?: boolean;
+  };
 }
 
 describe('MakerScheduleRunner model selection', () => {
@@ -344,6 +355,32 @@ describe('MakerScheduleRunner model selection', () => {
       expect(opts.model).toBe('auto');
     });
 
+    it('Cursor 非 heartbeat 透传 schedule.fastMode(#25: 不再硬绑 Codex)', async () => {
+      const h = createSessionHarness();
+      const harness = createRunnerHarness(h);
+
+      const opts = await fireToCompletion(
+        harness,
+        h,
+        baseSchedule({ agentKind: 'cursor', model: 'auto', fastMode: true }),
+      );
+
+      expect(opts.fastMode).toBe(true);
+    });
+
+    it('Claude 非 heartbeat 恒不传 fastMode(no-break)', async () => {
+      const h = createSessionHarness();
+      const harness = createRunnerHarness(h);
+
+      const opts = await fireToCompletion(
+        harness,
+        h,
+        baseSchedule({ agentKind: 'claude-code', fastMode: true }),
+      );
+
+      expect(opts.fastMode).toBeUndefined();
+    });
+
     it('schedule.model 显式设置时原样透传', async () => {
       const h = createSessionHarness();
       const harness = createRunnerHarness(h);
@@ -366,6 +403,29 @@ describe('MakerScheduleRunner model selection', () => {
       workDir: '/work',
       sdkSessionId: 'sdk-1',
     };
+
+    it('Cursor heartbeat 沿用 session meta.fastMode(#25: 不再硬绑 Codex)', async () => {
+      const h = createSessionHarness();
+      const harness = createRunnerHarness(h, {
+        ...HEARTBEAT_META,
+        model: 'auto',
+        agentKind: 'cursor',
+        fastMode: true,
+      });
+
+      const opts = await fireToCompletion(
+        harness,
+        h,
+        baseSchedule({
+          agentKind: 'cursor',
+          model: undefined,
+          targetSessionId: 'scheduler-session',
+        }),
+      );
+
+      // heartbeat 非显式 fast -> 取 meta.fastMode(true),透传给 createSession。
+      expect(opts.fastMode).toBe(true);
+    });
 
     it('schedule.model 显式设置时优先于绑定 session 的 meta.model，并同步给运行时 + 落库', async () => {
       const h = createSessionHarness();

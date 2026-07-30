@@ -3985,7 +3985,12 @@ export function ChatInput({
           if (makerChatStore.getSnapshot(sessionId).agentStatus.isRunning) {
             toast.success(
               t('newChat.chatInput.agentSwitch.deferred', {
-                agent: targetAgentKind === 'codex' ? 'Codex' : 'Claude Code',
+                agent:
+                  targetAgentKind === 'codex'
+                    ? 'Codex'
+                    : targetAgentKind === 'cursor'
+                      ? 'Cursor'
+                      : 'Claude Code',
                 model: newModelId,
               }),
               { duration: 4000 },
@@ -4025,6 +4030,7 @@ export function ChatInput({
       localProviders.providers,
       ccCaps.capabilities,
       codexCaps.capabilities,
+      cursorCaps.capabilities,
     ],
   );
   // 声明顺序在 performAgentSwitch 之前的 handler(handleFastModeChange)经此 ref
