@@ -3849,6 +3849,8 @@
     "banner": {
       "title": "{{version}} に更新済み",
       "subtitle": "再起動して適用",
+      "viewNotes": "更新情報を見る",
+      "viewNotesAria": "{{version}} の更新情報を見る",
       "button": "再起動",
       "tooltipReady": "更新準備完了 — クリックで再起動{{versionSuffix}}",
       "ariaCollapsed": "更新準備完了、クリックでバージョン {{version}} に再起動",

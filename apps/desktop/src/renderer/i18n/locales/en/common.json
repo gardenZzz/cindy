@@ -3850,6 +3850,8 @@
     "banner": {
       "title": "Updated to {{version}}",
       "subtitle": "Relaunch to apply",
+      "viewNotes": "See What's New",
+      "viewNotesAria": "See what's new in {{version}}",
       "button": "Relaunch",
       "tooltipReady": "Update ready – click to relaunch{{versionSuffix}}",
       "ariaCollapsed": "Update ready, click to relaunch to version {{version}}",
