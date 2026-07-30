@@ -1000,7 +1000,12 @@ interface OrcaCollabService {
     { ok: true; workerId?: string } | { ok: false; errorCode: string; message: string }
   >;
   listAvailableModels: (params: { agent?: AgentKind }) => Promise<
-    { ok: true; codex?: Array<{ id: string; label: string }>; claude_code?: Array<{ id: string; label: string }> }
+    {
+      ok: true;
+      codex?: Array<{ id: string; label: string }>;
+      claude_code?: Array<{ id: string; label: string }>;
+      cursor?: Array<{ id: string; label: string }>;
+    }
     | { ok: false; errorCode: string; message: string }
   >;
 }
@@ -5878,7 +5883,11 @@ export function registerMakerIpc(maker: Maker, options: RegisterMakerIpcOptions)
       fast?: unknown;
       providerId?: unknown;
     };
-    const workerAgent: AgentKind = body.workerAgent === 'codex' ? 'codex' : 'claude-code';
+    const workerAgent: AgentKind = body.workerAgent === 'codex'
+      ? 'codex'
+      : body.workerAgent === 'cursor'
+        ? 'cursor'
+        : 'claude-code';
     const delegateTask = typeof body.delegateTask === 'string' ? body.delegateTask : undefined;
     return enableOrcaInternal(leadSessionId, {
       workerAgent,
@@ -6231,7 +6240,11 @@ export function registerMakerIpc(maker: Maker, options: RegisterMakerIpcOptions)
       if (!leadRow) return null;
       return {
         id: leadRow.id,
-        agentKind: leadRow.agentKind === 'codex' ? 'codex' : 'claude-code',
+        agentKind: leadRow.agentKind === 'codex'
+          ? 'codex'
+          : leadRow.agentKind === 'cursor'
+            ? 'cursor'
+            : 'claude-code',
         workingDir: leadRow.workingDir,
         model: leadRow.model,
         effort: leadRow.effort,
@@ -6287,7 +6300,10 @@ export function registerMakerIpc(maker: Maker, options: RegisterMakerIpcOptions)
         availability: {
           'claude-code': availabilityFor('claude-code'),
           codex: availabilityFor('codex'),
-          // Type-slot only (#5): cursor agent is not registered yet - empty availability.
+          // cursor 是登录制 agent，凭证在 cursor-agent 自己的 login 态里，
+          // model-providers 里没有它的供应商条目 —— 恒空是事实而非缺口；
+          // worker 创建对 cursor 整段跳过供应商路由（orcaWorkerCreationService
+          // 的 isProviderRoutedAgent）。
           cursor: [],
         },
         resolveDefaultProviderIdForModel: (agent, model) => (
@@ -6636,11 +6652,12 @@ export function registerMakerIpc(maker: Maker, options: RegisterMakerIpcOptions)
     },
     listAvailableModels: async ({ agent }) => {
       try {
-        const agents: AgentKind[] = agent ? [agent] : ['codex', 'claude-code'];
+        const agents: AgentKind[] = agent ? [agent] : ['codex', 'claude-code', 'cursor'];
         const result: Record<string, Array<{ id: string; label: string }>> = {};
         for (const a of agents) {
           const caps = maker.getCapabilities(a);
-          result[a === 'codex' ? 'codex' : 'claude_code'] = caps.availableModels.map((m) => ({ id: m.id, label: m.displayName }));
+          const key = a === 'codex' ? 'codex' : a === 'cursor' ? 'cursor' : 'claude_code';
+          result[key] = caps.availableModels.map((m) => ({ id: m.id, label: m.displayName }));
         }
         return { ok: true, ...result };
       } catch (err) {

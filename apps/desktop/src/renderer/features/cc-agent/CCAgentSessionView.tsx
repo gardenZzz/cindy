@@ -168,6 +168,7 @@ import {
   normalizeOrcaDisplayAgentKind,
   orcaAgentLabel,
   orcaVendorForAgentKind,
+  type OrcaDisplayVendor,
 } from './lib/orcaAgentDisplay';
 import {
   shouldRevealOrcaWorkersAfterPaint,
@@ -1688,7 +1689,7 @@ export function CCAgentSessionView({
   // F-COLLAB: 协同模式真实状态。enabled 来自 session.orcaRole === 'lead';
   // worker(显示用)从 active workflow 的 Worker session 列表查到 agentKind。
   // 切换协同走 IPC enableOrca / disableOrca,失败时 toast。
-  const [collabWorker, setCollabWorker] = useState<'cc' | 'codex'>('codex');
+  const [collabWorker, setCollabWorker] = useState<OrcaDisplayVendor>('codex');
   // enableBusy 只盖"开启协同"路径;关闭走 useStopOrcaCollab hook 自己管 busy。
   const [enableBusy, setEnableBusy] = useState(false);
   const [createWorkerOpen, setCreateWorkerOpen] = useState(false);
@@ -1861,8 +1862,7 @@ export function CCAgentSessionView({
       .then((workers) => {
         if (cancelled || workers.length === 0) return;
         const activeWorker = workers[0]; // MVP: 假设最多 1 个 active Worker
-        const kind: 'cc' | 'codex' = activeWorker.session?.agentKind === 'codex' ? 'codex' : 'cc';
-        setCollabWorker(kind);
+        setCollabWorker(orcaVendorForAgentKind(normalizeOrcaDisplayAgentKind(activeWorker.session?.agentKind)));
       })
       .catch(() => undefined);
     return () => {
@@ -1952,8 +1952,7 @@ export function CCAgentSessionView({
         : Promise.resolve();
       try {
         const workerAgent = form.agent;
-        const worker: 'cc' | 'codex' = workerAgent === 'codex' ? 'codex' : 'cc';
-        setCollabWorker(worker);
+        setCollabWorker(orcaVendorForAgentKind(normalizeOrcaDisplayAgentKind(workerAgent)));
         setCreateWorkerOpen(false);
         await makerApiFor(collabSessionId).enableOrca(collabSessionId, {
           workerAgent,

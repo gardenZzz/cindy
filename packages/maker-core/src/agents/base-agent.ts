@@ -219,6 +219,23 @@ export interface AgentDeps {
   ) => Promise<CodexExtraSpawnConfig>;
 
   /**
+   * ACP (Cursor) 专用钩子：产出 `session/new` / `session/load` 的 `mcpServers`。
+   *
+   * 与 codex 同因异形：cursor-agent 也是独立子进程，消费不了 in-process JS
+   * McpServer instance；ACP 只认 stdio / http / sse（cursor 的 initialize 回
+   * `mcpCapabilities: {http:true, sse:true}`），所以同样要经 host 的 HTTP bridge
+   * 暴露。桥接与鉴权细节留在 desktop host，maker-core 只透传结果。
+   *
+   * cleanup 必须在 session close 时调用（注销 bridge 上的 session ctx）。
+   * 缺省 / 返回空数组 → cursor 会话不带 MCP（仍能基础对话）。
+   */
+  prepareAcpMcpServers?: (ctx: {
+    sessionId?: string;
+    workingDir: string;
+    vendorOptions?: Record<string, unknown>;
+  }) => Promise<{ servers: unknown[]; cleanup?: () => void }>;
+
+  /**
    * Codex 本地 shared app-server 凭证形态要切换前的宿主协调点。
    *
    * maker-core 不知道 desktop 的 active session / worktree / attachment 生命周期；

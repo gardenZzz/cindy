@@ -234,7 +234,11 @@ function draftEnableOrcaOptions(
   providers: ProviderView[],
   providersReady: boolean,
 ) {
-  const workerAgent: AgentKind = collab.worker === 'codex' ? 'codex' : 'claude-code';
+  const workerAgent: AgentKind = collab.worker === 'codex'
+    ? 'codex'
+    : collab.worker === 'cursor'
+      ? 'cursor'
+      : 'claude-code';
   const cfg = collab.workerConfig;
   if (!cfg) return { workerAgent };
   // 草稿里持久化的来源在发送时按 live 目录重新收窄(已连接 + 提供该模型 + 未被可见性
@@ -3302,7 +3306,7 @@ export function NewMakerDraftRoute() {
           onCreate={(form: CreateWorkerForm) => {
             patchCollab({
               enabled: true,
-              worker: form.agent === 'codex' ? 'codex' : 'cc',
+              worker: form.agent === 'codex' ? 'codex' : form.agent === 'cursor' ? 'cursor' : 'cc',
               workerConfig: {
                 role: form.role,
                 model: form.model,

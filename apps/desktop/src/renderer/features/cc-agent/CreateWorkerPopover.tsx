@@ -14,6 +14,7 @@ import { FastModeToggle } from '@/components/new-chat/FastModeToggle';
 import { ModelSelector } from '@/components/new-chat/ModelSelector';
 import { VendorSegmentedSwitcher } from '@/components/new-chat/VendorSegmentedSwitcher';
 import { useAgentCapabilities } from '@/hooks/useAgentCapabilities';
+import { useCursorAvailable } from '@/hooks/useCursorAvailable';
 import { useDeviceProviders } from '@/hooks/useDeviceProviders';
 import { useProviders } from '@/hooks/useProviders';
 import { filterChatBridgedCodexProviders } from '@/lib/providerModels';
@@ -34,8 +35,8 @@ import type { AgentKind } from '@cindy/maker-core';
 const PREDEFINED_ROLES = ['developer', 'designer', 'reviewer', 'tester', 'merger'] as const;
 const PREFS_KEY = 'workerCreationPrefs';
 
-/** Orca worker 创建面板只覆盖已注册 runtime；cursor 未进选择面 (#5)。 */
-type WorkerSelectableAgent = Exclude<AgentKind, 'cursor'>;
+/** Orca worker 可选 agent；cursor 段只在本机装了 cursor-agent 时翻开。 */
+type WorkerSelectableAgent = AgentKind;
 
 interface WorkerAgentPrefs {
   model: string;
@@ -49,12 +50,15 @@ interface WorkerPrefs {
   lastAgent: WorkerSelectableAgent;
   codex: WorkerAgentPrefs;
   'claude-code': WorkerAgentPrefs;
+  cursor: WorkerAgentPrefs;
 }
 
 const DEFAULT_PREFS: WorkerPrefs = {
   lastAgent: 'codex',
   codex: { model: 'codex/gpt-5.5', effort: 'high', fast: false, providerId: null },
   'claude-code': { model: 'claude-opus-4-7', effort: 'high', fast: false, providerId: null },
+  // cursor 的模型目录来自 ACP session/new，'auto' 是产品级默认档；无供应商维度。
+  cursor: { model: 'auto', effort: 'high', fast: false, providerId: null },
 };
 
 function readWorkerPrefs(): WorkerPrefs {
@@ -74,9 +78,13 @@ function readWorkerPrefs(): WorkerPrefs {
       };
     };
     return {
-      lastAgent: parsed.lastAgent === 'claude-code' ? 'claude-code' : 'codex',
+      lastAgent:
+        parsed.lastAgent === 'claude-code' || parsed.lastAgent === 'cursor'
+          ? parsed.lastAgent
+          : 'codex',
       codex: agentPrefs('codex'),
       'claude-code': agentPrefs('claude-code'),
+      cursor: agentPrefs('cursor'),
     };
   } catch {
     return DEFAULT_PREFS;
@@ -149,13 +157,17 @@ export function CreateWorkerPopover({
 
   const ccCaps = useAgentCapabilities('claude-code', deviceId);
   const codexCaps = useAgentCapabilities('codex', deviceId);
+  const cursorCaps = useAgentCapabilities('cursor', deviceId);
+  // device-link 被控端不一定装了 cursor-agent，远程创建面板不翻 Cursor 段。
+  const cursorAvailable = useCursorAvailable() && !deviceId;
   const localProviders = useProviders();
   const remoteProviders = useDeviceProviders(deviceId);
   const providers = deviceId ? remoteProviders.providers : localProviders.providers;
   const providersLoading = deviceId ? remoteProviders.loading : localProviders.loading;
   const providersError = deviceId ? remoteProviders.error : null;
   const visibilityVersion = useModelVisibilityVersion();
-  const activeCapabilitiesState = agent === 'codex' ? codexCaps : ccCaps;
+  const activeCapabilitiesState =
+    agent === 'codex' ? codexCaps : agent === 'cursor' ? cursorCaps : ccCaps;
   const activeCaps = activeCapabilitiesState.capabilities;
   const activeModels = useMemo(() => {
     return selectWorkerModels({
@@ -338,7 +350,19 @@ export function CreateWorkerPopover({
     }
   }, [currentModel, currentModelSupportsFast, fast]);
 
-  const vendorKey = agent === 'codex' ? 'codex' : 'cc';
+  // 记忆里停在 cursor 但本机没装 cursor-agent（或这是 device-link 远程面板）时回落，
+  // 避免提交一个 spawn 必失败的 agent。
+  useEffect(() => {
+    if (agent === 'cursor' && !cursorAvailable) {
+      setAgent('codex');
+      setModel(prefs.codex.model);
+      setEffort(prefs.codex.effort);
+      setFast(prefs.codex.fast);
+      setProviderSource(deviceId ? null : prefs.codex.providerId);
+    }
+  }, [agent, cursorAvailable, deviceId, prefs]);
+
+  const vendorKey = agent === 'codex' ? 'codex' : agent === 'cursor' ? 'cursor' : 'cc';
   const updateAgent = useCallback(
     (nextAgent: WorkerSelectableAgent) => {
       if (nextAgent === agent) return;
@@ -678,9 +702,12 @@ export function CreateWorkerPopover({
               「不自建选择 UI」的组件复用原则)。 */}
           <VendorSegmentedSwitcher
             value={vendorKey}
-            width={220}
+            width={cursorAvailable ? 300 : 220}
             ariaLabel={t('orca.createWorker.agentLabel')}
-            onChange={(next) => updateAgent(next === 'codex' ? 'codex' : 'claude-code')}
+            includeCursor={cursorAvailable}
+            onChange={(next) =>
+              updateAgent(next === 'codex' ? 'codex' : next === 'cursor' ? 'cursor' : 'claude-code')
+            }
           />
         </div>
 
@@ -745,7 +772,7 @@ export function CreateWorkerPopover({
           {noAvailableLocalModels ? (
             <p className="mt-1.5 text-11 leading-snug text-[var(--error-fg)]" role="status">
               {t('orca.createWorker.noAvailableModels', {
-                agent: agent === 'codex' ? 'Codex' : 'Claude Code',
+                agent: agent === 'codex' ? 'Codex' : agent === 'cursor' ? 'Cursor' : 'Claude Code',
               })}
             </p>
           ) : null}

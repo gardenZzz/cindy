@@ -51,6 +51,7 @@ import { remoteInvoke } from '../device-link/index.js';
 import { WorktreePool } from '../worktree/index.js';
 import { getReadyBinaryPath, getCachedBinaryStatus } from '../agent-binaries/index.js';
 import { discoverCursorAgentBinarySync } from './cursor-binary-discovery.js';
+import { buildCursorAcpMcpServers } from './cursor-acp-mcp.js';
 import { createDesktopCursorAuthAdapter } from './cursor-auth-adapter.js';
 import {
   desktopClaudeAuthAdapter,
@@ -1102,6 +1103,14 @@ export function getMaker(): Maker {
           // Cursor 无 vendor Auto reviewer；注入 Cindy 侧分类器（看 tool 名 + input）。
           classifyAutoPermission: async (args) => classifyAcpAutoPermission(args),
           onAutoPermissionClassifierUnavailable: notifyAutoPermissionClassifierUnavailable,
+          // 协同 MCP(cindy_orca / orca_worker_bridge)经同一座 HTTP bridge 注入
+          // ACP session/new + session/load,让 Cursor 会话既能当 Orca Lead 派活,
+          // 也能作为 Worker 手动 send_to_lead。
+          prepareAcpMcpServers: (ctx) =>
+            buildCursorAcpMcpServers(ctx, {
+              ensureBridgeStarted: ensureCodexMcpBridgeStartedForRemote,
+              isCollabEnabled: () => pluginRegistry.isEnabled('collab'),
+            }),
           onCursorLocalModelsListed: (listing) => {
             const maker = _maker;
             if (!maker) return;

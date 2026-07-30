@@ -81,7 +81,7 @@ export interface CollabWorkerConfig {
 
 export interface CollabDraft {
   enabled: boolean;
-  worker: 'cc' | 'codex';
+  worker: 'cc' | 'codex' | 'cursor';
   workerConfig?: CollabWorkerConfig;
 }
 
@@ -259,7 +259,7 @@ function sanitize(raw: unknown): NewMakerDraft {
   // 防止历史脏数据让用户看到协同 ON 但 workdir 为空的不可达状态)。
   const collabRaw = (r as { collab?: Partial<CollabDraft> }).collab;
   const collabWorker: CollabDraft['worker'] =
-    collabRaw?.worker === 'cc' ? 'cc' : 'codex';
+    collabRaw?.worker === 'cc' ? 'cc' : collabRaw?.worker === 'cursor' ? 'cursor' : 'codex';
   // remote 项目的协同 codex / cc draft 均放行:worker 创建已继承 remoteHostId
   // (在同一台远端主机 spawn,见 OrcaLeadSessionSnapshot.remoteHostId),两端
   // 远端 MCP 注入均已落地 (codex daemon config + cc per-query http 注入)。
