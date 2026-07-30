@@ -422,7 +422,7 @@ function resolveWorkerConfig(params: {
         : (input.agent === lead.agentKind ? lead.providerId : null),
     fastMode: modelCapabilities.supportsFastMode === false
       ? false
-      : ((input.agent === 'codex' && input.fast !== undefined)
+      : (((input.agent === 'codex' || input.agent === 'cursor') && input.fast !== undefined)
           ? input.fast
           : (defaults.fastMode ?? !!lead.fastMode)),
   };
@@ -624,7 +624,7 @@ export function createOrcaWorkerCreationService(deps: OrcaWorkerCreationDeps): O
     // 只有该来源确实带了 Fast 元数据才覆盖;无元数据(旧组装方)保留拍平解析。
     if (routeProvider?.fastModels) {
       const providerSupportsFast = routeProvider.fastModels.includes(resolved.model);
-      const requestedFast = params.agent === 'codex' && params.fast !== undefined
+      const requestedFast = (params.agent === 'codex' || params.agent === 'cursor') && params.fast !== undefined
         ? params.fast
         : (defaults.fastMode ?? !!lead.fastMode);
       resolved.fastMode = providerSupportsFast && requestedFast === true;

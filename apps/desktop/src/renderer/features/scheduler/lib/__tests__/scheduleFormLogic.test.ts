@@ -320,6 +320,21 @@ describe('buildScheduleInput — 非 heartbeat 分支(行为锁定,不动 create
     expect(input.fastMode).toBe(false);
   });
 
+  it('cursor 也带 fastMode（#25: 不再硬绑 codex）', () => {
+    const input = buildScheduleInput(
+      makeForm({ agentKind: 'cursor', fastMode: true }),
+    );
+    expect(hasKey(input, 'fastMode')).toBe(true);
+    expect(input.fastMode).toBe(true);
+  });
+
+  it('claude-code 仍不带 fastMode key（no-break）', () => {
+    const input = buildScheduleInput(
+      makeForm({ agentKind: 'claude-code', fastMode: true }),
+    );
+    expect(hasKey(input, 'fastMode')).toBe(false);
+  });
+
   it('targetSessionId 空 → undefined(落库 null,解绑通道)', () => {
     const input = buildScheduleInput(makeForm());
     expect(input.targetSessionId).toBeUndefined();

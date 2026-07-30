@@ -97,7 +97,7 @@ export interface ScheduleFormState {
    */
   providerId: string;
   effort: EffortValue | '';
-  /** Codex Fast 模式开关。仅 Codex 有意义;切到 Claude / 不支持 fast 的模型时自动清为 false。 */
+  /** Fast 模式开关。对 Codex / Cursor 有意义;切到 Claude / 不支持 fast 的模型时自动清为 false。 */
   fastMode: boolean;
   workspaceKind: ScheduleWorkspaceKind;
   workingDir: string;
@@ -459,6 +459,6 @@ export function buildScheduleInput(form: ScheduleFormState): CreateScheduleInput
   if (form.model.trim()) base.model = form.model.trim();
   if (form.providerId.trim()) base.providerId = form.providerId.trim();
   if (form.effort && isEffortValue(form.effort)) base.effort = form.effort;
-  if (form.agentKind === 'codex') base.fastMode = form.fastMode;
+  if (form.agentKind === 'codex' || form.agentKind === 'cursor') base.fastMode = form.fastMode;
   return base;
 }

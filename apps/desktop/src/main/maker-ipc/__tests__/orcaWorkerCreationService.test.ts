@@ -901,6 +901,77 @@ describe('OrcaWorkerCreationService', () => {
     }));
   });
 
+  // ── #25: Cursor worker 的 Fast 不再被硬绑在 Codex 上 ──────────────────
+  it.each([
+    ['adopts explicit fast=true for a cursor worker whose model supports fast', true, true],
+    ['forces fast=false when cursor worker model does not support fast', false, false],
+  ])('%s', async (_name, supportsFastMode, expectedFast) => {
+    const { deps, service } = createDeps({
+      getAvailableModels: vi.fn((agent: AgentKind) => (
+        agent === 'cursor'
+          ? [{ id: 'claude-opus-5', efforts: [], defaultEffort: null, supportsFastMode }]
+          : [{ id: 'claude-sonnet-4-6', efforts: ['low', 'high'], defaultEffort: 'high' }]
+      )),
+    });
+
+    await expect(
+      service.createWorker({
+        leadSessionId: 'lead-1',
+        role: 'developer',
+        agent: 'cursor',
+        label: 'cursor-fast',
+        model: 'claude-opus-5',
+        fast: true,
+      }),
+    ).resolves.toMatchObject({
+      ok: true,
+      resolved: {
+        agent: 'cursor',
+        model: 'claude-opus-5',
+        fastMode: expectedFast,
+      },
+    });
+
+    expect(deps.buildCreateOptsWithStderr).toHaveBeenCalledWith(expect.objectContaining({
+      agentKind: 'cursor',
+      model: 'claude-opus-5',
+      fastMode: expectedFast,
+    }));
+  });
+
+  it('inherits lead.fastMode for a cursor worker when fast is not explicit', async () => {
+    const { service } = createDeps({
+      getLeadSessionRow: vi.fn(async () => ({
+        id: 'lead-1',
+        agentKind: 'cursor' as const,
+        workingDir: '/repo',
+        model: 'claude-opus-5',
+        effort: 'high',
+        permissionMode: 'default',
+        fastMode: true,
+        providerId: null,
+        remoteHostId: null,
+      })),
+      getAvailableModels: vi.fn((agent: AgentKind) => (
+        agent === 'cursor'
+          ? [{ id: 'claude-opus-5', efforts: [], defaultEffort: null, supportsFastMode: true }]
+          : [{ id: 'claude-sonnet-4-6', efforts: ['low', 'high'], defaultEffort: 'high' }]
+      )),
+    });
+
+    await expect(
+      service.createWorker({
+        leadSessionId: 'lead-1',
+        role: 'developer',
+        agent: 'cursor',
+        label: 'cursor-inherit',
+      }),
+    ).resolves.toMatchObject({
+      ok: true,
+      resolved: { agent: 'cursor', fastMode: true },
+    });
+  });
+
   it('keeps medium effort for a Codex GPT worker', async () => {
     const { deps, service } = createDeps({
       getWorkerDefaults: vi.fn(() => ({ model: 'gpt-5.4-mini', effort: 'medium', fastMode: false })),
