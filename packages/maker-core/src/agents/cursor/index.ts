@@ -1680,7 +1680,7 @@ export class CursorAgent extends BaseAgent {
         if (closed) throw new Error('Cursor session is closed');
         const productId = toCursorProductModelId(newModel);
         // 切模型前的会话 Fast 快照：ACP 的 fast 是 per-model 持久，set model 回包
-        // 会被目标模型的记录值覆盖（见下方 applyConfigEnrichment 同步 mutableFastMode），
+        // 会被目标模型的记录值覆盖（见下方 applyConfigSessionState 同步 mutableFastMode），
         // 补发要用切模型**前**用户拨的值，不是被回包覆盖后的值。
         const desiredFastBeforeSwitch = mutableFastMode ? 'true' : 'false';
         if (productId === mutableModel) {
@@ -1715,7 +1715,7 @@ export class CursorAgent extends BaseAgent {
           if (fastVal !== desiredFastBeforeSwitch) {
             try {
               const options = await setConfigOption('fast', desiredFastBeforeSwitch);
-              await applyConfigEnrichment(mutableModel, options);
+              applyConfigSessionState(options);
             } catch (err) {
               log.warn('cursor setModel reissue fast failed', {
                 message: err instanceof Error ? err.message : String(err),
