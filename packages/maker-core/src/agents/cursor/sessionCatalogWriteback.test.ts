@@ -252,10 +252,9 @@ describe('CursorAgent session does not write back catalog (spec #21 / S4)', () =
     }
   });
 
-  it('switching model re-sends fast per intent (per-model ACP fast resets on model switch)', async () => {
-    // 先在 opus 上开 fast，切到 gpt-5.5（也有 fast）后再读 getFastMode：
-    // 切模型回包 fast=false（重置），但会话尚未重新下发 fast；这里只验证
-    // 「切模型」本身不触发目录上报，且 setModel 仍把 model 下发给了上游。
+  it('switching model re-sends fast per intent without catalog publish (per-model ACP fast resets on model switch)', async () => {
+    // #22: setModel 在切模后若新模型暴露 fast，按切模型前的会话 Fast 值补发一次。
+    // 这里同时守 #27: 整条序列仍不触发目录上报。
     const transport = new SessionWritebackTransport();
     const { agent, handle, userDataPath, published } = await bootSession(transport);
     try {
@@ -266,11 +265,13 @@ describe('CursorAgent session does not write back catalog (spec #21 / S4)', () =
       await handle.setModel!('gpt-5.5');
       expect(published).toHaveLength(0);
 
-      // 切到 gpt-5.5 后该模型回包 fast=false（per-model 重置），
-      // 会话状态随之读到 false；再开 fast 仍走 set_config_option 下发。
-      expect(handle.getFastMode?.()).toBe(false);
-      await handle.setFastMode!(true);
+      // 切到 gpt-5.5 后会话意图仍是 true，且 setModel 已按意图补发 fast。
       expect(handle.getFastMode?.()).toBe(true);
+      const fastSets = transport.setConfigValues.filter((s) => s.configId === 'fast');
+      expect(fastSets.map((s) => s.value)).toContain('true');
+      // 再拨一次仍可下发，且仍不写目录。
+      await handle.setFastMode!(false);
+      expect(handle.getFastMode?.()).toBe(false);
       expect(published).toHaveLength(0);
     } finally {
       await handle.close().catch(() => undefined);
