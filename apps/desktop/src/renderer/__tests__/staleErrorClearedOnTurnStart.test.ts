@@ -160,6 +160,14 @@ describe('残留终态 error 在新 turn 启动时清除', () => {
     expect(makerChatStore.hasSessionTerminalError(SESSION_ID)).toBe(false);
   });
 
+  it('status 字段缺失(上游 shape 漂移)不把 undefined 写进 agentStatus', () => {
+    emitStatus({ isRunning: true, status: 'Working' });
+    // ACP/Cursor 曾把文案发在 `text` 而非 `status`,undefined 流进 state 会让
+    // RunningStatusBar 的 localizeAgentStatus 崩掉整棵渲染树。
+    emitStatus({ isRunning: true, text: 'Generating...' });
+    expect(makerChatStore.getSnapshot(SESSION_ID).agentStatus.status).toBe('Working');
+  });
+
   it('skipTurnReset 的 side-channel running 信号不清 error(banner 保留)', () => {
     emitTerminalError();
     expect(makerChatStore.getSnapshot(SESSION_ID).error).not.toBeNull();

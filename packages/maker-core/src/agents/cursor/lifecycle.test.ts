@@ -414,7 +414,7 @@ describe('CursorAgent lifecycle (FakeTransport)', () => {
       const sawCancelledStatus = events.some(
         (e) =>
           e.type === 'status' &&
-          (e.data as { isRunning?: boolean; text?: string }).isRunning === false,
+          (e.data as { isRunning?: boolean; status?: string }).isRunning === false,
       );
       expect(sawCancelledStatus).toBe(true);
       expect(transport.findNotifications(Method.SessionCancel).length).toBeGreaterThan(0);

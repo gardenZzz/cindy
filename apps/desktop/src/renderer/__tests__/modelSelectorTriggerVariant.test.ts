@@ -31,6 +31,7 @@ vi.mock('react-i18next', async (importOriginal) => ({
         'newChat.modelSelector.trigger.placeholder': '选择模型',
         'newChat.modelSelector.trigger.agent.claudeCode': 'Claude Code',
         'newChat.modelSelector.trigger.agent.codex': 'Codex',
+        'newChat.modelSelector.trigger.agent.cursor': 'Cursor',
         'newChat.modelSelector.pricing.free': '限时免费',
         'newChat.modelSelector.source.disconnected': '已断开',
       };
@@ -523,6 +524,36 @@ describe('ModelSelector trigger variants', () => {
     } finally {
       visibleModelsRef.models = null;
       providersRef.providers = providersRef.DEFAULT_PROVIDERS;
+    }
+  });
+
+  it('names Cursor as the session Agent instead of collapsing it to Claude Code', () => {
+    visibleModelsRef.models = [
+      {
+        id: 'auto',
+        displayName: 'Auto',
+        contextWindow: 200000,
+        efforts: [],
+        defaultEffort: null,
+      },
+    ];
+    try {
+      render(
+        React.createElement(ModelSelector, {
+          modelId: 'auto',
+          effort: 'medium' as Effort,
+          onModelChange: vi.fn(),
+          onEffortChange: vi.fn(),
+          vendorKey: 'cursor' as const,
+          agentIdentity: resolveModelSelectorAgentIdentity('cursor', null),
+        }),
+      );
+
+      const trigger = screen.getByRole('button', { name: /Current: Cursor · Auto/ });
+      expect(trigger.textContent).toContain('Cursor');
+      expect(trigger.textContent).not.toContain('Claude Code');
+    } finally {
+      visibleModelsRef.models = null;
     }
   });
 

@@ -3090,7 +3090,10 @@ function handleStatusUpdate(
     // 收口,防止桥接标记漏网永久撑住 running 快照。skipTurnReset 已提前 return。
     pendingTaskWake: false,
     agentStatus: {
-      status: update.status,
+      // update 来自未校验的 IPC / device-link 远端推送(`event.data as CCAgentStatusUpdate`),
+      // 上游漏字段时不能把 undefined 塞进 state —— 消费方(RunningStatusBar 的
+      // localizeAgentStatus 等)按 string 处理,会直接崩渲染树。
+      status: typeof update.status === 'string' ? update.status : state.agentStatus.status,
       tokenUsage: tu,
       costUsd: cu,
       contextTokens: ct,

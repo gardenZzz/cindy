@@ -11,6 +11,10 @@ const STATUS_KEYS = new Map<string, string>([
   ['just wait', 'ccAgent.agentStatus.waiting'],
   ['working', 'ccAgent.agentStatus.working'],
   ['running', 'ccAgent.agentStatus.running'],
+  // Cursor(ACP)专有的三个状态文案,与 Claude 的 Done 同属 Cindy 自有 chrome。
+  ['starting', 'ccAgent.agentStatus.starting'],
+  ['cancelled', 'ccAgent.agentStatus.cancelled'],
+  ['error', 'ccAgent.agentStatus.error'],
 ]);
 
 const TURN_START_NAME_PATTERNS = [
