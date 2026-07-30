@@ -285,3 +285,42 @@ describe('providerModelMemory —— (agent, model) fast 全局预设', () => {
     expect(m2.getProviderModelFast('claude-code', 'anthropic', 'claude-opus-4-8')).toBe(true);
   });
 });
+
+describe('modelMemorySourceId —— 合成记忆槽(Cursor)', () => {
+  it('有真实 providerId → 原样返回(不受 agent 影响)', async () => {
+    const m = await loadModule();
+    expect(m.modelMemorySourceId('claude-code', 'anthropic')).toBe('anthropic');
+    expect(m.modelMemorySourceId('codex', 'xd')).toBe('xd');
+    expect(m.modelMemorySourceId('cursor', 'anthropic')).toBe('anthropic');
+  });
+
+  it('cursor 且无 provider → 合成槽 cursor;其它 agent 无 provider → null', async () => {
+    const m = await loadModule();
+    expect(m.modelMemorySourceId('cursor', null)).toBe('cursor');
+    expect(m.modelMemorySourceId('cursor', undefined)).toBe('cursor');
+    expect(m.modelMemorySourceId('cursor', '')).toBe('cursor');
+    expect(m.modelMemorySourceId('claude-code', null)).toBeNull();
+    expect(m.modelMemorySourceId('codex', '')).toBeNull();
+    expect(m.modelMemorySourceId(null, null)).toBeNull();
+  });
+
+  it('合成槽能真正读写 effort / fast,并跨重启恢复', async () => {
+    const m1 = await loadModule();
+    const slot = m1.modelMemorySourceId('cursor', null)!;
+    m1.setProviderModelEffort('cursor', slot, 'gpt-5.5', 'high');
+    m1.setProviderModelFast('cursor', slot, 'gpt-5.5', true);
+    expect(m1.getProviderModelEffort('cursor', slot, 'gpt-5.5')).toBe('high');
+    expect(m1.getProviderModelFast('cursor', slot, 'gpt-5.5')).toBe(true);
+    vi.resetModules();
+    const m2 = await loadModule();
+    expect(m2.getProviderModelEffort('cursor', slot, 'gpt-5.5')).toBe('high');
+    expect(m2.getProviderModelFast('cursor', slot, 'gpt-5.5')).toBe(true);
+  });
+
+  it('合成槽不污染其它 agent 的同名模型预设', async () => {
+    const m = await loadModule();
+    m.setProviderModelEffort('cursor', m.modelMemorySourceId('cursor', null)!, 'gpt-5.5', 'max');
+    expect(m.getProviderModelEffort('codex', 'cursor', 'gpt-5.5')).toBeUndefined();
+    expect(m.getProviderModelEffort('claude-code', 'cursor', 'gpt-5.5')).toBeUndefined();
+  });
+});
