@@ -1222,8 +1222,6 @@ export function CCAgentSessionView({
     fastMode,
     setFastMode,
     resetFastMode,
-    thinkingMode,
-    setThinkingMode,
     planModeEnabled,
     setPlanMode,
     // F-QUEUE-DEFER
@@ -3313,8 +3311,6 @@ export function CCAgentSessionView({
                   onPlanModeChange={setPlanMode}
                   fastMode={fastMode}
                   onFastModeChange={setFastMode}
-                  thinkingMode={thinkingMode}
-                  onThinkingModeChange={setThinkingMode}
                   onWorkingDirChange={handleWorkingDirChange}
                   isStreaming={isStreaming}
                   isAgentBusy={isAgentBusy}
