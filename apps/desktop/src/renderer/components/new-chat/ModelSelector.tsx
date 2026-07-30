@@ -47,7 +47,7 @@ import {
   isSubscriptionDirectModel,
 } from '../../../shared/subscriptionModels';
 import { isModelEnabled, useModelVisibilityVersion } from '@/state/modelVisibilityPrefs';
-import { useProviderModelMemoryVersion } from '@/state/providerModelMemory';
+import { modelMemorySourceId, useProviderModelMemoryVersion } from '@/state/providerModelMemory';
 import { useDeviceLinkModelMirrorVersion } from '@/state/deviceLinkModelMirror';
 import {
   connectedProvidersForAgent,
@@ -986,13 +986,19 @@ function ModelSelectorContentView({
   const isSelectedRow = (providerId: string | null, id: string): boolean =>
     !browsing && id === modelId && (providerId === null || providerId === activeSourceId);
 
+  // 记忆槽来源:与路由来源分离。Cursor 无 Cindy provider(行 providerId 恒 null),经合成槽
+  // 仍能按 (agent, model) 读写全局预设;其它 agent 的 flat 行仍无记忆(返回 null)。
+  const memorySourceOf = (providerId: string | null): string | null =>
+    modelMemorySourceId(currentAgentKind, providerId);
+
   // 行内 Fast 闪电:选中行 → 调用方 fastMode(会话 = live;首页草稿 = 全局预设派生);其余行 → (agent,model) 全局预设(本机 =
   // providerModelMemory / 远程 = 被控端镜像),并由 fastEditable 按当前来源 capability 过滤。
   const fastOnOf = (providerId: string | null, m: RowModel): boolean => {
     if (!fastEditable(providerId, m)) return false;
     if (isSelectedRow(providerId, m.id)) return fastMode;
-    if (!currentAgentKind || !providerId) return false;
-    return modelMemory?.getFast(currentAgentKind, providerId, m.id) ?? false;
+    const memoryId = memorySourceOf(providerId);
+    if (!currentAgentKind || !memoryId) return false;
+    return modelMemory?.getFast(currentAgentKind, memoryId, m.id) ?? false;
   };
 
   // 某 (供应商, 模型) 行当前要展示的 effort(选中 → 调用方值;否则全局模型预设 → 模型默认)。
@@ -1002,9 +1008,10 @@ function ModelSelectorContentView({
     if (isSelectedRow(providerId, m.id)) {
       return m.efforts.includes(effort) ? effort : (m.defaultEffort ?? m.efforts[0]);
     }
+    const memoryId = memorySourceOf(providerId);
     const pe =
-      currentAgentKind && providerId
-        ? modelMemory?.getEffort(currentAgentKind, providerId, m.id)
+      currentAgentKind && memoryId
+        ? modelMemory?.getEffort(currentAgentKind, memoryId, m.id)
         : undefined;
     const cand = pe ?? m.defaultEffort ?? undefined;
     return cand && m.efforts.includes(cand) ? cand : (m.defaultEffort ?? m.efforts[0] ?? null);
@@ -1079,12 +1086,14 @@ function ModelSelectorContentView({
     editing.modelId === modelId &&
     (editing.providerId === null || editing.providerId === activeSourceId);
   const editingProviderId = editing?.providerId ?? null;
-  // 当前行可编辑配置的边界:选中行写实时状态;非选中供应商行写模型级全局预设。
-  // flat 非选中行没有来源 capability / 写穿上下文,只展示模型信息,避免出现点击后无效果的配置项。
+  const editingMemorySourceId = memorySourceOf(editingProviderId);
+  // 当前行可编辑配置的边界:选中行写实时状态;非选中行写模型级全局预设,需要一个记忆槽
+  // (真实来源,或 Cursor 的合成槽)。其余 flat 非选中行没有来源 capability / 写穿上下文,
+  // 只展示模型信息,避免出现点击后无效果的配置项。
   const canConfigure =
     configurationEnabled &&
     !!editingModel &&
-    (editingIsActive || (!!modelMemory && !!currentAgentKind && !!editingProviderId));
+    (editingIsActive || (!!modelMemory && !!currentAgentKind && !!editingMemorySourceId));
   const editShowFast =
     canConfigure && !!editingModel && fastEditable(editingProviderId, editingModel);
   const editHasEfforts = canConfigure && (editingModel?.efforts.length ?? 0) > 0;
@@ -1096,8 +1105,8 @@ function ModelSelectorContentView({
   const editFastValue: boolean = editingModel
     ? editingIsActive
       ? fastMode
-      : ((currentAgentKind && editingProviderId
-          ? modelMemory?.getFast(currentAgentKind, editingProviderId, editingModel.id)
+      : ((currentAgentKind && editingMemorySourceId
+          ? modelMemory?.getFast(currentAgentKind, editingMemorySourceId, editingModel.id)
           : undefined) ?? false)
     : false;
 
@@ -1107,8 +1116,8 @@ function ModelSelectorContentView({
       onEffortChange(e);
     } else {
       // 非选中行:只写该设备的全局模型预设;不传 modelMemory(flat 选择器)则纯 no-op。
-      if (currentAgentKind && editing.providerId) {
-        modelMemory?.setEffort(currentAgentKind, editing.providerId, editingModel.id, e);
+      if (currentAgentKind && editingMemorySourceId) {
+        modelMemory?.setEffort(currentAgentKind, editingMemorySourceId, editingModel.id, e);
       }
       bump();
     }
@@ -1121,8 +1130,8 @@ function ModelSelectorContentView({
       void onFastModeChange?.(enabled);
     } else {
       // 非选中行:只写该设备的模型级全局预设;来源参数用于 capability / device-link 写穿路由。
-      if (currentAgentKind && editing.providerId) {
-        modelMemory?.setFast(currentAgentKind, editing.providerId, editingModel.id, enabled);
+      if (currentAgentKind && editingMemorySourceId) {
+        modelMemory?.setFast(currentAgentKind, editingMemorySourceId, editingModel.id, enabled);
       }
     }
     bump();

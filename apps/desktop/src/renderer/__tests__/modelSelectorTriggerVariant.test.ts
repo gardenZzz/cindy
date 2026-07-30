@@ -2,7 +2,7 @@
 
 import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import React from 'react';
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import type { Effort } from '@/lib/userPreferences.types';
 
@@ -352,7 +352,9 @@ vi.mock('@/state/modelVisibilityPrefs', () => ({
   useModelVisibilityVersion: () => 0,
 }));
 
-vi.mock('@/state/providerModelMemory', () => ({
+// 只替 version hook;modelMemorySourceId 用真实实现(合成槽语义是被测契约的一部分)。
+vi.mock('@/state/providerModelMemory', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('@/state/providerModelMemory')>()),
   useProviderModelMemoryVersion: () => 0,
 }));
 
@@ -1852,5 +1854,193 @@ describe('ModelSelector trigger variants', () => {
     } finally {
       providersRef.providers = providersRef.DEFAULT_PROVIDERS;
     }
+  });
+});
+
+/**
+ * Cursor flat 列表的配置侧栏(issue #16)。
+ *
+ * Cursor 无 Cindy provider,行 providerId 恒 null;此前门控要求 providerId 真值,
+ * 于是非选中行永远不可配 —— 侧栏只剩「上下文 / 快速」等只读元信息,推理强度整段不出现。
+ * 现在经合成记忆槽放行,Claude / Codex 的 flat 行(无合成槽)必须维持原样。
+ */
+describe('ModelSelectorContent —— Cursor 模型行配置侧栏', () => {
+  const CURSOR_MODELS = [
+    {
+      id: 'gpt-5.5',
+      displayName: 'GPT-5.5',
+      description: 'Cursor reasoning model',
+      contextWindow: 272000,
+      efforts: ['low', 'medium', 'high'],
+      defaultEffort: 'medium',
+      supportsFastMode: true,
+    },
+    {
+      id: 'auto',
+      displayName: 'Auto',
+      contextWindow: 272000,
+      efforts: [],
+      defaultEffort: null,
+    },
+  ];
+
+  function memoryStub() {
+    const effortByKey = new Map<string, Effort>();
+    const fastByKey = new Map<string, boolean>();
+    return {
+      getEffort: vi.fn((agent: string, providerId: string, model: string) =>
+        effortByKey.get(`${agent}:${providerId}:${model}`),
+      ),
+      setEffort: vi.fn((agent: string, providerId: string, model: string, effort: Effort) => {
+        effortByKey.set(`${agent}:${providerId}:${model}`, effort);
+      }),
+      setChoice: vi.fn(),
+      getFast: vi.fn((agent: string, providerId: string, model: string) =>
+        fastByKey.get(`${agent}:${providerId}:${model}`),
+      ),
+      setFast: vi.fn((agent: string, providerId: string, model: string, enabled: boolean) => {
+        fastByKey.set(`${agent}:${providerId}:${model}`, enabled);
+      }),
+    };
+  }
+
+  beforeEach(() => {
+    visibleModelsRef.models = CURSOR_MODELS;
+    agentCapabilitiesRef.capabilities = {
+      ...agentCapabilitiesRef.DEFAULT_CAPABILITIES,
+      availableModels: CURSOR_MODELS,
+      hasFastMode: true,
+    };
+  });
+
+  afterEach(() => {
+    visibleModelsRef.models = null;
+    agentCapabilitiesRef.capabilities = agentCapabilitiesRef.DEFAULT_CAPABILITIES;
+  });
+
+  it('非选中行:侧栏出现推理强度,点选写进 (cursor, 模型) 全局预设', () => {
+    const modelMemory = memoryStub();
+    render(
+      React.createElement(ModelSelectorContent, {
+        modelId: 'auto',
+        effort: 'medium',
+        onModelChange: vi.fn(),
+        onEffortChange: vi.fn(),
+        vendorKey: 'cursor',
+        modelMemory,
+      }),
+    );
+
+    fireEvent.pointerEnter(screen.getByRole('option', { name: /GPT-5\.5/ }));
+    const panel = screen.getByRole('group', { name: /GPT-5\.5/ });
+    // 默认档来自目录 defaultEffort。
+    expect(within(panel).getByRole('option', { name: 'medium' }).getAttribute('aria-selected')).toBe(
+      'true',
+    );
+
+    fireEvent.click(within(panel).getByRole('option', { name: 'high' }));
+    // 合成槽 = 'cursor';写的是全局预设,不碰 live props。
+    expect(modelMemory.setEffort).toHaveBeenCalledWith('cursor', 'cursor', 'gpt-5.5', 'high');
+    expect(
+      within(screen.getByRole('group', { name: /GPT-5\.5/ }))
+        .getByRole('option', { name: 'high' })
+        .getAttribute('aria-selected'),
+    ).toBe('true');
+  });
+
+  it('选中行:侧栏改 effort 走 live 回调,不写全局预设', () => {
+    const modelMemory = memoryStub();
+    const onEffortChange = vi.fn();
+    render(
+      React.createElement(ModelSelectorContent, {
+        modelId: 'gpt-5.5',
+        effort: 'low',
+        onModelChange: vi.fn(),
+        onEffortChange,
+        vendorKey: 'cursor',
+        modelMemory,
+      }),
+    );
+
+    fireEvent.pointerEnter(screen.getByRole('option', { name: /GPT-5\.5/ }));
+    const panel = screen.getByRole('group', { name: /GPT-5\.5/ });
+    expect(within(panel).getByRole('option', { name: 'low' }).getAttribute('aria-selected')).toBe(
+      'true',
+    );
+
+    fireEvent.click(within(panel).getByRole('option', { name: 'high' }));
+    expect(onEffortChange).toHaveBeenCalledWith('high');
+    expect(modelMemory.setEffort).not.toHaveBeenCalled();
+  });
+
+  it('Fast 开关只在模型支持时出现,写入合成槽', () => {
+    const modelMemory = memoryStub();
+    render(
+      React.createElement(ModelSelectorContent, {
+        modelId: 'auto',
+        effort: 'medium',
+        onModelChange: vi.fn(),
+        onEffortChange: vi.fn(),
+        onFastModeChange: vi.fn(),
+        vendorKey: 'cursor',
+        modelMemory,
+      }),
+    );
+
+    fireEvent.pointerEnter(screen.getByRole('option', { name: /GPT-5\.5/ }));
+    fireEvent.click(
+      within(screen.getByRole('group', { name: /GPT-5\.5/ })).getByRole('button', {
+        name: 'Fast Mode',
+      }),
+    );
+    expect(modelMemory.setFast).toHaveBeenCalledWith('cursor', 'cursor', 'gpt-5.5', true);
+
+    // supportsFastMode 缺省的模型不出现开关。
+    fireEvent.pointerEnter(screen.getByRole('option', { name: /Auto/ }));
+    expect(
+      within(screen.getByRole('group', { name: /Auto/ })).queryByRole('button', {
+        name: 'Fast Mode',
+      }),
+    ).toBeNull();
+  });
+
+  it('无 effort 档的模型:侧栏不出现空的强度区', () => {
+    render(
+      React.createElement(ModelSelectorContent, {
+        modelId: 'gpt-5.5',
+        effort: 'high',
+        onModelChange: vi.fn(),
+        onEffortChange: vi.fn(),
+        vendorKey: 'cursor',
+        modelMemory: memoryStub(),
+      }),
+    );
+
+    fireEvent.pointerEnter(screen.getByRole('option', { name: /Auto/ }));
+    const panel = screen.getByRole('group', { name: /Auto/ });
+    expect(within(panel).queryByRole('option')).toBeNull();
+    expect(within(panel).queryByText('newChat.modelSelector.effortLabel')).toBeNull();
+  });
+
+  it('回归:Claude Code 的 flat 非选中行仍无记忆槽,不给配置项', () => {
+    // 默认 cc fixture(cursor fixture 不在 anthropic providers 里,会被 flat 可选集过滤空)。
+    visibleModelsRef.models = null;
+    agentCapabilitiesRef.capabilities = agentCapabilitiesRef.DEFAULT_CAPABILITIES;
+    const modelMemory = memoryStub();
+    render(
+      React.createElement(ModelSelectorContent, {
+        modelId: 'claude-haiku-4-5',
+        effort: 'high',
+        onModelChange: vi.fn(),
+        onEffortChange: vi.fn(),
+        vendorKey: 'cc',
+        modelMemory,
+      }),
+    );
+
+    fireEvent.pointerEnter(screen.getByRole('option', { name: /Opus 4\.8/ }));
+    const panel = screen.getByRole('group', { name: /Opus 4\.8/ });
+    expect(within(panel).queryByRole('option')).toBeNull();
+    expect(modelMemory.setEffort).not.toHaveBeenCalled();
   });
 });
