@@ -119,6 +119,7 @@ import {
 } from '../credential-mode.js';
 import {
   Method,
+  codexErrorInfoTag,
   type AskForApproval,
   type ApprovalsReviewer,
   type ApprovalDecision,
@@ -652,6 +653,16 @@ function skillDescription(skill: SkillMetadata): string | undefined {
   );
 }
 
+function isPaletteVisibleCodexSkill(skill: SkillMetadata): boolean {
+  if (!skill.enabled || skill.scope === 'system' || skill.scope === 'admin') return false;
+
+  // Codex plugins can contribute internal skills and currently report them as scope=user.
+  // They remain available to Codex's own dispatch, but Cindy's slash palette should only
+  // expose installed user/repo skills instead of every plugin implementation detail.
+  const normalizedPath = skill.path.replace(/\\/g, '/');
+  return !/\/plugins\/cache\/[^/]+\/[^/]+\/[^/]+\/skills\//i.test(normalizedPath);
+}
+
 function parseLeadingSlashToken(text: string): { name: string; rest: string } | null {
   const match = text.match(/^\/([^\s/]+)(?:\s+([\s\S]*))?$/);
   if (!match?.[1]) return null;
@@ -1159,11 +1170,14 @@ export class CodexAgent extends BaseAgent {
    * 只是包成新的 AgentSkillCommand 形状(kind='agent-skill')。
    */
   override async listAgentSkills(opts: ListAgentSkillsOptions): Promise<ListAgentSkillsResult> {
+    // Codex app-server 的 skills/list 强制要求 cwd；无项目的新对话用 HOME 作为
+    // 查询上下文，既能发现全局 skills，又不会误带任意项目的 repo skills。
+    const workingDir = opts.workingDir || os.homedir();
     try {
-      const { skills, errors } = await this.listSkillsForCwd(opts.workingDir, opts.forceReload ?? false);
+      const { skills, errors } = await this.listSkillsForCwd(workingDir, opts.forceReload ?? false);
       const out: ListAgentSkillsResult = {
         skills: skills
-          .filter((skill) => skill.enabled)
+          .filter(isPaletteVisibleCodexSkill)
           .map((skill) => ({
             kind: 'agent-skill' as const,
             name: skill.name,
@@ -3772,7 +3786,8 @@ export class CodexAgent extends BaseAgent {
      * 分片计时,片尾核对真实耗时。不能用一个 30 分钟的长定时器直接判定 —— Electron 被
      * 系统挂起(合盖睡眠)期间没有任何事件,定时器一旦在唤醒后到期就立刻开火,一次午休
      * 就能让看门狗中断一条完全健康的 turn(review #944 第十二轮 P1,与 Session 层的
-     * armTurnStallSlice、scheduler 的 absorbSuspendGap 同源)。
+     * armTurnStallSlice、claude-code 的 armUpstreamResponseIdleSlice、scheduler 的
+     * absorbSuspendGap 同源)。
      */
     function armUpstreamIdleSlice(): void {
       const slice = Math.min(upstreamIdleRemainingMs, CODEX_UPSTREAM_IDLE_SLICE_MS);
@@ -6035,12 +6050,15 @@ export class CodexAgent extends BaseAgent {
         // 不认 → 落到既有的 `stale codex terminal error ignored` 分支被丢掉, 这是安全的:
         // 真属于某个 turn 的话, server 随后会为那个 turn 发权威的 turn/completed(failed),
         // 收口由它完成。
+        // 判定同样优先吃结构化 codexErrorInfo, 文案只作老 daemon 兜底: 这条判据决定
+        // 空 id 的容量拒绝能不能被归属到在飞的 turn/start, 漏判 = 整轮重投预算白给。
         const idLessCapacityError =
           params.turnId === ''
           && isTerminalError
           && parseOverloadError(
             params.error?.message ?? '',
             extractNonSecretErrorSignals(params.error?.message ?? '').errorStatus,
+            codexErrorInfoTag(params.error?.codexErrorInfo),
           ) !== null;
         const idLessAttributable = inFlightStarts.size === 1;
         const targetsIdLessPendingStart =
