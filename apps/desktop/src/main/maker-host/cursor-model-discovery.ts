@@ -88,28 +88,133 @@ export function readCachedCursorModels(): ModelDescriptor[] {
   }
 }
 
+/** 探测目标 agent 接口(由 CursorAgent 实现;单测可注入 fake)。 */
+export interface CursorModelDiscoverer {
+  discoverModelOptions(opts: {
+    workingDir: string;
+    userDataPath: string;
+    signal?: AbortSignal;
+    onProgress?: (done: number, total: number) => void;
+  }): Promise<void>;
+}
+
+/** 一次刷新的进行中句柄:可取消,也用于进行中互斥(同时只跑一轮)。 */
+export interface CursorModelRefreshHandle {
+  /** 取消探测;已探到的结果已落盘,未探到的保持原值。 */
+  cancel(): void;
+}
+
+const REFRESH_CWD_SUBPATH = path.join('cursor-acp', 'model-discovery-cwd');
+
 /**
- * 后台补一轮全量档位探测（宿主侧触发口）。失败只告警：探测是锦上添花，
- * 用户照常可以建会话，选中某个模型时那条链路仍会补上它自己的档位。
- * 一个进程只跑一次，避免登录失败时每次调用都重来。
+ * 注入探测目标(maker-host 装配 CursorAgent 后调 setCursorModelDiscoverer;
+ * 二进制未装时为 null,刷新入口随之不可用)。IPC 层经 getCursorModelDiscoverer
+ * 取实例触发刷新,不直接持有装配期的局部引用。
  */
-let discoveryStarted = false;
-export async function discoverCursorModelOptionsInBackground(agent: {
-  discoverModelOptions(opts: { workingDir: string; userDataPath: string }): Promise<void>;
-}): Promise<void> {
-  if (discoveryStarted) return;
-  discoveryStarted = true;
+let discoverer: CursorModelDiscoverer | null = null;
+export function setCursorModelDiscoverer(agent: CursorModelDiscoverer | null): void {
+  discoverer = agent;
+}
+export function getCursorModelDiscoverer(): CursorModelDiscoverer | null {
+  return discoverer;
+}
+
+/** 设置页查询:刷新入口当前是否可用(已注册探针 + 未在进行中)。 */
+export function isCursorModelRefreshAvailable(): boolean {
+  return discoverer !== null;
+}
+
+/**
+ * 手动可重入 + 进行中互斥的探测编排(spec #21 / #28)。
+ *
+ * 目录的唯一写入方:设置页「刷新模型」(与 #29 的「登录成功探一次」复用本编排)。
+ * 移除了进程级「只探一次」布尔门:每点一次刷新都真的重跑;探测未结束时再点无效
+ * (进行中互斥 -- 返回当前进行中句柄的 cancel,不排队)。支持取消:取消后已探到的
+ * 档位保留并落盘,未探到的保持原值。刷新结束(正常完成或取消收尾)由 agent 侧
+ * publishListedModels 触发一次目录广播。
+ */
+let inflight: { controller: AbortController } | null = null;
+
+/**
+ * 启动一轮探测。进行中时再调用是 no-op(返回 null),不排队、不重入。
+ * 返回句柄供调用方取消;null = 已有一轮在进行中。
+ * onProgress 每探完一个模型回调;onDone 在结束(完成 / 取消 / 失败)后回调一次。
+ */
+export function startCursorModelRefresh(
+  agent: CursorModelDiscoverer,
+  opts?: {
+    onProgress?: (done: number, total: number) => void;
+    onDone?: (result: { aborted: boolean; error: string | null }) => void;
+  },
+): CursorModelRefreshHandle | null {
+  if (inflight) return null;
+  const controller = new AbortController();
+  inflight = { controller };
   const userDataPath = app.getPath('userData');
   // 空的专用 cwd：不让探测进程去扫用户仓库的 rules / skills。
-  const workingDir = path.join(userDataPath, 'cursor-acp', 'model-discovery-cwd');
-  try {
-    fs.mkdirSync(workingDir, { recursive: true });
-    await agent.discoverModelOptions({ workingDir, userDataPath });
-  } catch (err) {
-    desktopMakerLogger.warn('cursor model option discovery failed', {
-      error: err instanceof Error ? err.message : String(err),
+  const workingDir = path.join(userDataPath, REFRESH_CWD_SUBPATH);
+  void (async () => {
+    let aborted = false;
+    let error: string | null = null;
+    try {
+      fs.mkdirSync(workingDir, { recursive: true });
+      await agent.discoverModelOptions({
+        workingDir,
+        userDataPath,
+        signal: controller.signal,
+        onProgress: opts?.onProgress,
+      });
+      aborted = controller.signal.aborted;
+    } catch (err) {
+      aborted = controller.signal.aborted;
+      // 未登录 / 探测出错:由调用方据 agent 状态区分呈现;这里只告警不抛。
+      error = err instanceof Error ? err.message : String(err);
+      desktopMakerLogger.warn('cursor model refresh failed', {
+        aborted,
+        error,
+      });
+    } finally {
+      inflight = null;
+      try {
+        opts?.onDone?.({ aborted, error });
+      } catch {
+        // onDone 回调失败不影响编排本身。
+      }
+    }
+  })();
+  return { cancel: () => controller.abort() };
+}
+
+/** 取消进行中的探测;无进行中轮次时 no-op。已探到的结果已落盘。 */
+export function cancelCursorModelRefresh(): boolean {
+  if (!inflight) return false;
+  inflight.controller.abort();
+  return true;
+}
+
+/** 当前是否有一轮探测在进行中(供设置页按钮态 / 进行中互斥判断)。 */
+export function isCursorModelRefreshRunning(): boolean {
+  return inflight !== null;
+}
+
+/**
+ * 后台补一轮全量档位探测(冷启动 / 登录成功触发口)。
+ *
+ * 复用 startCursorModelRefresh 的同一套编排(进度、取消、落盘、广播)。
+ * 与手动刷新的区别:不传 onProgress(冷启动无人看进度),且进行中时 no-op
+ * (不抢手动刷新正在跑的那轮)。await 到本轮结束(完成 / 失败)。
+ */
+export async function discoverCursorModelOptionsInBackground(
+  agent: CursorModelDiscoverer,
+): Promise<void> {
+  // 进行中时不抢(手动刷新正在跑就让它跑完)。
+  if (inflight) return;
+  await new Promise<void>((resolve) => {
+    const handle = startCursorModelRefresh(agent, {
+      onDone: () => resolve(),
     });
-  }
+    if (!handle) resolve();
+  });
 }
 
 /** 上报后落盘。内容未变则不写（每次切模型的 config 丰富都会走到这里）。 */

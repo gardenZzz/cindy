@@ -248,6 +248,15 @@ export const MAKER_INVOKE = {
    * 仅 darwin / linux；未确认不得调用。本地桌面专属，不进 device-link allowlist。
    */
   CURSOR_INSTALL: 'maker:cursor:install',
+  /**
+   * 设置页「刷新模型」:启动一轮 Cursor 模型档位串行探测(可重入 + 进行中互斥)。
+   * 进行中再调 no-op(返回 started:false)。本地桌面专属,不进 device-link allowlist。
+   */
+  CURSOR_REFRESH_MODELS: 'maker:cursor:refresh-models',
+  /** 取消进行中的探测;已探到的结果已落盘。 */
+  CURSOR_CANCEL_REFRESH: 'maker:cursor:cancel-refresh',
+  /** 探测进度推送(已探 n / 总数),仅 main -> renderer。 */
+  CURSOR_REFRESH_PROGRESS: 'maker:cursor:refresh-progress',
   // Agent 今日累计 (取代老 codex:usage:today) —— 走 host 的 readAgentTodayUsage
   USAGE_TODAY: 'maker:usage:today',
   USAGE_ACCOUNT: 'maker:usage:account',
