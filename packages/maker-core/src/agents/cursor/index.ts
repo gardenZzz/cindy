@@ -1172,7 +1172,7 @@ export class CursorAgent extends BaseAgent {
           type: 'status',
           data: {
             isRunning: false,
-            text: statusText,
+            status: statusText,
             ...usageTracker.snapshot(),
           },
           source: 'cursor',
@@ -1566,7 +1566,7 @@ export class CursorAgent extends BaseAgent {
             type: 'status',
             data: {
               isRunning: true,
-              text: 'Starting...',
+              status: 'Starting...',
               ...usageTracker.snapshot(),
             },
             source: 'cursor',

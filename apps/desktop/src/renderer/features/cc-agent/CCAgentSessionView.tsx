@@ -3299,13 +3299,7 @@ export function CCAgentSessionView({
                   sessionId={sessionId}
                   // session=null 是冷启动 / 直链 GET 尚未回流的合法首帧；显式传 null，
                   // 让 ChatInput 暂不显示 Agent 身份，不能跟随 displayAgentKind 的 cc 回退。
-                  runtimeAgentKind={
-                    session
-                      ? session.agentKind === 'codex'
-                        ? 'codex'
-                        : 'claude-code'
-                      : null
-                  }
+                  runtimeAgentKind={session ? toMakerAgentKind(session.agentKind) : null}
                   initialWorkingDir={session?.workingDir}
                   remoteHostId={session?.remoteHostId ?? null}
                   deviceLinkDeviceId={remoteDeviceId}

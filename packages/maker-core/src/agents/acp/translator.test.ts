@@ -44,7 +44,7 @@ describe('translateSessionUpdate — agent_message_chunk text path', () => {
       ctx,
     );
     expect(first.map((e) => e.type)).toEqual(['status', 'text']);
-    expect(first[0]?.data).toMatchObject({ isRunning: true, text: 'Generating...' });
+    expect(first[0]?.data).toMatchObject({ isRunning: true, status: 'Generating...' });
     expect(first[1]?.data).toEqual({ text: 'Hello', isFinal: false });
 
     const second = translateSessionUpdate(
@@ -258,7 +258,7 @@ describe('finishPromptTurn + translateAcpError', () => {
   it('emits cancelled status text on cancelled stopReason', () => {
     const ctx = makeCtx();
     const events = finishPromptTurn({ stopReason: 'cancelled' }, ctx);
-    expect(events[1]?.data).toMatchObject({ isRunning: false, text: 'Cancelled' });
+    expect(events[1]?.data).toMatchObject({ isRunning: false, status: 'Cancelled' });
   });
 
   it('emits terminal error + idle status', () => {
@@ -266,6 +266,6 @@ describe('finishPromptTurn + translateAcpError', () => {
     const events = translateAcpError(new Error('boom'), ctx);
     expect(events.map((e) => e.type)).toEqual(['error', 'status']);
     expect(events[0]?.data).toMatchObject({ message: 'boom', isTerminal: true });
-    expect(events[1]?.data).toMatchObject({ isRunning: false, text: 'Error' });
+    expect(events[1]?.data).toMatchObject({ isRunning: false, status: 'Error' });
   });
 });
