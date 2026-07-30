@@ -4130,7 +4130,9 @@
         "addFailed": "プロジェクト追加に失敗",
         "pathEmpty": "プロジェクトのパスを入力してください",
         "pathIsFile": "{{path}} はファイルです (ディレクトリではありません)"
-      }
+      },
+      "selectTargetPlaceholder": "対象を選択…",
+      "requestedDeviceUnavailable": "指定のデバイスは現在利用できません。別の対象を選んでください"
     },
     "projectPicker": {
       "addRemoteProject": "リモートプロジェクトを追加"
@@ -4453,6 +4455,14 @@
       "alwaysAllowScopedHint": "このセッション全体に適用され、ここに挙げた範囲にのみ及びます。",
       "alwaysAllowSessionHint": "この 1 回のリクエストだけでなく、このセッション全体に適用されます。",
       "ruleSeparator": "、"
+    },
+    "deviceSwitcher": {
+      "label": "デバイス",
+      "localHint": "このパソコンで実行",
+      "onlineHint": "接続済み — 作成できます",
+      "offlineHint": "オフライン — 接続後に利用可能",
+      "attachmentsDropped": "添付ファイル {{count}} 件を削除しました（前のデバイス上のファイルです）",
+      "attachmentsRemoteUnsupported": "リモートデバイスではファイル添付に未対応のため {{count}} 件をスキップしました（画像は可）"
     }
   },
   "onboarding": {
@@ -5315,7 +5325,8 @@
       "worktreeMissingRepo": "worktree を作成できません：現在のディレクトリのリポジトリルートがありません",
       "worktreeRepoHint": "作業ディレクトリを再選択し、右下のフォルダ表示が更新されてから再試行してください",
       "sessionInactive": "セッションはすでにアクティブではありません",
-      "remoteProjectBanner": "{{device}} の {{project}} で新しいセッションを作成"
+      "remoteProjectBanner": "{{device}} の {{project}} で新しいセッションを作成",
+      "remoteDialogueBanner": "{{device}} で新しい対話（プロジェクトなし）"
     },
     "jumpSession": {
       "emptyId": "移動先の sessionId を入力してください",
@@ -7350,7 +7361,8 @@
       "start": "開始",
       "starting": "作成中…",
       "cancel": "キャンセル",
-      "failed": "目標の作成に失敗しました"
+      "failed": "目標の作成に失敗しました",
+      "busy": "作成処理が進行中です。しばらくしてからもう一度お試しください。"
     },
     "usageLimitedUntil": "{{time}} に再開",
     "capacityRetryAt": "{{time}} に再試行",

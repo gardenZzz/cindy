@@ -4130,7 +4130,9 @@
         "addFailed": "添加项目失败",
         "pathEmpty": "请输入项目路径",
         "pathIsFile": "{{path}} 是文件，不是目录"
-      }
+      },
+      "selectTargetPlaceholder": "请选择目标…",
+      "requestedDeviceUnavailable": "指定的设备当前不可用，请选择其它目标"
     },
     "projectPicker": {
       "addRemoteProject": "添加远程项目"
@@ -4453,6 +4455,14 @@
       "alwaysAllowScopedHint": "作用于整个对话，且只限这里列出的范围。",
       "alwaysAllowSessionHint": "作用于整个对话，不只是这一次请求。",
       "ruleSeparator": "、"
+    },
+    "deviceSwitcher": {
+      "label": "设备",
+      "localHint": "在这台电脑上运行",
+      "onlineHint": "已连接，可在其上创建",
+      "offlineHint": "离线 · 连上后可用",
+      "attachmentsDropped": "已移除 {{count}} 个附件：它们是上一台设备上的文件",
+      "attachmentsRemoteUnsupported": "远程设备暂不支持文件附件，已跳过 {{count}} 个（图片可以）"
     }
   },
   "onboarding": {
@@ -5315,7 +5325,8 @@
       "worktreeMissingRepo": "无法开 worktree：缺少当前目录的仓库根",
       "worktreeRepoHint": "可尝试重新选一次工作目录，等右下角文件夹标识刷新后再试",
       "sessionInactive": "对话已不再处于活跃状态",
-      "remoteProjectBanner": "在 {{device}} 的 {{project}} 中新建对话"
+      "remoteProjectBanner": "在 {{device}} 的 {{project}} 中新建对话",
+      "remoteDialogueBanner": "在 {{device}} 上新建对话（不绑定项目）"
     },
     "jumpSession": {
       "emptyId": "请输入要跳转的对话 ID",
@@ -7350,7 +7361,8 @@
       "start": "开始",
       "starting": "创建中…",
       "cancel": "取消",
-      "failed": "新建目标失败"
+      "failed": "新建目标失败",
+      "busy": "已有创建正在进行，请稍候再试"
     },
     "usageLimitedUntil": "{{time}} 恢复",
     "capacityRetryAt": "{{time}} 重试",
