@@ -1745,38 +1745,6 @@ export class CursorAgent extends BaseAgent {
         return mutableFastMode;
       },
 
-      async setThinkingMode(enabled: boolean) {
-        if (closed) throw new Error('Cursor session is closed');
-        if (!latestConfigOptions.some((o) => o.id === 'thinking')) {
-          const refreshed = await setConfigOption('model', toCursorAcpModelId(mutableModel));
-          await applyConfigEnrichment(mutableModel, refreshed);
-        }
-        if (!latestConfigOptions.some((o) => o.id === 'thinking')) {
-          throw new NotSupportedError('thinkingMode', {
-            supported: false,
-            reason: 'sdk-missing',
-            message: `Cursor model ${mutableModel} does not expose thinking mode`,
-          });
-        }
-        // 产品语义：有 thinking 则强制开；false 为 no-op，不向 ACP 下发关闭。
-        if (!enabled) {
-          log.debug('setThinkingMode ignored false (thinking forced on)', {
-            model: mutableModel,
-          });
-          if (!mutableThinkingMode) {
-            const options = await setConfigOption('thinking', 'true');
-            await applyConfigEnrichment(mutableModel, options);
-          }
-          return;
-        }
-        log.debug('setThinkingMode', { from: mutableThinkingMode, to: true });
-        const options = await setConfigOption('thinking', 'true');
-        await applyConfigEnrichment(mutableModel, options);
-      },
-
-      getThinkingMode() {
-        return mutableThinkingMode;
-      },
 
       async setPermissionMode(newMode: PermissionMode) {
         const normalized = normalizeCursorPermissionMode(newMode);

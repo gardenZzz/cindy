@@ -672,7 +672,7 @@ describe('CursorAgent lifecycle (FakeTransport)', () => {
     ).rejects.toBeInstanceOf(AgentNotAuthenticatedError);
   });
 
-  it('forces thinking=true when model exposes thinking even if start opts say false', async () => {
+  it('forces thinking=true when model exposes thinking option', async () => {
     const transport = new FakeTransport();
     transport.sessionConfigOptions = [
       {
@@ -694,7 +694,7 @@ describe('CursorAgent lifecycle (FakeTransport)', () => {
     };
     const { agent, handle, userDataPath } = await bootWithTransport(
       transport,
-      { thinkingMode: false, model: 'claude-opus-5' },
+      { model: 'claude-opus-5' },
       opusModels,
     );
     try {
@@ -705,16 +705,12 @@ describe('CursorAgent lifecycle (FakeTransport)', () => {
       }) as Array<{ params: { configId: string; value: string } }>;
       expect(thinkingSets.length).toBeGreaterThan(0);
       expect(thinkingSets.every((m) => m.params.value === 'true')).toBe(true);
-      expect(handle.getThinkingMode?.()).toBe(true);
-
-      await handle.setThinkingMode?.(false);
-      expect(handle.getThinkingMode?.()).toBe(true);
-      const afterFalse = transport.written.filter((msg) => {
+      const thinkingFalse = transport.written.filter((msg) => {
         if (!isRecord(msg) || msg.method !== Method.SessionSetConfigOption) return false;
         const params = msg.params as { configId?: string; value?: string } | undefined;
         return params?.configId === 'thinking' && params.value === 'false';
       });
-      expect(afterFalse).toEqual([]);
+      expect(thinkingFalse).toEqual([]);
     } finally {
       await handle.close().catch(() => undefined);
       await agent.dispose().catch(() => undefined);
@@ -723,14 +719,13 @@ describe('CursorAgent lifecycle (FakeTransport)', () => {
   });
 
   it('skips thinking config when model has no thinking option', async () => {
-    await withBootedSession(async ({ transport, handle }) => {
+    await withBootedSession(async ({ transport }) => {
       const thinkingSets = transport.written.filter((msg) => {
         if (!isRecord(msg) || msg.method !== Method.SessionSetConfigOption) return false;
         const params = msg.params as { configId?: string } | undefined;
         return params?.configId === 'thinking';
       });
       expect(thinkingSets).toEqual([]);
-      expect(handle.getThinkingMode?.()).toBe(true);
     });
   });
 });

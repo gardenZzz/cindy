@@ -181,7 +181,6 @@ describe('orcaTeamStore', () => {
         context_tokens INTEGER NOT NULL DEFAULT 0,
         context_window INTEGER NOT NULL DEFAULT 0,
         fast_mode INTEGER NOT NULL DEFAULT 0,
-        thinking_mode INTEGER NOT NULL DEFAULT 1,
         plan_mode_enabled INTEGER NOT NULL DEFAULT 0,
         cleared_at INTEGER,
         pinned_at INTEGER,

@@ -216,12 +216,11 @@ export function setRemoteSettingsPersist(fn: RemoteSettingsPersist | null): void
 }
 
 /** set-* channel → 持久化的 session 字段名(args[0]=sessionId, args[1]=value)。 */
-const SET_CHANNEL_FIELD: Record<string, 'model' | 'effort' | 'permissionMode' | 'fastMode' | 'thinkingMode' | 'planModeEnabled' | 'extraDirs'> = {
+const SET_CHANNEL_FIELD: Record<string, 'model' | 'effort' | 'permissionMode' | 'fastMode' | 'planModeEnabled' | 'extraDirs'> = {
   'maker:set-model': 'model',
   'maker:set-effort': 'effort',
   'maker:set-permission-mode': 'permissionMode',
   'maker:set-fast-mode': 'fastMode',
-  'maker:set-thinking-mode': 'thinkingMode',
   'maker:set-plan-mode': 'planModeEnabled',
   'maker:set-extra-dirs': 'extraDirs',
 };

@@ -4209,7 +4209,6 @@
         "xai": "サブスクリプション直結の Grok モデルは SSH リモートセッションに未対応です",
         "generic": "サブスクリプション直結モデルは SSH リモートセッションに未対応です"
       },
-      "thinkingLabel": "Thinking",
       "effortLabel": "推論強度",
       "edit": "編集",
       "options": "オプション",

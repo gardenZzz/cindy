@@ -14,7 +14,7 @@ const registerSource = readFileSync(resolve(__dirname, '..', 'register.ts'), 'ut
 function extractSetFastModeHandler(source: string): string {
   const start = source.indexOf('MAKER_INVOKE.SET_FAST_MODE');
   expect(start).toBeGreaterThanOrEqual(0);
-  const end = source.indexOf('MAKER_INVOKE.SET_THINKING_MODE', start);
+  const end = source.indexOf('MAKER_INVOKE.MODEL_VISIBILITY_SYNC', start);
   expect(end).toBeGreaterThan(start);
   return source.slice(start, end);
 }

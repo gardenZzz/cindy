@@ -76,11 +76,6 @@ export const sessions = sqliteTable(
     contextWindow: integer('context_window').notNull().default(0),
     fastMode: integer('fast_mode', { mode: 'boolean' }).notNull().default(false),
     /**
-     * Cursor ACP thinking 开关。true → session/set_config_option(thinking=true)。
-     * 非 Cursor 忽略。默认 true（对齐 Cursor Opus 自报默认）。
-     */
-    thinkingMode: integer('thinking_mode', { mode: 'boolean' }).notNull().default(true),
-    /**
      * 计划模式一级开关(与 permissionMode 正交):开启时 agent 先产出计划、经用户
      * 审批后再执行(Claude 走 SDK plan mode, Codex 走 collaborationMode plan)。
      * 计划批准后 agent 自动退出, main 收 plan_mode_changed 事件回写此列。

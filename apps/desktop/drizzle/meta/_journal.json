@@ -589,13 +589,6 @@
       "when": 1785287922480,
       "tag": "0083_gray_katie_power",
       "breakpoints": true
-    },
-    {
-      "idx": 84,
-      "version": "6",
-      "when": 1785418024413,
-      "tag": "0084_cursor_thinking_mode",
-      "breakpoints": true
     }
   ]
 }

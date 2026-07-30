@@ -664,11 +664,6 @@ export interface StartSessionOptions {
    */
   fastMode?: boolean;
   /**
-   * Cursor ACP `thinking` 开关。Undefined = 跟随上游默认（通常 true）。
-   * Claude Code / Codex 忽略。
-   */
-  thinkingMode?: boolean;
-  /**
    * 用户级 system prompt 追加段，跨 agent (claude-code / codex) 公用，
    * 拼接顺序最末（优先级最高），覆盖 engine 与 host 段。空串 / undefined 跳过。
    *
@@ -949,8 +944,6 @@ export interface AgentSessionHandle {
   /** 运行时切换 Fast mode；不支持的 agent 不实现。 */
   setFastMode?(enabled: boolean): Promise<void>;
 
-  /** Cursor ACP thinking 开关；不支持的 agent 不实现。 */
-  setThinkingMode?(enabled: boolean): Promise<void>;
 
   /**
    * 运行时增删 extraDirs(覆盖式)。Claude 与 Codex 都更新 closure，在下一 turn 生效。
@@ -968,9 +961,6 @@ export interface AgentSessionHandle {
 
   /** 当前 maker 进程内记录的 Fast mode 状态；不支持的 agent 不实现。 */
   getFastMode?(): boolean;
-
-  /** 当前 maker 进程内记录的 Thinking 状态；不支持的 agent 不实现。 */
-  getThinkingMode?(): boolean;
 
   // ── Rewind ────────────────────────────────────────────────────────────────
   // Claude 走 SDK message uuid + file checkpoint；Codex 走 app-server thread/rollback
