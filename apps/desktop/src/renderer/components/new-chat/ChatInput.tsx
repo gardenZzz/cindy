@@ -3677,14 +3677,14 @@ export function ChatInput({
   );
 
   const resolveFast = useCallback(
-    (targetModelId: string, providerId: string | null): boolean => {
+    (targetModelId: string, providerId: string | null): boolean | undefined => {
       if (!modelFastSupported(targetModelId, providerId)) return false;
       // 能力判定用**路由来源**(上一行);记忆读**记忆槽**(Cursor 无 provider 也能恢复)。
       // providerId 只用于旧 v2 兼容回退;新预设按 (agent, model) 跨来源共享。
       // 无记忆槽 / device-link(modelMemory 为 undefined)→ false,且不掺控制端本机记忆。
       const memoryId = modelMemorySourceId(currentModelAgentKind, providerId);
-      if (!currentModelAgentKind || !memoryId || !modelMemory) return false;
-      return modelMemory.getFast(currentModelAgentKind, memoryId, targetModelId) ?? false;
+      if (!currentModelAgentKind || !memoryId || !modelMemory) return undefined;
+      return modelMemory.getFast(currentModelAgentKind, memoryId, targetModelId);
     },
     [currentModelAgentKind, modelMemory, modelFastSupported],
   );
@@ -3940,19 +3940,29 @@ export function ChatInput({
         const targetFast =
           overrides?.fastMode !== undefined
             ? overrides.fastMode
-            : !!providerId &&
-              !!modelMemory &&
+            : !!modelMemory &&
               resolveFastSupported({
                 deviceId: deviceLinkDeviceId,
                 deviceProviders: remoteProviders.providers,
                 localProviders: localProviders.providers,
                 capabilities:
-                  targetAgentKind === 'codex' ? codexCaps.capabilities : ccCaps.capabilities,
+                  targetAgentKind === 'codex'
+                    ? codexCaps.capabilities
+                    : targetAgentKind === 'cursor'
+                      ? cursorCaps.capabilities
+                      : ccCaps.capabilities,
                 providerId,
                 modelId: newModelId,
                 agentKind: targetAgentKind,
               }) &&
-              (modelMemory.getFast(targetAgentKind, providerId, newModelId) ?? false);
+              (() => {
+                // 与 resolveFast 同口径但锚定**目标**引擎:cursor 无 provider 也按
+                // (agent,model) 合成槽恢复预设,不再被 !!providerId 短路成 false。
+                const memoryId = modelMemorySourceId(targetAgentKind, providerId);
+                return memoryId
+                  ? (modelMemory.getFast(targetAgentKind, memoryId, newModelId) ?? false)
+                  : false;
+              })();
 
         const result = await window.electronAPI.maker.switchSessionAgent(
           sessionId,
@@ -4073,7 +4083,7 @@ export function ChatInput({
         if (sessionId) {
           // 切模型时 fast 恢复该 (供应商, 模型) 的记忆值(对齐 effort);模型不支持 → false。
           // 已创建会话会在成功切换后同步 New Maker 草稿默认,使下一次新建聊天复用本次选择。
-          const restoredFast = resolveFast(newModelId, effectiveSourceId);
+          const restoredFast = resolveFast(newModelId, effectiveSourceId) ?? fastMode;
           if (sourceRemoteDeviceId) {
             // device-link 远程会话:控制端纯镜像 —— **await** 运行时隧道 setX,被控端持久化(Phase 5)后
             // 广播 sessions:patched 回流到分片(display 经回流更新);send/resume 由被控端 DB(已 persist
@@ -4454,7 +4464,7 @@ export function ChatInput({
         // session 状态保护,只有切到目标 (来源, 模型) 时才应用这个预设。
         // resolveSwitchEffort / resolveFast 内部已按目标模型支持的档位校验、不支持 fast 的模型恒 false。
         const targetEffort = resolveSwitchEffort(targetModel, newProviderId, reconciledEffort);
-        const restoredFast = resolveFast(targetModel, newProviderId);
+        const restoredFast = resolveFast(targetModel, newProviderId) ?? fastMode;
         // 乐观显示目标 (model, effort, provider) + 置灰 selector,等被控端 echo 回流;失败回滚 provider/快照。
         setPendingRemoteSwitch({
           model: targetModel,
@@ -4524,7 +4534,7 @@ export function ChatInput({
       const applyModelAndEffort = async (modelId: string, eff: Effort) => {
         if (sessionId) {
           // 切来源+模型:fast 恢复目标 (供应商, 模型) 的记忆值(对齐 effort);不支持 → false。
-          const restoredFast = resolveFast(modelId, newProviderId);
+          const restoredFast = resolveFast(modelId, newProviderId) ?? fastMode;
           const switchSeqBySession = localRuntimeSwitchSeqBySessionRef.current;
           const rollbackSeq = (switchSeqBySession.get(sessionId) ?? 0) + 1;
           switchSeqBySession.set(sessionId, rollbackSeq);
