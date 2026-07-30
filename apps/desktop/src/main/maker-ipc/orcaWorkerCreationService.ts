@@ -287,6 +287,17 @@ function normalizeRequiredText(value: string, field: string): { ok: true; value:
   return { ok: true, value: trimmed };
 }
 
+/**
+ * worker agent 入参归一：所有创建入口共用一处，避免各自维护三元表达式后分叉
+ * （曾有 WORKER_CREATE 漏掉 'cursor' 导致静默降级成 claude-code，issue #18）。
+ * 缺省/异型值回落 claude-code，与既有入口语义一致。
+ */
+export function normalizeOrcaWorkerAgent(value: unknown): AgentKind {
+  if (value === 'codex') return 'codex';
+  if (value === 'cursor') return 'cursor';
+  return 'claude-code';
+}
+
 const ORCA_WORKER_LABEL_MAX_LENGTH = 32;
 const ORCA_WORKER_LABEL_PATTERN = /^[a-z0-9_-]+$/i;
 

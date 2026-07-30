@@ -4,6 +4,7 @@ import { describe, expect, it, vi } from 'vitest';
 import {
   buildNoProviderMessage,
   createOrcaWorkerCreationService,
+  normalizeOrcaWorkerAgent,
   providerRouteRequiresExplicitSelection,
   type OrcaWorkerCreationDeps,
   type OrcaWorkerProviderRoutingContext,
@@ -29,6 +30,19 @@ describe('providerRouteRequiresExplicitSelection', () => {
     'does not force an explicit route for %s',
     (strategy) => {
       expect(providerRouteRequiresExplicitSelection(strategy)).toBe(false);
+    },
+  );
+});
+
+describe('normalizeOrcaWorkerAgent', () => {
+  it.each(['codex', 'cursor', 'claude-code'] as const)('keeps %s as the requested worker agent', (agent) => {
+    expect(normalizeOrcaWorkerAgent(agent)).toBe(agent);
+  });
+
+  it.each([undefined, null, '', 'claude', 'Cursor', 42, {}])(
+    'falls back to claude-code for %s',
+    (value) => {
+      expect(normalizeOrcaWorkerAgent(value)).toBe('claude-code');
     },
   );
 });
