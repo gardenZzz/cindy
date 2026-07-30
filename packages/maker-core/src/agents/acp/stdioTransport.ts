@@ -57,11 +57,16 @@ export interface TaskkillHandle {
 
 export type TaskkillSpawner = (pid: number) => TaskkillHandle;
 
-const defaultTaskkillSpawner: TaskkillSpawner = (pid) =>
-  spawn('taskkill', ['/pid', String(pid), '/T', '/F'], {
+const defaultTaskkillSpawner: TaskkillSpawner = (pid) => {
+  const killer = spawn('taskkill', ['/pid', String(pid), '/T', '/F'], {
     windowsHide: true,
     stdio: 'ignore',
   });
+  // taskkill 若挂住，默认 ref 的 handle 会连带把宿主进程钉住不退。我们只关心它的
+  // 终态事件，不需要它维持事件循环。
+  killer.unref();
+  return killer;
+};
 
 /**
  * Windows 树杀：一次 `taskkill /PID <pid> /T /F`，失败回落单进程 kill。
@@ -163,6 +168,12 @@ export function createAcpStdioTransport(opts: AcpStdioTransportOptions): Transpo
     detached: useProcessGroup,
   });
 
+  /**
+   * Windows 专用：taskkill 未确认成功过（失败 / 挂住 / 超时），因此「整树已收口」
+   * 无法保证。close() 据此在 close reason 里如实标注，不把它报成干净关闭。
+   */
+  let treeKillUnconfirmed = false;
+
   /** 连子孙一起收；手段不可用时退回直系子进程 kill。 */
   const killTree = (signal: NodeJS.Signals): void => {
     const pid = child.pid;
@@ -177,6 +188,10 @@ export function createAcpStdioTransport(opts: AcpStdioTransportOptions): Transpo
         pid,
         signal,
         (s) => {
+          // 走到回落 = taskkill 未确认成功。Windows 没有 taskkill 之外的树杀原语，
+          // 所以这里只能杀 leader，孙进程（worker-server）可能残留——必须记下来，
+          // 不能让 close() 把「只杀了 leader」报成「整树已收口」。
+          treeKillUnconfirmed = true;
           try { child.kill(s); } catch { /* swallow */ }
         },
         opts.taskkillSpawner,
@@ -233,9 +248,18 @@ export function createAcpStdioTransport(opts: AcpStdioTransportOptions): Transpo
     }
   });
 
-  const fireClose = (reason: string): void => {
+  const fireClose = (rawReason: string): void => {
     if (closed) return;
     closed = true;
+    /**
+     * 如实上报：Windows 上 taskkill 未确认成功时我们只杀掉了 leader，孙进程
+     * (worker-server) 可能残留。标注必须加在这里而不是 close() 里——回落的
+     * `child.kill()` 一旦生效，`child.on('exit')` 会先带着「child exited」这个
+     * reason 触发本函数，close() 后面拼的字符串因幂等而永远用不上。
+     */
+    const reason = treeKillUnconfirmed
+      ? `${rawReason} (windows tree-kill unconfirmed: only the ACP leader was killed; descendants may survive)`
+      : rawReason;
     try { rl.close(); } catch { /* already closed */ }
     for (const cb of closeHandlers) {
       try { cb({ reason }); } catch { /* handler should not throw */ }
@@ -324,6 +348,8 @@ export function createAcpStdioTransport(opts: AcpStdioTransportOptions): Transpo
           // 以为已关而进程仍在——这是「伪成功」的第三个入口。超时按同一条回落
           // 处理：不是重试 taskkill，而是把 timeout 也算作它失败。
           if (childAlive()) {
+            // 等满仍活 = taskkill 挂住，同上：只能杀 leader，树无法保证收干净。
+            treeKillUnconfirmed = true;
             try { child.kill('SIGKILL'); } catch { /* swallow */ }
             await waitForChildExit(child, sigkillWaitMs);
           }
