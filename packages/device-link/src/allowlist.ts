@@ -152,6 +152,8 @@ const CORE_INVOKE_CHANNELS: readonly string[] = [
   'maker:set-effort',
   'maker:set-permission-mode',
   'maker:set-fast-mode',
+  // Cursor thinking 开关(runtime-only, 持久化经 dispatch persistRemoteSetting 回流)。
+  'maker:set-thinking-mode',
   // 计划模式一级开关(runtime-only, 持久化经 dispatch persistRemoteSetting 回流)。
   // 老被控端无 handler → CHANNEL_NOT_ALLOWED → 控制端 UI 本就按 capabilities.planMode 缺失隐藏入口。
   'maker:set-plan-mode',

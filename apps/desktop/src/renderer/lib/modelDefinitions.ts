@@ -20,6 +20,7 @@ export interface ModelDefinition {
   vendorKey: 'cc' | 'codex';
   contextWindow?: number;
   supportsFastMode?: boolean;
+  supportsThinkingMode?: boolean;
 }
 
 function toLegacy(m: ModelDescriptor, vendorKey: 'cc' | 'codex'): ModelDefinition {
@@ -32,6 +33,7 @@ function toLegacy(m: ModelDescriptor, vendorKey: 'cc' | 'codex'): ModelDefinitio
     vendorKey,
     contextWindow: m.contextWindow,
     supportsFastMode: m.supportsFastMode,
+    supportsThinkingMode: m.supportsThinkingMode,
   };
 }
 

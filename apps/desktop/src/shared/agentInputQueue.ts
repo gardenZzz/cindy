@@ -109,6 +109,7 @@ export interface AgentInputCreateOpts {
   orcaRole?: 'lead' | 'worker' | null;
   effort?: string;
   fastMode?: boolean;
+  thinkingMode?: boolean;
   permissionMode?: string;
   /** 计划模式一级开关(与 permissionMode 正交), lazy-create / rehydrate 时透传给 maker。 */
   planMode?: boolean;

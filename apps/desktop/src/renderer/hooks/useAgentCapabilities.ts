@@ -33,6 +33,7 @@ export interface ModelDescriptor {
   effortDisplayNames?: Partial<Record<Effort, string>>;
   defaultEffort: Effort | null;
   supportsFastMode?: boolean;
+  supportsThinkingMode?: boolean;
 }
 
 export interface EffortDescriptor {

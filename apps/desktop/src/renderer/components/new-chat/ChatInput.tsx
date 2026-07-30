@@ -351,6 +351,9 @@ interface ChatInputProps {
   fastMode?: boolean;
   /** Called when the Fast Mode toggle changes. Captured device ID pins remote routing. */
   onFastModeChange?: (enabled: boolean, sourceRemoteDeviceId?: string) => void | Promise<void>;
+  /** Cursor Thinking 开关状态(默认 true)。 */
+  thinkingMode?: boolean;
+  onThinkingModeChange?: (enabled: boolean, sourceRemoteDeviceId?: string) => void | Promise<void>;
   /** Callback when workingDir changes (for parent state sync). */
   onWorkingDirChange?: (dir: string | null) => void;
   /** When true, the input is disabled (e.g. during streaming). */
@@ -818,6 +821,8 @@ export function ChatInput({
   onPlanModeChange,
   fastMode = false,
   onFastModeChange,
+  thinkingMode = true,
+  onThinkingModeChange,
   onWorkingDirChange,
   disabled,
   isStreaming = false,
@@ -3749,6 +3754,36 @@ export function ChatInput({
     [onFastModeChange, t],
   );
 
+  const persistThinkingModeChange = useCallback(
+    async (
+      enabled: boolean,
+      options?: { silent?: boolean; remoteDeviceId?: string },
+    ): Promise<boolean> => {
+      try {
+        await onThinkingModeChange?.(enabled, options?.remoteDeviceId);
+        return true;
+      } catch (err) {
+        log.warn('thinking mode change failed:', err);
+        if (!options?.silent) {
+          toast.error(
+            t(mapIpcErrorToI18nKey(err, { fallback: 'newChat.chatInput.remoteSwitchFailed' })),
+          );
+        }
+        return false;
+      }
+    },
+    [onThinkingModeChange, t],
+  );
+
+  const handleThinkingModeChange = useCallback(
+    async (enabled: boolean) => {
+      await persistThinkingModeChange(enabled, {
+        remoteDeviceId: deviceLinkDeviceId ?? undefined,
+      });
+    },
+    [persistThinkingModeChange, deviceLinkDeviceId],
+  );
+
   const handleFastModeChange = useCallback(
     async (
       enabled: boolean,
@@ -5328,6 +5363,8 @@ export function ChatInput({
                     // 意图期显示目标引擎下解析出的 fast(apply 时才落库),无意图走真实态。
                     fastMode={agentSwitchIntent?.fastMode ?? fastMode}
                     onFastModeChange={handleFastModeChange}
+                    thinkingMode={thinkingMode}
+                    onThinkingModeChange={handleThinkingModeChange}
                     modelMemory={modelMemory}
                     vendorKey={vendorKey}
                     // 稳态只接受父层已加载的 session/runtime 身份；intent 存在时则明确标成

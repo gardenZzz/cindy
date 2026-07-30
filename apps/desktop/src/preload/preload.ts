@@ -4262,6 +4262,8 @@ contextBridge.exposeInMainWorld('electronAPI', {
       ipcRenderer.invoke('maker:set-permission-mode', sessionId, mode),
     setFastMode: (sessionId: string, enabled: boolean): Promise<void> =>
       ipcRenderer.invoke('maker:set-fast-mode', sessionId, enabled),
+    setThinkingMode: (sessionId: string, enabled: boolean): Promise<void> =>
+      ipcRenderer.invoke('maker:set-thinking-mode', sessionId, enabled),
     // 计划模式一级开关(与 permissionMode 正交)。runtime-only; DB 持久化由 renderer
     // 同步调 sessionService.update({ planModeEnabled })(与 setModel 双 IPC 协调先例一致)。
     setPlanMode: (sessionId: string, enabled: boolean): Promise<void> =>

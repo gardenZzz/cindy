@@ -51,6 +51,12 @@ const OPTIONS_BY_MODEL: Record<string, unknown[]> = {
       currentValue: 'false',
       options: [{ value: 'false', name: 'Off' }, { value: 'true', name: 'Fast' }],
     },
+    {
+      id: 'thinking',
+      name: 'Thinking',
+      currentValue: 'true',
+      options: [{ value: 'false', name: 'Off' }, { value: 'true', name: 'On' }],
+    },
   ],
   'gpt-5.5': [
     {
@@ -200,6 +206,7 @@ describe('CursorAgent.discoverModelOptions', () => {
       defaultEffort: 'high',
       contextWindow: 300_000,
       supportsFastMode: true,
+      supportsThinkingMode: true,
     });
     // GPT 家族挂在 reasoning 上，none / extra-high 归一到 minimal / xhigh。
     expect(byId.get('gpt-5.5')).toMatchObject({

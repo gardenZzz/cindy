@@ -96,6 +96,15 @@ describe('enrichCursorModelFromConfigOptions', () => {
         ],
       },
       {
+        id: 'thinking',
+        name: 'Thinking',
+        currentValue: 'true',
+        options: [
+          { value: 'false', name: 'Off' },
+          { value: 'true', name: 'On' },
+        ],
+      },
+      {
         id: 'context',
         name: 'Context',
         currentValue: '300k',
@@ -111,9 +120,11 @@ describe('enrichCursorModelFromConfigOptions', () => {
       efforts: ['low', 'medium', 'high', 'xhigh', 'max'],
       defaultEffort: 'high',
       supportsFastMode: true,
+      supportsThinkingMode: true,
       contextWindow: 300_000,
     });
     expect(cursorListingToDescriptors(models)[1]?.supportsFastMode).toBe(true);
+    expect(cursorListingToDescriptors(models)[1]?.supportsThinkingMode).toBe(true);
   });
 
   // GPT / Kimi / GLM 家族把推理强度挂在 `reasoning` 上，拼写也和 Claude 家族不同：
@@ -173,6 +184,7 @@ describe('enrichCursorModelFromConfigOptions', () => {
       efforts: [],
       defaultEffort: null,
       supportsFastMode: false,
+      supportsThinkingMode: false,
     });
   });
 });

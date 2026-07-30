@@ -815,6 +815,7 @@ type SendToSessionCreateDefaults = {
   providerId?: string | null;
   effort?: 'minimal' | 'low' | 'medium' | 'high' | 'xhigh' | 'max' | 'ultra';
   fastMode?: boolean;
+  thinkingMode?: boolean;
   workingDir: string;
   workspaceKind?: 'project' | 'dialogue';
   permissionMode?: 'ask' | 'default' | 'acceptEdits' | 'plan' | 'auto' | 'bypassPermissions';
@@ -4393,6 +4394,7 @@ export function registerMakerIpc(maker: Maker, options: RegisterMakerIpcOptions)
       model: row.model,
       effort: row.effort as CreateOpts['effort'],
       fastMode: !!row.fastMode,
+      thinkingMode: row.thinkingMode !== false,
       permissionMode: row.permissionMode as CreateOpts['permissionMode'],
       title: row.title,
       resumeSessionId: row.sdkSessionId ?? undefined,
@@ -4818,6 +4820,7 @@ export function registerMakerIpc(maker: Maker, options: RegisterMakerIpcOptions)
         providerId: row.providerId ?? undefined,
         effort: (row.effort ?? undefined) as CreateOpts['effort'],
         fastMode: !!row.fastMode,
+        thinkingMode: row.thinkingMode !== false,
         permissionMode: (row.permissionMode ?? 'ask') as CreateOpts['permissionMode'],
         planMode: false,
         title: row.title ?? undefined,
@@ -5167,6 +5170,7 @@ export function registerMakerIpc(maker: Maker, options: RegisterMakerIpcOptions)
             model: meta.model,
             effort: (row?.effort ?? undefined) as SendToSessionCreateDefaults['effort'],
             fastMode: !!row?.fastMode,
+            thinkingMode: row?.thinkingMode !== false,
             providerId: row?.providerId ?? undefined,
             // working_dir 覆盖时强制继承来源会话的权限档(review 反馈):把新目录
             // 以 Full access 打开是相对 dispatcher 的权限升级,跨项目 handoff
@@ -5195,6 +5199,7 @@ export function registerMakerIpc(maker: Maker, options: RegisterMakerIpcOptions)
           model: inherited.model,
           effort: inherited.effort as CreateOpts['effort'],
           fastMode: !!inherited.fastMode,
+          thinkingMode: inherited.thinkingMode !== false,
           providerId: inherited.providerId ?? undefined,
           title: newTitle,
           permissionMode: inherited.permissionMode ?? 'bypassPermissions',
@@ -5814,6 +5819,7 @@ export function registerMakerIpc(maker: Maker, options: RegisterMakerIpcOptions)
       resumeSessionId: meta.sdkSessionId,
       effort: (row.effort ?? undefined) as CreateOpts['effort'],
       fastMode: !!row.fastMode,
+      thinkingMode: row.thinkingMode !== false,
       permissionMode: permissionModeOrAsk(row.permissionMode),
       planMode: false,
       title: row.title ?? undefined,
@@ -5838,6 +5844,7 @@ export function registerMakerIpc(maker: Maker, options: RegisterMakerIpcOptions)
       model: createOpts.model,
       effort: createOpts.effort,
       fastMode: createOpts.fastMode,
+      thinkingMode: createOpts.thinkingMode,
       permissionMode: createOpts.permissionMode,
       planMode: createOpts.planMode,
       makerMemoryEnabled: createOpts.makerMemoryEnabled,
@@ -7980,7 +7987,10 @@ export function registerMakerIpc(maker: Maker, options: RegisterMakerIpcOptions)
       log.debug('set-fast-mode: session not found, no-op', { sessionId });
       return;
     }
-    if (sess.agentKind !== 'codex') {
+    // 最小修复：在 main 的 codex-only 门禁上叠加 cursor live push。
+    // 其它 agent（含 CC）仍 no-op：只保留 setSessionFastMode 给 bridge。
+    // 旧逻辑只放行 codex，导致 Cursor 开关已落库但 session/set_config_option(fast) 从不下发。
+    if (sess.agentKind !== 'codex' && sess.agentKind !== 'cursor') {
       log.debug('set-fast-mode: agent does not implement fast mode, no-op', {
         sessionId,
         agentKind: sess.agentKind,
@@ -7993,6 +8003,29 @@ export function registerMakerIpc(maker: Maker, options: RegisterMakerIpcOptions)
       return;
     }
     await sess.setFastMode(enabled);
+  });
+
+  ipcMain.handle(MAKER_INVOKE.SET_THINKING_MODE, async (_e, sessionId: unknown, enabled: unknown) => {
+    if (typeof sessionId !== 'string' || typeof enabled !== 'boolean') {
+      throwIpcError('INVALID_PARAMS', 'sessionId + enabled required');
+    }
+    const sess = maker.getSession(sessionId);
+    if (!sess) {
+      log.debug('set-thinking-mode: session not found, no-op', { sessionId });
+      return;
+    }
+    if (sess.agentKind !== 'cursor') {
+      log.debug('set-thinking-mode: agent does not implement thinking mode, no-op', {
+        sessionId,
+        agentKind: sess.agentKind,
+      });
+      return;
+    }
+    if (pendingCredentialSwitchHolder?.has(sessionId)) {
+      log.debug('set-thinking-mode: skipped live push (pending credential switch)', { sessionId });
+      return;
+    }
+    await sess.setThinkingMode(enabled);
   });
 
   // renderer → main 单向镜像「模型显示/隐藏」override(整张快照,fire-and-forget,不落盘)。

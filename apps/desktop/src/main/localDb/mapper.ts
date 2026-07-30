@@ -167,6 +167,7 @@ export function sessionToCamel(row: SessionRowWithCount): Session {
     contextTokens: row.contextTokens,
     contextWindow: row.contextWindow,
     fastMode: !!row.fastMode,
+    thinkingMode: row.thinkingMode !== false,
     planModeEnabled: !!row.planModeEnabled,
     clearedAt: msToIso(row.clearedAt),
     pinnedAt: msToIso(row.pinnedAt),
@@ -250,6 +251,7 @@ export function sessionCreateToRow(
         effort?: string;
         permissionMode?: string;
         fastMode?: boolean;
+        thinkingMode?: boolean;
         planModeEnabled?: boolean;
         agentKind?: AgentKind;
         orcaRole?: OrcaRole | null;
@@ -284,6 +286,8 @@ export function sessionCreateToRow(
     contextWindow: 0,
     // 新建 session 默认 Fast Mode OFF；调用方显式传 true 时才打开。
     fastMode: !!body?.fastMode,
+    // Cursor thinking 默认 ON（对齐 ACP 自报）；仅显式 false 关闭。
+    thinkingMode: body?.thinkingMode !== false,
     // 计划模式默认 OFF；草稿里开了计划模式的会话显式传 true。
     planModeEnabled: !!body?.planModeEnabled,
     clearedAt: null,
@@ -323,6 +327,7 @@ export function sessionPatchToRow(
     permissionMode?: string;
     providerId?: string | null;
     fastMode?: boolean;
+    thinkingMode?: boolean;
     planModeEnabled?: boolean;
     sdkSessionId?: string | null;
     totalTokenUsage?: number;
@@ -348,6 +353,7 @@ export function sessionPatchToRow(
     out.permissionMode = patch.permissionMode as SessionInsert['permissionMode'];
   if (patch.providerId !== undefined) out.providerId = patch.providerId;
   if (patch.fastMode !== undefined) out.fastMode = !!patch.fastMode;
+  if (patch.thinkingMode !== undefined) out.thinkingMode = !!patch.thinkingMode;
   if (patch.planModeEnabled !== undefined) out.planModeEnabled = !!patch.planModeEnabled;
   if (patch.sdkSessionId !== undefined) out.sdkSessionId = patch.sdkSessionId;
   if (patch.totalTokenUsage !== undefined) out.totalTokenUsage = patch.totalTokenUsage;

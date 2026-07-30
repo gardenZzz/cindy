@@ -931,6 +931,8 @@ export interface SessionChatState {
   queueExpanded: boolean;
   /** Fast Mode toggle state — session-level, OFF by default, only meaningful for supported models. */
   fastMode: boolean;
+  /** Cursor thinking 开关 — session-level, ON by default when model exposes it. */
+  thinkingMode: boolean;
   /**
    * 计划模式一级开关(与 permissionMode 正交)。开关入口在 composer「+」菜单;
    * 计划批准后 agent 自动退出, 经 plan_mode_changed → sessions:patched →
@@ -1009,6 +1011,7 @@ export type SessionChatLightState = Pick<
   | 'queuePaused'
   | 'queueExpanded'
   | 'fastMode'
+  | 'thinkingMode'
   | 'planModeEnabled'
   | 'agentSwitchIntent'
 >;
@@ -1068,6 +1071,7 @@ function createInitialState(): SessionChatState {
     queueAbortPending: false,
     queueExpanded: false,
     fastMode: false,
+    thinkingMode: true,
     planModeEnabled: false,
     planModeRev: 0,
     lastStopWasSideTask: false,
@@ -1131,6 +1135,7 @@ export const EMPTY_SESSION_STATE: SessionChatState = Object.freeze({
   queueAbortPending: false,
   queueExpanded: false,
   fastMode: false,
+  thinkingMode: true,
   planModeEnabled: false,
   planModeRev: 0,
   lastStopWasSideTask: false,
@@ -4635,6 +4640,7 @@ function selectLightState(state: SessionChatState): SessionChatLightState {
     queuePaused: state.queuePaused,
     queueExpanded: state.queueExpanded,
     fastMode: state.fastMode,
+    thinkingMode: state.thinkingMode,
     planModeEnabled: state.planModeEnabled,
   };
 }
@@ -5195,6 +5201,9 @@ function ensureInitialMessages(sessionId: string): void {
         // Restore persisted fastMode so FastToggle reflects the DB state on session switch / restart.
         if (session.fastMode !== undefined && s.fastMode !== session.fastMode) {
           updates.fastMode = session.fastMode;
+        }
+        if (session.thinkingMode !== undefined && s.thinkingMode !== session.thinkingMode) {
+          updates.thinkingMode = session.thinkingMode;
         }
         // 计划模式同 fastMode: 从 DB 恢复, 让「+」菜单勾选态 / chip 跨切换与重启保持。
         // rev 守卫: fetch 期间发生过本地写入(典型: pending 首发已消耗一次性勾选)
@@ -6590,6 +6599,7 @@ function buildCreateOptsForCurrentSession(
     effort,
     permissionMode,
     fastMode: current.fastMode,
+    thinkingMode: current.thinkingMode,
     planMode: current.planModeEnabled,
     displayReasoning: 'summarized',
     userPrompt: getUserPrompt(),
@@ -8325,13 +8335,52 @@ async function setFastMode(
       if (s.fastMode === enabled) return s;
       return { ...s, fastMode: enabled };
     });
-    // 无条件推 IPC:codex → agent setFastMode;claude-code → main 记 bridge 会话态
-    // (chatgpt/ 模型经订阅 handler 的 prefs 生效),其余在 main 侧安全 no-op。
+    // 无条件推 IPC；main 只对 codex/cursor live push，其余 agent 安全 no-op。
     await window.electronAPI.maker.setFastMode(sessionId, enabled).catch((err: unknown) => {
       log.warn('setFastMode IPC failed:', err);
     });
   } catch (err) {
     log.warn('setFastMode persist failed:', err);
+    throw err;
+  }
+}
+
+async function setThinkingMode(
+  sessionId: string,
+  enabled: boolean,
+  sourceRemoteDeviceId?: string,
+): Promise<void> {
+  if (!sessionId) return;
+  if (sourceRemoteDeviceId || isRemoteSession(sessionId)) {
+    const previous = getOrCreateState(sessionId).thinkingMode;
+    setState(sessionId, (s) =>
+      s.thinkingMode === enabled ? s : { ...s, thinkingMode: enabled },
+    );
+    try {
+      const remoteMaker = sourceRemoteDeviceId
+        ? makerApiForDevice(sourceRemoteDeviceId)
+        : makerApiFor(sessionId);
+      await remoteMaker.setThinkingMode(sessionId, enabled);
+    } catch (err) {
+      setState(sessionId, (s) =>
+        s.thinkingMode === enabled ? { ...s, thinkingMode: previous } : s,
+      );
+      log.warn('setThinkingMode IPC failed (remote):', err);
+      throw err;
+    }
+    return;
+  }
+  try {
+    await sessionService.update(sessionId, { thinkingMode: enabled });
+    setState(sessionId, (s) => {
+      if (s.thinkingMode === enabled) return s;
+      return { ...s, thinkingMode: enabled };
+    });
+    await window.electronAPI.maker.setThinkingMode(sessionId, enabled).catch((err: unknown) => {
+      log.warn('setThinkingMode IPC failed:', err);
+    });
+  } catch (err) {
+    log.warn('setThinkingMode persist failed:', err);
     throw err;
   }
 }
@@ -8618,6 +8667,7 @@ function sendUiTrigger(sessionId: string, prompt: string): Promise<void> {
         ...queued.createOpts,
         agentKind: dbAgentKindToMakerKind(session.agentKind, state.agentKind),
         fastMode: session.fastMode ?? state.fastMode,
+        thinkingMode: session.thinkingMode ?? state.thinkingMode,
         planMode: false,
         ...(session.providerId !== undefined ? { providerId: session.providerId } : {}),
         ...((session.sdkSessionId ?? state.sdkSessionId)
@@ -8752,6 +8802,7 @@ function mirrorSessionFields(
   patch:
     | {
         fastMode?: unknown;
+    thinkingMode?: unknown;
         planModeEnabled?: unknown;
         agentKind?: unknown;
         agentSwitchIntentCanceled?: unknown;
@@ -8787,6 +8838,10 @@ function mirrorSessionFields(
   if (typeof patch.fastMode === 'boolean') {
     const next = patch.fastMode;
     setState(sessionId, (s) => (s.fastMode === next ? s : { ...s, fastMode: next }));
+  }
+  if (typeof patch.thinkingMode === 'boolean') {
+    const next = patch.thinkingMode;
+    setState(sessionId, (s) => (s.thinkingMode === next ? s : { ...s, thinkingMode: next }));
   }
   // 计划模式同 fastMode 语义镜像:承接「计划批准 → agent 自动退出」的 plan_mode_changed
   // 回流(persistSessionFields 广播), 让「+」菜单勾选与 chip 即时熄灭。
@@ -8902,6 +8957,7 @@ export const makerChatStore = {
   updatePendingPlanReviewContent,
   setFastMode,
   resetFastMode,
+  setThinkingMode,
   setPlanMode,
   setPlanViewerState,
   /** F-AUQ-MIN-2/4: minimize/restore the AskUserQuestion prompt UI. */

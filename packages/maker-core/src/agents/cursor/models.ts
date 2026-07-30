@@ -47,6 +47,8 @@ export interface CursorListedModel {
   efforts: readonly Effort[];
   defaultEffort: Effort | null;
   supportsFastMode?: boolean;
+  /** 当前模型是否暴露 ACP `thinking` 开关（Claude Opus 系常见）。 */
+  supportsThinkingMode?: boolean;
 }
 
 export interface CursorModelsListing {
@@ -220,6 +222,13 @@ export function enrichCursorModelFromConfigOptions(
     fastOpt?.options.some((o) => o.value === 'true' || o.value === 'false'),
   );
 
+  // Cursor 后台在 Thinking+High+Fast 时会把展示 id 记成
+  // `claude-opus-5-thinking-high-fast`；ACP 参数化模式下仍是干净 modelId + configOptions。
+  const thinkingOpt = byId.get('thinking');
+  target.supportsThinkingMode = Boolean(
+    thinkingOpt?.options.some((o) => o.value === 'true' || o.value === 'false'),
+  );
+
   const contextOpt = byId.get('context');
   const window = parseContextWindow(contextOpt?.currentValue);
   if (window != null) target.contextWindow = window;
@@ -244,6 +253,7 @@ export function cursorListingToDescriptors(
       defaultEffort: m.defaultEffort,
     };
     if (m.supportsFastMode !== undefined) d.supportsFastMode = m.supportsFastMode;
+    if (m.supportsThinkingMode !== undefined) d.supportsThinkingMode = m.supportsThinkingMode;
     return d;
   });
 }

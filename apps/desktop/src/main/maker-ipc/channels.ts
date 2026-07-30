@@ -174,6 +174,8 @@ export const MAKER_INVOKE = {
   SET_EFFORT: 'maker:set-effort',
   SET_PERMISSION_MODE: 'maker:set-permission-mode',
   SET_FAST_MODE: 'maker:set-fast-mode',
+  /** Cursor thinking 开关; 持久化由 renderer sessions:update / device-link 回流负责 */
+  SET_THINKING_MODE: 'maker:set-thinking-mode',
   /** 计划模式一级开关(与 permissionMode 正交), runtime-only; 持久化由 renderer sessions:update / device-link 回流负责 */
   SET_PLAN_MODE: 'maker:set-plan-mode',
   /**
