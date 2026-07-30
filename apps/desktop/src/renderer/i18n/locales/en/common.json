@@ -2357,7 +2357,8 @@
       "prefs": {
         "agentLabel": "Agent",
         "modelLabel": "Model",
-        "effortLabel": "Reasoning effort",
+        "thinkingLabel": "Thinking",
+      "effortLabel": "Reasoning effort",
         "permissionLabel": "Permission mode",
         "providerSlack": "Slack",
         "providerTelegram": "Telegram",

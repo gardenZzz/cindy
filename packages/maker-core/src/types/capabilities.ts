@@ -154,6 +154,10 @@ export interface ModelDescriptor {
    */
   supportsFastMode?: boolean;
   /**
+   * Cursor ACP 参数化 `thinking` 开关（与 effort/fast 并列）。仅 Cursor 会填。
+   */
+  supportsThinkingMode?: boolean;
+  /**
    * 厂商分组 id（纯展示元数据，源自目录 providers.json，host 派生时透传）。
    * 渲染层据此对模型分组；缺省时回退 id 前缀归类。maker-core 运行时不读它。
    */

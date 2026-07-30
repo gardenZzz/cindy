@@ -16,12 +16,17 @@ export function FastModeToggle({
   enabled,
   onToggle,
   hideIcon = false,
+  label = 'Fast',
+  ariaLabel = 'Fast Mode',
   accentVar = 'var(--status-bar-accent)',
   thumbVar,
 }: {
   enabled: boolean;
   onToggle: () => void;
   hideIcon?: boolean;
+  /** 文案(默认 Fast;Thinking 开关复用此组件时传入 i18n 文案)。 */
+  label?: string;
+  ariaLabel?: string;
   /** 开启态的强调色(图标 / "Fast" 文案 / 轨道)。默认品牌橙;模型选择器传单色 token 以遵循设计稿。 */
   accentVar?: string;
   /** 滑钮颜色。缺省 = 白色(`bg-white`);传入则按主题 token 上色(深色主题下深钮)。 */
@@ -41,7 +46,7 @@ export function FastModeToggle({
         'bg-transparent transition-colors hover:bg-[var(--model-trigger-hover)]',
       )}
       onClick={onToggle}
-      aria-label="Fast Mode"
+      aria-label={ariaLabel}
       aria-pressed={enabled}
     >
       {!hideIcon && (
@@ -61,7 +66,7 @@ export function FastModeToggle({
         )}
         style={enabled ? { color } : undefined}
       >
-        Fast
+        {label}
       </span>
       <span
         className="relative shrink-0 rounded-full transition-colors duration-150"

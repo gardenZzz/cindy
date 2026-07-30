@@ -17,6 +17,8 @@ export interface SessionMeta {
   effort?: Effort;
   permissionMode?: PermissionMode;
   fastMode?: boolean;
+  /** Cursor thinking 开关；缺省/非 cursor 为 false。 */
+  thinkingMode?: boolean;
   createdAt: number;
   updatedAt: number;
   /** SDK 内部生成的 sessionId（与本地 id 不同），用于 resume */

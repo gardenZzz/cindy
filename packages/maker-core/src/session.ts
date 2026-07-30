@@ -650,6 +650,14 @@ export class Session {
     await this.handle.setFastMode(enabled);
   }
 
+  async setThinkingMode(enabled: boolean): Promise<void> {
+    this.ensureActive();
+    if (!this.handle.setThinkingMode) {
+      throw new NotSupportedError('thinkingMode', { supported: false, reason: 'not-implemented' });
+    }
+    await this.handle.setThinkingMode(enabled);
+  }
+
   /** 运行时开关计划模式（capability 见 Capabilities.planMode）。 */
   async setPlanMode(enabled: boolean): Promise<void> {
     this.ensureActive();
@@ -668,6 +676,10 @@ export class Session {
 
   getFastMode(): boolean | null {
     return this.handle.getFastMode?.() ?? null;
+  }
+
+  getThinkingMode(): boolean | null {
+    return this.handle.getThinkingMode?.() ?? null;
   }
 
   /**

@@ -520,6 +520,7 @@ export class CursorAgent extends BaseAgent {
               efforts: prev.efforts,
               defaultEffort: prev.defaultEffort,
               supportsFastMode: prev.supportsFastMode,
+              supportsThinkingMode: prev.supportsThinkingMode,
               contextWindow: prev.contextWindow,
             }
           : { ...m };
@@ -660,6 +661,8 @@ export class CursorAgent extends BaseAgent {
     let mutableModel = toCursorProductModelId(opts.model || CURSOR_AUTO_MODEL.id);
     let mutableEffort: Effort | undefined = opts.effort;
     let mutableFastMode = opts.fastMode === true;
+    // Thinking 默认开（Cursor Opus 自报 currentValue=true）；仅当 start 显式传 false 时关闭。
+    let mutableThinkingMode = opts.thinkingMode !== false;
     let latestConfigOptions: AcpConfigOption[] = [];
     const sessionAllowKeys = new Set<string>();
     let autoFallbackNotified = false;
@@ -736,6 +739,10 @@ export class CursorAgent extends BaseAgent {
       if (fastVal === 'true' || fastVal === 'false') {
         mutableFastMode = fastVal === 'true';
       }
+      const thinkingVal = readConfigOptionValue(options, 'thinking');
+      if (thinkingVal === 'true' || thinkingVal === 'false') {
+        mutableThinkingMode = thinkingVal === 'true';
+      }
       await this.publishListedModels(productModelId);
     };
 
@@ -753,6 +760,7 @@ export class CursorAgent extends BaseAgent {
                 efforts: prev.efforts.length > 0 ? prev.efforts : m.efforts,
                 defaultEffort: prev.defaultEffort ?? m.defaultEffort,
                 supportsFastMode: prev.supportsFastMode ?? m.supportsFastMode,
+                supportsThinkingMode: prev.supportsThinkingMode ?? m.supportsThinkingMode,
                 contextWindow: prev.contextWindow !== 200_000 ? prev.contextWindow : m.contextWindow,
               }
             : m;
@@ -1329,6 +1337,23 @@ export class CursorAgent extends BaseAgent {
           });
         }
       }
+      if (
+        opts.thinkingMode !== undefined &&
+        latestConfigOptions.some((o) => o.id === 'thinking')
+      ) {
+        try {
+          const options = await setConfigOption(
+            'thinking',
+            opts.thinkingMode ? 'true' : 'false',
+          );
+          await applyConfigEnrichment(mutableModel, options);
+        } catch (err) {
+          log.warn('cursor initial setThinkingMode failed', {
+            thinkingMode: opts.thinkingMode,
+            message: err instanceof Error ? err.message : String(err),
+          });
+        }
+      }
     };
 
     // mutable vendorOptions —— host bridge / setVendorOptions 必须共享同一引用。
@@ -1710,6 +1735,28 @@ export class CursorAgent extends BaseAgent {
 
       getFastMode() {
         return mutableFastMode;
+      },
+
+      async setThinkingMode(enabled: boolean) {
+        if (closed) throw new Error('Cursor session is closed');
+        if (!latestConfigOptions.some((o) => o.id === 'thinking')) {
+          const refreshed = await setConfigOption('model', toCursorAcpModelId(mutableModel));
+          await applyConfigEnrichment(mutableModel, refreshed);
+        }
+        if (!latestConfigOptions.some((o) => o.id === 'thinking')) {
+          throw new NotSupportedError('thinkingMode', {
+            supported: false,
+            reason: 'sdk-missing',
+            message: `Cursor model ${mutableModel} does not expose thinking mode`,
+          });
+        }
+        log.debug('setThinkingMode', { from: mutableThinkingMode, to: enabled });
+        const options = await setConfigOption('thinking', enabled ? 'true' : 'false');
+        await applyConfigEnrichment(mutableModel, options);
+      },
+
+      getThinkingMode() {
+        return mutableThinkingMode;
       },
 
       async setPermissionMode(newMode: PermissionMode) {

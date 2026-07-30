@@ -106,6 +106,7 @@ const state = (overrides: Partial<SessionChatState> = {}): SessionChatState => (
   queueAbortPending: false,
   queueExpanded: false,
   fastMode: false,
+  thinkingMode: true,
   planModeEnabled: false,
   planModeRev: 0,
   lastStopWasSideTask: false,

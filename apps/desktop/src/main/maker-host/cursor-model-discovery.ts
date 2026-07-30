@@ -71,6 +71,9 @@ function sanitizeDescriptors(raw: unknown): ModelDescriptor[] {
           : null,
     };
     if (typeof m.supportsFastMode === 'boolean') descriptor.supportsFastMode = m.supportsFastMode;
+    if (typeof m.supportsThinkingMode === 'boolean') {
+      descriptor.supportsThinkingMode = m.supportsThinkingMode;
+    }
     out.push(descriptor);
   }
   return out;
