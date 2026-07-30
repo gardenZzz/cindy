@@ -662,10 +662,10 @@ export class MakerScheduleRunner implements ScheduleRunner {
         : undefined;
     const model = rawModel?.trim() ? rawModel : defaultModelFor(effectiveAgentKind);
     const permissionMode = defaultPermissionModeForSchedule();
-    // fastMode 只对 codex 有意义（claude-code agent 忽略此字段）；Claude 恒不传，
+    // fastMode 对 codex / cursor 有意义（claude-code agent 忽略此字段）；Claude 恒不传，
     // 确保「不影响 Claude」。heartbeat 沿用 session meta 里的 fast 态，非 heartbeat 取 schedule。
     let fastMode =
-      effectiveAgentKind === 'codex'
+      effectiveAgentKind === 'codex' || effectiveAgentKind === 'cursor'
         ? isHeartbeat
           ? heartbeatFastMode
           : schedule.fastMode

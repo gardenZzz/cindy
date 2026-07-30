@@ -87,7 +87,7 @@ export function formToProjectConfig(
     agentKind: form.agentKind,
     model: form.model.trim() || undefined,
     effort: form.effort || undefined,
-    fastMode: form.agentKind === 'codex' && form.fastMode ? true : undefined,
+    fastMode: (form.agentKind === 'codex' || form.agentKind === 'cursor') && form.fastMode ? true : undefined,
     useWorktree: form.useWorktree,
     persistentSession: form.persistentSession,
     silentWhenIdle: form.silentWhenIdle,
