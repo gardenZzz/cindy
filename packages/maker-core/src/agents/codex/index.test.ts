@@ -13884,3 +13884,501 @@ describe('CodexAgent plan mode', () => {
     await handle.close();
   });
 });
+
+// ── upstream-response-idle watchdog ──────────────────────────────────────────
+// codex 此前只有 willRetry 风暴的终局升级(retry-escalation),覆盖不到 daemon **静默**
+// 卡死(后端连接半开 / 内部死锁 / app-server 不再投递任何通知)—— turn 会永远转圈。
+// 计时语义与 claude-code 侧一致:只在"球在上游"期间走表,工具执行期间停表。
+describe('CodexAgent upstream-response-idle watchdog', () => {
+  const IDLE_MS = 60_000;
+
+  beforeEach(() => {
+    vi.stubEnv('XDT_CODEX_IDLE_TIMEOUT_MS', String(IDLE_MS));
+  });
+
+  afterEach(() => {
+    vi.unstubAllEnvs();
+  });
+
+  function installIdleHost(agent: CodexAgent) {
+    let turnSeq = 0;
+    return installFakeHost(agent, (method) => {
+      if (method === Method.TurnStart) return { turn: { id: `turn-${++turnSeq}` } };
+      if (method === Method.TurnInterrupt) return {};
+      return undefined;
+    });
+  }
+
+  async function startIdleSession(agent: CodexAgent, sessionId: string) {
+    return agent.startSession({ sessionId, model: 'gpt-5.4', workingDir: '/repo' });
+  }
+
+  function collectEvents(handle: Awaited<ReturnType<CodexAgent['startSession']>>): AgentEvent[] {
+    const seen: AgentEvent[] = [];
+    void (async () => {
+      for await (const ev of handle.events()) seen.push(ev);
+    })();
+    return seen;
+  }
+
+  it('turn 开始后上游持续静默 → 推终态 error 并 interrupt turn', async () => {
+    vi.useFakeTimers();
+    try {
+      const agent = new CodexAgent(createDeps());
+      const host = installIdleHost(agent);
+      const handle = await startIdleSession(agent, 'session-idle-trip');
+      const seen = collectEvents(handle);
+      await handle.send({ type: 'user', content: 'go' });
+      const handlers = host.getThreadHandlers();
+      if (!handlers) throw new Error('expected thread handlers');
+      handlers.turnStarted?.({ threadId: 'start-thread-id', turn: { id: 'turn-1' } } as never);
+
+      await vi.advanceTimersByTimeAsync(IDLE_MS + 1);
+
+      const terminal = seen.find(
+        (ev) =>
+          ev.type === 'error' &&
+          (ev.data as { reason?: string } | null)?.reason === 'upstream_response_idle_timeout',
+      );
+      expect(terminal).toBeDefined();
+      expect((terminal!.data as { isTerminal?: boolean }).isTerminal).toBe(true);
+      expect(
+        host.request.mock.calls.some(
+          ([method, params]) =>
+            method === Method.TurnInterrupt &&
+            (params as { turnId?: string }).turnId === 'turn-1',
+        ),
+      ).toBe(true);
+      await handle.close();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('工具执行期间停表:长命令不会被误杀', async () => {
+    vi.useFakeTimers();
+    try {
+      const agent = new CodexAgent(createDeps());
+      const host = installIdleHost(agent);
+      const handle = await startIdleSession(agent, 'session-idle-tool');
+      const seen = collectEvents(handle);
+      await handle.send({ type: 'user', content: 'run a long build' });
+      const handlers = host.getThreadHandlers();
+      if (!handlers) throw new Error('expected thread handlers');
+      handlers.turnStarted?.({ threadId: 'start-thread-id', turn: { id: 'turn-1' } } as never);
+      handlers.itemStarted?.({
+        threadId: 'start-thread-id',
+        turnId: 'turn-1',
+        item: { id: 'item-1', type: 'commandExecution', command: 'make build' },
+      } as never);
+
+      await vi.advanceTimersByTimeAsync(IDLE_MS * 5);
+
+      expect(
+        seen.some(
+          (ev) =>
+            ev.type === 'error' &&
+            (ev.data as { reason?: string } | null)?.reason === 'upstream_response_idle_timeout',
+        ),
+      ).toBe(false);
+      await handle.close();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('工具收工后恢复计时(停表不能变成永久豁免)', async () => {
+    vi.useFakeTimers();
+    try {
+      const agent = new CodexAgent(createDeps());
+      const host = installIdleHost(agent);
+      const handle = await startIdleSession(agent, 'session-idle-tool-done');
+      const seen = collectEvents(handle);
+      await handle.send({ type: 'user', content: 'run then think' });
+      const handlers = host.getThreadHandlers();
+      if (!handlers) throw new Error('expected thread handlers');
+      handlers.turnStarted?.({ threadId: 'start-thread-id', turn: { id: 'turn-1' } } as never);
+      handlers.itemStarted?.({
+        threadId: 'start-thread-id',
+        turnId: 'turn-1',
+        item: { id: 'item-1', type: 'commandExecution', command: 'make build' },
+      } as never);
+      await vi.advanceTimersByTimeAsync(IDLE_MS * 2);
+      handlers.itemCompleted?.({
+        threadId: 'start-thread-id',
+        turnId: 'turn-1',
+        item: { id: 'item-1', type: 'commandExecution', command: 'make build' },
+      } as never);
+
+      // 球回到上游,再静默满一个阈值 → 该触发
+      await vi.advanceTimersByTimeAsync(IDLE_MS + 1);
+
+      expect(
+        seen.some(
+          (ev) =>
+            ev.type === 'error' &&
+            (ev.data as { reason?: string } | null)?.reason === 'upstream_response_idle_timeout',
+        ),
+      ).toBe(true);
+      await handle.close();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('interrupt 两次都超时也要收干净本地 turn 状态,会话保持可发(review 第二轮)', async () => {
+    // app-server 彻底哑火时 interruptTurnForPermissionTighten 会两次 ack 超时后放弃,
+    // 而它按设计不动 isTurnInFlight —— 若 watchdog 只依赖它,会话 isTurnRunning() 恒 true,
+    // 之后每条 send 都被 in-flight guard 拒掉,watchdog 报告"已恢复"实际彻底不可用。
+    vi.useFakeTimers();
+    try {
+      const agent = new CodexAgent(createDeps());
+      let turnSeq = 0;
+      const host = installFakeHost(agent, (method) => {
+        if (method === Method.TurnStart) return { turn: { id: `turn-${++turnSeq}` } };
+        // interrupt 永不响应 → 触发两次 ack 超时
+        if (method === Method.TurnInterrupt) return new Promise(() => {}) as never;
+        return undefined;
+      });
+      const handle = await startIdleSession(agent, 'session-idle-interrupt-dead');
+      const seen = collectEvents(handle);
+      await handle.send({ type: 'user', content: 'go' });
+      const handlers = host.getThreadHandlers();
+      if (!handlers) throw new Error('expected thread handlers');
+      handlers.turnStarted?.({ threadId: 'start-thread-id', turn: { id: 'turn-1' } } as never);
+      expect(handle.isTurnRunning?.()).toBe(true);
+
+      await vi.advanceTimersByTimeAsync(IDLE_MS + 1);
+
+      // 终态 error 照常推出
+      expect(
+        seen.some(
+          (ev) =>
+            ev.type === 'error' &&
+            (ev.data as { reason?: string } | null)?.reason === 'upstream_response_idle_timeout',
+        ),
+      ).toBe(true);
+      // 关键:本地 turn 状态必须已收干净,不等 interrupt 的结果
+      expect(handle.isTurnRunning?.()).toBe(false);
+      await handle.close();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('interrupt 始终不 ack → 作废 host(否则坏 daemon 会被下一条 send 复用)', async () => {
+    // watchdog 会先合成一次本地 turn 收口好让会话立刻可发,代价是 isTurnRunning() 变
+    // false —— Session 层的 recoverIfTurnStillRunning 正以它为判据,于是会认为"中断
+    // 生效了、会话仍可用"而放过这个 host。若中断其实从未被确认,这个已经哑火整个阈值
+    // 周期的 app-server 就留给下一条 send 复用:要么再超时,要么撞上服务端那个还在跑
+    // 的 turn(review #944 第五轮 P1)。确诊不可用就自己 close,让上层重建。
+    vi.useFakeTimers();
+    try {
+      const agent = new CodexAgent(createDeps());
+      let turnSeq = 0;
+      const host = installFakeHost(agent, (method) => {
+        if (method === Method.TurnStart) return { turn: { id: `turn-${++turnSeq}` } };
+        // app-server 彻底哑火:中断请求永不返回,两次 ack 都会超时
+        if (method === Method.TurnInterrupt) return new Promise<never>(() => {});
+        return undefined;
+      });
+      const handle = await startIdleSession(agent, 'session-idle-interrupt-dead');
+      let eventsEnded = false;
+      void (async () => {
+        for await (const ev of handle.events()) void ev;
+        eventsEnded = true;
+      })();
+      await handle.send({ type: 'user', content: 'go' });
+      const handlers = host.getThreadHandlers();
+      if (!handlers) throw new Error('expected thread handlers');
+      handlers.turnStarted?.({ threadId: 'start-thread-id', turn: { id: 'turn-1' } } as never);
+
+      await vi.advanceTimersByTimeAsync(IDLE_MS + 1);
+      // 中断结果还没出来(两次 ack 各 10s)—— 此时不许提前作废 host
+      expect(eventsEnded).toBe(false);
+
+      await vi.advanceTimersByTimeAsync(10_000 * 2 + 10);
+      // close() → eventQueue.end() → 上层 for-await 自然收尾,Session 据此
+      // setStatus('closed'),下一条 send 走 Maker 的 lazy create 重建 handle。
+      expect(eventsEnded).toBe(true);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('interrupt 始终不 ack → 连共享 app-server host 一起退役', async () => {
+    // handle.close() 只放掉本 thread 的订阅并结束自己的事件队列,共享的 AppServerHost 仍
+    // 留在缓存里 —— 下一次 lazy create 会连回同一个已确诊无响应的 app-server,立刻再卡
+    // 一遍,等于没恢复(review #944 第八轮 P1)。
+    vi.useFakeTimers();
+    try {
+      const agent = new CodexAgent(createDeps());
+      let turnSeq = 0;
+      const host = installFakeHost(agent, (method) => {
+        if (method === Method.TurnStart) return { turn: { id: `turn-${++turnSeq}` } };
+        if (method === Method.TurnInterrupt) return new Promise<never>(() => {});
+        return undefined;
+      });
+      const retireHostKey = vi
+        .spyOn(
+          agent as unknown as { retireHostKey: (...args: unknown[]) => Promise<void> },
+          'retireHostKey',
+        )
+        .mockResolvedValue(undefined);
+      const handle = await startIdleSession(agent, 'session-idle-retire-host');
+      void (async () => {
+        for await (const ev of handle.events()) void ev;
+      })();
+      await handle.send({ type: 'user', content: 'go' });
+      const handlers = host.getThreadHandlers();
+      if (!handlers) throw new Error('expected thread handlers');
+      handlers.turnStarted?.({ threadId: 'start-thread-id', turn: { id: 'turn-1' } } as never);
+
+      await vi.advanceTimersByTimeAsync(IDLE_MS + 10_000 * 2 + 10);
+      // 两次 ack 都超时 → 必须把 host 缓存条目退役,下一个会话才会重建一个新的 app-server。
+      // failIfActive:false —— 别的会话可能还挂在这个 host 上,退役要广播强制退役的终态
+      // transport error 让它们各自收口,而不是抛错放着不管。
+      expect(retireHostKey).toHaveBeenCalledTimes(1);
+      expect(retireHostKey.mock.calls[0]?.[2]).toMatchObject({ failIfActive: false });
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('等 interrupt 期间用户起了新 turn → 不关 handle、不退役 host', async () => {
+    // 合成收口把 isTurnInFlight 清成 false,所以两次 ack 的 20s 里新 send 不会被拒。
+    // 无条件 close 会掐死这条健康的新 turn,紧随的 host 退役还会连带终止同 host 上的
+    // 其它会话(review #944 第十七轮 P1)。
+    vi.useFakeTimers();
+    try {
+      const agent = new CodexAgent(createDeps());
+      let turnSeq = 0;
+      const host = installFakeHost(agent, (method) => {
+        if (method === Method.TurnStart) return { turn: { id: `turn-${++turnSeq}` } };
+        if (method === Method.TurnInterrupt) return new Promise<never>(() => {});
+        return undefined;
+      });
+      const retireHostKey = vi
+        .spyOn(
+          agent as unknown as { retireHostKey: (...args: unknown[]) => Promise<void> },
+          'retireHostKey',
+        )
+        .mockResolvedValue(undefined);
+      const handle = await startIdleSession(agent, 'session-idle-newer-turn');
+      let eventsEnded = false;
+      void (async () => {
+        for await (const ev of handle.events()) void ev;
+        eventsEnded = true;
+      })();
+      await handle.send({ type: 'user', content: 'go' });
+      const handlers = host.getThreadHandlers();
+      if (!handlers) throw new Error('expected thread handlers');
+      handlers.turnStarted?.({ threadId: 'start-thread-id', turn: { id: 'turn-1' } } as never);
+
+      // 看门狗开火 → 合成本地收口(isTurnInFlight 清空),interrupt 挂住
+      await vi.advanceTimersByTimeAsync(IDLE_MS + 1);
+      // 用户在两次 ack 的窗口里起了新 turn
+      await handle.send({ type: 'user', content: 'next' });
+      handlers.turnStarted?.({ threadId: 'start-thread-id', turn: { id: 'turn-2' } } as never);
+
+      await vi.advanceTimersByTimeAsync(10_000 * 2 + 10);
+
+      // 新 turn 必须活着:既不关 handle,也不退役 host
+      expect(eventsEnded).toBe(false);
+      expect(retireHostKey).not.toHaveBeenCalled();
+      await handle.close();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('等 interrupt 期间新 turn 起了又正常结束 → 依然不关 handle、不退役 host', async () => {
+    // 上一个用例里新 turn 在窗口结束时**仍在跑**,所以看瞬时的 isTurnInFlight /
+    // currentTurnId 就够。但新 turn 完全可能在这 20s 里跑完:handleTurnCompleted 把两个
+    // 瞬时量双双复位,只看它们就会误判成"没人用了",照样关掉一个刚刚证明自己健康的 host,
+    // 并连带退役同 host 上的其它会话(review #944 第十八轮 P1)。判据必须是单调的
+    // turnStartGeneration:它答得了"期间有没有发生过新活儿"。
+    vi.useFakeTimers();
+    try {
+      const agent = new CodexAgent(createDeps());
+      let turnSeq = 0;
+      const host = installFakeHost(agent, (method) => {
+        if (method === Method.TurnStart) return { turn: { id: `turn-${++turnSeq}` } };
+        if (method === Method.TurnInterrupt) return new Promise<never>(() => {});
+        return undefined;
+      });
+      const retireHostKey = vi
+        .spyOn(
+          agent as unknown as { retireHostKey: (...args: unknown[]) => Promise<void> },
+          'retireHostKey',
+        )
+        .mockResolvedValue(undefined);
+      const handle = await startIdleSession(agent, 'session-idle-newer-turn-done');
+      let eventsEnded = false;
+      void (async () => {
+        for await (const ev of handle.events()) void ev;
+        eventsEnded = true;
+      })();
+      await handle.send({ type: 'user', content: 'go' });
+      const handlers = host.getThreadHandlers();
+      if (!handlers) throw new Error('expected thread handlers');
+      handlers.turnStarted?.({ threadId: 'start-thread-id', turn: { id: 'turn-1' } } as never);
+
+      // 看门狗开火 → 合成本地收口,interrupt 挂住
+      await vi.advanceTimersByTimeAsync(IDLE_MS + 1);
+      // 窗口里起了新 turn,并且**在窗口内就正常结束**
+      await handle.send({ type: 'user', content: 'next' });
+      handlers.turnStarted?.({ threadId: 'start-thread-id', turn: { id: 'turn-2' } } as never);
+      handlers.turnCompleted?.({
+        threadId: 'start-thread-id',
+        turn: { id: 'turn-2', status: 'completed' },
+      });
+      expect(handle.isTurnRunning?.()).toBe(false); // 瞬时量已被复位,只看它就会误判
+
+      await vi.advanceTimersByTimeAsync(10_000 * 2 + 10);
+
+      expect(eventsEnded).toBe(false);
+      expect(retireHostKey).not.toHaveBeenCalled();
+      await handle.close();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('等 interrupt 期间 host 已被换掉 → 不退役那个新的健康 host', async () => {
+    // 两次 interrupt ack 要等 20s,期间别的路径(auth / 凭证重启)完全可能已经把这个 key
+    // 下的 host 换成新实例。retireHostKey 只按 key 查删,不加身份闸就会把新 host 退役、
+    // 连带终止它名下正在干活的会话(review #944 第九轮 P1)。
+    vi.useFakeTimers();
+    try {
+      const agent = new CodexAgent(createDeps());
+      let turnSeq = 0;
+      const host = installFakeHost(agent, (method) => {
+        if (method === Method.TurnStart) return { turn: { id: `turn-${++turnSeq}` } };
+        if (method === Method.TurnInterrupt) return new Promise<never>(() => {});
+        return undefined;
+      });
+      const retireHostKey = vi
+        .spyOn(
+          agent as unknown as { retireHostKey: (...args: unknown[]) => Promise<void> },
+          'retireHostKey',
+        )
+        .mockResolvedValue(undefined);
+      const handle = await startIdleSession(agent, 'session-idle-host-replaced');
+      void (async () => {
+        for await (const ev of handle.events()) void ev;
+      })();
+      await handle.send({ type: 'user', content: 'go' });
+      const handlers = host.getThreadHandlers();
+      if (!handlers) throw new Error('expected thread handlers');
+      handlers.turnStarted?.({ threadId: 'start-thread-id', turn: { id: 'turn-1' } } as never);
+
+      // 看门狗开火,但在两次 ack 超时之前,别的路径(auth / 凭证重启)已经在这个 key 下
+      // 放了一个**新的** host —— isCurrentHost 由此判假。
+      await vi.advanceTimersByTimeAsync(IDLE_MS + 1);
+      (agent as unknown as { hosts: Map<string, unknown> }).hosts.set('local', {
+        replacement: true,
+      });
+      await vi.advanceTimersByTimeAsync(10_000 * 2 + 10);
+
+      expect(retireHostKey).not.toHaveBeenCalled();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('interrupt 被 ack 时不作废 host(daemon 还活着,会话继续可用)', async () => {
+    vi.useFakeTimers();
+    try {
+      const agent = new CodexAgent(createDeps());
+      const host = installIdleHost(agent); // TurnInterrupt 正常返回 {}
+      const handle = await startIdleSession(agent, 'session-idle-interrupt-ok');
+      let eventsEnded = false;
+      void (async () => {
+        for await (const ev of handle.events()) void ev;
+        eventsEnded = true;
+      })();
+      await handle.send({ type: 'user', content: 'go' });
+      const handlers = host.getThreadHandlers();
+      if (!handlers) throw new Error('expected thread handlers');
+      handlers.turnStarted?.({ threadId: 'start-thread-id', turn: { id: 'turn-1' } } as never);
+
+      await vi.advanceTimersByTimeAsync(IDLE_MS + 10_000 * 2 + 10);
+      expect(eventsEnded).toBe(false);
+      await handle.close();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('系统挂起期间不计额度,醒来不立刻开火', async () => {
+    // 与 Session 层同源的问题:一个 30 分钟的长定时器在唤醒后到期就立刻开火,一次午休
+    // 足以中断一条完全健康的 turn(review #944 第十二轮 P1)。
+    vi.useFakeTimers();
+    try {
+      const agent = new CodexAgent(createDeps());
+      const host = installIdleHost(agent);
+      const handle = await startIdleSession(agent, 'session-idle-suspend');
+      const seen = collectEvents(handle);
+      await handle.send({ type: 'user', content: 'go' });
+      const handlers = host.getThreadHandlers();
+      if (!handlers) throw new Error('expected thread handlers');
+      handlers.turnStarted?.({ threadId: 'start-thread-id', turn: { id: 'turn-1' } } as never);
+
+      // 合盖睡 8 小时:壁钟前进,但定时器没有按比例推进
+      vi.setSystemTime(Date.now() + 8 * 3_600_000);
+      await vi.advanceTimersByTimeAsync(IDLE_MS);
+      expect(
+        seen.some(
+          (ev) =>
+            ev.type === 'error' &&
+            (ev.data as { reason?: string } | null)?.reason === 'upstream_response_idle_timeout',
+        ),
+      ).toBe(false);
+
+      // 吸收不等于豁免:醒来后继续静默满一个阈值,照常开火
+      await vi.advanceTimersByTimeAsync(IDLE_MS + 1);
+      expect(
+        seen.some(
+          (ev) =>
+            ev.type === 'error' &&
+            (ev.data as { reason?: string } | null)?.reason === 'upstream_response_idle_timeout',
+        ),
+      ).toBe(true);
+      await handle.close();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('turn 正常收口后不再计时', async () => {
+    vi.useFakeTimers();
+    try {
+      const agent = new CodexAgent(createDeps());
+      const host = installIdleHost(agent);
+      const handle = await startIdleSession(agent, 'session-idle-completed');
+      const seen = collectEvents(handle);
+      await handle.send({ type: 'user', content: 'go' });
+      const handlers = host.getThreadHandlers();
+      if (!handlers) throw new Error('expected thread handlers');
+      handlers.turnStarted?.({ threadId: 'start-thread-id', turn: { id: 'turn-1' } } as never);
+      handlers.turnCompleted?.({
+        threadId: 'start-thread-id',
+        turn: { id: 'turn-1', status: 'completed' },
+      } as never);
+
+      await vi.advanceTimersByTimeAsync(IDLE_MS * 5);
+
+      expect(
+        seen.some(
+          (ev) =>
+            ev.type === 'error' &&
+            (ev.data as { reason?: string } | null)?.reason === 'upstream_response_idle_timeout',
+        ),
+      ).toBe(false);
+      await handle.close();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+});
