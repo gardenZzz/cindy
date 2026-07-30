@@ -2357,8 +2357,7 @@
       "prefs": {
         "agentLabel": "Agent",
         "modelLabel": "Model",
-        "thinkingLabel": "Thinking",
-      "effortLabel": "Reasoning effort",
+        "effortLabel": "Reasoning effort",
         "permissionLabel": "Permission mode",
         "providerSlack": "Slack",
         "providerTelegram": "Telegram",
@@ -4211,6 +4210,7 @@
         "xai": "Subscription-direct Grok models are not supported in SSH remote sessions yet",
         "generic": "Subscription-direct models are not supported in SSH remote sessions yet"
       },
+      "thinkingLabel": "Thinking",
       "effortLabel": "Effort level",
       "edit": "Edit",
       "options": "Options",

@@ -2356,8 +2356,7 @@
       "prefs": {
         "agentLabel": "Agent",
         "modelLabel": "モデル",
-        "thinkingLabel": "Thinking",
-      "effortLabel": "推論強度",
+        "effortLabel": "推論強度",
         "permissionLabel": "権限モード",
         "providerSlack": "Slack",
         "providerTelegram": "Telegram",
@@ -4210,6 +4209,7 @@
         "xai": "サブスクリプション直結の Grok モデルは SSH リモートセッションに未対応です",
         "generic": "サブスクリプション直結モデルは SSH リモートセッションに未対応です"
       },
+      "thinkingLabel": "Thinking",
       "effortLabel": "推論強度",
       "edit": "編集",
       "options": "オプション",
