@@ -582,11 +582,11 @@
       "fallbackName": "사용자",
       "avatarAlt": "{{name}} 아바타",
       "local": {
-        "exitFailed": "로컬 모드를 종료하지 못했습니다. 다시 시도해 주세요",
-        "name": "로컬 모드",
+        "exitFailed": "로그인하지 않은 상태를 종료하지 못했습니다. 다시 시도해 주세요",
+        "name": "로그인하지 않음",
         "description": "데이터는 이 기기에만 저장되며 Cindy 계정 서비스를 사용하지 않습니다",
         "signIn": "Cindy 로그인",
-        "exit": "로컬 모드 종료"
+        "exit": "로그인하지 않은 상태 종료"
       },
       "copyUserId": {
         "action": "사용자 ID 복사",
@@ -756,7 +756,7 @@
       "serviceSource": {
         "label": "음성 서비스",
         "hint": "기본적으로 Cindy 음성 서비스를 사용합니다. 실시간 ASR 지원 서비스와 별도의 음성 인증 정보로 전환할 수도 있습니다.",
-        "localHint": "로컬 모드에서는 Cindy 계정 서비스를 사용하지 않습니다. 실시간 ASR 지원 서비스와 별도의 음성 인증 정보를 설정하세요.",
+        "localHint": "로그인하지 않은 상태에서는 Cindy 계정 서비스를 사용하지 않습니다. 실시간 ASR 지원 서비스와 별도의 음성 인증 정보를 설정하세요.",
         "ariaLabel": "음성 서비스 소스 선택",
         "options": {
           "cindy": "Cindy 공식 서비스",
@@ -3136,7 +3136,7 @@
     "ssoRequired": "이 조직은 SSO 로그인이 필요합니다",
     "ssoEntry": "기업 SSO로 로그인",
     "localModeEntry": "로그인 건너뛰기",
-    "localModeOpening": "로컬 모드를 여는 중…",
+    "localModeOpening": "로그인을 건너뛰는 중…",
     "localModeDescription": "Cindy 계정이 필요하지 않습니다. 데이터는 이 기기에 저장되며 클라우드 모델, 기기 간 연결 및 마켓 서비스는 사용할 수 없습니다.",
     "consentStatement": "<terms>서비스 이용약관</terms> 및 <privacy>개인정보 처리방침</privacy>을 읽고 동의합니다",
     "consentDialog": {
