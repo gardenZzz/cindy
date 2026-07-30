@@ -19,6 +19,10 @@ describe('localizeAgentStatus', () => {
     expect(localizeAgentStatus('Working', i18n.t)).toBe('正在工作…');
     expect(localizeAgentStatus('Running', i18n.t)).toBe('运行中…');
     expect(localizeAgentStatus('Done', i18n.t)).toBe('已完成');
+    // Cursor(ACP)专有的三个终态 / 起始态文案。
+    expect(localizeAgentStatus('Starting...', i18n.t)).toBe('正在启动…');
+    expect(localizeAgentStatus('Cancelled', i18n.t)).toBe('已取消');
+    expect(localizeAgentStatus('Error', i18n.t)).toBe('执行失败');
   });
 
   it('keeps the command or tool name while localizing the running suffix', () => {

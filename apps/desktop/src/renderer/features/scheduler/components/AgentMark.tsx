@@ -3,7 +3,7 @@
  * ---------------------------------------------------------------------------
  * - 'claude-code' → ClaudeMark（Claude Code CLI 像素脸）
  * - 'codex'       → CodexMark（Codex CLI 花形 + `>_`）
- * - 'cursor'      → CursorMark（Cursor 光标箭头）
+ * - 'cursor'      → CursorMark（Cursor 立方体）
  *
  * 颜色由父级通过 className 传 text-xxx 控制（mark 都消费 currentColor）。
  * 用一个统一入口避免每个调用点都写 if/else，未来加新 agent 也只动这一处。

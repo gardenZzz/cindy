@@ -4208,6 +4208,7 @@
         "agent": {
           "claudeCode": "Claude Code",
           "codex": "Codex",
+          "cursor": "Cursor",
           "pending": "下条：{{agent}}"
         }
       },
@@ -5262,6 +5263,9 @@
       "waiting": "请稍候…",
       "working": "正在工作…",
       "running": "运行中…",
+      "starting": "正在启动…",
+      "cancelled": "已取消",
+      "error": "执行失败",
       "turnStart": "正在处理，{{name}}",
       "issueTip": "{{name}}，试试用 /issue 给我们提反馈或建议",
       "runningTool": "{{tool}} 运行中…"

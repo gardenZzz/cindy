@@ -268,8 +268,15 @@ function ModelPromotionBadge({ children }: { children: ReactNode }) {
   );
 }
 
+/** trigger 上的 Agent 身份名。少一个 vendor 就会把它显示成别家引擎,故按 key 全列。 */
+const AGENT_IDENTITY_LABEL_KEY: Record<'cc' | 'codex' | 'cursor', string> = {
+  cc: 'newChat.modelSelector.trigger.agent.claudeCode',
+  codex: 'newChat.modelSelector.trigger.agent.codex',
+  cursor: 'newChat.modelSelector.trigger.agent.cursor',
+};
+
 export interface ModelSelectorAgentIdentity {
-  vendorKey: 'cc' | 'codex';
+  vendorKey: 'cc' | 'codex' | 'cursor';
   /**
    * current = 已由会话/runtime 元数据确认的当前 Agent；
    * pending = 已登记、将在下一条消息应用的切换目标。
@@ -282,16 +289,14 @@ export function resolveModelSelectorAgentIdentity(
   pendingTarget: AgentKind | null | undefined,
 ): ModelSelectorAgentIdentity | undefined {
   if (pendingTarget) {
-    return {
-      vendorKey: pendingTarget === 'codex' ? 'codex' : 'cc',
-      state: 'pending',
-    };
+    return { vendorKey: agentKindToVendorKey(pendingTarget), state: 'pending' };
   }
   if (!runtimeAgentKind) return undefined;
-  return {
-    vendorKey: runtimeAgentKind === 'codex' ? 'codex' : 'cc',
-    state: 'current',
-  };
+  return { vendorKey: agentKindToVendorKey(runtimeAgentKind), state: 'current' };
+}
+
+function agentKindToVendorKey(kind: AgentKind): 'cc' | 'codex' | 'cursor' {
+  return kind === 'codex' ? 'codex' : kind === 'cursor' ? 'cursor' : 'cc';
 }
 
 interface ModelSelectorProps {
@@ -1766,9 +1771,7 @@ export function ModelSelector({
       t('newChat.modelSelector.trigger.placeholder'));
   const agentName =
     agentIdentity && !fallbackOption?.active
-      ? agentIdentity.vendorKey === 'cc'
-        ? t('newChat.modelSelector.trigger.agent.claudeCode')
-        : t('newChat.modelSelector.trigger.agent.codex')
+      ? t(AGENT_IDENTITY_LABEL_KEY[agentIdentity.vendorKey])
       : null;
   const agentIdentityLabel =
     agentName && agentIdentity?.state === 'pending'
