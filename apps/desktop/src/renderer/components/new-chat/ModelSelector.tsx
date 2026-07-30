@@ -929,10 +929,16 @@ function ModelSelectorContentView({
       browsing && agentKind
         ? visibleModels.filter((m) => sourcesForModel(providers, m.id, agentKind).length > 0)
         : visibleModels;
-    // Cursor 无 Cindy provider 目录；capabilities 列表即最终可见集，不做 provider 可见性过滤。
+    // Cursor 无 Cindy provider 目录；capabilities 列表即最终可见集。
+    // 可见性 override 仍要过滤:设置页关掉的模型不进选择器(spec #21 / #26)。
+    // 当前会话正用着的模型即使被关也保留(与其它 agent 准入口径一致:按 id 查已选
+    // 元数据不参与过滤)。device-link 远程 cursor 段维持 fail-open(本票范围外)。
     if (currentAgentKind === 'cursor') {
-      if (!q) return base;
-      return base.filter(
+      const cursorVisible = deviceId
+        ? base
+        : base.filter((m) => m.id === modelId || isModelEnabled('cursor', 'cursor', m));
+      if (!q) return cursorVisible;
+      return cursorVisible.filter(
         (m) => m.displayName.toLowerCase().includes(q) || m.id.toLowerCase().includes(q),
       );
     }
@@ -976,6 +982,7 @@ function ModelSelectorContentView({
     currentAgentKind,
     providers,
     deviceId,
+    modelId,
     visibilityVersion,
     remoteProviders.modelVisibilityOverrides,
   ]);

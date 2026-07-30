@@ -56,6 +56,7 @@ import { CustomProviderDialog } from './CustomProviderDialog';
 import { AddProviderWizard, type WizardEntry } from './AddProviderWizard';
 import { OAuthDeviceCodeCard } from './OAuthDeviceCodeCard';
 import { buildUnionRows, UnifiedModelList } from './UnifiedModelList';
+import { CursorModelList } from './CursorModelList';
 import { AnthropicMark } from '@/components/icons/AnthropicMark';
 import { CursorMark } from '@/components/icons/CursorMark';
 import { OpenAIMark } from '@/components/icons/OpenAIMark';
@@ -1375,6 +1376,27 @@ function CursorDetail() {
               {t('settings.providers.cursor.loginUrlHint')}
             </span>
           </>
+        )}
+
+        {/* 模型清单 + 显示开关（spec #21 / #26）。已安装才列；探测编排由 #28 接线。 */}
+        {probe.kind === 'installed' && !loginUrl && (
+          <CursorModelList
+            onRefresh={() => {
+              // T1 暂为占位:实际探测编排在 #28 落进 cursor-model-discovery 模块后接通。
+              // 现在点按钮是 no-op,按钮可见性 / 禁用态已由 refresh 状态正确反映。
+            }}
+            refresh={{
+              running: false,
+              done: 0,
+              total: 0,
+              unavailableReason:
+                probe.kind !== 'installed'
+                  ? 'not-installed'
+                  : auth.kind !== 'authenticated'
+                    ? 'not-authenticated'
+                    : null,
+            }}
+          />
         )}
       </div>
     );

@@ -1490,7 +1490,18 @@
         "installSuccess": "Cursor 已安装",
         "installFailed": "无法安装 Cursor",
         "installNotDetected": "安装已结束，但仍未检测到 cursor-agent。请刷新，或在终端自行安装。",
-        "unsupportedPlatform": "官方 cursor-agent 安装程序仅支持 macOS 与 Linux。"
+        "unsupportedPlatform": "官方 cursor-agent 安装程序仅支持 macOS 与 Linux。",
+        "models": {
+          "emptyState": "还没有 Cursor 模型目录。点击「刷新模型」拉取一次（需已登录 Cursor）。",
+          "refreshCta": "刷新模型",
+          "refreshing": "已探 {{done}} / {{total}}",
+          "refreshUnavailableInstalled": "需先安装 cursor-agent",
+          "refreshUnavailableAuth": "需先登录 Cursor",
+          "autoHint": "兜底",
+          "autoAlwaysOn": "常显",
+          "effortHint_one": "{{count}} 档推理强度",
+          "effortHint_other": "{{count}} 档推理强度"
+        }
       },
       "wizard": {
         "title": "添加供应商",

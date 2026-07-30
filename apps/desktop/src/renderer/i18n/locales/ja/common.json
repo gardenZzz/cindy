@@ -1490,7 +1490,18 @@
         "installSuccess": "Cursor をインストールしました",
         "installFailed": "Cursor をインストールできませんでした",
         "installNotDetected": "インストールは完了しましたが、cursor-agent が見つかりません。更新するか、ターミナルからインストールしてください。",
-        "unsupportedPlatform": "公式の cursor-agent インストーラーは macOS と Linux のみをサポートします。"
+        "unsupportedPlatform": "公式の cursor-agent インストーラーは macOS と Linux のみをサポートします。",
+        "models": {
+          "emptyState": "Cursor のモデルカタログがまだありません。「モデルを更新」で取得してください（Cursor ログインが必要）。",
+          "refreshCta": "モデルを更新",
+          "refreshing": "検出 {{done}} / {{total}}",
+          "refreshUnavailableInstalled": "先に cursor-agent をインストール",
+          "refreshUnavailableAuth": "先に Cursor にログイン",
+          "autoHint": "フォールバック",
+          "autoAlwaysOn": "常時表示",
+          "effortHint_one": "推理強度 {{count}} 段階",
+          "effortHint_other": "推理強度 {{count}} 段階"
+        }
       },
       "wizard": {
         "title": "プロバイダーを追加",
