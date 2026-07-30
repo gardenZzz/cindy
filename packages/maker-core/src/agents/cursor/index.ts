@@ -1336,6 +1336,18 @@ export class CursorAgent extends BaseAgent {
             message: err instanceof Error ? err.message : String(err),
           });
         }
+      } else if (opts.fastMode !== undefined) {
+        // 初始 Fast 被请求但目标模型当前未暴露 fast option -> 跳过下发。
+        // 隔离 config dir 下 session/new 的当前模型常是 `default`(Auto)，其
+        // configOptions 不含 fast/effort/thinking，需先 set_config_option('model',…)
+        // 才出现；走 followAcpCurrent 时此分支恒成立，Fast 永远不下发。打 warn
+        // 留痕，不再静默（与 thinking 的「有 option 才发」语义不同：thinking 非可选
+        // 恒开，fast 是用户可拨开关，被跳过意味着 UI 与 ACP 不一致）。
+        log.warn('cursor initial setFastMode skipped: no fast option exposed', {
+          model: mutableModel,
+          fastMode: opts.fastMode,
+          followAcpCurrent,
+        });
       }
       if (latestConfigOptions.some((o) => o.id === 'thinking')) {
         try {
@@ -1670,6 +1682,10 @@ export class CursorAgent extends BaseAgent {
       async setModel(newModel: string) {
         if (closed) throw new Error('Cursor session is closed');
         const productId = toCursorProductModelId(newModel);
+        // 切模型前的会话 Fast 快照：ACP 的 fast 是 per-model 持久，set model 回包
+        // 会被目标模型的记录值覆盖（见下方 applyConfigEnrichment 同步 mutableFastMode），
+        // 补发要用切模型**前**用户拨的值，不是被回包覆盖后的值。
+        const desiredFastBeforeSwitch = mutableFastMode ? 'true' : 'false';
         if (productId === mutableModel) {
           const options = await setConfigOption('model', toCursorAcpModelId(productId));
           await applyConfigEnrichment(productId, options);
@@ -1688,6 +1704,23 @@ export class CursorAgent extends BaseAgent {
               await applyConfigEnrichment(mutableModel, options);
             } catch (err) {
               log.warn('cursor setModel force thinking failed', {
+                message: err instanceof Error ? err.message : String(err),
+              });
+            }
+          }
+        }
+        // 切模后若新模型暴露 fast option，按切模型前的会话 Fast 值补发一次（与
+        // thinking 补发对称）。Cursor 的 ACP fast 是 per-model 持久的：切模型会被
+        // 目标模型重置成它自己的记录值，不补发则 ACP 侧实际是目标模型的旧记录，
+        // 而 UI/DB 仍显示用户拨的会话态。目标模型不暴露 fast 时不发也不抛。
+        if (latestConfigOptions.some((o) => o.id === 'fast')) {
+          const fastVal = readConfigOptionValue(latestConfigOptions, 'fast');
+          if (fastVal !== desiredFastBeforeSwitch) {
+            try {
+              const options = await setConfigOption('fast', desiredFastBeforeSwitch);
+              await applyConfigEnrichment(mutableModel, options);
+            } catch (err) {
+              log.warn('cursor setModel reissue fast failed', {
                 message: err instanceof Error ? err.message : String(err),
               });
             }

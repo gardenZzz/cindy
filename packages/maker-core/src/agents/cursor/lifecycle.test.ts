@@ -260,13 +260,16 @@ async function bootWithTransport(
     if (msg.method === Method.SessionSetConfigOption) {
       const params = msg.params as { configId?: string; value?: string } | undefined;
       let configOptions = transport.sessionConfigOptions ?? [];
+      // 真实 ACP 回包会把 set 过的 option 的 currentValue 更新成刚设的值。
+      // thinking / fast 都回写，使 applyConfigEnrichment 读到与会话态一致的真值。
       if (
-        params?.configId === 'thinking' &&
+        (params?.configId === 'thinking' || params?.configId === 'fast') &&
         Array.isArray(transport.sessionConfigOptions) &&
         transport.sessionConfigOptions.length > 0
       ) {
+        const cid = params.configId as string;
         configOptions = transport.sessionConfigOptions.map((raw) => {
-          if (!isRecord(raw) || raw.id !== 'thinking') return raw;
+          if (!isRecord(raw) || raw.id !== cid) return raw;
           return { ...raw, currentValue: params.value ?? 'true' };
         });
         transport.sessionConfigOptions = configOptions;
@@ -727,6 +730,129 @@ describe('CursorAgent lifecycle (FakeTransport)', () => {
       });
       expect(thinkingSets).toEqual([]);
     });
+  });
+
+  // ── fast 下发（#22）──────────────────────────────────────────────────
+  // 模型暴露 fast option 时，初始 fastMode 与切模型后的补发都要落到 ACP。
+
+  /** FakeTransport 的 SessionSetConfigOption auto-reply 不回写 fast 的
+   *  currentValue（只回写 thinking，见 transport 260-282 行），所以回包里
+   *  fast 恒为预设的 currentValue，模拟「ACP 侧值 ≠ 会话态」以触发补发。 */
+  function fastOption(currentValue = 'false') {
+    return {
+      id: 'fast',
+      name: 'Fast',
+      currentValue,
+      options: [
+        { value: 'false', name: 'Off' },
+        { value: 'true', name: 'On' },
+      ],
+    };
+  }
+
+  /** 取出所有 set_config_option('fast', ...) 的下发值，按发出顺序。 */
+  function fastSets(transport: FakeTransport): string[] {
+    return transport.written
+      .filter((msg) => {
+        if (!isRecord(msg) || msg.method !== Method.SessionSetConfigOption) return false;
+        const params = msg.params as { configId?: string; value?: string } | undefined;
+        return params?.configId === 'fast';
+      })
+      .map((msg) => (msg as { params: { value: string } }).params.value);
+  }
+
+  it('issues set_config_option(fast,true) when createSession fastMode=true and model exposes fast', async () => {
+    const transport = new FakeTransport();
+    transport.sessionConfigOptions = [fastOption('false')];
+    const models = {
+      currentModelId: 'claude-opus-5',
+      availableModels: [
+        { modelId: 'default', name: 'Auto' },
+        { modelId: 'claude-opus-5', name: 'Opus 5' },
+      ],
+    };
+    const { agent, handle, userDataPath } = await bootWithTransport(
+      transport,
+      { fastMode: true, model: 'claude-opus-5' },
+      models,
+    );
+    try {
+      // 初始下发：fastMode=true -> 'true'。Auto/default 不暴露 fast 会被跳过，
+      // 但显式 model=claude-opus-5 走非 followAcpCurrent 路径，set model 后回的
+      // configOptions 含 fast，初始下发应命中。
+      const sets = fastSets(transport);
+      expect(sets.length).toBeGreaterThan(0);
+      expect(sets[0]).toBe('true');
+    } finally {
+      await handle.close().catch(() => undefined);
+      await agent.dispose().catch(() => undefined);
+      rmSync(userDataPath, { recursive: true, force: true });
+    }
+  });
+
+  it('reissues fast after setModel to a model that exposes fast option', async () => {
+    const transport = new FakeTransport();
+    transport.sessionConfigOptions = [fastOption('false')];
+    const models = {
+      currentModelId: 'claude-opus-5',
+      availableModels: [
+        { modelId: 'default', name: 'Auto' },
+        { modelId: 'claude-opus-5', name: 'Opus 5' },
+        { modelId: 'claude-opus-4-8', name: 'Opus 4.8' },
+      ],
+    };
+    const { agent, handle, userDataPath } = await bootWithTransport(
+      transport,
+      { fastMode: true, model: 'claude-opus-5' },
+      models,
+    );
+    try {
+      const beforeSetModel = fastSets(transport).length;
+      // 会话当前 fast=true（初始下发过，FakeTransport 已把 fast currentValue 回写成 'true'）。
+      // 模拟 per-model 重置：切到 claude-opus-4-8 时，ACP 回包里该模型的 fast 记录值=false。
+      // setModel 内部 set_config_option('model',...) 后 FakeTransport 回 sessionConfigOptions，
+      // 故把 fast currentValue 重置回 'false' 模拟目标模型的记录值。
+      const setFastCurrent = (value: string) => {
+        transport.sessionConfigOptions = (transport.sessionConfigOptions ?? []).map((raw) =>
+          isRecord(raw) && raw.id === 'fast' ? { ...raw, currentValue: value } : raw,
+        );
+      };
+      setFastCurrent('false');
+      await handle.setModel!('claude-opus-4-8');
+      const after = fastSets(transport);
+      // setModel 之后应至少补发一次 fast；补发值与切模型前会话态一致 = 'true'。
+      const reissued = after.slice(beforeSetModel);
+      expect(reissued.length).toBeGreaterThan(0);
+      expect(reissued.every((v) => v === 'true')).toBe(true);
+    } finally {
+      await handle.close().catch(() => undefined);
+      await agent.dispose().catch(() => undefined);
+      rmSync(userDataPath, { recursive: true, force: true });
+    }
+  });
+
+  it('does not issue or throw fast when target model has no fast option on setModel', async () => {
+    // session/new 不带 fast option（模拟隔离 config dir 下的 default/Auto）。
+    const transport = new FakeTransport();
+    const models = {
+      currentModelId: 'default',
+      availableModels: [{ modelId: 'default', name: 'Auto' }],
+    };
+    const { agent, handle, userDataPath } = await bootWithTransport(
+      transport,
+      { fastMode: true },
+      models,
+    );
+    try {
+      const before = fastSets(transport).length;
+      // setModel 到自己（default）仍无 fast option -> 不补发也不抛。
+      await expect(handle.setModel!('default')).resolves.toBeUndefined();
+      expect(fastSets(transport).length).toBe(before);
+    } finally {
+      await handle.close().catch(() => undefined);
+      await agent.dispose().catch(() => undefined);
+      rmSync(userDataPath, { recursive: true, force: true });
+    }
   });
 });
 
