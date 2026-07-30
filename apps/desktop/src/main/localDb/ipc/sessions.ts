@@ -163,7 +163,6 @@ const REMOTE_PERSIST_FIELDS = new Set([
   'effort',
   'permissionMode',
   'fastMode',
-  'thinkingMode',
   'planModeEnabled',
   'extraDirs',
 ]);
@@ -1066,8 +1065,7 @@ export function registerSessionIpc(): void {
       'effort',
       'permissionMode',
       'fastMode',
-      'thinkingMode',
-      'planModeEnabled',
+          'planModeEnabled',
       'providerId',
       'orcaRole',
       'extraDirs',

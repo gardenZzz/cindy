@@ -54,7 +54,6 @@ export async function create(body?: {
   effort?: string;
   permissionMode?: string;
   fastMode?: boolean;
-  thinkingMode?: boolean;
   /** 计划模式一级开关(与 permissionMode 正交); 草稿开着计划模式时随建会话落库。 */
   planModeEnabled?: boolean;
   agentKind?: 'cc' | 'codex' | 'cursor';
@@ -110,8 +109,7 @@ export async function update(
     effort?: string;
     permissionMode?: string;
     fastMode?: boolean;
-    thinkingMode?: boolean;
-    /** 计划模式一级开关(与 permissionMode 正交), 与 maker.setPlanMode 双 IPC 协调。 */
+      /** 计划模式一级开关(与 permissionMode 正交), 与 maker.setPlanMode 双 IPC 协调。 */
     planModeEnabled?: boolean;
     sdkSessionId?: string | null;
     totalTokenUsage?: number;

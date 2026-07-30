@@ -330,7 +330,6 @@ export class Maker {
         effort: opts.effort,
         permissionMode: opts.permissionMode,
         fastMode: opts.fastMode,
-        thinkingMode: opts.thinkingMode,
         parentSessionId: opts.parentSessionId,
         // remoteHostId: 远端 session 把目标机器持久化, 之后 resume / list 都能识别。
         // 本地 session 留 undefined (sqlite 落空), 跟历史行为兼容。

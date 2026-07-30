@@ -1143,13 +1143,6 @@ describe('远程 set-* 持久化回流', () => {
     await runInvoke('ctrl-a', { channel: 'maker:set-fast-mode', args: ['sess-1', true] });
     expect(persist).toHaveBeenCalledWith('sess-1', { fastMode: true });
   });
-  it('set-thinking-mode → {thinkingMode}', async () => {
-    const persist = vi.fn();
-    setRemoteSettingsPersist(persist);
-    registry.register('maker:set-thinking-mode', () => undefined);
-    await runInvoke('ctrl-a', { channel: 'maker:set-thinking-mode', args: ['sess-1', false] });
-    expect(persist).toHaveBeenCalledWith('sess-1', { thinkingMode: false });
-  });
 
   it('set-plan-mode → {planModeEnabled}', async () => {
     const persist = vi.fn();

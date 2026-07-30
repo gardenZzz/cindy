@@ -271,9 +271,6 @@ interface UseCCAgentChatReturn {
   setFastMode: (enabled: boolean, sourceRemoteDeviceId?: string) => Promise<void>;
   /** Reset Fast Mode to OFF (server-first, used on model switch away from Opus 4.6). */
   resetFastMode: () => Promise<void>;
-  /** Cursor Thinking 开关状态。 */
-  thinkingMode: boolean;
-  setThinkingMode: (enabled: boolean, sourceRemoteDeviceId?: string) => Promise<void>;
   /** 计划模式一级开关状态(与 permissionMode 正交); 计划批准后经 plan_mode_changed 回流自动变 false。 */
   planModeEnabled: boolean;
   /** 切换计划模式(server-first: 落库 → store → maker runtime)。 */
@@ -714,13 +711,6 @@ export function useCCAgentChat(
     await makerChatStore.resetFastMode(sessionId);
   }, [sessionId]);
 
-  const setThinkingMode = useCallback(
-    async (enabled: boolean, sourceRemoteDeviceId?: string) => {
-      if (!sessionId) return;
-      await makerChatStore.setThinkingMode(sessionId, enabled, sourceRemoteDeviceId);
-    },
-    [sessionId],
-  );
 
   const setPlanMode = useCallback(
     async (enabled: boolean) => {
@@ -874,8 +864,6 @@ export function useCCAgentChat(
     fastMode: lightState.fastMode,
     setFastMode,
     resetFastMode,
-    thinkingMode: lightState.thinkingMode,
-    setThinkingMode,
     planModeEnabled: lightState.planModeEnabled,
     setPlanMode,
     chatDisplaySnapshot,

@@ -4109,7 +4109,6 @@ interface ElectronAPI {
     setEffort: (sessionId: string, effort: string) => Promise<void>;
     setPermissionMode: (sessionId: string, mode: string) => Promise<void>;
     setFastMode: (sessionId: string, enabled: boolean) => Promise<void>;
-    setThinkingMode: (sessionId: string, enabled: boolean) => Promise<void>;
     /** 计划模式一级开关(与 permissionMode 正交); DB 持久化由调用方另调 sessionService.update({ planModeEnabled }) */
     setPlanMode: (sessionId: string, enabled: boolean) => Promise<void>;
     /**

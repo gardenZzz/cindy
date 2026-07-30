@@ -37,7 +37,6 @@ export interface RoutableMaker {
   setEffort: FullMaker['setEffort'];
   setPermissionMode: FullMaker['setPermissionMode'];
   setFastMode: FullMaker['setFastMode'];
-  setThinkingMode: FullMaker['setThinkingMode'];
   setPlanMode: FullMaker['setPlanMode'];
   resolveInteraction: FullMaker['resolveInteraction'];
   getPendingInteractions: FullMaker['getPendingInteractions'];
@@ -91,7 +90,6 @@ function remoteMakerApi(deviceId: string): RoutableMaker {
     setEffort: t('maker:set-effort') as FullMaker['setEffort'],
     setPermissionMode: t('maker:set-permission-mode') as FullMaker['setPermissionMode'],
     setFastMode: t('maker:set-fast-mode') as FullMaker['setFastMode'],
-    setThinkingMode: t('maker:set-thinking-mode') as FullMaker['setThinkingMode'],
     setPlanMode: t('maker:set-plan-mode') as FullMaker['setPlanMode'],
     resolveInteraction: t('maker:resolve-interaction') as FullMaker['resolveInteraction'],
     getPendingInteractions: t(
