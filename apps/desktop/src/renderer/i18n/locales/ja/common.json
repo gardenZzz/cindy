@@ -7537,7 +7537,7 @@
     }
   },
   "billing": {
-    "sidebar": "クレジットとプラン",
+    "sidebar": "残高とプラン",
     "settings": {
       "title": "使用量と請求",
       "subscriptionCard": {
@@ -7552,13 +7552,13 @@
         "portalAction": "Stripe で管理",
         "portalFailed": "Stripeのサブスクリプション管理を開けませんでした。しばらくしてからもう一度お試しください。",
         "priceInterval": "{{price}} / {{interval}}",
-        "includedCredits": "毎{{interval}} {{amount}} クレジットを付与",
+        "includedCredits": "毎{{interval}} {{amount}} 分を付与",
         "renewsAt": "次回更新日: {{date}}",
         "endsAt": "{{date}} にプラン終了",
         "cancelAction": "サブスクリプションを解約",
         "cancelConfirmTitle": "現在のサブスクリプションを解約しますか？",
-        "cancelConfirmDescription": "この操作による返金やクレジットの即時変更はありません。現在のプランは {{date}} まで利用でき、その後は更新されません。キャンセルはアプリ内では元に戻せません。また、この請求期間が終了するまで新しいプランは購入できません。",
-        "cancelConfirmDescriptionWithoutDate": "この操作による返金やクレジットの即時変更はありません。現在のプランは請求期間の終了まで利用でき、その後は更新されません。キャンセルはアプリ内では元に戻せません。また、この請求期間が終了するまで新しいプランは購入できません。",
+        "cancelConfirmDescription": "この操作による返金や残高の即時変更はありません。現在のプランは {{date}} まで利用でき、その後は更新されません。キャンセルはアプリ内では元に戻せません。また、この請求期間が終了するまで新しいプランは購入できません。",
+        "cancelConfirmDescriptionWithoutDate": "この操作による返金や残高の即時変更はありません。現在のプランは請求期間の終了まで利用でき、その後は更新されません。キャンセルはアプリ内では元に戻せません。また、この請求期間が終了するまで新しいプランは購入できません。",
         "cancelConfirmAction": "解約を確定",
         "cancelSuccess": "自動更新を停止しました。現在のプランは {{date}} まで利用できます。",
         "cancelSuccessWithoutDate": "自動更新を停止しました。現在のプランはこの請求期間の終了後に終了します。",
@@ -7566,35 +7566,33 @@
         "cancelFailed": "サブスクリプションを解約できませんでした。しばらくしてからもう一度お試しください。"
       },
       "topupCard": {
-        "action": "クレジットを購入"
+        "action": "残高チャージ"
       }
     },
     "balance": {
       "title": "利用可能残高",
-      "creditParityCny": "1クレジット = 1元。クレジットは Cindy AI の利用量の決済に使われ、支払いは第三者の決済事業者が処理します。",
-      "creditParityUsd": "1クレジット = 1米ドル。クレジットは Cindy AI の利用量の決済に使われ、支払いは第三者の決済事業者が処理します。",
-      "plan": "プランクレジット",
-      "purchased": "購入済みクレジット",
-      "promotional": "特典クレジット",
-      "notProvisioned": "このアカウントではクレジットがまだ有効になっていません。",
+      "plan": "プラン残高",
+      "purchased": "チャージ残高",
+      "promotional": "特典残高",
+      "notProvisioned": "このアカウントでは残高がまだ有効になっていません。",
       "notSupported": "このアカウントでは残高照会を利用できません。",
       "unavailable": "残高を取得できません。更新してもう一度お試しください。"
     },
     "usage": {
-      "title": "クレジット使用量",
-      "observedAt": "クレジット更新: {{date}}",
+      "title": "残高使用量",
+      "observedAt": "残高更新: {{date}}",
       "poolDetail": "使用済み {{used}} · 合計 {{total}}",
       "remaining": "残り",
       "progressLabel": "{{label}}の使用量",
-      "noPlanCredits": "有効なサブスクリプションがないため、サブスクリプションクレジットはありません。",
-      "historyUnavailable": "使用履歴が完全ではないため、残りのクレジットのみ表示しています。",
+      "noPlanCredits": "有効なサブスクリプションがないため、プラン残高はありません。",
+      "historyUnavailable": "使用履歴が完全ではないため、残高のみ表示しています。",
       "detailsUnavailable": "使用量の詳細を取得できないため、現在の残高のみ表示しています。",
       "promotionalDetails": {
-        "title": "特典クレジット明細",
+        "title": "特典残高明細",
         "count": "{{count}}件",
-        "empty": "特典クレジットの付与履歴はありません。",
+        "empty": "特典の付与履歴はありません。",
         "incomplete": "付与履歴が多いため、最新の{{count}}件のみ表示しています。",
-        "unnamed": "特典クレジット",
+        "unnamed": "特典残高",
         "original": "付与額",
         "used": "使用済み",
         "remaining": "残り",
@@ -7612,7 +7610,7 @@
         "title": "サブスクリプションプランを選択"
       },
       "topup": {
-        "title": "クレジットを購入"
+        "title": "残高チャージ"
       }
     },
     "steps": {
@@ -7649,7 +7647,7 @@
       "MONTH": "月",
       "YEAR": "年"
     },
-    "credits": "{{amount}} クレジット",
+    "credits": "{{amount}} 分を付与",
     "confirm": {
       "channel": "{{provider}}で支払う"
     },
@@ -7682,7 +7680,7 @@
       "failedTitle": "完了できませんでした",
       "expiredTitle": "支払い期限切れ",
       "canceledTitle": "支払いキャンセル済み",
-      "topupSubtitle": "クレジットチャージ",
+      "topupSubtitle": "残高チャージ",
       "subscriptionSubtitle": "サブスクリプション",
       "creatingBody": "支払いサービスで注文を確認しています…",
       "qrAlt": "支払いQRコード",
