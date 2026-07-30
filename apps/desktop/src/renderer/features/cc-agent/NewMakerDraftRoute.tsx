@@ -84,6 +84,7 @@ import {
 import {
   getProviderModelEffort,
   getProviderModelFast,
+  modelMemorySourceId,
   setProviderModelFast,
   useProviderModelMemoryVersion,
 } from '@/state/providerModelMemory';
@@ -952,17 +953,23 @@ export function NewMakerDraftRoute() {
   // 由 CCAgentSessionView 的 live DB/runtime props 保护,不会走这里。
   const modelPresetVersion = useProviderModelMemoryVersion();
   const localDraftEffort = useMemo<Effort>(() => {
-    if (isDeviceLinkDraft || !effectiveSourceId) return chatPrefs.effort;
-    const provider = providers.find((item) => item.id === effectiveSourceId);
+    if (isDeviceLinkDraft) return chatPrefs.effort;
+    // 记忆槽来源:Cursor 无 provider,用合成槽读全局预设(与选择器非选中行对称)。
+    const memorySourceId = modelMemorySourceId(capabilityAgentKind, effectiveSourceId);
+    if (!memorySourceId) return chatPrefs.effort;
     // 按**校准后**的模型推导:effort 必须和最终提交的模型属于同一个能力集合。
+    // 无 provider 的 agent(Cursor)从 capabilities 目录取档位。
+    const provider = effectiveSourceId
+      ? providers.find((item) => item.id === effectiveSourceId)
+      : undefined;
     const model = provider
       ? getModel(provider, calibratedDraftModel, capabilityAgentKind)
-      : undefined;
+      : capabilities?.availableModels.find((m) => m.id === calibratedDraftModel);
     return resolveNewMakerDraftEffort({
       currentEffort: chatPrefs.effort,
       presetEffort: getProviderModelEffort(
         capabilityAgentKind,
-        effectiveSourceId,
+        memorySourceId,
         calibratedDraftModel,
       ),
       efforts: model?.efforts ?? [],
@@ -972,6 +979,7 @@ export function NewMakerDraftRoute() {
     isDeviceLinkDraft,
     effectiveSourceId,
     providers,
+    capabilities,
     capabilityAgentKind,
     calibratedDraftModel,
     chatPrefs.effort,
@@ -983,8 +991,9 @@ export function NewMakerDraftRoute() {
   // 不再是权威读源(retire 计划单列)。device-link 草稿不调本函数(以被控端镜像为准)。
   const resolveDraftFast = useCallback(
     (modelId: string): boolean => {
-      if (effectiveSourceId) {
-        const v = getProviderModelFast(capabilityAgentKind, effectiveSourceId, modelId);
+      const memorySourceId = modelMemorySourceId(capabilityAgentKind, effectiveSourceId);
+      if (memorySourceId) {
+        const v = getProviderModelFast(capabilityAgentKind, memorySourceId, modelId);
         if (v !== undefined) return v;
       }
       return getFastModeForModel(modelId);
@@ -1712,8 +1721,9 @@ export function NewMakerDraftRoute() {
       // 写入键必须与 effectiveFastMode 的读取键同源:两者都用**校准后**的模型。若这里仍写
       // chatPrefs.model,种子默认被校准后用户切 fast 会写到一个当前根本没在用的模型上 ——
       // 开关看着没生效,旧模型却被静默改了偏好(PR #548 review)。
-      if (effectiveSourceId) {
-        setProviderModelFast(capabilityAgentKind, effectiveSourceId, calibratedDraftModel, enabled);
+      const memorySourceId = modelMemorySourceId(capabilityAgentKind, effectiveSourceId);
+      if (memorySourceId) {
+        setProviderModelFast(capabilityAgentKind, memorySourceId, calibratedDraftModel, enabled);
       }
       // per-model 旧库:保留为兜底(retire 计划单列),写入维持向后兼容。
       setFastModeForModel(calibratedDraftModel, enabled);

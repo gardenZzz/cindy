@@ -188,6 +188,7 @@ import { effectiveSourceIdForModel, sourcesForModel } from '@cindy/model-provide
 import { deriveModelsFromProviders, filterChatBridgedCodexProviders, resolveFastSupported } from '@/lib/providerModels';
 import {
   getProviderModelEffort,
+  modelMemorySourceId,
   setProviderModelChoice,
   setProviderModelEffort,
   getProviderModelFast,
@@ -1310,6 +1311,14 @@ export function ChatInput({
     return effectiveSourceIdForModel(providers, activeProviderId, activeModel, kind);
   }, [providers, currentModelAgentKind, activeProviderId, activeModel]);
 
+  // **记忆槽来源 id** —— 与上面的路由来源分离。Cursor 无 Cindy provider(effectiveSourceId
+  // 恒 null),但 effort / Fast 仍要按 (agent, model) 记住,故走合成槽。仅用于
+  // providerModelMemory 读写;setModel / sendProviderId / 路由一律仍用 effectiveSourceId。
+  const memorySourceId = useMemo<string | null>(
+    () => modelMemorySourceId(currentModelAgentKind, effectiveSourceId),
+    [currentModelAgentKind, effectiveSourceId],
+  );
+
   // 发送(草稿态建会话)时携带的**显式来源**:仅当本地选择仍在已连接来源栏内才带上
   // (与 effectiveSourceId 的高亮口径一致,即"所见即所得");否则带 null。
   // 关键:这里**绝不**把"跟随默认"具体化成原生默认 id(如 'xd')——默认 cohort 必须保持
@@ -1349,15 +1358,15 @@ export function ChatInput({
   const rememberProviderChoice = useCallback(
     (modelId: string, eff: Effort) => {
       const kind = currentModelAgentKind;
-      if (kind && effectiveSourceId && modelId) {
+      if (kind && memorySourceId && modelId) {
         if (modelMemory?.setChoice) {
-          modelMemory.setChoice(kind, effectiveSourceId, modelId, eff);
+          modelMemory.setChoice(kind, memorySourceId, modelId, eff);
         } else if (!deviceLinkDeviceId) {
-          setProviderModelChoice(kind, effectiveSourceId, modelId, eff);
+          setProviderModelChoice(kind, memorySourceId, modelId, eff);
         }
       }
     },
-    [currentModelAgentKind, effectiveSourceId, modelMemory, deviceLinkDeviceId],
+    [currentModelAgentKind, memorySourceId, modelMemory, deviceLinkDeviceId],
   );
 
   const folderOpen = folderPickerOpen ?? internalFolderOpen;
@@ -3647,7 +3656,11 @@ export function ChatInput({
         deviceProviders: remoteProviders.providers,
         localProviders: localProviders.providers,
         capabilities:
-          currentModelAgentKind === 'codex' ? codexCaps.capabilities : ccCaps.capabilities,
+          currentModelAgentKind === 'codex'
+            ? codexCaps.capabilities
+            : currentModelAgentKind === 'cursor'
+              ? cursorCaps.capabilities
+              : ccCaps.capabilities,
         providerId,
         modelId: targetModelId,
         agentKind: currentModelAgentKind,
@@ -3659,16 +3672,19 @@ export function ChatInput({
       currentModelAgentKind,
       ccCaps.capabilities,
       codexCaps.capabilities,
+      cursorCaps.capabilities,
     ],
   );
 
   const resolveFast = useCallback(
     (targetModelId: string, providerId: string | null): boolean => {
       if (!modelFastSupported(targetModelId, providerId)) return false;
-      // providerId 只用于来源 capability 与旧 v2 兼容回退;新预设按 (agent, model) 跨来源共享。
-      // 无 providerId / device-link(modelMemory 为 undefined)→ false,且不掺控制端本机记忆。
-      if (!currentModelAgentKind || !providerId || !modelMemory) return false;
-      return modelMemory.getFast(currentModelAgentKind, providerId, targetModelId) ?? false;
+      // 能力判定用**路由来源**(上一行);记忆读**记忆槽**(Cursor 无 provider 也能恢复)。
+      // providerId 只用于旧 v2 兼容回退;新预设按 (agent, model) 跨来源共享。
+      // 无记忆槽 / device-link(modelMemory 为 undefined)→ false,且不掺控制端本机记忆。
+      const memoryId = modelMemorySourceId(currentModelAgentKind, providerId);
+      if (!currentModelAgentKind || !memoryId || !modelMemory) return false;
+      return modelMemory.getFast(currentModelAgentKind, memoryId, targetModelId) ?? false;
     },
     [currentModelAgentKind, modelMemory, modelFastSupported],
   );
@@ -3687,7 +3703,7 @@ export function ChatInput({
       const activeProviderId =
         opts.activeProviderId !== undefined ? opts.activeProviderId : selectedProviderId;
       const memoryProviderId =
-        opts.memoryProviderId !== undefined ? opts.memoryProviderId : effectiveSourceId;
+        opts.memoryProviderId !== undefined ? opts.memoryProviderId : memorySourceId;
       const remoteDeviceId =
         opts.remoteDeviceId ?? getSessionDeviceId(sessionId) ?? deviceLinkDeviceId;
       if (!remoteDeviceId) {
@@ -3725,7 +3741,7 @@ export function ChatInput({
           log.warn('session draft model preference sync failed:', err);
         });
     },
-    [sessionId, deviceLinkDeviceId, currentModelAgentKind, selectedProviderId, effectiveSourceId],
+    [sessionId, deviceLinkDeviceId, currentModelAgentKind, selectedProviderId, memorySourceId],
   );
 
   const persistFastModeChange = useCallback(
@@ -3755,7 +3771,7 @@ export function ChatInput({
       modelId = activeModel,
       effort = activeEffort,
       syncDraft = true,
-      memoryProviderId = effectiveSourceId,
+      memoryProviderId = memorySourceId,
     ) => {
       // 切换意图期:Fast 改动是"更新意图"而不是改当前会话实时状态(否则普通
       // SET_FAST 链路会让 main 清意图、renderer 乐观态失配)。经 ref 调用——
@@ -3792,7 +3808,7 @@ export function ChatInput({
       activeModel,
       activeEffort,
       currentModelAgentKind,
-      effectiveSourceId,
+      memorySourceId,
       modelMemory,
       persistFastModeChange,
       syncSessionDraftModelPrefs,
@@ -4043,8 +4059,8 @@ export function ChatInput({
       // (agent,model) 全局预设 > 旧 per-model 记忆 > 沿用当前 > 模型默认。
       const { efforts, defaultEffort } = resolveModelEfforts(newModelId);
       const providerEffort =
-        modelMemory && currentModelAgentKind && effectiveSourceId
-          ? modelMemory.getEffort(currentModelAgentKind, effectiveSourceId, newModelId)
+        modelMemory && currentModelAgentKind && memorySourceId
+          ? modelMemory.getEffort(currentModelAgentKind, memorySourceId, newModelId)
           : undefined;
       const newEffort = resolveEffort({
         efforts,
@@ -4214,6 +4230,7 @@ export function ChatInput({
       resolveFast,
       currentModelAgentKind,
       effectiveSourceId,
+      memorySourceId,
       modelMemory,
       modelFastSupported,
       syncSessionDraftModelPrefs,

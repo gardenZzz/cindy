@@ -73,6 +73,12 @@ export function resolveFastSupported(params: {
   // agent 级粗粒度 gate（agent 运行时是否实现 fast 管道）。
   if (!capabilities?.hasFastMode) return false;
 
+  // Cursor 无 Cindy provider（ADR 0001，本机与被控端都没有）⇒ per-model 能力只在
+  // capabilities 目录里；走 per-provider 解析必然查不到来源、恒 false。
+  if (agentKind === 'cursor') {
+    return !!capabilities.availableModels.find((m) => m.id === modelId)?.supportsFastMode;
+  }
+
   const effectiveProviders = deviceId ? deviceProviders : localProviders;
 
   // 旧被控端（或 device providers 加载首帧）→ 无 per-provider 数据 → 回退拍平 caps。
