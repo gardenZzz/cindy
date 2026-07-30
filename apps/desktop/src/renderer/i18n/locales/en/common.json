@@ -1501,7 +1501,9 @@
           "autoHint": "fallback",
           "autoAlwaysOn": "always shown",
           "effortHint_one": "{{count}} effort tier",
-          "effortHint_other": "{{count}} effort tiers"
+          "effortHint_other": "{{count}} effort tiers",
+          "cancelRefresh": "Cancel refresh",
+          "refreshFailed": "Could not refresh models. Try again later."
         }
       },
       "wizard": {

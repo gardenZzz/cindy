@@ -59,10 +59,12 @@ export interface CursorRefreshState {
 export interface CursorModelListProps {
   /** 「刷新模型」点击;不可用 / 进行中时不会触发。 */
   onRefresh: () => void;
+  /** 进行中取消;未进行中时 no-op。 */
+  onCancel: () => void;
   refresh: CursorRefreshState;
 }
 
-export function CursorModelList({ onRefresh, refresh }: CursorModelListProps) {
+export function CursorModelList({ onRefresh, onCancel, refresh }: CursorModelListProps) {
   const { t } = useTranslation();
   const { capabilities } = useAgentCapabilities(CURSOR_AGENT_KIND);
   // visibilityVersion 让开关变更后(设置页 / 聊天页)实时重算,即便本组件未重挂。
@@ -117,6 +119,12 @@ export function CursorModelList({ onRefresh, refresh }: CursorModelListProps) {
               ) : null
             }
           />
+          {refresh.running && (
+            <PillButton
+              label={t('settings.providers.cursor.models.cancelRefresh')}
+              onClick={onCancel}
+            />
+          )}
           {refreshHint && (
             <span className="text-12" style={{ color: 'var(--text-tertiary)' }}>
               {refreshHint}
@@ -142,6 +150,12 @@ export function CursorModelList({ onRefresh, refresh }: CursorModelListProps) {
             ) : null
           }
         />
+        {refresh.running && (
+          <PillButton
+            label={t('settings.providers.cursor.models.cancelRefresh')}
+            onClick={onCancel}
+          />
+        )}
         <span className="text-12" style={{ color: 'var(--text-tertiary)' }}>
           {t('settings.providers.models.modelCount', { count: toggleable.length })}
         </span>

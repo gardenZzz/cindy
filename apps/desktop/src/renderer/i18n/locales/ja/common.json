@@ -1500,7 +1500,9 @@
           "autoHint": "フォールバック",
           "autoAlwaysOn": "常時表示",
           "effortHint_one": "推理強度 {{count}} 段階",
-          "effortHint_other": "推理強度 {{count}} 段階"
+          "effortHint_other": "推理強度 {{count}} 段階",
+          "cancelRefresh": "更新をキャンセル",
+          "refreshFailed": "モデルの更新に失敗しました。後でもう一度お試しください。"
         }
       },
       "wizard": {

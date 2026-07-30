@@ -464,6 +464,8 @@ const fanOutMakerInteractionDismissed = createIpcFanOut('maker:interaction-dismi
 // Agent 鉴权 + today usage push (取代老 codex:auth:state-changed / codex-oauth / codex:usage:changed)
 const fanOutMakerAuthStateChanged = createIpcFanOut('maker:auth:state-changed');
 const fanOutMakerAuthLoginProgress = createIpcFanOut('maker:auth:login-progress');
+// Cursor 模型探测进度(设置页「刷新模型」)。
+const fanOutMakerCursorRefreshProgress = createIpcFanOut('maker:cursor:refresh-progress');
 // 自定义供应商增删改广播 → 各 useProviders 实例 refetch（设置页列表 + 对话模型选择器 live 刷新）。
 const fanOutMakerProvidersChanged = createIpcFanOut('maker:provider:changed');
 const fanOutMakerProviderOAuthProgress = createIpcFanOut('maker:provider:oauth:progress');
@@ -4694,6 +4696,17 @@ contextBridge.exposeInMainWorld('electronAPI', {
        */
       installCursorAgent: (): Promise<{ installed: boolean }> =>
         ipcRenderer.invoke('maker:cursor:install'),
+      /**
+       * 设置页「刷新模型」:启动一轮 Cursor 模型档位串行探测。
+       * started=false 表示已有一轮在进行中(进行中互斥,不排队)。
+       */
+      refreshCursorModels: (): Promise<{ started: boolean }> =>
+        ipcRenderer.invoke('maker:cursor:refresh-models'),
+      /** 取消进行中的探测;已探到的结果已落盘。 */
+      cancelCursorModelRefresh: (): Promise<{ cancelled: boolean }> =>
+        ipcRenderer.invoke('maker:cursor:cancel-refresh'),
+      /** 探测进度推送(已探 n / 总数 + running)。 */
+      onCursorModelRefreshProgress: fanOutMakerCursorRefreshProgress,
     },
 
     // ── Agent 今日累计 (取代老 electronAPI.codex.usage.* + electronAPI.onUsageTodaySpendChanged) ─

@@ -1500,7 +1500,9 @@
           "autoHint": "대체",
           "autoAlwaysOn": "항상 표시",
           "effortHint_one": "추론 강도 {{count}}단계",
-          "effortHint_other": "추론 강도 {{count}}단계"
+          "effortHint_other": "추론 강도 {{count}}단계",
+          "cancelRefresh": "새로고침 취소",
+          "refreshFailed": "모델 새로고침에 실패했습니다. 나중에 다시 시도하세요."
         }
       },
       "wizard": {

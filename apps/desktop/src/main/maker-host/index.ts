@@ -161,9 +161,9 @@ import {
 } from './mcp-tool-approval-policy.js';
 import { mapCodexAppServerModelsToCatalog } from './codex-model-discovery.js';
 import {
-  discoverCursorModelOptionsInBackground,
   mapCursorAcpModelsToDescriptors,
   readCachedCursorModels,
+  setCursorModelDiscoverer,
   writeCachedCursorModels,
 } from './cursor-model-discovery.js';
 import { prepareSharedProjectSkillLinks } from './shared-global-skills.js';
@@ -1140,8 +1140,8 @@ export function getMaker(): Maker {
     if (!cursorAgent) {
       desktopMakerLogger.info('cursor-agent binary not found; Cursor agent not registered');
     } else {
-      // 冷启动先用上次落盘的目录：ACP 只在 session/new 才报模型，否则选择器要等用户
-      // 先发起一次会话才有 Auto 以外的条目。首次真实上报会按 id 合并覆盖。
+      // 冷启动只读落盘缓存 seed 进 capabilities,不触发探测(spec #21 / #29)。
+      // 缓存为空 ⇒ 选择器只有 Auto 兜底;目录唯一写入方 = 设置页刷新 / 登录成功。
       const cached = readCachedCursorModels();
       if (cached.length > 0) {
         const availableModels = cursorAgent.capabilities.availableModels;
@@ -1149,12 +1149,10 @@ export function getMaker(): Maker {
         // agent 侧也要预热：session/new 只报 id + 名字，档位靠它按 id 保旧续上。
         cursorAgent.seedListedModels(cached);
       }
-      // 没有任何模型带出档位 = 还没探过（或上次探失败）→ 后台补一轮。
-      // 探测本身要遍历全部模型逐个切换（每个约 3s），只能后台跑，结果落盘复用。
-      if (!cached.some((m) => m.efforts.length > 0)) {
-        void discoverCursorModelOptionsInBackground(cursorAgent);
-      }
     }
+    // 探测编排接入 cursor-model-discovery 模块(可重入 / 进度 / 取消)。
+    // 二进制未装时 cursorAgent 为 null,setCursorModelDiscoverer(null) 让刷新入口不可用。
+    setCursorModelDiscoverer(cursorAgent);
 
     // 用户自定义 MCP:把两个 agent 的 mcpProviders 数组注册进 registry，并立即尝试一次 refresh。
     // localDb onReady 可能在 Maker 构造前就已触发（此时 registry 无数组，refresh 空跑）；

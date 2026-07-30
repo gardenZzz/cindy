@@ -1500,7 +1500,9 @@
           "autoHint": "兜底",
           "autoAlwaysOn": "常显",
           "effortHint_one": "{{count}} 档推理强度",
-          "effortHint_other": "{{count}} 档推理强度"
+          "effortHint_other": "{{count}} 档推理强度",
+          "cancelRefresh": "取消刷新",
+          "refreshFailed": "模型刷新失败，请稍后再试"
         }
       },
       "wizard": {
