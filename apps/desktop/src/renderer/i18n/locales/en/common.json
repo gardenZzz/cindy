@@ -52,7 +52,7 @@
   },
   "agentIsland": {
     "native": {
-      "newConversationTitle": "New Maker",
+      "newConversationTitle": "New Chat",
       "newConversationHint": "Start a new conversation",
       "muteSound": "Mute Agent Island",
       "enableSound": "Enable Agent Island sound",
