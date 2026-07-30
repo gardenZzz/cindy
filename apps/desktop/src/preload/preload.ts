@@ -3930,7 +3930,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
 
     listAgentSkills: (
       agentKind: 'claude-code' | 'codex',
-      params: { workingDir: string; forceReload?: boolean },
+      params: { workingDir?: string; forceReload?: boolean },
     ): Promise<{
       success: boolean;
       error?: string;
