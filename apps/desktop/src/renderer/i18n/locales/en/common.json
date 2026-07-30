@@ -7548,7 +7548,7 @@
     }
   },
   "billing": {
-    "sidebar": "Credits & plans",
+    "sidebar": "Balance & Plans",
     "settings": {
       "title": "Usage and billing",
       "subscriptionCard": {
@@ -7563,13 +7563,13 @@
         "portalAction": "Manage in Stripe",
         "portalFailed": "Couldn't open Stripe subscription management. Try again later.",
         "priceInterval": "{{price}} / {{interval}}",
-        "includedCredits": "Includes {{amount}} credits per {{interval}}",
+        "includedCredits": "Includes {{amount}} per {{interval}}",
         "renewsAt": "Renews {{date}}",
         "endsAt": "Plan ends {{date}}",
         "cancelAction": "Cancel Subscription",
         "cancelConfirmTitle": "Cancel Your Current Subscription?",
-        "cancelConfirmDescription": "This action does not issue a refund or immediately change your credits. Your current plan stays available through {{date}}, then it will not renew. Cancellation cannot be undone in the app, and you cannot purchase a new plan until this billing period ends.",
-        "cancelConfirmDescriptionWithoutDate": "This action does not issue a refund or immediately change your credits. Your current plan stays available through the end of this billing period, then it will not renew. Cancellation cannot be undone in the app, and you cannot purchase a new plan until this billing period ends.",
+        "cancelConfirmDescription": "This action does not issue a refund or immediately change your balance. Your current plan stays available through {{date}}, then it will not renew. Cancellation cannot be undone in the app, and you cannot purchase a new plan until this billing period ends.",
+        "cancelConfirmDescriptionWithoutDate": "This action does not issue a refund or immediately change your balance. Your current plan stays available through the end of this billing period, then it will not renew. Cancellation cannot be undone in the app, and you cannot purchase a new plan until this billing period ends.",
         "cancelConfirmAction": "Confirm Cancellation",
         "cancelSuccess": "Auto-renewal is canceled. Your current plan remains available through {{date}}.",
         "cancelSuccessWithoutDate": "Auto-renewal is canceled. Your current plan will end after this billing period.",
@@ -7577,35 +7577,33 @@
         "cancelFailed": "Could not cancel the subscription. Try again later."
       },
       "topupCard": {
-        "action": "Buy credits"
+        "action": "Add Funds"
       }
     },
     "balance": {
       "title": "Available balance",
-      "creditParityCny": "1 credit = 1 CNY. Credits pay for Cindy AI usage; payments are processed by third-party providers.",
-      "creditParityUsd": "1 credit = 1 USD. Credits pay for Cindy AI usage; payments are processed by third-party providers.",
-      "plan": "Plan credits",
-      "purchased": "Purchased credits",
-      "promotional": "Promotional credits",
-      "notProvisioned": "Credits have not been enabled for this account.",
+      "plan": "Plan Balance",
+      "purchased": "Top-up Balance",
+      "promotional": "Promotional Balance",
+      "notProvisioned": "Balance has not been enabled for this account.",
       "notSupported": "Balance lookup is not supported for this account.",
       "unavailable": "Balance is temporarily unavailable. Refresh to try again."
     },
     "usage": {
-      "title": "Credit usage",
+      "title": "Balance Usage",
       "observedAt": "Balance updated {{date}}",
       "poolDetail": "Used {{used}} · Total {{total}}",
       "remaining": "Remaining",
       "progressLabel": "{{label}} usage",
-      "noPlanCredits": "No subscription credits because there is no active subscription.",
+      "noPlanCredits": "No plan balance because there is no active subscription.",
       "historyUnavailable": "Usage history is incomplete. Only the remaining balance is available.",
       "detailsUnavailable": "Usage details are temporarily unavailable. Current balances are shown instead.",
       "promotionalDetails": {
-        "title": "Promotional Credit Details",
+        "title": "Promotional Balance Details",
         "count": "{{count}} grants",
-        "empty": "No promotional credit grants are available.",
+        "empty": "No promotional grants are available.",
         "incomplete": "There are many grant records. Only the latest {{count}} are shown.",
-        "unnamed": "Promotional credit",
+        "unnamed": "Promotional Grant",
         "original": "Original",
         "used": "Used",
         "remaining": "Remaining",
@@ -7623,7 +7621,7 @@
         "title": "Choose a subscription plan"
       },
       "topup": {
-        "title": "Buy credits"
+        "title": "Add Funds"
       }
     },
     "steps": {
@@ -7660,7 +7658,7 @@
       "MONTH": "month",
       "YEAR": "year"
     },
-    "credits": "{{amount}} credits",
+    "credits": "Includes {{amount}}",
     "confirm": {
       "channel": "Pay with {{provider}}"
     },
@@ -7693,7 +7691,7 @@
       "failedTitle": "Unable to complete",
       "expiredTitle": "Payment expired",
       "canceledTitle": "Payment canceled",
-      "topupSubtitle": "Credit top-up",
+      "topupSubtitle": "Balance Top-up",
       "subscriptionSubtitle": "Subscription",
       "creatingBody": "Confirming the order with the payment service…",
       "qrAlt": "Payment QR code",
