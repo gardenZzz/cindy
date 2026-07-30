@@ -4418,6 +4418,17 @@ interface ElectronAPI {
       getCursorBinaryStatus: () => Promise<{ installed: boolean }>;
       /** 用户确认后执行官方 cursor-agent 安装脚本。 */
       installCursorAgent: () => Promise<{ installed: boolean }>;
+      /**
+       * 设置页「刷新模型」:启动一轮 Cursor 模型档位串行探测。
+       * started=false 表示已有一轮在进行中(进行中互斥,不排队)。
+       */
+      refreshCursorModels: () => Promise<{ started: boolean }>;
+      /** 取消进行中的探测;已探到的结果已落盘。 */
+      cancelCursorModelRefresh: () => Promise<{ cancelled: boolean }>;
+      /** 探测进度推送(已探 n / 总数 + running)。 */
+      onCursorModelRefreshProgress: (
+        cb: (progress: { done: number; total: number; running: boolean }) => void,
+      ) => () => void;
     };
 
     /* ── Agent 今日累计 (取代老 codex.usage.* + onUsageTodaySpendChanged) ── */
