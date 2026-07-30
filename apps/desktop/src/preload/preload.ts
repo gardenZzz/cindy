@@ -1691,6 +1691,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
     refreshPlanChange: (payload) =>
       ipcRenderer.invoke(BILLING_INVOKE.REFRESH_PLAN_CHANGE, payload),
     cancelPlanChange: (payload) => ipcRenderer.invoke(BILLING_INVOKE.CANCEL_PLAN_CHANGE, payload),
+    openSubscriptionPortal: () => ipcRenderer.invoke(BILLING_INVOKE.OPEN_SUBSCRIPTION_PORTAL),
     openPaymentRedirect: (payload) =>
       ipcRenderer.invoke(BILLING_INVOKE.OPEN_PAYMENT_REDIRECT, payload),
   } satisfies BillingRendererApi,
