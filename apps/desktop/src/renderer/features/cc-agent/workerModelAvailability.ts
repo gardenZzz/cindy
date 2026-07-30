@@ -54,6 +54,10 @@ export function selectWorkerModels({
 }: SelectWorkerModelsOptions): ModelDescriptor[] {
   const models = capabilities?.availableModels ?? [];
 
+  // cursor 是登录制 agent：模型目录来自 ACP session/new，model-providers 里没有它的
+  // 供应商条目，按 provider 并集过滤会把整份目录滤空。capabilities 即权威清单。
+  if (agent === 'cursor') return models;
+
   if (!deviceId) {
     // SSH 远程 Lead 与本地共用这份 provider 清单(worker 继承 remoteHostId 在远端
     // spawn,但目录快照来自本机) — 先按 SSH 口径剔除仅本地可桥接的来源,再取并集,

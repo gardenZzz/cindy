@@ -1331,10 +1331,30 @@ export class CursorAgent extends BaseAgent {
       }
     };
 
+    // MCP (协同工具面) 经 host 的 HTTP bridge 注入 —— ACP 消费不了 in-process
+    // McpServer instance。host 未接线 / 失败时按「无 MCP」降级,不阻断会话。
+    let mcpServers: unknown[] = [];
+    let mcpCleanup: (() => void) | undefined;
+    if (this.deps.prepareAcpMcpServers) {
+      try {
+        const prepared = await this.deps.prepareAcpMcpServers({
+          sessionId: opts.sessionId,
+          workingDir: opts.workingDir,
+          vendorOptions: opts.vendorOptions,
+        });
+        mcpServers = prepared.servers;
+        mcpCleanup = prepared.cleanup;
+      } catch (err) {
+        log.warn('cursor MCP injection skipped', {
+          message: err instanceof Error ? err.message : String(err),
+        });
+      }
+    }
+
     const createFreshSession = async (): Promise<void> => {
       const created = await client.request<NewSessionResponse>(Method.SessionNew, {
         cwd: opts.workingDir,
-        mcpServers: [],
+        mcpServers,
       });
       if (!created?.sessionId || typeof created.sessionId !== 'string') {
         throw new Error('cursor session/new: missing sessionId');
@@ -1373,7 +1393,7 @@ export class CursorAgent extends BaseAgent {
           const loaded = await client.request<LoadSessionResponse>(Method.SessionLoad, {
             cwd: opts.workingDir,
             sessionId: resumeId,
-            mcpServers: [],
+            mcpServers,
           });
           sessionId = resumeId;
           resumedSuccessfully = true;
@@ -1476,6 +1496,7 @@ export class CursorAgent extends BaseAgent {
       eventQueue.end();
       await client.close({ reason: `startSession failed: ${err.message}` });
       isolated.dispose();
+      mcpCleanup?.();
       throw err;
     }
 
@@ -1489,6 +1510,7 @@ export class CursorAgent extends BaseAgent {
       dismissAllPending('session_closed', 'deny');
       await client.close({ reason: 'CursorAgentSession.close()' });
       isolated.dispose();
+      mcpCleanup?.();
       eventQueue.end();
     };
     liveSessionClosers.add(closeSession);

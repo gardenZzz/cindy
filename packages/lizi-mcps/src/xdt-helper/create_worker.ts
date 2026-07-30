@@ -68,7 +68,7 @@ export const createWorkerSpecSchema = z.object({
     .max(32)
     .describe('worker 角色: developer / reviewer / tester / merger 或自定义 string'),
   agent: z
-    .enum(['claude-code', 'codex'])
+    .enum(['claude-code', 'codex', 'cursor'])
     .describe('worker agent 类型'),
   model: z
     .string()
@@ -115,7 +115,7 @@ const DESCRIPTION = [
   '',
   '参数:',
   '- role: worker 角色 (developer / reviewer / tester / merger 或自定义 string)',
-  '- agent: worker agent 类型 (codex / claude-code)',
+  '- agent: worker agent 类型 (codex / claude-code / cursor)',
   '- model: 可选, worker 使用的模型 id; 不传走 host 端默认 fallback',
   '- effort: 可选, reasoning/thinking 强度 (low / medium / high / xhigh / max / ultra)。Codex: 映射 OpenAI reasoning effort(max/ultra 仅部分模型如 GPT-5.6 Sol 支持); Claude Code: 映射 extended thinking token 预算(无 ultra,自动降级为 max)。显式传入时必须匹配所选 model 能力；当前 worker 模型都不把 minimal 作为可选思考档。',
   '- fast: 可选 boolean, 是否给 worker 开启 Fast 模式 (更快输出)。用户明确说「fast / 快速 / 开/关 fast」时显式传。仅对 codex worker 生效; claude-code worker 忽略此参数 (其 fast mode 在 agent 层为 no-op)。不传则继承默认 (New Maker 面板默认或 lead session 的 fastMode)。',

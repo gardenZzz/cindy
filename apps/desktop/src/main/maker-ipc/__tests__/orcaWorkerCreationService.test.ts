@@ -452,6 +452,57 @@ describe('OrcaWorkerCreationService', () => {
     expect(deps.addOrUpdateWorker).not.toHaveBeenCalled();
   });
 
+  it('creates a cursor worker although cursor has no connected provider (login-based agent)', async () => {
+    // cursor 的凭证在 cursor-agent 自己的 login 态里，model-providers 恒无它的
+    // 供应商条目 —— 供应商 preflight 必须整段跳过，否则 cursor worker 永远建不出来。
+    const { deps, service } = createDeps({
+      getAvailableModels: vi.fn((agent: AgentKind) => (
+        agent === 'cursor'
+          ? [{ id: 'auto', efforts: [], defaultEffort: null }]
+          : [{ id: 'claude-sonnet-4-6', efforts: ['low', 'high'], defaultEffort: 'high' }]
+      )),
+    });
+
+    const result = await service.createWorker({
+      leadSessionId: 'lead-1',
+      role: 'developer',
+      agent: 'cursor',
+      label: 'cursor-dev',
+    });
+
+    expect(result).toMatchObject({ ok: true });
+    expect(deps.bootstrapSession).toHaveBeenCalledWith(
+      expect.objectContaining({ agentKind: 'cursor', model: 'auto', providerId: null }),
+    );
+  });
+
+  it('rejects a cursor worker under an SSH remote lead (remote hosts only provision cc / codex)', async () => {
+    const { deps, service } = createDeps({
+      getAvailableModels: vi.fn(() => [{ id: 'auto', efforts: [], defaultEffort: null }]),
+      getLeadSessionRow: vi.fn(async () => ({
+        id: 'lead-1',
+        agentKind: 'codex' as const,
+        workingDir: '/remote/repo',
+        model: 'gpt-5.5',
+        effort: 'medium',
+        permissionMode: 'default',
+        fastMode: false,
+        providerId: 'xd',
+        remoteHostId: 'host-1',
+      })),
+    });
+
+    const result = await service.createWorker({
+      leadSessionId: 'lead-1',
+      role: 'developer',
+      agent: 'cursor',
+      label: 'cursor-dev',
+    });
+
+    expect(result).toMatchObject({ ok: false, errorCode: 'INVALID_PARAMS' });
+    expect(deps.bootstrapSession).not.toHaveBeenCalled();
+  });
+
   it('returns NOT_FOUND when the lead session row is missing', async () => {
     const { deps, service } = createDeps({
       getLeadSessionRow: vi.fn(async () => null),

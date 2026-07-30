@@ -20,8 +20,9 @@ import { Popover, PopoverTrigger, PopoverContent } from '@/components/ui/popover
 import { Tip } from '@/components/ui/tooltip';
 import { CodexMark } from '@/components/icons/CodexMark';
 import { ClaudeMark } from '@/components/icons/ClaudeMark';
+import { CursorMark } from '@/components/icons/CursorMark';
 
-export type CollabWorkerKind = 'cc' | 'codex';
+export type CollabWorkerKind = 'cc' | 'codex' | 'cursor';
 
 interface Props {
   enabled: boolean;
@@ -51,6 +52,11 @@ const WORKER_OPTIONS: ReadonlyArray<{
     kind: 'cc',
     label: 'Claude',
     renderMark: (size) => <ClaudeMark size={size} className="shrink-0" />,
+  },
+  {
+    kind: 'cursor',
+    label: 'Cursor',
+    renderMark: (size) => <CursorMark size={size} className="shrink-0" />,
   },
 ];
 
