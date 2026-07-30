@@ -3849,6 +3849,8 @@
     "banner": {
       "title": "{{version}}로 업데이트됨",
       "subtitle": "재시작해 적용",
+      "viewNotes": "업데이트 소식 보기",
+      "viewNotesAria": "{{version}} 업데이트 소식 보기",
       "button": "재시작",
       "tooltipReady": "업데이트 준비됨 — 클릭해 재시작{{versionSuffix}}",
       "ariaCollapsed": "업데이트 준비됨, 클릭해 버전 {{version}}로 재시작",

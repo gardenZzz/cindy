@@ -3849,6 +3849,8 @@
     "banner": {
       "title": "已更新到 {{version}}",
       "subtitle": "重启以应用更新",
+      "viewNotes": "查看更新公告",
+      "viewNotesAria": "查看 {{version}} 的更新公告",
       "button": "立即重启",
       "tooltipReady": "更新已就绪 — 点击重启{{versionSuffix}}",
       "ariaCollapsed": "更新已就绪，点击重启到版本 {{version}}",
