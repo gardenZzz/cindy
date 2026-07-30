@@ -51,6 +51,7 @@ import type { DesktopCommandContext } from '../commands/index.js';
 import { getDesktopCommandRegistry } from '../commands/index.js';
 import { initGithubIssueSubmit, IssueConfirmBridge } from '../github-issue/index.js';
 import { initGhostGrantConfirmBridge } from '../cindy-brain/ghostGrantConfirmBridge.js';
+import { createFeishuDesktopConfirmNotifier } from '../im/desktopConfirmNoticeWiring.js';
 import {
   initGhostSetupInteractionBridge,
   parseGhostSetupInteractionCommand,
@@ -1217,14 +1218,22 @@ const pendingInteractionResolvers = new Map<string, PendingInteractionEntry>();
  * 超时/会话清理由桥自己兜底。复用同一对 INTERACTION_REQUEST / RESOLVE_INTERACTION
  * channel,renderer 按 kind 分发。
  */
+// 桌面专属确认卡的 IM 侧提示(#926):卡片仍只在桌面出现(设计边界不动),
+// 但飞书绑定会话的用户会即时收到「去桌面确认」的文字提示,不再默等到超时。
+const desktopConfirmImNotifier = createFeishuDesktopConfirmNotifier();
+
 const issueConfirmBridge = new IssueConfirmBridge({
   broadcast: (channel, payload) => broadcastToAllWindows(channel, payload),
   logger: log,
+  onDesktopOnlyConfirmPending: (sessionId) =>
+    desktopConfirmImNotifier(sessionId, '「提交 GitHub issue」的确认卡'),
 });
 
 const renameSessionsConfirmBridge = new RenameSessionsConfirmBridge({
   broadcast: (channel, payload) => broadcastToAllWindows(channel, payload),
   logger: log,
+  onDesktopOnlyConfirmPending: (sessionId) =>
+    desktopConfirmImNotifier(sessionId, '「批量重命名会话」的确认卡'),
 });
 
 /**
@@ -1235,6 +1244,8 @@ const renameSessionsConfirmBridge = new RenameSessionsConfirmBridge({
 const ghostGrantConfirmBridge = initGhostGrantConfirmBridge({
   broadcast: (channel, payload) => broadcastToAllWindows(channel, payload),
   logger: log,
+  onDesktopOnlyConfirmPending: (sessionId) =>
+    desktopConfirmImNotifier(sessionId, '「插件文件授权」的确认卡'),
 });
 
 const ghostSetupInteractionBridge = initGhostSetupInteractionBridge({
