@@ -158,7 +158,12 @@ import {
   getDesktopMcpToolApprovalPolicy,
 } from './mcp-tool-approval-policy.js';
 import { mapCodexAppServerModelsToCatalog } from './codex-model-discovery.js';
-import { mapCursorAcpModelsToDescriptors } from './cursor-model-discovery.js';
+import {
+  discoverCursorModelOptionsInBackground,
+  mapCursorAcpModelsToDescriptors,
+  readCachedCursorModels,
+  writeCachedCursorModels,
+} from './cursor-model-discovery.js';
 import { prepareSharedProjectSkillLinks } from './shared-global-skills.js';
 export { withRehydrateCloseSuppressed };
 
@@ -1105,6 +1110,7 @@ export function getMaker(): Maker {
             if (mapped.length === 0) return;
             const availableModels = maker.getCapabilities('cursor').availableModels;
             availableModels.splice(0, availableModels.length, ...mapped);
+            writeCachedCursorModels(mapped);
             // 复用 PROVIDER_CHANGED 收口，让 renderer 原子刷新 capabilities（含 cursor）。
             refreshSelectableModelsAndBroadcast({
               revision: getActiveCatalogRevision(),
@@ -1115,6 +1121,21 @@ export function getMaker(): Maker {
       : null;
     if (!cursorAgent) {
       desktopMakerLogger.info('cursor-agent binary not found; Cursor agent not registered');
+    } else {
+      // 冷启动先用上次落盘的目录：ACP 只在 session/new 才报模型，否则选择器要等用户
+      // 先发起一次会话才有 Auto 以外的条目。首次真实上报会按 id 合并覆盖。
+      const cached = readCachedCursorModels();
+      if (cached.length > 0) {
+        const availableModels = cursorAgent.capabilities.availableModels;
+        availableModels.splice(0, availableModels.length, ...cached);
+        // agent 侧也要预热：session/new 只报 id + 名字，档位靠它按 id 保旧续上。
+        cursorAgent.seedListedModels(cached);
+      }
+      // 没有任何模型带出档位 = 还没探过（或上次探失败）→ 后台补一轮。
+      // 探测本身要遍历全部模型逐个切换（每个约 3s），只能后台跑，结果落盘复用。
+      if (!cached.some((m) => m.efforts.length > 0)) {
+        void discoverCursorModelOptionsInBackground(cursorAgent);
+      }
     }
 
     // 用户自定义 MCP:把两个 agent 的 mcpProviders 数组注册进 registry，并立即尝试一次 refresh。

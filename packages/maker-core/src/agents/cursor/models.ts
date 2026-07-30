@@ -17,14 +17,34 @@ import type {
 export const CURSOR_ACP_AUTO_MODEL_ID = 'default';
 export const CURSOR_PRODUCT_AUTO_MODEL_ID = 'auto';
 
-const CURSOR_EFFORTS = new Set<Effort>(['low', 'medium', 'high', 'xhigh', 'max']);
+/**
+ * 推理强度在上游有两个承载 id：Claude / Gemini 家族叫 `effort`，GPT / Kimi / GLM
+ * 家族叫 `reasoning`（实测 cursor-agent 2026.07）。只认 `effort` 会让 GPT-5.x /
+ * Codex / Kimi / GLM 这半边模型永远没有推理强度可选。
+ */
+const CURSOR_EFFORT_CONFIG_IDS: readonly string[] = ['effort', 'reasoning'];
+
+/**
+ * 上游取值 → Cindy Effort。同一档位在不同模型上拼写不同（`extra-high` 与 `xhigh`、
+ * `none` 与 `minimal`），回写时必须按该模型自报的拼写发回，见 toCursorConfigEffortValue。
+ */
+const CURSOR_EFFORT_VALUES: Readonly<Record<string, Effort>> = {
+  none: 'minimal',
+  minimal: 'minimal',
+  low: 'low',
+  medium: 'medium',
+  high: 'high',
+  xhigh: 'xhigh',
+  'extra-high': 'xhigh',
+  max: 'max',
+};
 
 export interface CursorListedModel {
   /** Cindy 产品 model id（`default` 已映射为 `auto`）。 */
   id: string;
   displayName: string;
   contextWindow: number;
-  efforts: Effort[];
+  efforts: readonly Effort[];
   defaultEffort: Effort | null;
   supportsFastMode?: boolean;
 }
@@ -146,8 +166,27 @@ function parseContextWindow(value: string | undefined): number | undefined {
   return undefined;
 }
 
-function parseEffortValue(value: string): Effort | null {
-  return CURSOR_EFFORTS.has(value as Effort) ? (value as Effort) : null;
+/** 上游取值 → Cindy Effort；不认识的档位返回 null（丢弃，不猜）。 */
+export function toCursorEffort(value: string): Effort | null {
+  return CURSOR_EFFORT_VALUES[value] ?? null;
+}
+
+/** 该模型承载推理强度的 configOption(`effort` 或 `reasoning`)；没有则 undefined。 */
+export function findCursorEffortOption(
+  configOptions: readonly AcpConfigOption[],
+): AcpConfigOption | undefined {
+  return configOptions.find((o) => CURSOR_EFFORT_CONFIG_IDS.includes(o.id));
+}
+
+/**
+ * Cindy Effort → 该模型 configOption 里的原始取值。按模型自报的清单挑拼写
+ * （xhigh 在有的模型上叫 extra-high），挑不到返回 null = 该模型不支持这一档。
+ */
+export function toCursorConfigEffortValue(
+  option: AcpConfigOption,
+  effort: Effort,
+): string | null {
+  return option.options.find((o) => CURSOR_EFFORT_VALUES[o.value] === effort)?.value ?? null;
 }
 
 /**
@@ -163,13 +202,13 @@ export function enrichCursorModelFromConfigOptions(
   if (!target) return;
 
   const byId = new Map(configOptions.map((o) => [o.id, o]));
-  const effortOpt = byId.get('effort');
+  const effortOpt = findCursorEffortOption(configOptions);
   if (effortOpt) {
     const efforts = effortOpt.options
-      .map((o) => parseEffortValue(o.value))
+      .map((o) => toCursorEffort(o.value))
       .filter((e): e is Effort => e != null);
     target.efforts = efforts;
-    const current = parseEffortValue(effortOpt.currentValue);
+    const current = toCursorEffort(effortOpt.currentValue);
     target.defaultEffort = current ?? (efforts.length > 0 ? efforts[efforts.length - 1]! : null);
   } else {
     target.efforts = [];

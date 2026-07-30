@@ -101,10 +101,13 @@ import {
 import {
   cursorAutoModelFallback,
   enrichCursorModelFromConfigOptions,
+  findCursorEffortOption,
   parseAcpConfigOptions,
   parseCursorModelsState,
   readConfigOptionValue,
   toCursorAcpModelId,
+  toCursorConfigEffortValue,
+  toCursorEffort,
   toCursorProductModelId,
   type CursorListedModel,
 } from './models.js';
@@ -166,6 +169,8 @@ const UNSUPPORTED = {
 };
 
 const CURSOR_EFFORT_LEVELS: EffortDescriptor[] = [
+  // minimal 对应上游 GPT 系的 `none` 档（reasoning=none）。
+  { id: 'minimal', displayName: 'Minimal', description: 'No extra reasoning budget' },
   { id: 'low', displayName: 'Low', description: 'Fast responses with minimal reasoning' },
   { id: 'medium', displayName: 'Medium', description: 'Balanced reasoning depth' },
   { id: 'high', displayName: 'High', description: 'Deeper reasoning for harder tasks' },
@@ -418,6 +423,16 @@ export class CursorAgent extends BaseAgent {
     this.capabilities = this.buildCapabilities(CAPABILITIES);
   }
 
+  /**
+   * 用宿主的持久化快照预热目录。session/new 只报 id + 名字，档位靠
+   * applyModelsFromSessionPayload 的「同 id 保旧」合并续上——不预热，冷启动第一次
+   * 建会话就会把上次探到的 effort / context 全抹平。空数组 = no-op。
+   */
+  seedListedModels(models: readonly CursorListedModel[]): void {
+    if (models.length === 0) return;
+    this.listedModels = models.map((m) => ({ ...m, efforts: [...m.efforts] }));
+  }
+
   private async publishListedModels(currentModelId: string): Promise<void> {
     const listing = {
       currentModelId,
@@ -429,6 +444,112 @@ export class CursorAgent extends BaseAgent {
       this.deps.logger.warn('onCursorLocalModelsListed failed', {
         message: err instanceof Error ? err.message : String(err),
       });
+    }
+  }
+
+  /**
+   * 全量目录探测：ACP 只在「切到某模型」后才回该模型的 effort / fast / context，
+   * 所以不遍历就只有当前模型有推理强度可选，选择器里其它模型是空的。
+   *
+   * 用一次性 ACP 会话跑，绝不碰用户会话的当前模型；结果照常经
+   * onCursorLocalModelsListed 交给宿主落盘 + 广播（宿主负责只跑一次）。
+   *
+   * ponytail: 串行探测，实测每个模型约 3s（29 个模型近 100s）——所以只能后台跑、
+   * 结果必须落盘复用。要更快就得开多个 ACP 会话并行探，等有人真嫌慢再说。
+   */
+  async discoverModelOptions(opts: {
+    workingDir: string;
+    userDataPath: string;
+    signal?: AbortSignal;
+    /** 单测注入 FakeTransport；缺省 spawn 真 cursor-agent。 */
+    createTransport?: () => Transport;
+  }): Promise<void> {
+    const log = this.deps.logger.child('cursor/model-discovery');
+    const authState = await this.deps.auth.getState();
+    if (!authState.authenticated) {
+      throw new AgentNotAuthenticatedError(
+        'cursor',
+        `cursor not authenticated: ${authState.errorReason ?? 'no_credentials'}`,
+      );
+    }
+    const isolated = createCursorIsolatedConfigDir(process.env, {
+      stableKey: 'model-discovery',
+      userDataPath: opts.userDataPath,
+    });
+    const client = new AcpClient({
+      createTransport:
+        opts.createTransport ??
+        (() =>
+          createAcpStdioTransport({
+            binaryPath: this.deps.binaryPath,
+            args: ['acp'],
+            cwd: opts.workingDir,
+            env: isolated.env,
+          })),
+      logger: log,
+      onTransportError: (err) => log.warn('discovery transport error', { message: err.message }),
+    });
+    client.start();
+    try {
+      await client.initialize({
+        protocolVersion: ACP_PROTOCOL_VERSION,
+        clientCapabilities: {
+          fs: { readTextFile: false, writeTextFile: false },
+          // 不声明就拿不到参数化 picker：模型 id 会带死参数、effort 选项整个消失。
+          _meta: { parameterizedModelPicker: true },
+        },
+        clientInfo: { name: 'cindy', title: 'Cindy', version: '0.0.0' },
+      });
+      const created = await client.request<NewSessionResponse>(Method.SessionNew, {
+        cwd: opts.workingDir,
+        mcpServers: [],
+      });
+      const parsed = parseCursorModelsState(created?.models);
+      if (!parsed) {
+        log.warn('discovery got no models; keeping previous listing');
+        return;
+      }
+      // 同 id 保旧：某个模型这轮探失败时，仍留着上次（或宿主预热）探到的档位；
+      // 探成功的会被紧接着的 enrich 覆盖。名字 / 顺序一律以本轮上报为准。
+      const prevById = new Map(this.listedModels.map((m) => [m.id, m]));
+      this.listedModels = parsed.models.map((m) => {
+        const prev = prevById.get(m.id);
+        return prev
+          ? {
+              ...m,
+              efforts: prev.efforts,
+              defaultEffort: prev.defaultEffort,
+              supportsFastMode: prev.supportsFastMode,
+              contextWindow: prev.contextWindow,
+            }
+          : { ...m };
+      });
+      const sessionId = created.sessionId;
+      for (const model of this.listedModels) {
+        if (opts.signal?.aborted) break;
+        try {
+          const result = await client.request<SetConfigOptionResult>(
+            Method.SessionSetConfigOption,
+            { sessionId, configId: 'model', value: toCursorAcpModelId(model.id) },
+          );
+          enrichCursorModelFromConfigOptions(
+            this.listedModels,
+            model.id,
+            parseAcpConfigOptions(result?.configOptions),
+          );
+        } catch (err) {
+          // 单个模型探测失败不该毁掉整轮：该模型保持「无档位」，其余照常。
+          log.warn('discovery model probe failed', {
+            model: model.id,
+            message: err instanceof Error ? err.message : String(err),
+          });
+        }
+      }
+      await this.publishListedModels(parsed.currentModelId);
+      log.info('model options discovered', { models: this.listedModels.length });
+    } finally {
+      await client.close({ reason: 'model discovery done' }).catch(() => undefined);
+      isolated.dispose();
     }
   }
 
@@ -608,16 +729,9 @@ export class CursorAgent extends BaseAgent {
 
     const applyConfigEnrichment = async (productModelId: string, options: AcpConfigOption[]) => {
       enrichCursorModelFromConfigOptions(this.listedModels, productModelId, options);
-      const effortVal = readConfigOptionValue(options, 'effort');
-      if (
-        effortVal === 'low' ||
-        effortVal === 'medium' ||
-        effortVal === 'high' ||
-        effortVal === 'xhigh' ||
-        effortVal === 'max'
-      ) {
-        mutableEffort = effortVal;
-      }
+      const effortOpt = findCursorEffortOption(options);
+      const effortVal = effortOpt ? toCursorEffort(effortOpt.currentValue) : null;
+      if (effortVal) mutableEffort = effortVal;
       const fastVal = readConfigOptionValue(options, 'fast');
       if (fastVal === 'true' || fastVal === 'false') {
         mutableFastMode = fastVal === 'true';
@@ -1185,9 +1299,14 @@ export class CursorAgent extends BaseAgent {
         }
       }
 
-      if (opts.effort && latestConfigOptions.some((o) => o.id === 'effort')) {
+      const initialEffortOpt = opts.effort ? findCursorEffortOption(latestConfigOptions) : undefined;
+      const initialEffortValue =
+        initialEffortOpt && opts.effort
+          ? toCursorConfigEffortValue(initialEffortOpt, opts.effort)
+          : null;
+      if (initialEffortOpt && initialEffortValue) {
         try {
-          const options = await setConfigOption('effort', opts.effort);
+          const options = await setConfigOption(initialEffortOpt.id, initialEffortValue);
           await applyConfigEnrichment(mutableModel, options);
         } catch (err) {
           log.warn('cursor initial setEffort failed', {
@@ -1511,19 +1630,29 @@ export class CursorAgent extends BaseAgent {
 
       async setEffort(newEffort: Effort) {
         if (closed) throw new Error('Cursor session is closed');
-        if (!latestConfigOptions.some((o) => o.id === 'effort')) {
+        if (!findCursorEffortOption(latestConfigOptions)) {
           const refreshed = await setConfigOption('model', toCursorAcpModelId(mutableModel));
           await applyConfigEnrichment(mutableModel, refreshed);
         }
-        if (!latestConfigOptions.some((o) => o.id === 'effort')) {
+        const effortOpt = findCursorEffortOption(latestConfigOptions);
+        if (!effortOpt) {
           throw new NotSupportedError('effort', {
             supported: false,
             reason: 'sdk-missing',
             message: `Cursor model ${mutableModel} does not expose effort`,
           });
         }
-        log.debug('setEffort', { from: mutableEffort, to: newEffort });
-        const options = await setConfigOption('effort', newEffort);
+        // 档位拼写按模型走（xhigh ↔ extra-high、minimal ↔ none），发原样 Cindy 值会被上游拒。
+        const value = toCursorConfigEffortValue(effortOpt, newEffort);
+        if (!value) {
+          throw new NotSupportedError('effort', {
+            supported: false,
+            reason: 'sdk-missing',
+            message: `Cursor model ${mutableModel} does not support effort ${newEffort}`,
+          });
+        }
+        log.debug('setEffort', { from: mutableEffort, to: newEffort, configId: effortOpt.id });
+        const options = await setConfigOption(effortOpt.id, value);
         await applyConfigEnrichment(mutableModel, options);
       },
 
