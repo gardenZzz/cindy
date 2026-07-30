@@ -2,6 +2,10 @@
   "ipcError": {
     "SESSION_RUNNING": "当前对话正在执行任务，请稍后再试。",
     "CREDENTIAL_SWITCH_BUSY": "其他 Codex 任务正在运行，本次来源切换未生效（对话仍使用原来源）。等其他任务结束后再试。",
+    "REMOTE_MODEL_SWITCH_ROUTE_CHANGE": "目标模型或来源需要不同的远端路由，请关闭并重新创建远程对话后生效。",
+    "REMOTE_PROVIDER_UPDATING": "供应商凭证正在更新，请稍后重试",
+    "REMOTE_PROVIDER_UNSUPPORTED": "该供应商不支持 SSH 远程会话，请更换来源",
+    "REMOTE_NATIVE_OAUTH_UNAVAILABLE": "未连接 Claude.ai 订阅，请先连接或选择网关模型",
     "REMOTE_WORKDIR_INVALID": "远程项目目录无效，请重新选择项目目录。",
     "REMOTE_WORKDIR_NOT_FOUND": "远程项目目录不存在，请重新选择项目目录。",
     "REMOTE_WORKDIR_NOT_DIRECTORY": "远程项目路径不是文件夹，请重新选择项目目录。",
@@ -4146,6 +4150,11 @@
     },
     "modelSelector": {
       "budgetNeedsApiKey": "此模型需先在设置里配置 API key 才能使用",
+      "subscriptionDirectDisabled": {
+        "chatgpt": "订阅直连的 GPT 模型协议暂不支持 SSH 远程会话",
+        "xai": "订阅直连的 Grok 模型协议暂不支持 SSH 远程会话",
+        "generic": "订阅直连模型协议暂不支持 SSH 远程会话"
+      },
       "effortLabel": "推理强度",
       "edit": "编辑",
       "options": "选项",
@@ -5328,6 +5337,9 @@
     },
     "draft": {
       "createSessionFailed": "创建对话失败，请重试",
+      "remoteProviderUpdating": "供应商凭证正在更新，请稍后重试",
+      "remoteProviderUnsupported": "该供应商不支持 SSH 远程会话，请更换来源",
+      "remoteNativeOauthUnavailable": "未连接 Claude.ai 订阅，请先连接或选择网关模型",
       "deviceStillLoading": "远程设备仍在加载中，请稍候",
       "worktreeMissingRepo": "无法开 worktree：缺少当前目录的仓库根",
       "worktreeRepoHint": "可尝试重新选一次工作目录，等右下角文件夹标识刷新后再试",

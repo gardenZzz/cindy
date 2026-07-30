@@ -5,7 +5,11 @@
     "REMOTE_WORKDIR_INVALID": "The remote project path is invalid. Choose the project directory again.",
     "REMOTE_WORKDIR_NOT_FOUND": "The remote project directory no longer exists. Choose it again.",
     "REMOTE_WORKDIR_NOT_DIRECTORY": "The remote project path is not a folder. Choose a project directory.",
-    "REMOTE_WORKDIR_UNAVAILABLE": "The remote project directory is unavailable. Reconnect the network drive and try again."
+    "REMOTE_WORKDIR_UNAVAILABLE": "The remote project directory is unavailable. Reconnect the network drive and try again.",
+    "REMOTE_MODEL_SWITCH_ROUTE_CHANGE": "The target model or source needs a different remote route — close and recreate the remote session to apply.",
+    "REMOTE_PROVIDER_UPDATING": "Provider credentials are being updated — retry in a moment",
+    "REMOTE_PROVIDER_UNSUPPORTED": "This provider is not supported in SSH remote sessions — pick another source",
+    "REMOTE_NATIVE_OAUTH_UNAVAILABLE": "Claude.ai subscription is not connected — connect it first or pick a gateway model"
   },
   "providerError": {
     "AUTH_INVALID": "Invalid or expired API key (401). Check the key and try again",
@@ -4147,6 +4151,11 @@
     },
     "modelSelector": {
       "budgetNeedsApiKey": "This model needs an API key — configure it in Settings",
+      "subscriptionDirectDisabled": {
+        "chatgpt": "Subscription-direct GPT models are not supported in SSH remote sessions yet",
+        "xai": "Subscription-direct Grok models are not supported in SSH remote sessions yet",
+        "generic": "Subscription-direct models are not supported in SSH remote sessions yet"
+      },
       "effortLabel": "Effort level",
       "edit": "Edit",
       "options": "Options",
@@ -5338,6 +5347,9 @@
     },
     "draft": {
       "createSessionFailed": "Failed to create session, please retry",
+      "remoteProviderUpdating": "Provider credentials are being updated — retry in a moment",
+      "remoteProviderUnsupported": "This provider is not supported in SSH remote sessions — pick another source",
+      "remoteNativeOauthUnavailable": "Claude.ai subscription is not connected — connect it first or pick a gateway model",
       "deviceStillLoading": "Remote device is still loading, please wait",
       "worktreeMissingRepo": "Cannot create worktree: missing repository root for the current directory",
       "worktreeRepoHint": "Try re-selecting the working directory and wait for the folder badge to refresh, then retry",
