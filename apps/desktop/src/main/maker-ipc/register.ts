@@ -516,6 +516,12 @@ import {
   SILENT_STOP_RESUME_PROMPT,
   SilentStopAutoResumeGuard,
 } from './silentStopAutoResume.js';
+import {
+  publishUiContinuation,
+  publishUiSessionIntervention,
+  publishUiTurnDispatching,
+  publishUiTurnUndispatched,
+} from './uiContinuationSignal.js';
 import { readSilentStopAutoResumeSettings } from '../maker-host/silent-stop-auto-resume-store.js';
 import {
   broadcastGhostMessageBlocked,
@@ -6922,6 +6928,13 @@ export function registerMakerIpc(maker: Maker, options: RegisterMakerIpcOptions)
       }
     },
     noteSessionClearBoundary,
+    // 用户点了错误横幅的「重试」→ hook 侧把这一轮接回渠道那条已收口的消息。
+    // 这是权威来源: 零产出重试重发的是原文, 从文本认不出重试意图(见 deps 注释)。
+    onUiRetry: publishUiContinuation,
+    // 新消息进队 → 作废该会话的待续跑记账(渠道那条旧消息已被别的内容取代)。
+    // 用 enqueue 入口而不是消息文本: 零产出重试重发的是原文, 文本上无从区分,
+    // 而它走 unshift 不经这里, 于是不会把自己的回流作废掉。
+    onUserEnqueue: publishUiSessionIntervention,
     // 队列项未派发即被丢弃(stop/remove/clearSession) → 释放暂存的 accepted 副作用, 防回调表泄漏。
     onDiscardedQueuedMessage: (_sessionId, item) => {
       orcaInterAgentDispatcher.discardQueuedOrcaInterAgentAcceptedCallback(item.clientId);
@@ -6969,8 +6982,19 @@ export function registerMakerIpc(maker: Maker, options: RegisterMakerIpcOptions)
       }),
     onUserMessageRewritten: (sessionId, item, info) =>
       broadcastGhostMessageRewritten({ sessionId, clientId: item.clientId, ...info }),
-    beforeDispatchUserTurn: (sessionId) => gitSnapshotCoordinator?.onTurnStart(sessionId),
-    onUndispatchedUserTurn: (sessionId) => gitSnapshotCoordinator?.onTurnAbort(sessionId),
+    beforeDispatchUserTurn: (sessionId, item) => {
+      // hook 续跑回流的**权威归属点**: 在 vendor dispatch 之前(本回调被 await), 所以
+      // 观察器挂上就不丢正文开头, 而 live session 此刻必然已就绪。clientId 对得上的
+      // 才是目标续跑轮 —— 绕过 coordinator 的 turn(silent-stop 自动续跑)不走这里,
+      // 结构上不可能被误认。详见 uiContinuationSignal 的模块注释。
+      publishUiTurnDispatching(sessionId, item.clientId);
+      return gitSnapshotCoordinator?.onTurnStart(sessionId);
+    },
+    onUndispatchedUserTurn: (sessionId, item) => {
+      // 目标轮落库了却没能 dispatch(取消 / 失败): 记账该立刻还回去, 而不是等超时。
+      publishUiTurnUndispatched(sessionId, item.clientId);
+      gitSnapshotCoordinator?.onTurnAbort(sessionId);
+    },
     // Thread 3 fix: called from drain/dispatchCompact failure paths where the item
     // was removed from the queue but not put back (persisted-failure case). If no
     // other work is pending, any deferred completion must be replayed so Agent
