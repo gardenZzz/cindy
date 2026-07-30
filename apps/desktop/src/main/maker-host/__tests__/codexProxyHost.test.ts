@@ -397,6 +397,17 @@ describe('decideCodexRoute', () => {
 });
 
 describe('chatBridgeCapabilitiesForRoute', () => {
+  it('does not forward unsupported passthrough fields into the translator', async () => {
+    const { chatBridgeCapabilitiesForRoute } = await freshCodexProxyHost();
+    const capabilities = chatBridgeCapabilitiesForRoute(
+      'https://api.deepseek.com/v1',
+      'deepseek-chat',
+    );
+    expect(capabilities.passthroughFields).not.toContain('n');
+    expect(capabilities.passthroughFields).not.toContain('logprobs');
+    expect(capabilities.passthroughFields).not.toContain('top_logprobs');
+  });
+
   it.each([
     'https://api.moonshot.cn/v1',
     'https://api.moonshot.ai/v1/',
@@ -483,6 +494,37 @@ describe('chatBridgeCapabilitiesForRoute', () => {
       }),
       expect.anything(),
     );
+    const localHandler = (decision as {
+      localHandler: (input: { rawBody: Buffer; parsedBody: unknown; res: unknown }) => Promise<void>;
+    }).localHandler;
+    const originalInstructions = [
+      { type: 'input_text', text: 'BASE_PROMPT' },
+      { type: 'input_image', image_url: 'data:image/png;base64,eA==' },
+    ];
+    const parsedBody = {
+      model: 'kimi-k3',
+      instructions: originalInstructions,
+      input: 'hello',
+    };
+    const res = {};
+    await localHandler({
+      rawBody: Buffer.from(JSON.stringify(parsedBody)),
+      parsedBody,
+      res,
+    });
+    const bridgeHandler = mockState.createResponsesChatHandler.mock.results.at(-1)?.value as {
+      handle: ReturnType<typeof vi.fn>;
+    };
+    expect(bridgeHandler.handle).toHaveBeenCalledWith({
+      parsedBody: {
+        ...parsedBody,
+        instructions: [
+          ...originalInstructions,
+          { type: 'input_text', text: '\n\nPRODUCT_PROMPT' },
+        ],
+      },
+      res,
+    });
 
     clearSessionProvider('session-kimi-image');
     setCustomProviderKeyReader(() => null);
@@ -1641,6 +1683,160 @@ describe('codex proxy host', () => {
     expect(summaryOnlyReasoning).toEqual({ model: 'bytedance-seed/seed-2.1-pro' });
 
     clearSessionProvider('session-seed');
+  });
+
+  it('normalizes custom Volcengine Ark Responses routes regardless of the model alias', async () => {
+    const host = await freshCodexProxyHost();
+    const { buildUserProvider } = await import('@cindy/model-providers');
+    const { setCustomProviders } = await import('../active-catalog.js');
+    const { setSessionProvider, clearSessionProvider } = await import('../session-provider-store.js');
+    setCustomProviders([
+      buildUserProvider({
+        id: 'custom-volcengine',
+        name: 'Custom Volcengine',
+        runtimes: {
+          codex: {
+            baseUrl: 'https://ark.cn-beijing.volces.com/api/v3',
+            models: [{ id: 'production-deployment', name: 'Production Deployment' }],
+          },
+        },
+      }),
+    ]);
+    mockState.createAnthropicCompatProxy.mockResolvedValueOnce({
+      url: 'http://127.0.0.1:43210',
+      dispose: vi.fn(async () => undefined),
+    });
+    await host.ensureCodexProxyReady();
+    host.registerComposed('session-custom-volcengine', 'thread-custom-volcengine', 'PRODUCT_PROMPT');
+    setSessionProvider('session-custom-volcengine', 'custom-volcengine');
+
+    const transforms = mockState.createAnthropicCompatProxy.mock.calls[0]?.[0]?.transformRequest ?? [];
+    let current: unknown = {
+      model: 'production-deployment',
+      reasoning: { effort: 'high', summary: 'auto' },
+      tools: [
+        { type: 'function', name: 'exec_command' },
+        { type: 'namespace', name: 'mcp__example', tools: [{ type: 'function', name: 'read' }] },
+        { type: 'web_search', external_web_access: true },
+      ],
+      input: [
+        { type: 'message', role: 'assistant', content: [{ type: 'output_text', text: 'earlier' }] },
+      ],
+    };
+    const ctx = {
+      method: 'POST',
+      url: '/responses',
+      headers: { 'thread-id': 'thread-custom-volcengine' },
+    };
+    for (const transform of transforms) {
+      const next = transform(current, ctx);
+      if (next !== null && next !== undefined) current = next;
+    }
+
+    expect(current).toEqual({
+      model: 'production-deployment',
+      reasoning: { effort: 'high' },
+      tools: [
+        { type: 'function', name: 'exec_command' },
+        { type: 'web_search' },
+      ],
+      input: [
+        {
+          type: 'message',
+          role: 'assistant',
+          status: 'completed',
+          content: [{ type: 'output_text', text: 'earlier' }],
+        },
+      ],
+    });
+
+    clearSessionProvider('session-custom-volcengine');
+    setCustomProviders([]);
+  });
+
+  it('does not apply the Seed fallback to non-Ark Volces Responses routes', async () => {
+    const host = await freshCodexProxyHost();
+    const { buildUserProvider } = await import('@cindy/model-providers');
+    const { setCustomProviders } = await import('../active-catalog.js');
+    const { setSessionProvider, clearSessionProvider } = await import('../session-provider-store.js');
+    setCustomProviders([
+      buildUserProvider({
+        id: 'custom-volces',
+        name: 'Custom Volces',
+        runtimes: {
+          codex: {
+            baseUrl: 'https://gateway.volces.com/api/v3',
+            models: [{ id: 'production-deployment', name: 'Production Deployment' }],
+          },
+        },
+      }),
+    ]);
+    mockState.createAnthropicCompatProxy.mockResolvedValueOnce({
+      url: 'http://127.0.0.1:43210',
+      dispose: vi.fn(async () => undefined),
+    });
+    await host.ensureCodexProxyReady();
+    host.registerComposed('session-custom-volces', 'thread-custom-volces', 'PRODUCT_PROMPT');
+    setSessionProvider('session-custom-volces', 'custom-volces');
+
+    const transforms = mockState.createAnthropicCompatProxy.mock.calls[0]?.[0]?.transformRequest ?? [];
+    const original = {
+      model: 'production-deployment',
+      reasoning: { effort: 'high', summary: 'auto' },
+      tools: [
+        { type: 'function', name: 'exec_command' },
+        { type: 'namespace', name: 'mcp__example', tools: [{ type: 'function', name: 'read' }] },
+        { type: 'web_search', external_web_access: true },
+      ],
+      input: [
+        { type: 'message', role: 'assistant', content: [{ type: 'output_text', text: 'earlier' }] },
+      ],
+    };
+    let current: unknown = original;
+    const ctx = {
+      method: 'POST',
+      url: '/responses',
+      headers: { 'thread-id': 'thread-custom-volces' },
+    };
+    for (const transform of transforms) {
+      const next = transform(current, ctx);
+      if (next !== null && next !== undefined) current = next;
+    }
+
+    expect(current).toEqual(original);
+
+    clearSessionProvider('session-custom-volces');
+    setCustomProviders([]);
+  });
+
+  it('recognizes Volcengine native doubao Seed model IDs without route metadata', async () => {
+    const host = await freshCodexProxyHost();
+    mockState.createAnthropicCompatProxy.mockResolvedValueOnce({
+      url: 'http://127.0.0.1:43210',
+      dispose: vi.fn(async () => undefined),
+    });
+    await host.ensureCodexProxyReady();
+
+    const transforms = mockState.createAnthropicCompatProxy.mock.calls[0]?.[0]?.transformRequest ?? [];
+    let current: unknown = {
+      model: 'doubao-seed-2-1-pro-260628',
+      tools: [
+        { type: 'function', name: 'exec_command' },
+        { type: 'namespace', name: 'mcp__example', tools: [{ type: 'function', name: 'read' }] },
+      ],
+      input: 'hello',
+    };
+    const ctx = { method: 'POST', url: '/responses', headers: {} };
+    for (const transform of transforms) {
+      const next = transform(current, ctx);
+      if (next !== null && next !== undefined) current = next;
+    }
+
+    expect(current).toEqual({
+      model: 'doubao-seed-2-1-pro-260628',
+      tools: [{ type: 'function', name: 'exec_command' }],
+      input: 'hello',
+    });
   });
 
   it('removes Seed tool controls when every declared tool is unsupported', async () => {
