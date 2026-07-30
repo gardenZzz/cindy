@@ -82,11 +82,13 @@ describe('UpdateNoticeDialog auto layout', () => {
     ).toBeTruthy();
   });
 
-  it('multiple versions: version count on the right, range badge, span aria', () => {
+  it('multiple versions: version count on the right, span aria', () => {
     renderAuto([NEWEST, OLDER]);
 
     expect(screen.getByText('update.notice.versionsSpan(count=2)')).toBeTruthy();
-    expect(screen.getByText('v0.1.20 → v0.1.21')).toBeTruthy();
+    // #956 单栏版式删掉了 header 的 range 徽标(v<旧> → v<新>):版本号、日期、
+    // 贡献者全部移进各自版本块,header 右侧只留 versionCountLabel。两枚 v<版本>
+    // 徽标改在各自 VersionBlock 里断言(见 renders one content block per version)。
     expect(
       screen.getByText('update.notice.ariaDescriptionSpan(from=0.1.20,count=2)'),
     ).toBeTruthy();
