@@ -2356,8 +2356,7 @@
       "prefs": {
         "agentLabel": "Agent",
         "modelLabel": "模型",
-        "thinkingLabel": "Thinking",
-      "effortLabel": "推理强度",
+        "effortLabel": "推理强度",
         "permissionLabel": "权限模式",
         "providerSlack": "Slack",
         "providerTelegram": "Telegram",
@@ -4210,6 +4209,7 @@
         "xai": "订阅直连的 Grok 模型协议暂不支持 SSH 远程会话",
         "generic": "订阅直连模型协议暂不支持 SSH 远程会话"
       },
+      "thinkingLabel": "Thinking",
       "effortLabel": "推理强度",
       "edit": "编辑",
       "options": "选项",

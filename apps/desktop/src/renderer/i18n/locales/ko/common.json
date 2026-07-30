@@ -2356,8 +2356,7 @@
       "prefs": {
         "agentLabel": "Agent",
         "modelLabel": "모델",
-        "thinkingLabel": "Thinking",
-      "effortLabel": "추론 강도",
+        "effortLabel": "추론 강도",
         "permissionLabel": "권한 모드",
         "providerSlack": "Slack",
         "providerTelegram": "Telegram",
@@ -4210,6 +4209,7 @@
         "xai": "구독 직결 Grok 모델은 SSH 원격 세션을 아직 지원하지 않습니다",
         "generic": "구독 직결 모델은 SSH 원격 세션을 아직 지원하지 않습니다"
       },
+      "thinkingLabel": "Thinking",
       "effortLabel": "추론 강도",
       "edit": "편집",
       "options": "옵션",
