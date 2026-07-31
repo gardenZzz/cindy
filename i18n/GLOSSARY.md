@@ -128,7 +128,6 @@
 
 Anthropic Messages API / wire protocol 的用户可见名称。四语统一保留官方英文名称，避免与普通的“消息”概念混译；先登记为 proposed，待产品术语评审后固化。
 
-
 ### Global region
 
 企业认证与业务服务所在区域的用户可见名称，用于组织登录检测到 Global 服务区域时的确认文案；它描述连接的服务区域，不是对当前安装版本的标签，也不同于项目配置里的 generic global scope。先按现有四语文案登记为 proposed。
@@ -148,7 +147,6 @@ Anthropic Messages API / wire protocol 的用户可见名称。四语统一保�
 ### Cursor
 
 经官方 ACP 通道接入的第三个 Agent（上游产品 Cursor 的编码 agent；二进制名 cursor-agent 是实现细节）。产品面统一称 Cursor，kind 标识为 cursor。四语保留英文原词，避免自造「光标 / Cursor Agent / Cursor CLI」等说法。
-
 
 ### Device
 
@@ -182,7 +180,6 @@ issue #882：模型管理/新对话选择器的分类标签，对应 Gateway mod
 
 issue #882：模型管理/新对话选择器的分类标签，对应 Gateway mode=audio_speech 的语音合成模型（如 elevenlabs/eleven_v3）。原先与语音转写、实时音频混在一个笼统的「音频语音」分类里，本次拆分为独立类型。
 
-
 ### Not signed in
 
 跳过登录后应用内的账号状态名（侧边栏账号胶囊、设置页资料卡、语音服务提示，以及 main 侧不走 locale 的 model-visible 文案——已知 mcp-integrations/ghost.ts 的 GHOST_NOT_FOUND tool result，它会被模型读到并可能回显进对话，#907 review 补上）。**约束范围不限于 locale JSON**：guard 只扫 locale 文件，这类硬编码文案要人工找（见 engineering-conventions §5.1「Slack / IM 侧的文案不在任何 locale 文件里」同类问题）。2026-07-29 产品口径：面向用户只说「未登录」，不再叫「本地模式」——后者听起来像另一种服务端连接方式，实际只是没有登录 Cindy 账号。「本地」仅用于描述数据落在本机（如资料卡副文案「数据仅保存在本机」），不作为状态名。代码内部标识（AuthState mode='local'、authEnterLocal IPC、data owner）不受本条约束，仍用 local。en 侧统一走 not signed in 一种说法（含 settings.userProfile.local 的 exit / exitFailed 两条当前无引用的文案：the not-signed-in state），不与 unauthenticated 混用——PR #907 review 指出过同一状态两种英文说法会让日后启用这些文案时 UI 自相矛盾。status 仍为 proposed：Not signed in 作为状态名尚未与设计侧正式过一遍。
@@ -198,7 +195,6 @@ issue #882：模型管理/新对话选择器的分类标签，对应 Gateway mod
 ### Pin
 
 右侧栏插件面板页签的图钉:钉住 = 面板在所有对话中保留。动词对:Pin=钉住 / Unpin=取消钉住。2026-07-31 随图钉功能提出,待裁决。
-
 
 ### Region badge
 
