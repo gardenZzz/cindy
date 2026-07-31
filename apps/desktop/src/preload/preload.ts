@@ -3396,6 +3396,8 @@ contextBridge.exposeInMainWorld('electronAPI', {
     // 开关只管连接/断开; 绑定阶段 4 起走 SIWS OIDC(bindStart 单独触发)
     setEnabled: (enabled: boolean): Promise<{ hook: unknown }> =>
       ipcRenderer.invoke('maker:hook-control:set-enabled', { enabled }),
+    setLifecycleAnnouncement: (enabled: boolean): Promise<{ hook: unknown }> =>
+      ipcRenderer.invoke('maker:hook-control:set-lifecycle-announcement', { enabled }),
     setProviderEnabled: (provider: 'telegram', enabled: boolean): Promise<{ hook: unknown }> =>
       ipcRenderer.invoke('maker:hook-control:set-provider-enabled', { provider, enabled }),
     setWorkspaces: (workspaces: Record<string, string>): Promise<{ hook: unknown }> =>
@@ -3974,7 +3976,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
       headers?: Record<string, string>;
     }): Promise<{
       ok: boolean;
-      models?: { id: string; name: string }[];
+      models?: { id: string; name: string; contextWindow?: number }[];
       code?: import('../shared/providerErrors').ProviderErrorCode;
       status?: number;
       detail?: string;

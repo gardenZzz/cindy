@@ -3113,6 +3113,9 @@ interface ElectronAPI {
     setEnabled: (
       enabled: boolean,
     ) => Promise<{ hook: import('../shared/hookControlIpc').SlackHookView }>;
+    setLifecycleAnnouncement: (
+      enabled: boolean,
+    ) => Promise<{ hook: import('../shared/hookControlIpc').SlackHookView }>;
     setProviderEnabled: (
       provider: 'telegram',
       enabled: boolean,
@@ -3767,7 +3770,7 @@ interface ElectronAPI {
       headers?: Record<string, string>;
     }) => Promise<{
       ok: boolean;
-      models?: { id: string; name: string }[];
+      models?: { id: string; name: string; contextWindow?: number }[];
       code?: import('../shared/providerErrors').ProviderErrorCode;
       status?: number;
       detail?: string;

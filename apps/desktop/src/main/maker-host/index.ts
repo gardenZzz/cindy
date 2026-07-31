@@ -111,6 +111,7 @@ import { claudeSubagentUsageBridge } from './claude-subagent-usage-bridge.js';
 import { notifyAutoPermissionClassifierUnavailable } from './claude-auto-permission-fallback.js';
 import { hasClaudeAiOAuth } from './claude-credentials-store.js';
 import {
+  armCodexHttpRecovery,
   clearCodexProxyAuthInjection,
   ensureCodexControlPlaneProxyReady,
   ensureCodexProxyReady,
@@ -1123,6 +1124,7 @@ export function getMaker(): Maker {
       prepareCodexResumeSession: prepareExternalCodexSessionForResume,
       registerCodexSystemPromptForThread: ({ sessionId, threadId, text }) =>
         registerCodexProxyComposed(sessionId, threadId, text),
+      armCodexHttpRecovery,
       registerCodexReviewerRouteContext: ({ sessionId, threadId, model }) =>
         registerCodexReviewerRouteContext(sessionId, threadId, model),
       registerCodexChildThreadForParent: ({ parentThreadId, childThreadId }) => {
