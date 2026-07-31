@@ -286,6 +286,7 @@ function draftEnableOrcaOptions(
     : collab.worker === 'cursor'
       ? 'cursor'
       : 'claude-code';
+  const cfg = collab.workerConfig;
   if (!cfg) return { workerAgent };
   // 草稿里持久化的来源在发送时按 live 目录重新收窄(已连接 + 提供该模型 + 未被可见性
   // 隐藏,与 CreateWorkerPopover.narrowProviderSource 同规则):草稿可跨重启存活,来源
@@ -529,21 +530,6 @@ export function NewMakerDraftRoute() {
       switchVendor('cc', getCurrentVendorPrefs());
     }
   }, [includeCursor, draft.vendor]);
-
-  /** createSession 失败 toast:远端路由错误按 code 给可操作文案,其余回退通用文案。 */
-  const toastCreateSessionFailed = (err?: unknown) => {
-    const code = (err as { code?: string } | null | undefined)?.code
-      ?? (createSessionError as { code?: string } | null)?.code;
-    const key =
-      code === 'REMOTE_PROVIDER_UPDATING'
-        ? 'ccAgent.draft.remoteProviderUpdating'
-        : code === 'REMOTE_PROVIDER_UNSUPPORTED'
-          ? 'ccAgent.draft.remoteProviderUnsupported'
-          : code === 'REMOTE_NATIVE_OAUTH_UNAVAILABLE'
-            ? 'ccAgent.draft.remoteNativeOauthUnavailable'
-            : 'ccAgent.draft.createSessionFailed';
-    toast.error(t(key));
-  };
 
   /** createSession 失败 toast:远端路由错误按 code 给可操作文案,其余回退通用文案。 */
   const toastCreateSessionFailed = (err?: unknown) => {

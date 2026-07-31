@@ -68,7 +68,6 @@ function readWorkerPrefs(): WorkerPrefs {
     if (!raw) return DEFAULT_PREFS;
     const parsed = JSON.parse(raw) as Partial<WorkerPrefs>;
     const agentPrefs = (agent: WorkerSelectableAgent): WorkerAgentPrefs => {
-    const agentPrefs = (agent: 'codex' | 'claude-code'): WorkerAgentPrefs => {
       const p = parsed[agent];
       return {
         ...DEFAULT_PREFS[agent],
@@ -377,7 +376,6 @@ export function CreateWorkerPopover({
   const vendorKey = agent === 'codex' ? 'codex' : agent === 'cursor' ? 'cursor' : 'cc';
   const updateAgent = useCallback(
     (nextAgent: WorkerSelectableAgent) => {
-    (nextAgent: 'claude-code' | 'codex') => {
       if (nextAgent === agent) return;
       // 切走前把当前 agent 的 live 编辑(模型/effort/Fast/来源)快照进内存 prefs:
       // 恢复读的是 prefs,不快照会把「改了还没提交就切了个 tab」的编辑静默回滚到

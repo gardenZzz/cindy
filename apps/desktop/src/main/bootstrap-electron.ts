@@ -2722,7 +2722,6 @@ const registerIpcHandlers = () => {
     // 该窗口内 owner boundary 清掉旧登记后,本请求不得再 schedule(codex review
     // P1 第 3 轮)。
     }, stillValid);
->>>>>>> origin/main
   });
   ipcMain.handle(MAKER_IPC_INVOKE.SUBAGENT_MODEL_SETTINGS_RESET, async (event) => {
     // 同 SET:restart-capable 操作,先验可信渲染器(codex review P1)。

@@ -23,7 +23,6 @@ import {
   setAnthropicDiscoveredModels,
   setDiscoveredCodexModels,
 } from '../active-catalog.js';
-import type { AgentKind } from '@cindy/maker-core';
 
 function openaiIds(agent: AgentKind): string[] {
   const openai = getActiveCatalog().providers.find((p) => p.id === 'openai');

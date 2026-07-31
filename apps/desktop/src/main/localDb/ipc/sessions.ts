@@ -16,11 +16,6 @@ import {
   normalizeAutoTitle,
 } from '@cindy/maker-shared/session-title';
 
-import {
-  DEFAULT_DRAFT_SESSION_TITLE,
-  normalizeAutoTitle,
-} from '@cindy/maker-shared/session-title';
-
 import { getDbClient } from '../client/current';
 import type { DbClient } from '../client/DbClient';
 import { sessions, messages } from '../schema';
@@ -1462,6 +1457,7 @@ function removeCursorAcpConfigDir(sessionId: string, status: unknown): void {
       err: err instanceof Error ? err.message : String(err),
     });
   }
+}
 
 /** {@link selectSessionListRows} 的行形状——与 sessionToCamel 的入参对齐。 */
 interface SessionListRow {

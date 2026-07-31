@@ -303,6 +303,7 @@ export function RightSidebarShell({
     return () => {
       cancelled = true;
     };
+  }, [sessionId, bucket.hydrated, ghostPinsVersion]);
   // 关掉最后一个 tab → 通知 host 自动收起侧栏。只在 tab 数「从 >0 变 0」的转变时
   // 触发,不是"等于 0"就触发:
   //   - hydrated 后首帧 prev===null 不触发(区分"刚加载出来就是空"与"关到空");
