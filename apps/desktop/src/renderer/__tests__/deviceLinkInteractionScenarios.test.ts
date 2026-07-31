@@ -1025,7 +1025,7 @@ describe('远程交互接线不变式', () => {
     const handleStart = src.indexOf('const handleFastModeChange');
     expect(handleStart).toBeGreaterThan(-1);
     const handleBody = src.slice(handleStart, handleStart + 2200);
-    expect(handleBody).toContain('memoryProviderId = effectiveSourceId');
+    expect(handleBody).toContain('memoryProviderId = memorySourceId');
     expect(handleBody).toContain(
       'modelMemory?.setFast(currentModelAgentKind, memoryProviderId, modelId, enabled)',
     );
