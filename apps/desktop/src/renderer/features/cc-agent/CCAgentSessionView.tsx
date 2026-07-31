@@ -175,6 +175,7 @@ import {
   shouldRevealOrcaWorkersBeforeFirstPaint,
 } from './lib/orcaPassiveReveal';
 import { didOpenOrcaWorkersTab, revealOrcaWorkersWithRetry } from './lib/orcaWorkersRevealRetry';
+import { usageLimitScheduleNavigationState } from '@/features/scheduler/lib/usageLimitScheduleCreateIntent';
 import {
   closeOrcaWorkersTabAfterTeamEnd,
   ensureOrcaWorkersTab,
@@ -1185,6 +1186,7 @@ export function CCAgentSessionView({
     insertSystemCard,
     updateSystemCardData,
     error,
+    usageLimitRecovery,
     errorIsRecoverable,
     errorRetryText,
     credentialSwitchWait,
@@ -2538,6 +2540,23 @@ export function CCAgentSessionView({
     continueAfterSilentStop();
   }, [continueAfterSilentStop]);
 
+  const handleContinueAfterUsageReset = useCallback(() => {
+    if (!sessionId || !usageLimitRecovery || remoteDeviceId) return;
+    const requestId =
+      typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function'
+        ? crypto.randomUUID()
+        : `${sessionId}:${Date.now()}`;
+    navigate('/cc-agent/scheduled', {
+      state: usageLimitScheduleNavigationState({
+        kind: 'usage-limit-recovery',
+        requestId,
+        sessionId,
+        agentKind: session?.agentKind === 'codex' ? 'codex' : 'claude-code',
+        resetAtMs: usageLimitRecovery.resetAtMs,
+      }),
+    });
+  }, [navigate, remoteDeviceId, session?.agentKind, sessionId, usageLimitRecovery]);
+
   // 点击 Cancel 关闭报错 banner 同样是处置(用户选择不管它了)。
   const handleDismissError = useCallback(() => {
     if (sessionId) ackErrorAlertHandled(sessionId);
@@ -3126,6 +3145,11 @@ export function CCAgentSessionView({
                 retryText={errorRetryText}
                 onRetry={handleRetry}
                 onSilentStopContinue={handleSilentStopContinue}
+                onContinueAfterUsageReset={
+                  usageLimitRecovery && !remoteDeviceId
+                    ? handleContinueAfterUsageReset
+                    : undefined
+                }
                 onCancel={handleDismissError}
                 agentKind={session?.agentKind}
                 remoteHostId={session?.remoteHostId ?? undefined}

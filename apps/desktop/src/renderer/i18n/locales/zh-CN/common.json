@@ -1286,6 +1286,8 @@
           "models": "模型",
           "modelIdPlaceholder": "model-id",
           "modelNamePlaceholder": "显示名称",
+          "modelContextWindowPlaceholder": "上下文(tokens)",
+          "modelContextWindowTitle": "上下文窗口(tokens)。留空按 200K 保守默认；影响窗口显示与压缩阈值。",
           "addModel": "添加模型",
           "headers": "请求头(可选)",
           "headerNamePlaceholder": "Header-Name",
@@ -1311,6 +1313,7 @@
           "nameRequired": "请填写显示名称",
           "runtimeRequired": "请至少配置一个 Runtime（填写它的基础 URL 和模型）",
           "baseUrlInvalid": "基础 URL 必须是合法的 http(s) 地址",
+          "contextWindowInvalid": "上下文窗口必须是合法的正整数（数字组之间可用分隔符）",
           "requestPathInvalid": "精确请求路径需以单个 / 开头，不含片段标识或 .、.. 路径段；空格和不安全字符请使用百分号编码",
           "modelRequired": "请至少添加一个模型",
           "oauthInvalid": "OAuth 配置不完整：所有字段均必填，且两个端点必须是安全的 https 地址"
@@ -2478,6 +2481,11 @@
         "slackDescription": "绑定 Slack workspace，在 Slack 里 @Cindy 派发任务。",
         "slackDisabledHint": "打开开关即发起 Slack 授权，绑定完成后即可在 Slack 里派活。",
         "slackBoundHint": "已完成绑定。关闭开关将解除绑定，重新打开需再次授权。",
+        "lifecycleAnnouncement": {
+          "label": "上下线通知",
+          "cellLabel": "消息通知",
+          "hint": "设备上下线时由 Slack Bot 发送通知消息"
+        },
         "toggleAria": "切换 Slack 连接的启用状态",
         "installApp": "安装 Slack App",
         "status": {
@@ -3084,12 +3092,10 @@
           "model": "模型",
           "permission": "动手权限",
           "permissionDisabled": "派活时不提供这一档",
-          "resetFollow": "恢复跟随默认",
           "workdir": "工作目录",
           "workdirDefault": "插件专属文件夹(默认)",
           "workdirPick": "选择…",
-          "workdirClear": "恢复默认目录",
-          "followDefault": "跟随默认"
+          "workdirClear": "恢复默认目录"
         },
         "toolsTitle": "Tools",
         "permissionsTitle": "权限",
@@ -5024,6 +5030,8 @@
       "retryTitle": "重新发送最后一条消息",
       "cancelTitle": "关闭错误提示",
       "retry": "重试",
+      "continueAfterReset": "恢复后继续",
+      "continueAfterResetTitle": "创建一次性自动化，在用量恢复后继续当前任务",
       "credentialSwitchBusy": "其他 Codex 任务正在运行，暂时无法按本对话选择的模型来源切换（需要重启共享的 Codex 后台进程）。等其他任务结束后点「重试」即可。",
       "codexThreadStale": "Codex 鉴权模式已切换，当前对话无法继续 —— 请新建对话后生效。",
       "budgetModelHint": "如果反复失败，可以切换到普通版 GPT 再试试。",
@@ -6263,6 +6271,10 @@
       "promptHeading": "暂无自动化任务",
       "promptDescription": "创建一个 cron 自动化任务，让 Claude Code 或 Codex 按计划执行你的 Prompt。"
     },
+    "usageLimitRecovery": {
+      "name": "用量恢复后继续任务",
+      "prompt": "从中断的位置继续完成当前任务。"
+    },
     "template": {
       "useTemplate": "新手帮助",
       "blank": "空白",
@@ -6573,6 +6585,7 @@
     },
     "chips": {
       "selectProject": "选择项目",
+      "chooseTime": "选择时间",
       "recent": "最近",
       "browseFolder": "选择其他文件夹",
       "advanced": "高级",

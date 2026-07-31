@@ -1286,6 +1286,8 @@
           "models": "モデル",
           "modelIdPlaceholder": "model-id",
           "modelNamePlaceholder": "表示名",
+          "modelContextWindowPlaceholder": "コンテキスト(tokens)",
+          "modelContextWindowTitle": "コンテキストウィンドウ(トークン数)。空欄の場合は保守的な既定値 200K。ウィンドウ表示と圧縮しきい値に影響します。",
           "addModel": "モデルを追加",
           "headers": "リクエストヘッダー(任意)",
           "headerNamePlaceholder": "Header-Name",
@@ -1311,6 +1313,7 @@
           "nameRequired": "表示名を入力してください",
           "runtimeRequired": "Runtime を 1 つ以上設定してください（ベース URL とモデル）",
           "baseUrlInvalid": "ベース URL は有効な http(s) アドレスである必要があります",
+          "contextWindowInvalid": "コンテキストウィンドウは有効な正の整数である必要があります（数字グループの間に区切り記号を使用できます）",
           "requestPathInvalid": "正確なリクエストパスは 1 つの / で始め、フラグメントや .、.. のパスセグメントを含めないでください。空白や安全でない文字はパーセントエンコードしてください。",
           "modelRequired": "モデルを 1 つ以上追加してください",
           "oauthInvalid": "OAuth 設定が不完全です。すべての項目が必須で、両方のエンドポイントは安全な https URL である必要があります"
@@ -2478,6 +2481,11 @@
         "slackDescription": "Slack ワークスペースを連携し、Slack から Cindy にタスクを依頼できます。",
         "slackDisabledHint": "スイッチをオンにすると Slack 認証が始まります。連携が完了すると Slack からタスクを依頼できます。",
         "slackBoundHint": "連携が完了しました。スイッチをオフにすると連携が解除され、再びオンにするには再認証が必要です。",
+        "lifecycleAnnouncement": {
+          "label": "オンライン・オフライン通知",
+          "cellLabel": "メッセージ通知",
+          "hint": "このデバイスのオンライン・オフライン時に Slack Bot から通知メッセージを送信します"
+        },
         "toggleAria": "Slack 接続の有効状態を切り替え",
         "installApp": "Slack アプリをインストール",
         "status": {
@@ -3084,12 +3092,10 @@
           "model": "モデル",
           "permission": "書き込み権限",
           "permissionDisabled": "代行セッションでは選べません",
-          "resetFollow": "既定に従うに戻す",
           "workdir": "作業フォルダー",
           "workdirDefault": "プラグイン専用フォルダー(既定)",
           "workdirPick": "選択…",
-          "workdirClear": "既定のフォルダーに戻す",
-          "followDefault": "既定に従う"
+          "workdirClear": "既定のフォルダーに戻す"
         },
         "toolsTitle": "Tools",
         "permissionsTitle": "権限",
@@ -5024,6 +5030,8 @@
       "retryTitle": "最後のメッセージを再送信",
       "cancelTitle": "エラーを閉じる",
       "retry": "再試行",
+      "continueAfterReset": "リセット後に続行",
+      "continueAfterResetTitle": "利用上限のリセット後にこのタスクを続行する一回限りの自動化を作成",
       "credentialSwitchBusy": "他の Codex タスクが実行中のため、この会話で選択したプロバイダーへまだ切り替えられません（共有 Codex プロセスの再起動が必要です）。他のタスクの終了後に「再試行」を押してください。",
       "codexThreadStale": "Codex の認証モードが切り替わりました。この会話は続行できません。新しい会話を開始してください。",
       "budgetModelHint": "繰り返し失敗する場合は、通常版 GPT モデルに切り替えてお試しください。",
@@ -6263,6 +6271,10 @@
       "promptHeading": "自動化がまだありません",
       "promptDescription": "cron 自動化を作成して、Claude Code または Codex にプロンプトをスケジュール実行させましょう。"
     },
+    "usageLimitRecovery": {
+      "name": "利用上限リセット後にタスクを続行",
+      "prompt": "中断したところから現在のタスクを続行してください。"
+    },
     "template": {
       "useTemplate": "初心者ヘルプ",
       "blank": "空白",
@@ -6573,6 +6585,7 @@
     },
     "chips": {
       "selectProject": "プロジェクトを選択",
+      "chooseTime": "時刻を選択",
       "recent": "最近",
       "browseFolder": "別のフォルダを選択",
       "advanced": "詳細設定",
