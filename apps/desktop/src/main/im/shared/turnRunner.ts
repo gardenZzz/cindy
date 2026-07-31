@@ -545,7 +545,6 @@ export function createTurnRunner(
       target = created.target;
     }
     const row = target.row;
-    args.onRouteResolved?.(row.id);
     if (!target.authChecked) {
       const auth = await checkImRouteAuthDetailed(row, undefined, authCheckDeps());
       if (!auth.ok) {
