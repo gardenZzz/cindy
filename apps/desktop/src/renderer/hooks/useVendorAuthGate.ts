@@ -235,11 +235,8 @@ export function useVendorAuthGate(): UseVendorAuthGateReturn {
           });
           return { proceed: false };
         }
-        // 缓存说「装了」直接信;说「没装」必须现场重探一次再拦人 —— 用户可能刚在终端里
-        // 装完(Cindy 之外的安装没有事件可订阅),拿一个过期的否定结果去弹「请先安装」
-        // 是硬拦截,代价远大于多探一次的几毫秒。
-        let installed = await getCursorAvailability();
-        if (!installed) installed = await getCursorAvailability({ refresh: true });
+        // 全局只在启动和设置页手动点击刷新时重探，门禁严格从缓存读取（spec #38）。
+        const installed = await getCursorAvailability();
         if (!installed) {
           const ok = await confirm({
             title: t('settings.providers.cursor.title'),
