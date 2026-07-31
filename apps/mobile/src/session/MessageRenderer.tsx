@@ -224,6 +224,10 @@ import {
   type MobileWorkChildItem,
   type MobileWorkGroupItem,
 } from '@/session/messageRenderModel';
+import {
+  PendingSendBubble,
+  type PendingSendBubbleActions,
+} from '@/session/PendingSendBubble';
 import { dedupeToolMediaByUrl } from '@cindy/maker-shared/message-render';
 import { tokenizeThinkingText } from '@cindy/maker-shared/thinking-text';
 import {
@@ -433,6 +437,8 @@ interface MessageActions {
   /** 正文里会话深链 chip(xdt-maker://session/…)点击回调,app 内跳转。 */
   onOpenSessionLink?: (url: string) => void;
   onPreviewRewind?: (clientId: string, draft: MobileMessageDraft) => void;
+  /** 待发送气泡(pending_send 项)的展开态与队列操作回调。 */
+  pendingSend?: PendingSendBubbleActions;
   onReadTextFilePreview?: (filePath: string) => Promise<RemoteTextFilePreviewResult>;
   onReleaseRemoteMedia?: (sourceUrl: string, media: MobileResolvedRemoteMedia) => void;
   onResolveRemoteMedia?: ResolveRemoteMediaFn;
@@ -458,6 +464,7 @@ export function MessageRenderer({
   onOpenSessionLink,
   onPreviewRewind,
   onQuoteSelection,
+  pendingSend,
   onReadTextFilePreview,
   onReleaseRemoteMedia,
   onResolveRemoteMedia,
@@ -697,6 +704,9 @@ export function MessageRenderer({
     onPreviewRewind,
     onOpenPayload: setPayload,
     onResolveRemoteMedia,
+    // 待发送气泡(pending_send 项)的展开态与队列操作:漏了这一项 actions.pendingSend 就是
+    // undefined,渲染分支直接 null —— 气泡整个不画,乐观显示消失。
+    pendingSend,
     busyClientId,
     firstUserMessageClientId,
     isSessionStreaming,
@@ -713,6 +723,7 @@ export function MessageRenderer({
     onOpenSessionLink,
     onPreviewRewind,
     onResolveRemoteMedia,
+    pendingSend,
     viewportLayout.contentWidth,
   ]);
   // chat-text-quote:选区采集 context。仅「会话页传了采集回调 + iOS」时启用
@@ -1298,6 +1309,20 @@ const RenderItemView = memo(function RenderItemView({
       break;
     case 'fork_origin':
       node = <ForkOriginMarker onOpenForkOrigin={actions.onOpenForkOrigin} />;
+      break;
+    case 'pending_send':
+      // 待发送气泡。actions.pendingSend 由会话页恒传;真缺失时**跳过这一项**(不渲染),
+      // 而不是渲染一个点不动的气泡 —— 没有回调的气泡无法取消 / 编辑 / 重试,画出来只会
+      // 让用户对着死气泡操作。渲染路径无 ErrorBoundary,这里也不抛,免得整列崩掉。
+      node = actions.pendingSend
+        ? (
+          <PendingSendBubble
+            actions={actions.pendingSend}
+            item={item}
+            resolveRemoteMedia={actions.onResolveRemoteMedia}
+          />
+        )
+        : null;
       break;
     default:
       // 穷尽性保证:给 render-item union 加新变体却漏处理 → typecheck 报错(入参 never)。运行时降级为
@@ -2936,6 +2961,17 @@ const agentSwitchEngineLabel = (kind: unknown): string => {
   if (kind === 'cursor') return 'Cursor';
   return 'Claude Code';
 };
+
+// 交接正文是否为英文格式(与 desktop SystemCard.tsx 同款判据)。content.handoff 是持久化
+// 数据:英文化之前落库的行仍是中文正文,升级后展开老卡片看到的就是中文——标题里「原文为
+// 英文」那句只能对新格式说。判据取英文结束标记的公共尾巴:三种英文标记都含它,旧中文标记不含。
+const ENGLISH_HANDOFF_TERMINATOR_TAIL = "; the user's new message follows ==";
+
+function isEnglishSourceHandoff(handoff: string): boolean {
+  // 锚在尾部而非 includes(与 desktop SystemCard.tsx 同款):正文里嵌着历史原文,
+  // 可能自身就含这段尾串,那样旧中文交接会被误判成英文。
+  return handoff.trimEnd().endsWith(ENGLISH_HANDOFF_TERMINATOR_TAIL);
+}
 
 // 交接正文是否为英文格式(与 desktop SystemCard.tsx 同款判据)。content.handoff 是持久化
 // 数据:英文化之前落库的行仍是中文正文,升级后展开老卡片看到的就是中文——标题里「原文为
