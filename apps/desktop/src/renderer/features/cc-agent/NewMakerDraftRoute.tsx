@@ -504,7 +504,9 @@ export function NewMakerDraftRoute() {
   // device-link 远程草稿不在控制端翻 Cursor 段:被控端是否装了 cursor-agent 是另一回事,
   // 用本机能力判断被控端会为没装的设备建 Cursor 会话;能力应按被控端上报(留待 device-link
   // 契约一期,本处先最小关掉)。见 issue #3 收尾。
-  const [includeCursor, setIncludeCursor] = useState(false);
+  // null = 探测未回;未知态**不能**当成「没装」——否则每次进新建页都会在探测回来前
+  // 把停在 cursor 的草稿翻成 cc(且不会翻回去),用户上次选的 Cursor 及其档位记忆全部作废。
+  const [includeCursor, setIncludeCursor] = useState<boolean | null>(null);
   useEffect(() => {
     // 远程草稿:不翻开 Cursor 段。
     if (draft.deviceLinkDeviceId != null) {
@@ -524,12 +526,15 @@ export function NewMakerDraftRoute() {
       cancelled = true;
     };
   }, [draft.deviceLinkDeviceId]);
-  // 探测结果回来前若草稿停在 cursor，先回落到 cc，避免未注册 agent 建会话。
+  // 确认没装(探测已回且为 false)才把停在 cursor 的草稿回落到 cc,避免未注册 agent 建会话。
   useEffect(() => {
-    if (!includeCursor && draft.vendor === 'cursor') {
+    if (includeCursor === false && draft.vendor === 'cursor') {
       switchVendor('cc', getCurrentVendorPrefs());
     }
   }, [includeCursor, draft.vendor]);
+  // 探测期(null)只对「上次就停在 cursor」的草稿显示该段:避免没装 cursor 的用户每次进页闪一下,
+  // 也避免已选 cursor 的用户看到自己选中的段临时消失。
+  const showCursorSegment = includeCursor === true || draft.vendor === 'cursor';
 
   /** createSession 失败 toast:远端路由错误按 code 给可操作文案,其余回退通用文案。 */
   const toastCreateSessionFailed = (err?: unknown) => {
@@ -3256,12 +3261,12 @@ export function NewMakerDraftRoute() {
                       <VendorSegmentedSwitcher
                         value={draft.vendor}
                         onChange={handleVendorChange}
-                        width={includeCursor ? 210 : 150}
+                        width={showCursorSegment ? 210 : 150}
                         dense
                         visualVariant="create-agent"
                         className="shrink-0"
                         disabled={wtCreating}
-                        includeCursor={includeCursor}
+                        includeCursor={showCursorSegment}
                       />
                     }
                     // 协同 toggle(与对话界面同一控件):本地与 SSH 远端项目 draft 均可用
@@ -3307,13 +3312,13 @@ export function NewMakerDraftRoute() {
                       <VendorSegmentedSwitcher
                         value={draft.vendor}
                         onChange={handleVendorChange}
-                        width={includeCursor ? 96 : 72}
+                        width={showCursorSegment ? 96 : 72}
                         dense
                         iconOnly
                         visualVariant="create-agent"
                         className="shrink-0"
                         disabled={wtCreating}
-                        includeCursor={includeCursor}
+                        includeCursor={showCursorSegment}
                       />
                     }
                     narrowToolbar={isDraftToolbarNarrow}
