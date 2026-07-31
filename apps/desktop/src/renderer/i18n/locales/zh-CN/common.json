@@ -1487,7 +1487,7 @@
         "logoutConfirm": "登出",
         "authRequiredTitle": "需要登录 Cursor",
         "authRequiredDescription": "请先在设置 → 模型供应商中登录 Cursor，然后再新建对话。",
-        "optionalHint": "可选——不阻塞其它功能",
+        "optionalHint": "Cursor ACP",
         "refreshAria": "重新检测 Cursor 安装状态",
         "confirmTitle": "安装 Cursor？",
         "confirmDescription": "确认后，Cindy 将在本机执行官方安装命令：\n\n{{command}}\n\n未确认前不会执行任何安装。",
@@ -1509,6 +1509,15 @@
           "effortHint_other": "{{count}} 档推理强度",
           "cancelRefresh": "取消刷新",
           "refreshFailed": "模型刷新失败，请稍后再试"
+        },
+        "groups": {
+          "cursor": "Cursor",
+          "anthropic": "Anthropic",
+          "openai": "OpenAI",
+          "google": "Google",
+          "xai": "xAI",
+          "domestic": "国内",
+          "other": "其它"
         }
       },
       "wizard": {

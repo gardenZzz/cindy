@@ -341,6 +341,12 @@ const rendererConfig = {
       ...INTERNAL_PURE_PACKAGE_EXCLUDES,
     ],
     include: ['@tiptap/react'],
+    // @cindy/maker-core 顶层 re-export 了 import './x.md?raw' 的模块(system-prompt
+    // 等),renderer 对 maker-core 的引用虽多为 import type,但 vite/esbuild 预打包仍会把
+    // 整包源码拉进图,而 plugin-vite 的 esbuild 预构建不认 ?raw 查询,缺 loader 即 build
+    // failed -> dev renderer server(5173)起不来。这里让 .md 走 text loader,等价 ?raw 语义,
+    // 只影响 dev 预构建;production 走 rollup 原生支持 ?raw,不受影响。
+    esbuildOptions: { loader: { '.md': 'text' as const } },
   },
   server: {
     watch: {

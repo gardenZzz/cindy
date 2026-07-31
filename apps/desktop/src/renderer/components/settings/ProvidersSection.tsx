@@ -26,6 +26,7 @@ import { Check, MoreHorizontal, Pencil, Plus, RefreshCw, Trash2 } from 'lucide-r
 
 import { cn } from '@/lib/utils';
 import { useProviders } from '@/hooks/useProviders';
+import { useAgentCapabilities } from '@/hooks/useAgentCapabilities';
 import { isChatGptConnectionConnected, useCodexAuth } from '@/hooks/useCodexAuth';
 import { useApiKey } from '@/hooks/useApiKey';
 import { useModelAccessStatus } from '@/hooks/useModelAccessStatus';
@@ -239,6 +240,7 @@ function DetailHeader({
   provider,
   detail,
   badge,
+  modelCount: modelCountOverride,
 }: {
   icon: ReactNode;
   title: string;
@@ -247,12 +249,19 @@ function DetailHeader({
   provider?: ProviderView;
   detail?: ReactNode;
   badge?: ReactNode;
+  /** 非 ProviderView 渠道(如 Cursor)直接给数,跳过 buildUnionRows 推导。 */
+  modelCount?: number | null;
 }) {
   const { t } = useTranslation();
   const hasModels = !!provider && providerHasModels(provider);
   const modelCount = useMemo(
-    () => (hasModels && provider ? buildUnionRows(provider).length : null),
-    [hasModels, provider],
+    () =>
+      modelCountOverride !== undefined
+        ? modelCountOverride
+        : hasModels && provider
+          ? buildUnionRows(provider).length
+          : null,
+    [modelCountOverride, hasModels, provider],
   );
   const subscriptionProduct =
     provider?.access?.kind === 'subscription' ? provider.access.product : null;
@@ -1285,11 +1294,16 @@ function extractLoginUrl(detail: string): string | null {
 
 function CursorRow({ selected, onSelect }: { selected: boolean; onSelect: () => void }) {
   const { t } = useTranslation();
+  // 与 CursorModelList 同源(useAgentCapabilities 有模块级缓存,多处挂载只拉一次);
+  // 未探测过时 availableModels 为空 → 计数为 0,按「无可报数」不显示,对齐 ListRow 的 null 语义。
+  const { capabilities } = useAgentCapabilities('cursor');
+  const modelCount = capabilities?.availableModels.length ?? null;
   return (
     <button
       type="button"
       onClick={onSelect}
       aria-current={selected}
+      aria-label={t('settings.providers.cursor.title')}
       className={cn(
         'flex w-full items-center gap-2.5 rounded-lg px-2.5 py-2 text-left transition-colors',
         !selected && 'hover:bg-[var(--surface-hover)]',
@@ -1312,8 +1326,17 @@ function CursorRow({ selected, onSelect }: { selected: boolean; onSelect: () => 
       >
         {t('settings.providers.cursor.title')}
       </span>
-      {/* ponytail: 不带连接态圆点 —— 那需要把探测状态提到 Section 层,而装没装/登没登
-          点进详情就一眼看到,不值得为一个圆点多铺一条状态线。 */}
+      {modelCount !== null && modelCount > 0 && (
+        <span className="shrink-0 text-11 tabular-nums" style={{ color: 'var(--text-tertiary)' }}>
+          {t('settings.providers.models.modelCount', { count: modelCount })}
+        </span>
+      )}
+      {/* ponytail: 圆点恒绿,不按探测态着色 —— 探测状态在详情层,row 层为一个圆点
+          铺一条状态线不值;装没装/登没登点进详情一眼看到(2026-07-31 用户定稿)。 */}
+      <span
+        className="h-1.5 w-1.5 shrink-0 rounded-full"
+        style={{ backgroundColor: 'var(--remote-status-ready)' }}
+      />
     </button>
   );
 }
@@ -1333,6 +1356,12 @@ function CursorDetail() {
   }>({ running: false, done: 0, total: 0 });
   const platform = window.electronAPI.platform;
   const installSupported = platform === 'darwin' || platform === 'linux';
+  // 详情头计数 chip:与 CursorModelList 同源(hook 有模块级缓存);未探测过(=0)不显示,
+  // 对齐 ProviderView 渠道 modelCount===null 不渲染 chip 的语义。Auto 是合成兜底行,不计。
+  const { capabilities: cursorCaps } = useAgentCapabilities('cursor');
+  const cursorModelCount = (cursorCaps?.availableModels.length ?? 0) > 0
+    ? cursorCaps!.availableModels.length
+    : null;
 
   const refreshAuth = useCallback(async () => {
     const authApi = window.electronAPI?.maker?.auth;
@@ -1673,8 +1702,46 @@ function CursorDetail() {
           </>
         )}
 
-        {/* 模型清单 + 显示开关（spec #21 / #26）。已安装才列；探测编排由 #28 接线。 */}
-        {probe.kind === 'installed' && !loginUrl && (
+        {/* 模型清单 + 显示开关（spec #21 / #26）移出 detail:UnifiedModelList 同款
+            通栏工具行(px-5 自带内边距),塞 pl-12 缩进里会和正常供应商版式错位;
+            改由下方 DetailHeader 之外通栏渲染,对齐其它供应商的分隔线 + 全宽列表。 */}
+
+      </div>
+    );
+
+  return (
+    <>
+      <DetailHeader
+        icon={<CursorMark size={18} />}
+        title={t('settings.providers.cursor.title')}
+        subtitle={t('settings.providers.cursor.optionalHint')}
+        badge={badgeLabel ? <CustomTag label={badgeLabel} /> : undefined}
+        modelCount={cursorModelCount}
+        trailing={
+          <div className="flex shrink-0 items-center gap-2.5">
+            {action}
+            <RowIconButton
+              icon={
+                <RefreshCw
+                  size={14}
+                  className={probe.kind === 'loading' || installing ? 'animate-spin' : undefined}
+                />
+              }
+              label={t('settings.providers.cursor.refreshAria')}
+              onClick={() => void refresh()}
+              disabled={probe.kind === 'loading' || installing || authBusy}
+            />
+          </div>
+        }
+        detail={body}
+      />
+      {/* 已安装且不在登录流程时才列;探测编排由 #28 接线。 */}
+      {probe.kind === 'installed' && !loginUrl && (
+        <>
+          <div
+            className="border-t"
+            style={{ borderColor: 'var(--settings-theme-card-border)' }}
+          />
           <CursorModelList
             onRefresh={() => void handleRefreshModels()}
             onCancel={() => void handleCancelRefresh()}
@@ -1683,41 +1750,12 @@ function CursorDetail() {
               done: refreshState.done,
               total: refreshState.total,
               unavailableReason:
-                probe.kind !== 'installed'
-                  ? 'not-installed'
-                  : auth.kind !== 'authenticated'
-                    ? 'not-authenticated'
-                    : null,
+                auth.kind !== 'authenticated' ? 'not-authenticated' : null,
             }}
           />
-        )}
-      </div>
-    );
-
-  return (
-    <DetailHeader
-      icon={<CursorMark size={18} />}
-      title={t('settings.providers.cursor.title')}
-      subtitle={t('settings.providers.cursor.optionalHint')}
-      badge={badgeLabel ? <CustomTag label={badgeLabel} /> : undefined}
-      trailing={
-        <div className="flex shrink-0 items-center gap-2.5">
-          {action}
-          <RowIconButton
-            icon={
-              <RefreshCw
-                size={14}
-                className={probe.kind === 'loading' || installing ? 'animate-spin' : undefined}
-              />
-            }
-            label={t('settings.providers.cursor.refreshAria')}
-            onClick={() => void refresh()}
-            disabled={probe.kind === 'loading' || installing || authBusy}
-          />
-        </div>
-      }
-      detail={body}
-    />
+        </>
+      )}
+    </>
   );
 }
 

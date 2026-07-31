@@ -1488,7 +1488,7 @@
         "logoutConfirm": "Sign out",
         "authRequiredTitle": "Sign in to Cursor",
         "authRequiredDescription": "Sign in to Cursor under Settings → Model providers before creating a session.",
-        "optionalHint": "Optional — nothing else is blocked",
+        "optionalHint": "Cursor ACP",
         "refreshAria": "Recheck Cursor installation",
         "confirmTitle": "Install Cursor?",
         "confirmDescription": "Cindy will run this official install command on your machine:\n\n{{command}}\n\nNothing runs until you confirm.",
@@ -1510,6 +1510,15 @@
           "effortHint_other": "{{count}} effort tiers",
           "cancelRefresh": "Cancel refresh",
           "refreshFailed": "Could not refresh models. Try again later."
+        },
+        "groups": {
+          "cursor": "Cursor",
+          "anthropic": "Anthropic",
+          "openai": "OpenAI",
+          "google": "Google",
+          "xai": "xAI",
+          "domestic": "China",
+          "other": "Other"
         }
       },
       "wizard": {
