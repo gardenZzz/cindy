@@ -314,10 +314,24 @@ export class Maker {
 
     // 落地元数据 —— storage 已有同 id 的 row 时跳过 insert, 走 update 把 sdkSessionId 写回
     let meta: SessionMeta;
+    const cursorModelFallback = opts.agentKind === 'cursor' && (
+      handle.startupEvents?.some((event) => (
+        event.type === 'error' &&
+        (event.data as { reason?: unknown } | undefined)?.reason === 'initial_model_unavailable'
+      )) ?? false
+    );
     const existingRow = opts.id ? await this.storage.get(opts.id) : null;
     if (existingRow) {
-      meta = handle.id !== '<pending>' && existingRow.sdkSessionId !== handle.id
-        ? await this.storage.update(id, { sdkSessionId: handle.id })
+      const patch = {
+        ...(handle.id !== '<pending>' && existingRow.sdkSessionId !== handle.id
+          ? { sdkSessionId: handle.id }
+          : {}),
+        ...(cursorModelFallback && existingRow.model !== handle.model
+          ? { model: handle.model }
+          : {}),
+      };
+      meta = Object.keys(patch).length > 0
+        ? await this.storage.update(id, patch)
         : existingRow;
     } else {
       meta = await this.storage.create({
@@ -325,7 +339,7 @@ export class Maker {
         agentKind: opts.agentKind,
         workDir: opts.workingDir,
         title: opts.title ?? DEFAULT_DRAFT_SESSION_TITLE,
-        model: opts.model,
+        model: cursorModelFallback ? handle.model : opts.model,
         workspaceKind: opts.workspaceKind,
         effort: opts.effort,
         permissionMode: opts.permissionMode,
@@ -380,7 +394,7 @@ export class Maker {
           this.logger.warn('failed to persist sdkSessionId', { error: String(e) });
         });
       }
-    });
+    }, { replayStartupEvents: false });
 
     session.onStatusChange((status) => {
       if (status === 'closed') {

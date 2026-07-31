@@ -35,6 +35,9 @@ export interface CursorIsolatedConfig {
   dispose: () => void;
 }
 
+/** 读取用户全局 cli-config 的 network 段；测试可注入以隔离真实用户目录。 */
+export type CursorNetworkConfigReader = (baseEnv: NodeJS.ProcessEnv) => unknown;
+
 export interface CreateCursorIsolatedConfigOptions {
   /**
    * Cindy 业务 session id（非上游 sdk session id）。
@@ -47,6 +50,8 @@ export interface CreateCursorIsolatedConfigOptions {
    * **必填**——maker-core 零 Electron 依赖，也不静默写开发者 HOME。
    */
   userDataPath: string;
+  /** 可选的 network 来源；未注入时不继承用户配置，使用内置默认值。 */
+  networkConfigReader?: CursorNetworkConfigReader;
 }
 
 function safeDirSegment(key: string): string {
@@ -79,11 +84,12 @@ function isStrictlyInside(parent: string, child: string): boolean {
 }
 
 /**
- * 用户全局 cli-config 的 `network` 段。`useHttp1ForAgent` 是上游对付
- * 「h2 stream CANCEL / 反复重连」的逃生阀；隔离 config 写死会把它关死，
- * 用户在 Cursor 里打开也对 Cindy 会话无效。读不到就 undefined（用默认）。
+ * 显式读取用户全局 cli-config 的 `network` 段，供生产调用点选择性传入。
+ * `useHttp1ForAgent` 是上游对付「h2 stream CANCEL / 反复重连」的逃生阀；
+ * 隔离 config 写死会把它关死，用户在 Cursor 里打开也对 Cindy 会话无效。
+ * 读不到就 undefined（用默认）。
  */
-function readUserNetworkConfig(baseEnv: NodeJS.ProcessEnv): unknown {
+export function readUserNetworkConfigFromEnv(baseEnv: NodeJS.ProcessEnv): unknown {
   const dir = baseEnv.CURSOR_CONFIG_DIR?.trim() || join(homedir(), '.cursor');
   try {
     const raw = JSON.parse(readFileSync(join(dir, 'cli-config.json'), 'utf8')) as unknown;
@@ -144,7 +150,8 @@ export function createCursorIsolatedConfigDir(
   mkdirSync(root, { recursive: true });
   const configDir = join(root, safeDirSegment(opts.stableKey ?? `ephemeral-${Date.now()}`));
   mkdirSync(configDir, { recursive: true });
-  writeIsolatedCliConfig(configDir, readUserNetworkConfig(baseEnv));
+  const network = opts.networkConfigReader?.(baseEnv);
+  writeIsolatedCliConfig(configDir, network);
 
   return {
     configDir,

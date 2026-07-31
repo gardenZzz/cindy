@@ -174,6 +174,7 @@ async function runDiscovery(transport: DiscoveryTransport): Promise<CursorModels
     runtimeConfig: { userDataPath },
     binaryPath: '/dev/null/cursor-agent',
     logger: createConsoleLogger('cursor-discovery-unit'),
+    networkConfigReader: () => undefined,
     onCursorLocalModelsListed: (listing) => {
       published.push(listing);
     },

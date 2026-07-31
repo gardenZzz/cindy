@@ -74,7 +74,10 @@ import {
   type SetConfigOptionResult,
   type Transport,
 } from '../acp/index.js';
-import { createCursorIsolatedConfigDir } from './isolatedConfig.js';
+import {
+  createCursorIsolatedConfigDir,
+  readUserNetworkConfigFromEnv,
+} from './isolatedConfig.js';
 import { isCursorResumeSessionNotFound } from './invalidResume.js';
 import {
   askQuestionResponseFromDecision,
@@ -478,6 +481,7 @@ export class CursorAgent extends BaseAgent {
     const isolated = createCursorIsolatedConfigDir(process.env, {
       stableKey: 'model-discovery',
       userDataPath: opts.userDataPath,
+      networkConfigReader: this.deps.networkConfigReader ?? readUserNetworkConfigFromEnv,
     });
     const client = new AcpClient({
       createTransport:
@@ -646,6 +650,7 @@ export class CursorAgent extends BaseAgent {
     }
 
     const eventQueue: AsyncQueue<AgentEvent> = createAsyncQueue();
+    const startupEvents: AgentEvent[] = [];
     const usageTracker = new UsageTracker();
     const rt = newAcpRuntime();
     const translateCtx: AcpTranslateContext = {
@@ -699,6 +704,7 @@ export class CursorAgent extends BaseAgent {
     const isolated = createCursorIsolatedConfigDir(process.env, {
       stableKey: opts.sessionId,
       userDataPath,
+      networkConfigReader: this.deps.networkConfigReader ?? readUserNetworkConfigFromEnv,
     });
 
     const pushAll = (events: AgentEvent[]): void => {
@@ -1323,17 +1329,15 @@ export class CursorAgent extends BaseAgent {
             log.warn('cursor initial setModel failed', { model: desiredModel, switching, message });
             // 只有「用户要的模型没换上」才提示；同模型 refresh 失败无行为差异。
             if (switching) {
-              pushAll([
-                {
-                  type: 'error',
-                  data: {
-                    message: formatCursorInitialModelFailedMessage(desiredModel, mutableModel, message),
-                    isTerminal: false,
-                    reason: 'initial_model_unavailable',
-                  },
-                  source: 'cursor',
+              startupEvents.push({
+                type: 'error',
+                data: {
+                  message: formatCursorInitialModelFailedMessage(desiredModel, mutableModel, message),
+                  isTerminal: false,
+                  reason: 'initial_model_unavailable',
                 },
-              ]);
+                source: 'cursor',
+              });
             }
           }
         }
@@ -1703,6 +1707,7 @@ export class CursorAgent extends BaseAgent {
       get model() {
         return mutableModel;
       },
+      startupEvents,
 
       async send(message: UserMessage, sendOpts?: SendOptions) {
         if (closed) throw new Error('Cursor session is closed');

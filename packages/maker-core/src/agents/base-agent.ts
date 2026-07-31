@@ -285,6 +285,12 @@ export interface AgentDeps {
   ) => void | Promise<void>;
 
   /**
+   * Cursor 用户全局 cli-config 的 network 读取器。缺省时由 CursorAgent 显式使用
+   * 生产读取器；单测应注入空读取器，避免接触开发者真实 HOME。
+   */
+  networkConfigReader?: import('./cursor/isolatedConfig.js').CursorNetworkConfigReader;
+
+  /**
    * Host-owned Auto permission fallback. A vendor reviewer timeout/unavailable
    * result has already blocked the current action; the host persists this session
    * from Auto to Ask and broadcasts the selector/toast update. Fire-and-forget:
@@ -908,6 +914,11 @@ export interface AgentSessionHandle {
   readonly id: string;
   readonly agentKind: AgentKind;
   readonly model: string;
+  /**
+   * Agent 启动完成前产生、但必须等 Session 的 host listeners 挂载后再交付的事件。
+   * 仅用于启动期可恢复告警；普通流式事件继续走 events()。
+   */
+  readonly startupEvents?: readonly AgentEvent[];
   /** Codex-only: 当前会话绑定的 app-server host 是否经 loopback proxy 出口。 */
   readonly codexProxyActive?: boolean;
   /**

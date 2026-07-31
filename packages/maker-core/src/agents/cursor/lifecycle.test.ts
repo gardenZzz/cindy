@@ -226,6 +226,7 @@ async function bootWithTransport(
     runtimeConfig: { userDataPath },
     binaryPath: '/dev/null/cursor-agent',
     logger,
+    networkConfigReader: () => undefined,
   });
 
   // Respond to initialize + session create/load as requests arrive.
@@ -790,6 +791,7 @@ describe('CursorAgent lifecycle (FakeTransport)', () => {
       runtimeConfig: {},
       binaryPath: '/dev/null/cursor-agent',
       logger: createConsoleLogger(),
+      networkConfigReader: () => undefined,
     });
     await expect(
       agent.startSession({
@@ -1042,19 +1044,21 @@ describe('CursorAgent lifecycle (FakeTransport)', () => {
 
     try {
       expect(booted.handle.id).toBe('fresh-session-id');
+      expect(booted.handle.model).toBe('auto');
       const warning = records.find((entry) => entry.msg === 'cursor initial setModel failed');
       expect(warning?.ctx).toMatchObject({ model: 'claude-opus-5' });
 
-      const errors: string[] = [];
-      void (async () => {
-        for await (const event of booted.handle.events()) {
-          if (event.type === 'error') {
-            errors.push(String((event.data as { message?: string }).message));
-          }
-        }
-      })();
-      await waitUntil(() => errors.length > 0);
-      expect(errors[0]).toContain('claude-opus-5');
+      expect(booted.handle.startupEvents).toHaveLength(1);
+      expect(booted.handle.startupEvents?.[0]).toMatchObject({
+        type: 'error',
+        data: {
+          isTerminal: false,
+          reason: 'initial_model_unavailable',
+        },
+        source: 'cursor',
+      });
+      expect(String((booted.handle.startupEvents?.[0]?.data as { message?: string }).message))
+        .toContain('claude-opus-5');
     } finally {
       await booted.handle.close().catch(() => undefined);
       await booted.agent.dispose().catch(() => undefined);
