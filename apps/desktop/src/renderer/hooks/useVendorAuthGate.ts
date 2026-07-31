@@ -32,6 +32,7 @@ import {
 import { useConfirmDialog } from '@/components/ui/confirm-dialog-provider';
 import { useVendorReadiness, type Readiness } from '@/hooks/useVendorReadiness';
 import { remoteProjectsStore } from '@/features/device-link/remoteProjectsStore';
+import { getCursorAvailability } from '@/state/cursorAvailability';
 import type { AgentKind } from '@/lib/ccAgent.types';
 
 interface DialogCopy {
@@ -234,12 +235,11 @@ export function useVendorAuthGate(): UseVendorAuthGateReturn {
           });
           return { proceed: false };
         }
-        let installed = false;
-        try {
-          installed = (await window.electronAPI.maker.agent.getCursorBinaryStatus()).installed;
-        } catch {
-          installed = false;
-        }
+        // 缓存说「装了」直接信;说「没装」必须现场重探一次再拦人 —— 用户可能刚在终端里
+        // 装完(Cindy 之外的安装没有事件可订阅),拿一个过期的否定结果去弹「请先安装」
+        // 是硬拦截,代价远大于多探一次的几毫秒。
+        let installed = await getCursorAvailability();
+        if (!installed) installed = await getCursorAvailability({ refresh: true });
         if (!installed) {
           const ok = await confirm({
             title: t('settings.providers.cursor.title'),

@@ -67,6 +67,7 @@ import { TopRightChipStack, TopRightChipStackProvider } from '@/components/chat/
 import { useProportionalWidth } from '@/hooks/useProportionalWidth';
 import { useCCSessions } from '@/hooks/useCCSessions';
 import { useVendorAuthGate } from '@/hooks/useVendorAuthGate';
+import { useCursorAvailability } from '@/hooks/useCursorAvailable';
 import { useAttachments } from '@/hooks/useAttachments';
 import {
   useNewMakerDraft,
@@ -506,26 +507,10 @@ export function NewMakerDraftRoute() {
   // 契约一期,本处先最小关掉)。见 issue #3 收尾。
   // null = 探测未回;未知态**不能**当成「没装」——否则每次进新建页都会在探测回来前
   // 把停在 cursor 的草稿翻成 cc(且不会翻回去),用户上次选的 Cursor 及其档位记忆全部作废。
-  const [includeCursor, setIncludeCursor] = useState<boolean | null>(null);
-  useEffect(() => {
-    // 远程草稿:不翻开 Cursor 段。
-    if (draft.deviceLinkDeviceId != null) {
-      setIncludeCursor(false);
-      return;
-    }
-    let cancelled = false;
-    void window.electronAPI.maker.agent
-      .getCursorBinaryStatus()
-      .then((status) => {
-        if (!cancelled) setIncludeCursor(status.installed);
-      })
-      .catch(() => {
-        if (!cancelled) setIncludeCursor(false);
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, [draft.deviceLinkDeviceId]);
+  // 远程草稿恒 false:不翻开 Cursor 段。
+  const cursorAvailability = useCursorAvailability();
+  const includeCursor: boolean | null =
+    draft.deviceLinkDeviceId != null ? false : cursorAvailability;
   // 确认没装(探测已回且为 false)才把停在 cursor 的草稿回落到 cc,避免未注册 agent 建会话。
   useEffect(() => {
     if (includeCursor === false && draft.vendor === 'cursor') {

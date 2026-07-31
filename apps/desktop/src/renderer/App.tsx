@@ -31,6 +31,7 @@ import { installSilentInstallToastListener } from '@/lib/silentInstallToast';
 import { installProviderUpstreamErrorToastListener } from '@/lib/providerUpstreamErrorToast';
 import { installAutoPermissionFallbackToastListener } from '@/lib/autoPermissionFallbackToast';
 import { installCcMgrUpgradeListener } from '@/state/ccMgrUpgradeStore';
+import { getCursorAvailability } from '@/state/cursorAvailability';
 import {
   preloadLocalCatalogSnapshot,
   refreshLocalCatalogSnapshot,
@@ -90,6 +91,9 @@ function MakerBootstrap() {
   useEffect(() => {
     makerChatStore.syncActiveTurnsFromMain();
     void preloadLocalCatalogSnapshot();
+    // cursor-agent 装没装:预热一次全局缓存,让后续消费点(New Maker vendor 分段、worker
+    // 面板、发送门禁)读到的是已解析值,不各自留一段「先当成没装」的窗口。
+    void getCursorAvailability();
     // main 先提交 active catalog + capabilities 再广播；renderer 收到任一目录/鉴权变化后
     // 联合重拉 providers 与两份 capabilities，整组成功且代际最新时才切换。
     const refresh = () => {
