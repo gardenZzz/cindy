@@ -30,7 +30,7 @@ async function probe(): Promise<boolean> {
   try {
     return (await call()).installed;
   } catch {
-    // 探测失败一律 fail-closed:未装时露出 Cursor 入口,选了也只会在 spawn 阶段失败。
+    // 探测失败一律 fail-closed:未装时不露出 Cursor 入口,选了也只会在 spawn 阶段失败。
     return false;
   }
 }
