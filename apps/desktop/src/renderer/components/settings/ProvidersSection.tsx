@@ -1428,23 +1428,26 @@ function CursorDetail() {
     return () => off();
   }, []);
 
-  const refresh = useCallback(async () => {
-    setProbe({ kind: 'loading' });
-    try {
-      // 设置页这一次就是「重新检查」的语义 —— 强制重探,顺带刷新全局缓存。
-      const status = { installed: await getCursorAvailability({ refresh: true }) };
-      if (status.installed) {
-        setProbe({ kind: 'installed' });
-        await refreshAuth();
-      } else {
+  const refresh = useCallback(
+    async (opts: { force?: boolean } = {}) => {
+      setProbe({ kind: 'loading' });
+      try {
+        // 读缓存还是强制重探：组件挂载/切换时读取已有缓存，用户显式点击「刷新/重新检查」传 force: true 强制重探
+        const status = { installed: await getCursorAvailability(opts.force ? { refresh: true } : {}) };
+        if (status.installed) {
+          setProbe({ kind: 'installed' });
+          await refreshAuth();
+        } else {
+          setProbe({ kind: 'missing' });
+          setAuth({ kind: 'loading' });
+        }
+      } catch {
+        // 探测失败按未安装降级展示引导,不弹全局错误(Cursor 可选)。
         setProbe({ kind: 'missing' });
-        setAuth({ kind: 'loading' });
       }
-    } catch {
-      // 探测失败按未安装降级展示引导,不弹全局错误(Cursor 可选)。
-      setProbe({ kind: 'missing' });
-    }
-  }, [refreshAuth]);
+    },
+    [refreshAuth],
+  );
 
   useEffect(() => {
     void refresh();
@@ -1728,7 +1731,7 @@ function CursorDetail() {
                 />
               }
               label={t('settings.providers.cursor.refreshAria')}
-              onClick={() => void refresh()}
+              onClick={() => void refresh({ force: true })}
               disabled={probe.kind === 'loading' || installing || authBusy}
             />
           </div>
