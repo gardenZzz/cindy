@@ -262,6 +262,8 @@ export interface OrcaWorkerCreationDeps {
 
 /** Orca worker 创建服务，只负责创建既有 team 下的新 worker，不负责 team lifecycle。 */
 export interface OrcaWorkerCreationService {
+  /** 只读返回当前 Lead workflow 的 Worker 数量闸快照，不创建或预留 Worker。 */
+  getWorkerLimitSnapshot(params: { leadSessionId: string }): Promise<OrcaWorkerLimitSnapshot>;
   createWorker(params: OrcaWorkerCreateParams): Promise<OrcaWorkerCreationResult>;
   createWorkerInTeam(params: OrcaWorkerCreateInTeamParams): Promise<OrcaWorkerCreationResult>;
 }
@@ -503,6 +505,15 @@ export function createOrcaWorkerCreationService(deps: OrcaWorkerCreationDeps): O
       return { ok: false, errorCode: 'NOT_FOUND', message: 'no active team for this lead' };
     }
     return createWorkerInTeam({ ...params, teamId: team.id });
+  }
+
+  async function getWorkerLimitSnapshot(params: { leadSessionId: string }): Promise<OrcaWorkerLimitSnapshot> {
+    const team = await deps.getActiveTeamByLead(params.leadSessionId);
+    if (!team) throw new Error('no active team for this lead');
+    const existing = await deps.listWorkersByLead(params.leadSessionId);
+    const settings = deps.readCollaborationSettings();
+    const activeCount = existing.filter((worker) => deps.isActiveWorkerStatus(worker.status)).length;
+    return limitSnapshot(settings.workerHardLimit, activeCount);
   }
 
   async function createWorkerInTeam(params: OrcaWorkerCreateInTeamParams): Promise<OrcaWorkerCreationResult> {
@@ -898,6 +909,7 @@ export function createOrcaWorkerCreationService(deps: OrcaWorkerCreationDeps): O
   }
 
   return {
+    getWorkerLimitSnapshot,
     createWorker,
     createWorkerInTeam,
   };
