@@ -1487,7 +1487,7 @@
         "logoutConfirm": "ログアウト",
         "authRequiredTitle": "Cursor へのログインが必要です",
         "authRequiredDescription": "セッションを作成する前に、設定 → モデルプロバイダーで Cursor にログインしてください。",
-        "optionalHint": "任意 — 他の機能はブロックされません",
+        "optionalHint": "Cursor ACP",
         "refreshAria": "Cursor のインストール状態を再確認",
         "confirmTitle": "Cursor をインストールしますか？",
         "confirmDescription": "確認後、Cindy はこの公式インストールコマンドを実行します：\n\n{{command}}\n\n確認するまで何も実行されません。",
@@ -1509,6 +1509,15 @@
           "effortHint_other": "推理強度 {{count}} 段階",
           "cancelRefresh": "更新をキャンセル",
           "refreshFailed": "モデルの更新に失敗しました。後でもう一度お試しください。"
+        },
+        "groups": {
+          "cursor": "Cursor",
+          "anthropic": "Anthropic",
+          "openai": "OpenAI",
+          "google": "Google",
+          "xai": "xAI",
+          "domestic": "中国国内",
+          "other": "その他"
         }
       },
       "wizard": {

@@ -257,10 +257,15 @@ export function CreateWorkerPopover({
   // effect 尚未把 state 置 null 的同一渲染里,直接用旧值会得到 false 并把记忆的
   // fast=true 清掉,回退默认来源支持 Fast 也不会恢复(codex review)。收窄后按
   // 「实际会生效的来源」口径判定,不经历 false 窗口。
+  // cursor 无 Cindy provider 维度,Fast 能力直接以 capabilities 目录条目的
+  // supportsFastMode 为准(与 ModelSelector 行级 fastEditable 的 cursor 特判同口径);
+  // codex/cc 走 per-provider 判定(同 id 模型在不同来源可分叉)。
   const currentModelSupportsFast = Boolean(
-    agent === 'codex' &&
-      activeCaps?.hasFastMode &&
-      providerFastSupported(narrowProviderSource(providerSource, model), model),
+    activeCaps?.hasFastMode &&
+      (agent === 'cursor'
+        ? activeModels.find((m) => m.id === model)?.supportsFastMode === true
+        : agent === 'codex' &&
+          providerFastSupported(narrowProviderSource(providerSource, model), model)),
   );
   // 实际路由来源的 effort 档位表:**显示收敛与提交共用同一口径**,保证面板显示的
   // effort 就是派发的 effort —— 只在提交口改写会出现「显示 high、创建 low」的静默
@@ -773,11 +778,12 @@ export function CreateWorkerPopover({
                     }
               }
               modelMemory={modelMemory}
-              // worker 创建链的显式 Fast 派发目前仅 Codex(resolveWorkerConfig 只对
-              // codex 消费 input.fast):cc 不接线,面板就不显示 Fast 开关,避免
-              // 「开关能开、提交被丢」的名不副实(codex review)。
-              fastMode={deviceId || agent !== 'codex' ? undefined : fast}
-              onFastModeChange={deviceId || agent !== 'codex' ? undefined : updateFast}
+              // worker 创建链的显式 Fast 派发:resolveWorkerConfig 只对 codex / cursor
+              // 消费 input.fast;cc 不接线,面板就不显示 Fast 开关,避免「开关能开、
+              // 提交被丢」的名不副实(codex review)。cursor 无来源维度,能力判定见
+              // currentModelSupportsFast 的目录条目口径。
+              fastMode={deviceId || agent === 'claude-code' ? undefined : fast}
+              onFastModeChange={deviceId || agent === 'claude-code' ? undefined : updateFast}
             />
           </div>
           {noAvailableLocalModels ? (

@@ -269,7 +269,7 @@ describe('ProvidersSection - Cursor 模型清单与显示开关 (spec #21 / S1)'
 
     const refresh = await screen.findByRole('button', { name: 'settings.providers.cursor.models.refreshCta' });
     expect((refresh as HTMLButtonElement).disabled).toBe(true);
-    expect(screen.getByText('settings.providers.cursor.models.refreshUnavailableAuth')).not.toBeNull();
+    expect(await screen.findByText('settings.providers.cursor.models.refreshUnavailableAuth')).not.toBeNull();
   });
 
   it('真实供应商(Anthropic)行与刷新行为不受影响', async () => {
