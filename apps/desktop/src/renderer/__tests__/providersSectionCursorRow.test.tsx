@@ -98,6 +98,8 @@ vi.mock('@/components/settings/AddProviderWizard', () => ({
 
 import { ProvidersSection } from '@/components/settings/ProvidersSection';
 
+import { __testing as cursorAvailabilityTesting } from '@/state/cursorAvailability';
+
 function makeProvider(id: string, over?: Partial<ProviderView>): ProviderView {
   return {
     id,
@@ -128,6 +130,9 @@ function cursorRow() {
 }
 
 beforeEach(() => {
+  // 装没装是模块级缓存(启动预热 + 单飞行),不清会把上一条用例的结果带进下一条,
+  // 后面改 cursorState.installed 全部失效。
+  cursorAvailabilityTesting.reset();
   cursorState.installed = false;
   cursorState.auth = { authenticated: false };
   providersState.providers = [
