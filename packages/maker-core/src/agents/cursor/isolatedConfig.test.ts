@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { homedir, tmpdir } from 'node:os';
@@ -6,6 +6,7 @@ import { homedir, tmpdir } from 'node:os';
 import {
   createCursorIsolatedConfigDir,
   removeCursorIsolatedConfigDir,
+  readUserNetworkConfigFromEnv,
   resolveCursorIsolatedConfigDir,
 } from './isolatedConfig.js';
 
@@ -86,7 +87,11 @@ describe('createCursorIsolatedConfigDir', () => {
       );
       const cfg = createCursorIsolatedConfigDir(
         { CURSOR_CONFIG_DIR: userCursorDir },
-        { stableKey: 'net-inherit', userDataPath },
+        {
+          stableKey: 'net-inherit',
+          userDataPath,
+          networkConfigReader: readUserNetworkConfigFromEnv,
+        },
       );
       const written = JSON.parse(readFileSync(join(cfg.configDir, 'cli-config.json'), 'utf8')) as {
         network: { useHttp1ForAgent: boolean };
@@ -95,6 +100,47 @@ describe('createCursorIsolatedConfigDir', () => {
       expect(written.network.useHttp1ForAgent).toBe(true);
       // 权限隔离不受影响：仍强制 allowlist。
       expect(written.approvalMode).toBe('allowlist');
+    } finally {
+      rmSync(userDataPath, { recursive: true, force: true });
+      rmSync(userCursorDir, { recursive: true, force: true });
+    }
+  });
+
+  it('默认不读取用户来源，注入 reader 时只使用注入值', () => {
+    const userDataPath = mkUserData();
+    const userCursorDir = mkUserData();
+    try {
+      writeFileSync(
+        join(userCursorDir, 'cli-config.json'),
+        JSON.stringify({ version: 1, network: { useHttp1ForAgent: true } }),
+      );
+
+      const withoutReader = createCursorIsolatedConfigDir(
+        { CURSOR_CONFIG_DIR: userCursorDir },
+        { stableKey: 'net-default', userDataPath },
+      );
+      const defaultConfig = JSON.parse(
+        readFileSync(join(withoutReader.configDir, 'cli-config.json'), 'utf8'),
+      ) as { network: { useHttp1ForAgent: boolean } };
+      expect(defaultConfig.network.useHttp1ForAgent).toBe(false);
+
+      const reader = vi.fn(() => ({ useHttp1ForAgent: true }));
+      const withReader = createCursorIsolatedConfigDir(
+        { CURSOR_CONFIG_DIR: join(userCursorDir, 'missing') },
+        {
+          stableKey: 'net-injected',
+          userDataPath,
+          networkConfigReader: reader,
+        },
+      );
+      const injectedConfig = JSON.parse(
+        readFileSync(join(withReader.configDir, 'cli-config.json'), 'utf8'),
+      ) as { network: { useHttp1ForAgent: boolean } };
+      expect(reader).toHaveBeenCalledOnce();
+      expect(reader).toHaveBeenCalledWith({
+        CURSOR_CONFIG_DIR: join(userCursorDir, 'missing'),
+      });
+      expect(injectedConfig.network.useHttp1ForAgent).toBe(true);
     } finally {
       rmSync(userDataPath, { recursive: true, force: true });
       rmSync(userCursorDir, { recursive: true, force: true });

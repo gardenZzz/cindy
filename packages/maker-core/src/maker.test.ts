@@ -90,12 +90,15 @@ function createAgent(
 function createHandle(args: {
   id: string;
   agentKind?: AgentKind;
+  model?: string;
+  startupEvents?: readonly AgentEvent[];
   delivery?: { threadId: string; historyHasProductPrompt: boolean };
 }): AgentSessionHandle {
-  return {
+  const handle: AgentSessionHandle & { startupEvents?: readonly AgentEvent[] } = {
     id: args.id,
     agentKind: args.agentKind ?? 'codex',
-    model: 'gpt-5.4',
+    model: args.model ?? 'gpt-5.4',
+    ...(args.startupEvents ? { startupEvents: args.startupEvents } : {}),
     codexProductPromptDelivery: args.delivery,
     async send() {},
     async steer() {},
@@ -106,6 +109,7 @@ function createHandle(args: {
     setInteractionResolver() {},
     isTurnRunning: () => false,
   };
+  return handle;
 }
 
 describe('Maker session creation singleflight', () => {
@@ -171,6 +175,66 @@ describe('Maker session creation singleflight', () => {
 
     await expect(maker.createSession({ ...options })).resolves.toBeInstanceOf(Session);
     expect(startSession).toHaveBeenCalledTimes(2);
+  });
+});
+
+describe('Maker Cursor startup fallback', () => {
+  it('persists the active model and replays its warning to host listeners attached after creation', async () => {
+    const storage = createStorage();
+    await storage.create({
+      id: 'cursor-session',
+      agentKind: 'cursor',
+      workDir: '/repo',
+      title: 'Cursor session',
+      model: 'claude-opus-5',
+    });
+    const warning: AgentEvent = {
+      type: 'error',
+      data: {
+        message: '未能切换到 Cursor 模型 claude-opus-5，本次会话继续使用 auto。',
+        isTerminal: false,
+        reason: 'initial_model_unavailable',
+      },
+      source: 'cursor',
+    };
+    const maker = new Maker({
+      agents: {
+        cursor: createAgent(
+          async () => createHandle({
+            id: 'cursor-sdk-session',
+            agentKind: 'cursor',
+            model: 'auto',
+            startupEvents: [warning],
+          }),
+          'cursor',
+        ),
+      },
+      storage,
+      logger: createLogger(),
+    });
+
+    const session = await maker.createSession({
+      id: 'cursor-session',
+      agentKind: 'cursor',
+      workingDir: '/repo',
+      model: 'claude-opus-5',
+    });
+
+    expect((await storage.get('cursor-session'))?.model).toBe('auto');
+    expect(session.model).toBe('auto');
+
+    const seen: AgentEvent[] = [];
+    session.onEvent((event) => seen.push(event));
+    expect(seen).toEqual([warning]);
+
+    const seenBySecondHostListener: AgentEvent[] = [];
+    session.onEvent((event) => seenBySecondHostListener.push(event));
+    expect(seenBySecondHostListener).toEqual([warning]);
+
+    await expect(session.send('start first turn')).resolves.toEqual({ accepted: true });
+    const seenAfterFirstTurn: AgentEvent[] = [];
+    session.onEvent((event) => seenAfterFirstTurn.push(event));
+    expect(seenAfterFirstTurn).toEqual([]);
   });
 });
 

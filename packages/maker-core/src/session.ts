@@ -42,6 +42,13 @@ import type { Logger } from './interfaces/logger.js';
 export type SessionStatus = 'active' | 'aborting' | 'closed' | 'error';
 
 export type SessionEventListener = (event: AgentEvent) => void;
+export interface SessionEventSubscriptionOptions {
+  /**
+   * 是否接收 Agent 在 Session/host listeners 挂载前产生的启动期事件。
+   * Maker 自己的 session_id 持久化 listener 关闭此项；host listeners 默认接收。
+   */
+  replayStartupEvents?: boolean;
+}
 export type SessionStatusListener = (status: SessionStatus) => void;
 export type InteractionRequestListener = (req: InteractionRequest) => Promise<InteractionDecision>;
 
@@ -257,6 +264,8 @@ export class Session {
   private readonly handle: AgentSessionHandle;
   private readonly logger: Logger;
   private readonly eventListeners = new Set<SessionEventListener>();
+  /** 保留到首个 turn 开始，确保同一次 host wiring 的多个 listener 都能收到。 */
+  private retainedStartupEvents: AgentEvent[];
   private readonly statusListeners = new Set<SessionStatusListener>();
   private interactionListener: InteractionRequestListener | null = null;
   private status: SessionStatus = 'active';
@@ -304,6 +313,7 @@ export class Session {
     this.agentKind = opts.agentKind;
     this.workDir = opts.workDir;
     this.handle = opts.handle;
+    this.retainedStartupEvents = (opts.handle.startupEvents ?? []).map(redactEventForListeners);
     this.capabilities = opts.capabilities;
     this.remoteHostId = opts.remoteHostId ?? null;
     this.logger = opts.logger.child(`s:${this.id}`);
@@ -406,6 +416,9 @@ export class Session {
         return { accepted: false, reason: 'cancelled-before-dispatch' };
       }
       turnDispatched = true;
+      // host 必须先挂 listener 才会发 turn；首个 turn 已接受后，启动告警不再向更晚的
+      // 临时订阅者重复回放。失败/取消的 send 不会提前消费它。
+      this.retainedStartupEvents = [];
       // turn 真正开始跑 → 起 stall 看门狗。后续每个事件都会重置它，done / 终态
       // error 会清掉它（见 armTurnStallWatchdog）。
       this.armTurnStallWatchdog();
@@ -769,8 +782,20 @@ export class Session {
 
   // ── 订阅 ─────────────────────────────────────────────────────────────────
 
-  onEvent(listener: SessionEventListener): () => void {
+  onEvent(
+    listener: SessionEventListener,
+    opts?: SessionEventSubscriptionOptions,
+  ): () => void {
     this.eventListeners.add(listener);
+    if (opts?.replayStartupEvents !== false) {
+      for (const event of this.retainedStartupEvents) {
+        try {
+          listener(event);
+        } catch (e) {
+          this.logger.error('startup event listener threw', { error: String(e) });
+        }
+      }
+    }
     this.startEventLoopIfNeeded();
     return () => this.eventListeners.delete(listener);
   }

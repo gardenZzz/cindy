@@ -101,6 +101,7 @@ async function boot(transport: FakeTransport, startOpts: Record<string, unknown>
     runtimeConfig: { userDataPath },
     binaryPath: '/dev/null/cursor-agent',
     logger: createConsoleLogger('cursor-ext-session'),
+    networkConfigReader: () => undefined,
   });
 
   const origWrite = transport.writeLine.bind(transport);

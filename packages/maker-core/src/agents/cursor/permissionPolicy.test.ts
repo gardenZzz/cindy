@@ -107,6 +107,7 @@ async function bootCursorSession(args: {
     runtimeConfig: { userDataPath },
     binaryPath: '/tmp/fake-cursor-agent',
     logger: createConsoleLogger('cursor-perm-test'),
+    networkConfigReader: () => undefined,
     classifyAutoPermission: args.classifyAutoPermission,
     onAutoPermissionClassifierUnavailable: args.onAutoPermissionClassifierUnavailable,
   });
@@ -186,6 +187,7 @@ describe('CursorAgent capabilities — permission modes', () => {
       runtimeConfig: {},
       binaryPath: '/tmp/fake-cursor-agent',
       logger: createConsoleLogger('cursor-perm-test'),
+      networkConfigReader: () => undefined,
     });
     const ids = agent.capabilities.permissionModes.map((p) => p.id);
     expect(ids).toEqual(['ask', 'auto', 'bypassPermissions']);

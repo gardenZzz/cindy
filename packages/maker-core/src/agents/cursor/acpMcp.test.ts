@@ -108,6 +108,7 @@ async function boot(
     runtimeConfig: { userDataPath },
     binaryPath: '/dev/null/cursor-agent',
     logger: createConsoleLogger('cursor-mcp'),
+    networkConfigReader: () => undefined,
     ...(prepareAcpMcpServers ? { prepareAcpMcpServers } : {}),
   });
   const handle = await agent.startSession({
