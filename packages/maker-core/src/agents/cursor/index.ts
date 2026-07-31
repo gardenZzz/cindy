@@ -93,6 +93,7 @@ import {
 import {
   createToolIdleWatchdog,
   formatCursorInvalidResumeCasConflictMessage,
+  formatCursorInitialModelFailedMessage,
   formatCursorInvalidResumeMessage,
   formatCursorToolIdleMessage,
   resolveCursorToolIdleMs,
@@ -630,7 +631,10 @@ export class CursorAgent extends BaseAgent {
 
   async startSession(opts: StartSessionOptions): Promise<AgentSessionHandle> {
     // ADR: 不消费 userPrompt / makerMemoryEnabled / runtimeConfig.systemPrompt。
-    const log = this.deps.logger.child('cursor-agent');
+    // 与 Claude Code 对齐：scope 中带 business session id，host logger 才能路由到
+    // sessions/<id>/<date>.ndjson。
+    const sid = opts.sessionId ?? '';
+    const log = this.deps.logger.child(sid ? `s:${sid}/cursor-agent` : 'cursor-agent');
 
     // Auth gate：未登录直接拒，给出可读 reason（no_credentials），不 spawn ACP。
     const authState = await this.deps.auth.getState();
@@ -674,6 +678,10 @@ export class CursorAgent extends BaseAgent {
     // Thinking 非可选：有 ACP thinking option 时始终 true（对齐 Codex/CC，忽略 start false）。
     let mutableThinkingMode = true;
     let latestConfigOptions: AcpConfigOption[] = [];
+    let spawnInitializeMs = 0;
+    let sessionMs = 0;
+    let sessionMethod: 'session/new' | 'session/load' = 'session/new';
+    let initialConfigMs = 0;
     const sessionAllowKeys = new Set<string>();
     let autoFallbackNotified = false;
     /** session/load 回放历史期间为 true — Cindy 自有存储渲染，跳过上游回放。 */
@@ -726,7 +734,7 @@ export class CursorAgent extends BaseAgent {
       },
     });
 
-    const setConfigOption = async (
+    const requestSetConfigOption = async (
       configId: string,
       value: string,
     ): Promise<AcpConfigOption[]> => {
@@ -735,7 +743,14 @@ export class CursorAgent extends BaseAgent {
         configId,
         value,
       });
-      const options = parseAcpConfigOptions(result?.configOptions);
+      return parseAcpConfigOptions(result?.configOptions);
+    };
+
+    const setConfigOption = async (
+      configId: string,
+      value: string,
+    ): Promise<AcpConfigOption[]> => {
+      const options = await requestSetConfigOption(configId, value);
       if (options.length > 0) latestConfigOptions = options;
       return options.length > 0 ? options : latestConfigOptions;
     };
@@ -1275,6 +1290,12 @@ export class CursorAgent extends BaseAgent {
       })();
     };
 
+    const cloneConfigOptions = (options: AcpConfigOption[]): AcpConfigOption[] =>
+      options.map((option) => ({
+        ...option,
+        options: option.options.map((choice) => ({ ...choice })),
+      }));
+
     const applyInitialModelConfig = async () => {
       const modelRaw = typeof opts.model === 'string' ? opts.model.trim() : '';
       const desiredModel = toCursorProductModelId(modelRaw || mutableModel);
@@ -1288,51 +1309,65 @@ export class CursorAgent extends BaseAgent {
         (!modelExplicit && desiredModel === CURSOR_AUTO_MODEL.id);
 
       if (!followAcpCurrent) {
-        if (desiredModel !== mutableModel) {
-          const options = await setConfigOption('model', toCursorAcpModelId(desiredModel));
-          mutableModel = desiredModel;
-          applyConfigSessionState(options);
-        } else if (desiredModel !== CURSOR_AUTO_MODEL.id) {
+        // 模型设不上不得毁掉整个会话：codex / claude 起会话都不校验模型，且同函数
+        // 下面的 effort / fast / thinking 失败也只 warn。抛出去会让该 session 每次
+        // 重建都在同一处失败（Orca lead 尤其致命：worker 汇报永远投不进来）。
+        const switching = desiredModel !== mutableModel;
+        if (switching || desiredModel !== CURSOR_AUTO_MODEL.id) {
           try {
             const options = await setConfigOption('model', toCursorAcpModelId(desiredModel));
+            if (switching) mutableModel = desiredModel;
             applyConfigSessionState(options);
           } catch (err) {
-            log.warn('cursor refresh model config failed', {
-              message: err instanceof Error ? err.message : String(err),
-            });
+            const message = err instanceof Error ? err.message : String(err);
+            log.warn('cursor initial setModel failed', { model: desiredModel, switching, message });
+            // 只有「用户要的模型没换上」才提示；同模型 refresh 失败无行为差异。
+            if (switching) {
+              pushAll([
+                {
+                  type: 'error',
+                  data: {
+                    message: formatCursorInitialModelFailedMessage(desiredModel, mutableModel, message),
+                    isTerminal: false,
+                    reason: 'initial_model_unavailable',
+                  },
+                  source: 'cursor',
+                },
+              ]);
+            }
           }
         }
       }
 
-      const initialEffortOpt = opts.effort ? findCursorEffortOption(latestConfigOptions) : undefined;
+      // All initial option decisions must use the same post-model snapshot. The
+      // responses below are full snapshots and may arrive out of order.
+      const baseOptions = cloneConfigOptions(latestConfigOptions);
+      type InitialConfigRequest = {
+        kind: 'effort' | 'fast' | 'thinking';
+        configId: string;
+        value: string;
+      };
+      const requests: InitialConfigRequest[] = [];
+
+      const initialEffortOpt = opts.effort ? findCursorEffortOption(baseOptions) : undefined;
       const initialEffortValue =
         initialEffortOpt && opts.effort
           ? toCursorConfigEffortValue(initialEffortOpt, opts.effort)
           : null;
       if (initialEffortOpt && initialEffortValue) {
-        try {
-          const options = await setConfigOption(initialEffortOpt.id, initialEffortValue);
-          applyConfigSessionState(options);
-        } catch (err) {
-          log.warn('cursor initial setEffort failed', {
-            effort: opts.effort,
-            message: err instanceof Error ? err.message : String(err),
-          });
-        }
+        requests.push({
+          kind: 'effort',
+          configId: initialEffortOpt.id,
+          value: initialEffortValue,
+        });
       }
-      if (
-        opts.fastMode !== undefined &&
-        latestConfigOptions.some((o) => o.id === 'fast')
-      ) {
-        try {
-          const options = await setConfigOption('fast', opts.fastMode ? 'true' : 'false');
-          applyConfigSessionState(options);
-        } catch (err) {
-          log.warn('cursor initial setFastMode failed', {
-            fastMode: opts.fastMode,
-            message: err instanceof Error ? err.message : String(err),
-          });
-        }
+
+      if (opts.fastMode !== undefined && baseOptions.some((o) => o.id === 'fast')) {
+        requests.push({
+          kind: 'fast',
+          configId: 'fast',
+          value: opts.fastMode ? 'true' : 'false',
+        });
       } else if (opts.fastMode !== undefined) {
         // 初始 Fast 被请求但目标模型当前未暴露 fast option -> 跳过下发。
         // 隔离 config dir 下 session/new 的当前模型常是 `default`(Auto)，其
@@ -1346,16 +1381,104 @@ export class CursorAgent extends BaseAgent {
           followAcpCurrent,
         });
       }
-      if (latestConfigOptions.some((o) => o.id === 'thinking')) {
-        try {
-          const options = await setConfigOption('thinking', 'true');
-          applyConfigSessionState(options);
-        } catch (err) {
+
+      if (baseOptions.some((o) => o.id === 'thinking')) {
+        requests.push({
+          kind: 'thinking',
+          configId: 'thinking',
+          value: 'true',
+        });
+      }
+
+      let settleSequence = 0;
+      const settleOrder = new Map<number, number>();
+      const results = await Promise.allSettled(
+        requests.map((request, index) =>
+          requestSetConfigOption(request.configId, request.value).finally(() => {
+            settleOrder.set(index, ++settleSequence);
+          }),
+        ),
+      );
+
+      const targetedIds = new Set(requests.map((request) => request.configId));
+      const mergedOptions = cloneConfigOptions(baseOptions);
+      const successfulResponses: Array<{
+        options: AcpConfigOption[];
+        settleOrder: number;
+      }> = [];
+
+      const replaceOption = (option: AcpConfigOption): void => {
+        const index = mergedOptions.findIndex((current) => current.id === option.id);
+        const replacement = {
+          ...option,
+          options: option.options.map((choice) => ({ ...choice })),
+        };
+        if (index >= 0) {
+          mergedOptions[index] = replacement;
+        } else {
+          mergedOptions.push(replacement);
+        }
+      };
+
+      for (let index = 0; index < results.length; index += 1) {
+        const result = results[index];
+        if (result.status === 'fulfilled' && result.value.length > 0) {
+          successfulResponses.push({
+            options: result.value,
+            settleOrder: settleOrder.get(index) ?? Number.MAX_SAFE_INTEGER,
+          });
+          const ownOption = result.value.find((option) => option.id === requests[index]!.configId);
+          if (ownOption) replaceOption(ownOption);
+        }
+      }
+
+      // Preserve the latest full snapshot for options not touched by this batch,
+      // while each requested option is sourced only from its own response.
+      successfulResponses.sort((a, b) => a.settleOrder - b.settleOrder);
+      const lastResponse = successfulResponses[successfulResponses.length - 1];
+      if (lastResponse) {
+        for (const option of lastResponse.options) {
+          if (!targetedIds.has(option.id)) replaceOption(option);
+        }
+      }
+
+      if (requests.length > 0) {
+        latestConfigOptions = mergedOptions;
+        applyConfigSessionState(mergedOptions);
+      }
+
+      for (let index = 0; index < results.length; index += 1) {
+        const result = results[index];
+        if (result.status !== 'rejected') continue;
+        const request = requests[index]!;
+        const message = result.reason instanceof Error ? result.reason.message : String(result.reason);
+        if (request.kind === 'effort') {
+          log.warn('cursor initial setEffort failed', {
+            effort: opts.effort,
+            message,
+          });
+        } else if (request.kind === 'fast') {
+          log.warn('cursor initial setFastMode failed', {
+            fastMode: opts.fastMode,
+            message,
+          });
+        } else {
           log.warn('cursor initial setThinkingMode failed', {
             thinkingMode: true,
-            message: err instanceof Error ? err.message : String(err),
+            message,
           });
         }
+      }
+    };
+
+    // 只包住初始配置整段，不包含 auth gate / MCP 注入 / session/new|load。
+    // 后续流水线化后这里仍然记录整段墙钟耗时。
+    const applyInitialModelConfigWithTiming = async () => {
+      const startedAt = Date.now();
+      try {
+        await applyInitialModelConfig();
+      } finally {
+        initialConfigMs = Date.now() - startedAt;
       }
     };
 
@@ -1386,18 +1509,26 @@ export class CursorAgent extends BaseAgent {
     }
 
     const createFreshSession = async (): Promise<void> => {
-      const created = await client.request<NewSessionResponse>(Method.SessionNew, {
-        cwd: opts.workingDir,
-        mcpServers,
-      });
+      const startedAt = Date.now();
+      let created: NewSessionResponse;
+      try {
+        created = await client.request<NewSessionResponse>(Method.SessionNew, {
+          cwd: opts.workingDir,
+          mcpServers,
+        });
+      } finally {
+        sessionMs = Date.now() - startedAt;
+        sessionMethod = 'session/new';
+      }
       if (!created?.sessionId || typeof created.sessionId !== 'string') {
         throw new Error('cursor session/new: missing sessionId');
       }
       sessionId = created.sessionId;
       await applyModelsFromSessionPayload(created);
-      await applyInitialModelConfig();
+      await applyInitialModelConfigWithTiming();
     };
 
+    const spawnInitializeStartedAt = Date.now();
     client.start();
 
     try {
@@ -1413,6 +1544,7 @@ export class CursorAgent extends BaseAgent {
           version: '0.0.0',
         },
       });
+      spawnInitializeMs = Date.now() - spawnInitializeStartedAt;
 
       const resumeId =
         typeof opts.resumeSessionId === 'string' && opts.resumeSessionId.length > 0
@@ -1424,15 +1556,22 @@ export class CursorAgent extends BaseAgent {
       if (resumeId) {
         suppressHistoryReplay = true;
         try {
-          const loaded = await client.request<LoadSessionResponse>(Method.SessionLoad, {
-            cwd: opts.workingDir,
-            sessionId: resumeId,
-            mcpServers,
-          });
+          const loadStartedAt = Date.now();
+          let loaded: LoadSessionResponse;
+          try {
+            loaded = await client.request<LoadSessionResponse>(Method.SessionLoad, {
+              cwd: opts.workingDir,
+              sessionId: resumeId,
+              mcpServers,
+            });
+          } finally {
+            sessionMs = Date.now() - loadStartedAt;
+            sessionMethod = 'session/load';
+          }
           sessionId = resumeId;
           resumedSuccessfully = true;
           await applyModelsFromSessionPayload(loaded ?? {});
-          await applyInitialModelConfig();
+          await applyInitialModelConfigWithTiming();
           log.info('session loaded', {
             sessionId,
             model: mutableModel,
@@ -1503,6 +1642,13 @@ export class CursorAgent extends BaseAgent {
       log.info('session ready', {
         sessionId,
         model: mutableModel,
+        effort: opts.effort ?? 'default',
+        workDir: opts.workingDir,
+        resume: opts.resumeSessionId ?? 'new',
+        spawnInitializeMs,
+        sessionMs,
+        sessionMethod,
+        initialConfigMs,
         permissionMode: mutablePermissionMode,
         planMode: mutablePlanMode,
         listedModels: this.listedModels.length,

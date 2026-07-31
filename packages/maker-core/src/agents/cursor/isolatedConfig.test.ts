@@ -74,6 +74,33 @@ describe('createCursorIsolatedConfigDir', () => {
     }
   });
 
+  // http1 是上游对付 h2 stream CANCEL 的逃生阀；写死 false 会让用户在 Cursor
+  // 里打开也对 Cindy 会话无效。
+  it('inherits the user network config (http1 escape hatch) instead of hardcoding it', () => {
+    const userDataPath = mkUserData();
+    const userCursorDir = mkUserData();
+    try {
+      writeFileSync(
+        join(userCursorDir, 'cli-config.json'),
+        JSON.stringify({ version: 1, network: { useHttp1ForAgent: true } }),
+      );
+      const cfg = createCursorIsolatedConfigDir(
+        { CURSOR_CONFIG_DIR: userCursorDir },
+        { stableKey: 'net-inherit', userDataPath },
+      );
+      const written = JSON.parse(readFileSync(join(cfg.configDir, 'cli-config.json'), 'utf8')) as {
+        network: { useHttp1ForAgent: boolean };
+        approvalMode: string;
+      };
+      expect(written.network.useHttp1ForAgent).toBe(true);
+      // 权限隔离不受影响：仍强制 allowlist。
+      expect(written.approvalMode).toBe('allowlist');
+    } finally {
+      rmSync(userDataPath, { recursive: true, force: true });
+      rmSync(userCursorDir, { recursive: true, force: true });
+    }
+  });
+
   it('refuses missing userDataPath and never writes under HOME', () => {
     const homeCursorAcp = join(homedir(), '.cindy', 'cursor-acp');
     const before = existsSync(homeCursorAcp);

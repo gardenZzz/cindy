@@ -229,6 +229,30 @@ describe('AcpClient message dispatch with jsonrpc fixtures', () => {
     await expect(pending).rejects.toThrow(/Invalid Request/);
   });
 
+  // Cursor 把真因塞在 data.message：外层永远是 "Invalid params"，只看 message
+  // 的日志 / UI 无法区分「模型不可用」「option 不存在」「session 丢了」。
+  it('surfaces error data.message in the thrown message', async () => {
+    const transport = new FakeTransport();
+    const client = new AcpClient({ createTransport: () => transport, logger });
+    client.start();
+
+    const pending = client.request('session/set_config_option', {
+      sessionId: 's',
+      configId: 'model',
+      value: 'claude-opus-5',
+    });
+    transport.emitLine({
+      jsonrpc: '2.0',
+      id: 1,
+      error: {
+        code: -32602,
+        message: 'Invalid params',
+        data: { message: 'Invalid model value: claude-opus-5' },
+      },
+    });
+    await expect(pending).rejects.toThrow(/Invalid model value: claude-opus-5/);
+  });
+
   it('routes session/update notifications with jsonrpc:2.0', async () => {
     const transport = new FakeTransport();
     const client = new AcpClient({ createTransport: () => transport, logger });

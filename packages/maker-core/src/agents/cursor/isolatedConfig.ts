@@ -22,7 +22,8 @@
  *   （见 credentials-and-local-storage.md）。
  */
 
-import { mkdirSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { homedir } from 'node:os';
 import { join, relative, resolve, sep } from 'node:path';
 import { createHash } from 'node:crypto';
 
@@ -77,7 +78,23 @@ function isStrictlyInside(parent: string, child: string): boolean {
   return rel !== '' && !rel.startsWith(`..${sep}`) && rel !== '..' && !rel.startsWith(sep);
 }
 
-function writeIsolatedCliConfig(configDir: string): void {
+/**
+ * 用户全局 cli-config 的 `network` 段。`useHttp1ForAgent` 是上游对付
+ * 「h2 stream CANCEL / 反复重连」的逃生阀；隔离 config 写死会把它关死，
+ * 用户在 Cursor 里打开也对 Cindy 会话无效。读不到就 undefined（用默认）。
+ */
+function readUserNetworkConfig(baseEnv: NodeJS.ProcessEnv): unknown {
+  const dir = baseEnv.CURSOR_CONFIG_DIR?.trim() || join(homedir(), '.cursor');
+  try {
+    const raw = JSON.parse(readFileSync(join(dir, 'cli-config.json'), 'utf8')) as unknown;
+    if (typeof raw !== 'object' || raw === null) return undefined;
+    return (raw as Record<string, unknown>).network;
+  } catch {
+    return undefined;
+  }
+}
+
+function writeIsolatedCliConfig(configDir: string, network: unknown): void {
   const cliConfig = {
     version: 1,
     permissions: { allow: [] as string[], deny: [] as string[] },
@@ -89,7 +106,7 @@ function writeIsolatedCliConfig(configDir: string): void {
       networkAccess: 'user_config_with_defaults',
     },
     editor: { vimMode: false },
-    network: { useHttp1ForAgent: false },
+    network: network ?? { useHttp1ForAgent: false },
   };
   writeFileSync(join(configDir, 'cli-config.json'), `${JSON.stringify(cliConfig, null, 2)}\n`);
 }
@@ -127,7 +144,7 @@ export function createCursorIsolatedConfigDir(
   mkdirSync(root, { recursive: true });
   const configDir = join(root, safeDirSegment(opts.stableKey ?? `ephemeral-${Date.now()}`));
   mkdirSync(configDir, { recursive: true });
-  writeIsolatedCliConfig(configDir);
+  writeIsolatedCliConfig(configDir, readUserNetworkConfig(baseEnv));
 
   return {
     configDir,

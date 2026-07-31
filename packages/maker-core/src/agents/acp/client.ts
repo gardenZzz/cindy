@@ -56,6 +56,15 @@ function isJsonRpcRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
 }
 
+/** JSON-RPC error.data 里的可读真因；拿不到就 null（不塞 [object Object]）。 */
+function errorDataDetail(data: unknown): string | null {
+  if (typeof data === 'string') return data.trim() || null;
+  if (isJsonRpcRecord(data) && typeof data.message === 'string') {
+    return data.message.trim() || null;
+  }
+  return null;
+}
+
 function isJsonRpcId(value: unknown): value is JsonRpcId {
   return typeof value === 'string' || typeof value === 'number';
 }
@@ -430,7 +439,12 @@ export class AcpClient {
     this.pending.delete(id);
     if (pending.timeoutId) clearTimeout(pending.timeoutId);
     if (error) {
-      const err = new Error(`acp ${pending.method} error ${error.code}: ${error.message}`);
+      // Cursor 的真因只在 data.message（外层恒为 "Invalid params"）；不拼进来
+      // 日志和 UI 就分不清模型不可用 / option 不存在 / session 丢失。
+      const detail = errorDataDetail(error.data);
+      const err = new Error(
+        `acp ${pending.method} error ${error.code}: ${error.message}${detail ? ` (${detail})` : ''}`,
+      );
       Object.assign(err, { code: error.code, data: error.data });
       pending.reject(err);
       return;

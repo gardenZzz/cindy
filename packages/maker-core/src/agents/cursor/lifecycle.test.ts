@@ -15,7 +15,7 @@ import {
   __setCursorImageBytesReaderForTesting,
   __setCursorPromptImageMaxBytesForTesting,
 } from './index.js';
-import { createConsoleLogger } from '../../interfaces/logger.js';
+import { createConsoleLogger, type Logger } from '../../interfaces/logger.js';
 import type { AuthAdapter } from '../../interfaces/auth-adapter.js';
 import type { AgentEvent } from '../../types/events.js';
 import type { CloseHandler, LineHandler, StderrHandler, Transport } from '../acp/transport.js';
@@ -33,6 +33,15 @@ class FakeTransport implements Transport {
   pendingSetModeIds: Array<number | string> = [];
   /** session/new|load 附带的 ACP configOptions（thinking/fast/effort 等）。 */
   sessionConfigOptions: unknown[] | null = null;
+  /** 为初始配置流水线测试暂缓非 model 的 set_config_option 回包。 */
+  deferConfigResponses = false;
+  /** 指定 config id 回错误，验证单项失败不阻断其它项。 */
+  readonly configResponseErrors = new Set<string>();
+  pendingConfigResponses: Array<{
+    id: number | string;
+    configOptions?: unknown[];
+    error?: { code: number; message: string };
+  }> = [];
 
   async writeLine(line: string): Promise<void> {
     this.written.push(JSON.parse(line));
@@ -112,6 +121,24 @@ class FakeTransport implements Transport {
     }
     this.pendingSetModeIds = [];
   }
+
+  get deferredConfigResponseCount(): number {
+    return this.pendingConfigResponses.length;
+  }
+
+  resolveDeferredConfigResponses(reverse = false): void {
+    const pending = this.pendingConfigResponses.splice(0);
+    if (reverse) pending.reverse();
+    for (const response of pending) {
+      this.emit({
+        jsonrpc: JSONRPC_VERSION,
+        id: response.id,
+        ...(response.error
+          ? { error: response.error }
+          : { result: { configOptions: response.configOptions } }),
+      });
+    }
+  }
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -124,6 +151,32 @@ function authStub(): AuthAdapter {
     triggerLogin: async () => ({ authenticated: true }),
     logout: async () => undefined,
     getAuthEnv: async () => ({}),
+  };
+}
+
+type RecordedLog = {
+  level: 'trace' | 'debug' | 'info' | 'warn' | 'error' | 'fatal';
+  scope: string;
+  msg: string;
+  ctx?: Record<string, unknown>;
+};
+
+function recordingLogger(records: RecordedLog[], scope = 'maker'): Logger {
+  const record = (
+    level: RecordedLog['level'],
+    msg: string,
+    ctx?: Record<string, unknown>,
+  ): void => {
+    records.push({ level, scope, msg, ctx });
+  };
+  return {
+    trace: (msg, ctx) => record('trace', msg, ctx),
+    debug: (msg, ctx) => record('debug', msg, ctx),
+    info: (msg, ctx) => record('info', msg, ctx),
+    warn: (msg, ctx) => record('warn', msg, ctx),
+    error: (msg, ctx) => record('error', msg, ctx),
+    fatal: (msg, ctx) => record('fatal', msg, ctx),
+    child: (sub) => recordingLogger(records, `${scope}/${sub}`),
   };
 }
 
@@ -161,6 +214,7 @@ async function bootWithTransport(
   transport: FakeTransport,
   startOpts: Record<string, unknown> = {},
   models: { currentModelId: string; availableModels: Array<{ modelId: string; name: string }> } = MODELS,
+  logger: Logger = createConsoleLogger('cursor-lifecycle-unit'),
 ): Promise<{
   agent: CursorAgent;
   handle: Awaited<ReturnType<CursorAgent['startSession']>>;
@@ -171,7 +225,7 @@ async function bootWithTransport(
     auth: authStub(),
     runtimeConfig: { userDataPath },
     binaryPath: '/dev/null/cursor-agent',
-    logger: createConsoleLogger('cursor-lifecycle-unit'),
+    logger,
   });
 
   // Respond to initialize + session create/load as requests arrive.
@@ -259,20 +313,45 @@ async function bootWithTransport(
     }
     if (msg.method === Method.SessionSetConfigOption) {
       const params = msg.params as { configId?: string; value?: string } | undefined;
+      const configId = params?.configId ?? '';
+      const shouldDefer = transport.deferConfigResponses && configId !== 'model';
+      if (transport.configResponseErrors.has(configId)) {
+        const error = { code: -32001, message: `Fake ${configId} failure` };
+        if (shouldDefer) {
+          transport.pendingConfigResponses.push({ id: msg.id as number | string, error });
+        } else {
+          queueMicrotask(() =>
+            transport.emit({
+              jsonrpc: JSONRPC_VERSION,
+              id: msg.id,
+              error,
+            }),
+          );
+        }
+        return;
+      }
       let configOptions = transport.sessionConfigOptions ?? [];
       // 真实 ACP 回包会把 set 过的 option 的 currentValue 更新成刚设的值。
-      // thinking / fast 都回写，使 applyConfigEnrichment 读到与会话态一致的真值。
+      // 用独立快照构造每个回包，流水线测试可模拟乱序到达时的旧全量快照。
       if (
-        (params?.configId === 'thinking' || params?.configId === 'fast') &&
         Array.isArray(transport.sessionConfigOptions) &&
         transport.sessionConfigOptions.length > 0
       ) {
-        const cid = params.configId as string;
+        const cid = configId;
         configOptions = transport.sessionConfigOptions.map((raw) => {
           if (!isRecord(raw) || raw.id !== cid) return raw;
-          return { ...raw, currentValue: params.value ?? 'true' };
+          return { ...raw, currentValue: params?.value ?? 'true' };
         });
+      }
+      if (!shouldDefer) {
         transport.sessionConfigOptions = configOptions;
+      }
+      if (shouldDefer) {
+        transport.pendingConfigResponses.push({
+          id: msg.id as number | string,
+          configOptions,
+        });
+        return;
       }
       queueMicrotask(() =>
         transport.emit({
@@ -358,6 +437,56 @@ describe('CursorAgent lifecycle (FakeTransport)', () => {
       expect(transport.getPid(), 'transport still live after dispose').toBeNull();
     } finally {
       rmSync(userDataPath, { recursive: true, force: true });
+    }
+  });
+
+  it('logs startup timing segments for new and resumed sessions', async () => {
+    const businessSessionId = '12345678-1234-1234-1234-123456789abc';
+    const cases = [
+      {
+        startOpts: {},
+        resume: 'new',
+        sessionMethod: 'session/new',
+      },
+      {
+        startOpts: { resumeSessionId: 'resume-me-please' },
+        resume: 'resume-me-please',
+        sessionMethod: 'session/load',
+      },
+    ] as const;
+
+    for (const testCase of cases) {
+      const transport = new FakeTransport();
+      const records: RecordedLog[] = [];
+      const { agent, handle, userDataPath } = await bootWithTransport(
+        transport,
+        { sessionId: businessSessionId, ...testCase.startOpts },
+        MODELS,
+        recordingLogger(records),
+      );
+      try {
+        const ready = records.find(
+          (entry) => entry.level === 'info' && entry.msg === 'session ready',
+        );
+        expect(ready).toBeDefined();
+        expect(ready?.scope).toBe(`maker/s:${businessSessionId}/cursor-agent`);
+        expect(ready?.ctx).toMatchObject({
+          model: 'auto',
+          effort: 'default',
+          workDir: '/tmp',
+          resume: testCase.resume,
+          sessionMethod: testCase.sessionMethod,
+          resumed: testCase.sessionMethod === 'session/load',
+        });
+        for (const field of ['spawnInitializeMs', 'sessionMs', 'initialConfigMs']) {
+          expect(ready?.ctx?.[field]).toEqual(expect.any(Number));
+          expect(ready?.ctx?.[field]).toBeGreaterThanOrEqual(0);
+        }
+      } finally {
+        await handle.close().catch(() => undefined);
+        await agent.dispose().catch(() => undefined);
+        rmSync(userDataPath, { recursive: true, force: true });
+      }
     }
   });
 
@@ -760,6 +889,216 @@ describe('CursorAgent lifecycle (FakeTransport)', () => {
       })
       .map((msg) => (msg as { params: { value: string } }).params.value);
   }
+
+  function effortOption(currentValue = 'medium') {
+    return {
+      id: 'effort',
+      name: 'Effort',
+      currentValue,
+      options: [
+        { value: 'medium', name: 'Medium' },
+        { value: 'high', name: 'High' },
+      ],
+    };
+  }
+
+  function thinkingOption(currentValue = 'false') {
+    return {
+      id: 'thinking',
+      name: 'Thinking',
+      currentValue,
+      options: [
+        { value: 'false', name: 'Off' },
+        { value: 'true', name: 'On' },
+      ],
+    };
+  }
+
+  async function waitUntil(predicate: () => boolean, timeoutMs = 2000): Promise<void> {
+    const deadline = Date.now() + timeoutMs;
+    while (!predicate() && Date.now() < deadline) {
+      await new Promise((resolve) => setTimeout(resolve, 5));
+    }
+    if (!predicate()) throw new Error(`condition not met within ${timeoutMs}ms`);
+  }
+
+  function pipelineModels() {
+    return {
+      currentModelId: 'default',
+      availableModels: [
+        { modelId: 'default', name: 'Auto' },
+        { modelId: 'claude-opus-5', name: 'Opus 5' },
+      ],
+    };
+  }
+
+  function pipelineOptions(): unknown[] {
+    return [effortOption(), fastOption('true'), thinkingOption()];
+  }
+
+  it('pipelines initial effort/fast/thinking after model and merges reversed responses', async () => {
+    const transport = new FakeTransport();
+    transport.sessionConfigOptions = pipelineOptions();
+    transport.deferConfigResponses = true;
+    const records: RecordedLog[] = [];
+    const bootPromise = bootWithTransport(
+      transport,
+      { model: 'claude-opus-5', effort: 'high', fastMode: false },
+      pipelineModels(),
+      recordingLogger(records),
+    );
+
+    let booted: Awaited<typeof bootPromise> | undefined;
+    try {
+      await waitUntil(
+        () => transport.findAllRequests(Method.SessionSetConfigOption).length === 4,
+      );
+      const configRequests = transport.findAllRequests(Method.SessionSetConfigOption);
+      expect(
+        configRequests.map((request) => (request.params as { configId: string }).configId),
+      ).toEqual(['model', 'effort', 'fast', 'thinking']);
+      expect(transport.deferredConfigResponseCount).toBe(3);
+
+      // All three option requests are already in flight; only now release stale
+      // full snapshots in reverse arrival order.
+      transport.resolveDeferredConfigResponses(true);
+      const ready = await bootPromise;
+      booted = ready;
+
+      expect(ready.handle.getFastMode!()).toBe(false);
+      transport.deferConfigResponses = false;
+      await ready.handle.setEffort!('medium');
+      const effortLog = records.find((entry) => entry.msg === 'setEffort');
+      expect(effortLog?.ctx).toMatchObject({ from: 'high' });
+    } finally {
+      transport.resolveDeferredConfigResponses();
+      if (!booted) booted = await bootPromise.catch(() => undefined);
+      if (booted) {
+        await booted.handle.close().catch(() => undefined);
+        await booted.agent.dispose().catch(() => undefined);
+        rmSync(booted.userDataPath, { recursive: true, force: true });
+      }
+    }
+  });
+
+  it('keeps other initial options effective when one pipeline request fails', async () => {
+    const transport = new FakeTransport();
+    transport.sessionConfigOptions = pipelineOptions();
+    transport.deferConfigResponses = true;
+    transport.configResponseErrors.add('effort');
+    const records: RecordedLog[] = [];
+    const bootPromise = bootWithTransport(
+      transport,
+      { model: 'claude-opus-5', effort: 'high', fastMode: false },
+      pipelineModels(),
+      recordingLogger(records),
+    );
+
+    let booted: Awaited<typeof bootPromise> | undefined;
+    try {
+      await waitUntil(
+        () => transport.findAllRequests(Method.SessionSetConfigOption).length === 4,
+      );
+      transport.resolveDeferredConfigResponses(true);
+      const ready = await bootPromise;
+      booted = ready;
+
+      expect(ready.handle.getFastMode!()).toBe(false);
+      expect(
+        transport.findAllRequests(Method.SessionSetConfigOption).some(
+          (request) => (request.params as { configId: string }).configId === 'thinking',
+        ),
+      ).toBe(true);
+      const warning = records.find((entry) => entry.msg === 'cursor initial setEffort failed');
+      expect(warning?.ctx).toMatchObject({
+        effort: 'high',
+        message: 'acp session/set_config_option error -32001: Fake effort failure',
+      });
+    } finally {
+      transport.resolveDeferredConfigResponses();
+      if (!booted) booted = await bootPromise.catch(() => undefined);
+      if (booted) {
+        await booted.handle.close().catch(() => undefined);
+        await booted.agent.dispose().catch(() => undefined);
+        rmSync(booted.userDataPath, { recursive: true, force: true });
+      }
+    }
+  });
+
+  // 用户日志实锤：模型设不上 → startSession 抛 → 该 session 每次重建都在同一处
+  // 死掉（Orca lead 尤其致命，worker 汇报永远投不进来）。codex / claude 起会话都
+  // 不因模型失败而失败，cursor 必须对齐。
+  it('starts the session anyway when the initial model cannot be set', async () => {
+    const transport = new FakeTransport();
+    transport.sessionConfigOptions = pipelineOptions();
+    transport.configResponseErrors.add('model');
+    const records: RecordedLog[] = [];
+    const booted = await bootWithTransport(
+      transport,
+      { model: 'claude-opus-5', effort: 'high', fastMode: false },
+      pipelineModels(),
+      recordingLogger(records),
+    );
+
+    try {
+      expect(booted.handle.id).toBe('fresh-session-id');
+      const warning = records.find((entry) => entry.msg === 'cursor initial setModel failed');
+      expect(warning?.ctx).toMatchObject({ model: 'claude-opus-5' });
+
+      const errors: string[] = [];
+      void (async () => {
+        for await (const event of booted.handle.events()) {
+          if (event.type === 'error') {
+            errors.push(String((event.data as { message?: string }).message));
+          }
+        }
+      })();
+      await waitUntil(() => errors.length > 0);
+      expect(errors[0]).toContain('claude-opus-5');
+    } finally {
+      await booted.handle.close().catch(() => undefined);
+      await booted.agent.dispose().catch(() => undefined);
+      rmSync(booted.userDataPath, { recursive: true, force: true });
+    }
+  });
+
+  it('pipelines initial config on the session/load resume path', async () => {
+    const transport = new FakeTransport();
+    transport.sessionConfigOptions = pipelineOptions();
+    transport.deferConfigResponses = true;
+    const bootPromise = bootWithTransport(
+      transport,
+      {
+        model: 'claude-opus-5',
+        effort: 'high',
+        fastMode: false,
+        resumeSessionId: 'resume-pipeline',
+      },
+      pipelineModels(),
+    );
+
+    let booted: Awaited<typeof bootPromise> | undefined;
+    try {
+      await waitUntil(
+        () => transport.findAllRequests(Method.SessionSetConfigOption).length === 4,
+      );
+      expect(transport.findRequest(Method.SessionLoad)).toBeTruthy();
+      expect(transport.deferredConfigResponseCount).toBe(3);
+      transport.resolveDeferredConfigResponses(true);
+      const ready = await bootPromise;
+      booted = ready;
+      expect(ready.handle.id).toBe('resume-pipeline');
+      expect(ready.handle.getFastMode!()).toBe(false);
+    } finally {
+      transport.resolveDeferredConfigResponses();
+      if (!booted) booted = await bootPromise.catch(() => undefined);
+      if (booted) {
+        await booted.handle.close().catch(() => undefined);
+        await booted.agent.dispose().catch(() => undefined);
+        rmSync(booted.userDataPath, { recursive: true, force: true });
+      }
+    }
+  });
 
   it('issues set_config_option(fast,true) when createSession fastMode=true and model exposes fast', async () => {
     const transport = new FakeTransport();
