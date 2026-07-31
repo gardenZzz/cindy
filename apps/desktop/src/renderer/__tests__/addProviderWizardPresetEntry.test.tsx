@@ -11,7 +11,7 @@ import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/re
 import React from 'react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
-import type { ProviderView } from '@cindy/model-providers';
+import type { AgentKind, ProviderView } from '@cindy/model-providers';
 
 vi.mock('react-i18next', () => ({
   useTranslation: () => ({ t: (key: string) => key, i18n: { language: 'zh-CN' } }),
@@ -421,7 +421,7 @@ describe('AddProviderWizard — preset 直达', () => {
     // 同一 model id 在两端窗口可以不同(如 cc=1M / codex=272K):共享一个发现值
     // 会让其中一端显示与压缩阈值双错,必须按 agent 分槽各取各的端点上报值。
     vi.mocked(window.electronAPI.maker.fetchProviderModels).mockImplementation(
-      async ({ agent }: { agent: 'claude-code' | 'codex' }) => ({
+      async ({ agent }: { agent: AgentKind }) => ({
         ok: true,
         models: [
           {
