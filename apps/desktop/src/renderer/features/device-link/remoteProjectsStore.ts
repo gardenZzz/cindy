@@ -403,36 +403,6 @@ const actions = {
     if (changed) recompute();
   },
 
-  /** bootstrap 永久失败 / 重试耗尽且没有 sessions shard：记录终态，避免侧边栏无限 loading。 */
-  markBootstrapFailed(deviceId: string): void {
-    if (!setBootstrapFailed(deviceId, true)) return;
-    subs.forEach((fn) => fn());
-  },
-
-  /** 新一轮 bootstrap 开始或 snapshot 成功：重新进入等待 / 已同步状态。 */
-  clearBootstrapFailure(deviceId: string): void {
-    if (!setBootstrapFailed(deviceId, false)) return;
-    subs.forEach((fn) => fn());
-  },
-
-  /**
-   * 合并一份有界会话快照。周期 anti-entropy 只拿最近 LIST_LIMIT 条 + 旧置顶，响应缺席
-   * 不能证明窗口外会话已归档/删除；因此命中行用权威值替换，未命中行先保留，再由 refresh
-   * 层有界补查终态。首次无分片时等价于 setDeviceSessions。
-   */
-  mergeDeviceSessions(deviceId: string, deviceName: string, rawSessions: readonly Session[]): void {
-    const existing = shards.get(deviceId);
-    if (!existing) {
-      actions.setDeviceSessions(deviceId, deviceName, rawSessions);
-      return;
-    }
-    const incomingIds = new Set(rawSessions.map((session) => session.id));
-    actions.setDeviceSessions(deviceId, deviceName, [
-      ...rawSessions,
-      ...existing.sessions.filter((session) => !incomingIds.has(session.id)),
-    ]);
-  },
-
   /**
    * 应用一条被控端 `local-db:sessions:patched` 增量(push 驱动镜像核心)。幂等:
    *  - status ∈ {deleted, archived} → 从分片移除该会话(active 视图不含)。

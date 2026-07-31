@@ -333,25 +333,6 @@ export function actualSourceIdForModel(
 }
 
 /**
- * 「实际路由口径」的来源解析:选择规则与 effectiveSourceIdForModel 相同,但**不**
- * 剔除停用拷贝(includeDisabled rail)。给「展示一个已在运行的会话」用:运行中的
- * 会话不因停用打断,实际路由层对隐式来源仍落原生默认、对显式来源仍用会话存的值 ——
- * 图标 / 价格 / Fast / 选中行豁免必须跟实际路由一致,不能显示成准入过滤后的替代
- * 来源(PR #744 review 第五轮)。**新路由选择**(新会话 / 切模型 / worker / schedule)
- * 一律用 effectiveSourceIdForModel,不要用本函数。
- */
-export function actualSourceIdForModel(
-  views: ProviderView[],
-  providerId: string | null | undefined,
-  modelId: string,
-  agent: AgentKind,
-): string | null {
-  const sources = sourcesForModel(views, modelId, agent, { includeDisabled: true });
-  if (providerId && sources.some((provider) => provider.id === providerId)) return providerId;
-  return nativeDefaultSourceId(sources, agent);
-}
-
-/**
  * 某 (provider, model, agent) 是否支持 Fast 模式 —— 纯函数,**Fast 能力的唯一真相**。
  * 直接读该供应商在该 agent 下那个模型条目的 `supportsFastMode`（per-provider，见 CatalogModel）。
  * 缺省 / 取不到 provider / 该来源不提供此模型 ⇒ false（不显示开关）。

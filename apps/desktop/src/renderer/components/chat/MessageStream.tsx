@@ -1932,9 +1932,8 @@ function groupAnsweredTurnItems(
     const it = turnItems[i];
     if (
       !sealedAnswers.has(i) &&
-      !isRunningAgentTask(it) &&
-      !isWorkflowTaskItem(it) &&
-      !isDeliveryProseItem(it) &&
+      isWorkActivityItem(it) &&
+      !isDeliveryProseItem(it)
     ) {
       run.push(it);
     } else {
