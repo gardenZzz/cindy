@@ -29,6 +29,7 @@ import { useProviders } from '@/hooks/useProviders';
 import { isChatGptConnectionConnected, useCodexAuth } from '@/hooks/useCodexAuth';
 import { useApiKey } from '@/hooks/useApiKey';
 import { useModelAccessStatus } from '@/hooks/useModelAccessStatus';
+import { getCursorAvailability, setCursorAvailability } from '@/state/cursorAvailability';
 import { useConfirmDialog } from '@/components/ui/confirm-dialog-provider';
 import { useSignInToCindy } from '@/hooks/useSignInToCindy';
 import { useProviderOAuthDeviceCode } from '@/hooks/useProviderOAuthDeviceCode';
@@ -1401,7 +1402,8 @@ function CursorDetail() {
   const refresh = useCallback(async () => {
     setProbe({ kind: 'loading' });
     try {
-      const status = await window.electronAPI.maker.agent.getCursorBinaryStatus();
+      // 设置页这一次就是「重新检查」的语义 —— 强制重探,顺带刷新全局缓存。
+      const status = { installed: await getCursorAvailability({ refresh: true }) };
       if (status.installed) {
         setProbe({ kind: 'installed' });
         await refreshAuth();
@@ -1471,6 +1473,8 @@ function CursorDetail() {
     setInstalling(true);
     try {
       const result = await window.electronAPI.maker.agent.installCursorAgent();
+      // 已知结果直写全局缓存:装完立刻让 New Maker / worker 面板露出 Cursor 段,不等重探。
+      setCursorAvailability(result.installed);
       if (result.installed) {
         setProbe({ kind: 'installed' });
         toast.success(t('settings.providers.cursor.installSuccess'));
