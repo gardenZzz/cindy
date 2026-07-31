@@ -114,6 +114,17 @@ export function formatCursorInvalidResumeMessage(sessionId: string): string {
   );
 }
 
+export function formatCursorInitialModelFailedMessage(
+  desiredModel: string,
+  activeModel: string,
+  reason: string,
+): string {
+  return (
+    `未能切换到 Cursor 模型 ${desiredModel}（${reason}），` +
+    `本次会话继续使用 ${activeModel}。可稍后在模型选择器重试。`
+  );
+}
+
 export function formatCursorInvalidResumeCasConflictMessage(): string {
   return 'Cursor 会话无法恢复，且会话 ID 已被并发更新，未自动覆盖。请重试。';
 }
