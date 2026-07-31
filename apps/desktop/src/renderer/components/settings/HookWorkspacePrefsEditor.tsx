@@ -76,7 +76,6 @@ import {
   type KnownAgent,
   type PrefsAgentCaps,
 } from './hookWorkspacePrefsLogic';
-import type { AgentKind } from '@cindy/maker-core';
 
 /** 全 null 的缺省偏好行(该目录从未设置过)。 */
 function emptyPrefs(workspace: string): HookWorkspacePrefs {
@@ -475,7 +474,7 @@ function PrefsField({
   );
 }
 
-/** hook prefs 的 agentKind(AgentKind)→ 选择器的 vendor key。 */
+/** hook prefs 的 agentKind('claude-code' | 'codex')→ 选择器的 vendor key。 */
 function toVendorKey(agentKind: string | null): 'cc' | 'codex' {
   return agentKind === 'codex' ? 'codex' : 'cc';
 }

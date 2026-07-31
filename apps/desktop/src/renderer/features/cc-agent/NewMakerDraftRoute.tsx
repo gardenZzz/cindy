@@ -59,6 +59,7 @@ import { useHasAnyRemoteTarget } from '@/hooks/useHasAnyReadyRemoteHost';
 import { useSelectableDevices } from '@/hooks/useControllableDevices';
 import { useProviderOnboarding } from '@/hooks/useProviderOnboarding';
 import { ConnectProviderCard } from '@/components/onboarding/ConnectProviderCard';
+import { InheritedSubscriptionNotice } from '@/components/onboarding/InheritedSubscriptionNotice';
 import { resolveDeviceLinkSubmission } from './deviceLinkCreateArgs';
 import { commitRemoteSessionHandoff } from './remoteSessionHandoff';
 import { VendorSegmentedSwitcher } from '@/components/new-chat/VendorSegmentedSwitcher';
@@ -75,6 +76,7 @@ import {
   patchDraft,
   patchCollab,
   patchCurrentVendorPrefs,
+  resetDraftWorkspaceTargets,
   getFastModeForModel,
   setFastModeForModel,
   setEffortForModel,
@@ -98,7 +100,10 @@ import {
 } from '@/lib/composerDraftStore';
 import type { JSONContent } from '@tiptap/core';
 import { base64ToUint8Array } from '@/lib/fileTypeInference';
-import { calibrateDraftModel } from '@/lib/draftModelCalibration';
+import {
+  calibrateDraftModel,
+  type DraftModelCalibrationResult,
+} from '@/lib/draftModelCalibration';
 import { showWorktreeError } from '@/lib/worktreeToast';
 import type { CreateWorktreeResp } from '@/lib/worktree.types';
 import * as sessionService from '@/lib/sessionService';
@@ -281,7 +286,6 @@ function draftEnableOrcaOptions(
     : collab.worker === 'cursor'
       ? 'cursor'
       : 'claude-code';
-  const cfg = collab.workerConfig;
   if (!cfg) return { workerAgent };
   // 草稿里持久化的来源在发送时按 live 目录重新收窄(已连接 + 提供该模型 + 未被可见性
   // 隐藏,与 CreateWorkerPopover.narrowProviderSource 同规则):草稿可跨重启存活,来源
@@ -300,7 +304,13 @@ function draftEnableOrcaOptions(
     // 显式路由过去。「隐藏」不再收窄 —— 隐藏只是陈列过滤,记忆来源被隐藏仍然合法可用
     // (2026-07 启用/显示双轴拆分)。suspended 供应商已被 connectedProvidersForAgent 剔除。
     const catalogModel = getModel(provider, cfg.model, workerAgent);
-    return catalogModel && catalogModel.disabled !== true ? cfg.providerId : undefined;
+    // 非聊天模型不该被当成持久化草稿的有效来源(issue #882 第 3 点,2026-07 review),
+    // 与 CreateWorkerPopover.narrowProviderSource 同规则同理由。
+    return catalogModel &&
+      catalogModel.disabled !== true &&
+      isAgentSelectableModel(catalogModel, { userProvider: provider.source === 'user' })
+      ? cfg.providerId
+      : undefined;
   })();
   return {
     workerAgent,
@@ -410,12 +420,36 @@ function getCurrentRoutePath(): string {
 
 /**
  * 发送 / 建目标成功后调用:把草稿 store 的工作区选择复位到默认(对话态、无额外目录)。
- * workingDir=null 会通过 patchDraft 的兜底级联清掉 remoteHostId / deviceLink / collab.enabled,
- * 所以这里只需显式清 workingDir + extraDirs 两个字段。vendor / lastByVendor / fastModeByModel
- * 等模型/agent 层偏好保持不变(那是"我常用哪个"的记忆,和"这次要跑在哪"的工作区选择正交)。
+ * 具体清哪些字段、为什么只需两个,见 state/newMakerDraft 的 resetDraftWorkspaceTargets ——
+ * 该语义已提到 store 侧共享,其它「另起一段干净对话」的入口也走同一个函数。
  */
 function resetDraftWorkspaceAfterSend(): void {
-  patchDraft({ workingDir: null, extraDirs: [] });
+  resetDraftWorkspaceTargets();
+}
+
+/**
+ * 「这份草稿要跑在哪」的目标描述 —— 见组件内 applyDraftTarget。
+ *
+ * 刻意把 deviceId 与 workingDir 放在一起要求调用方**同时**给出:草稿的运行目标本来就是这个二元组,
+ * 而所有需要连带更新的状态(mention chip、路径型附件、能力/供应商快照、远程运行配置、worktree
+ * 三态、extraDirs)都能从「这个二元组的哪一半变了」推导出来。分开传就又回到了「某条路径记得改
+ * 设备、忘了清项目」那类缺陷。
+ */
+interface DraftTargetRequest {
+  /** 目标设备;null = 本机。 */
+  deviceId: string | null;
+  deviceName: string | null;
+  /** 目标工作区;null = 该设备上的「对话」(不绑项目)。 */
+  workingDir: string | null;
+  /**
+   * 已经 inline 拉到的被控端快照。只有「添加远程项目」那条路径有 —— 它为了验证设备可达,本来就
+   * 直接 invoke 过 capabilities / defaults,于是能立刻 seed,不必等 effect 再跑一轮隧道往返。
+   * 不给就把远程运行配置打回未加载,交给 seed effect 自己拉。
+   */
+  remoteSnapshot?: {
+    capabilities: AgentCapabilities;
+    defaults: RemoteDraftDefaults | null;
+  };
 }
 
 /**
@@ -495,6 +529,21 @@ export function NewMakerDraftRoute() {
       switchVendor('cc', getCurrentVendorPrefs());
     }
   }, [includeCursor, draft.vendor]);
+
+  /** createSession 失败 toast:远端路由错误按 code 给可操作文案,其余回退通用文案。 */
+  const toastCreateSessionFailed = (err?: unknown) => {
+    const code = (err as { code?: string } | null | undefined)?.code
+      ?? (createSessionError as { code?: string } | null)?.code;
+    const key =
+      code === 'REMOTE_PROVIDER_UPDATING'
+        ? 'ccAgent.draft.remoteProviderUpdating'
+        : code === 'REMOTE_PROVIDER_UNSUPPORTED'
+          ? 'ccAgent.draft.remoteProviderUnsupported'
+          : code === 'REMOTE_NATIVE_OAUTH_UNAVAILABLE'
+            ? 'ccAgent.draft.remoteNativeOauthUnavailable'
+            : 'ccAgent.draft.createSessionFailed';
+    toast.error(t(key));
+  };
 
   /** createSession 失败 toast:远端路由错误按 code 给可操作文案,其余回退通用文案。 */
   const toastCreateSessionFailed = (err?: unknown) => {
@@ -904,8 +953,8 @@ export function NewMakerDraftRoute() {
     const healthy = calibrationProviders.filter((p) => !p.modelDiscoveryFailure);
     return healthy.length > 0 ? healthy : calibrationProviders;
   }, [calibrationProviders, draftModelChosenByUser, chatPrefs.providerId]);
-  const calibratedDraftModel = useMemo(() => {
-    if (isDeviceLinkDraft) return chatPrefs.model;
+  const draftCalibration = useMemo<DraftModelCalibrationResult>(() => {
+    if (isDeviceLinkDraft) return { model: chatPrefs.model, providerId: null };
     return calibrateDraftModel({
       providers: autoCalibrationProviders,
       agent: capabilityAgentKind,
@@ -921,6 +970,7 @@ export function NewMakerDraftRoute() {
     draftModelChosenByUser,
     localProvidersLoading,
   ]);
+  const calibratedDraftModel = draftCalibration.model;
 
   const effectiveSourceId = useMemo<string | null>(() => {
     // 本地草稿用**过滤后**的候选解析来源:SSH 场景下同一个 model id 可能既被允许的来源
@@ -933,9 +983,13 @@ export function NewMakerDraftRoute() {
     // 挑好的健康模型重新指回那个已知失败的原生默认来源(PR #548 review)。用户显式表达过时
     // autoCalibrationProviders 本身就等于完整候选,不受影响。
     const source = isDeviceLinkDraft ? providers : autoCalibrationProviders;
+    // 来源优先级:用户显式选的 > 校准挑中的 > 原生默认(nativeDefaultSourceId)。
+    // 中间那一档不能省:nativeDefaultSourceId 对 claude-code 无条件优先 XD 网关,校准好的
+    // 「anthropic 订阅提供的 claude-opus-5」交出去只剩模型 id 时会被重新指回网关 ——
+    // 计费落网关而不是用户已付费的订阅额度,「订阅优先」在最后一步被推翻(PR #1076 review)。
     return effectiveSourceIdForModel(
       source,
-      chatPrefs.providerId ?? null,
+      chatPrefs.providerId ?? draftCalibration.providerId ?? null,
       calibratedDraftModel,
       capabilityAgentKind,
     );
@@ -945,6 +999,7 @@ export function NewMakerDraftRoute() {
     autoCalibrationProviders,
     capabilityAgentKind,
     chatPrefs.providerId,
+    draftCalibration.providerId,
     calibratedDraftModel,
   ]);
 
@@ -3338,6 +3393,14 @@ export function NewMakerDraftRoute() {
                     <ConnectProviderCard />
                   </div>
                 )}
+                {/* 「已沿用本机订阅」一次性告知。与上面的引导卡条件互斥(它要求零已连接
+                    来源,而继承成功后该供应商已连接),所以不与快捷入口互斥 —— 告知不是
+                    待办,不该把快速开始顶掉。device-link 草稿不出:连接态在被控端。
+                    间距挂在组件自身:外层包一层 div 会在它不可见时留下一段空白 margin。 */}
+                <InheritedSubscriptionNotice
+                  enabled={!isDeviceLinkDraft}
+                  className="mt-6 self-stretch"
+                />
                 {/* 快捷入口与输入框同宽:左右两缘都与上方 ChatInput 对齐(父列已封顶
                     inputWidth)。此前封顶 800px 会在宽窗口下右缘短一截,视觉上没对齐
                     (2026-07-24 用户反馈)。 */}

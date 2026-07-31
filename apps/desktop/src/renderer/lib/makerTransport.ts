@@ -18,6 +18,11 @@ import {
   getSessionDeviceId,
   remoteProjectsStore,
 } from '@/features/device-link/remoteProjectsStore';
+import {
+  invalidationAtRequestStart,
+  persistCachedMessages,
+  sessionCacheInvalidationToken,
+} from '@/features/device-link/mirrorCacheClient';
 import { getStickySessionDeviceId } from '@/features/device-link/stickySessionOrigin';
 import type { Message, Session } from '@/lib/ccAgent.types';
 import * as messageService from '@/lib/messageService';
@@ -192,14 +197,130 @@ export function isSessionTurnRunningFor(sessionId: string): Promise<boolean> {
   return invokeRemote(deviceId, 'maker:session-in-turn', [sessionId]) as Promise<boolean>;
 }
 
-/** 读历史消息:远程走隧道 local-db:messages:list,返回形状与本地一致(camelCase Message[])。 */
+/**
+ * 读历史消息:远程走隧道 local-db:messages:list,返回形状与本地一致(camelCase Message[])。
+ *
+ * 远程会话取回**最新一页**(没有 before / beforeTs 游标)时顺手写进冷缓存
+ * (`mirrorCacheClient`),供下次冷启动 / 被控端离线时乐观渲染。这是缓存的**唯一写点**:
+ * 首拉、reconcileRemoteMessages、reconnect 重拉、turn 结束对账都经过这里,所以缓存
+ * 自然跟着最近一次对账保持新鲜。翻页(before/beforeTs)与本机会话都不写 ——
+ * 老窗口不是"最近一页",写进去会让下次冷开 hydrate 出一段历史中间的孤岛。
+ */
 export function listMessagesFor(
   sessionId: string,
   opts?: { limit?: number; before?: string; beforeTs?: number },
 ): Promise<Message[]> {
   const deviceId = getSessionDeviceId(sessionId);
   if (!deviceId) return messageService.list(sessionId, opts);
-  return invokeRemote(deviceId, 'local-db:messages:list', [sessionId, opts]) as Promise<Message[]>;
+  const promise = invokeRemote(deviceId, 'local-db:messages:list', [sessionId, opts]) as Promise<
+    Message[]
+  >;
+  if (!opts?.before && opts?.beforeTs == null) {
+    // 发起时的作废令牌:/clear、rewind、删消息都会自增它(见 clearCachedMessages)。
+    const invalidationAtStart = sessionCacheInvalidationToken(sessionId);
+    // 同时记下 main 侧的会话级作废计数(跨窗口 / 跨进程可见);落盘时交给 main 比对。
+    // 还没有已知值时**在这里**(与远端请求同时)补读一次 —— main 拒绝没带令牌的非空写入,
+    // 而补读若拖到落盘前做,拿到的是清理之后的值,屏障就失效了(见 invalidationAtRequestStart)。
+    const mainInvalidationAtStart = invalidationAtRequestStart(deviceId, sessionId);
+    void promise
+      .then((rows) => {
+        if (!Array.isArray(rows)) return;
+        // 请求在途期间权威侧作废过这个会话的历史 → 手里这批是作废前的行,丢弃这次写,
+        // 否则它会排在那次空写之后落地,把已被清掉的正文重新写回盘上(review: pr-code-review)。
+        if (sessionCacheInvalidationToken(sessionId) !== invalidationAtStart) return;
+        // 请求在途期间这台设备可能已被撤销 / 关闭被控 / 本机停用控制,那条路径已经
+        // clearCachedDevice 清过盘了。迟到的响应若照写,会用清理**之后**的 main 代际
+        // 把被撤销对端的明文重新落盘,main 侧的作废闸挡不住它(review: codex P1)。
+        // 落盘前重核归属:mapping 已经不在(或已换设备)就直接丢弃这次写入。
+        if (getSessionDeviceId(sessionId) !== deviceId) return;
+        // 把"我取到内容时 main 侧的会话级作废计数"一起交上去:main 会再比对一次,于是
+        // **另一个窗口 / 另一个进程**的作废也能挡住这次写(renderer 令牌只在本进程内可见)。
+        persistCachedMessages(deviceId, sessionId, rows, mainInvalidationAtStart);
+      })
+      // 拉取失败由调用方处理;这里只是不写缓存(旧缓存保留,离线时正好还能用)。
+      .catch(() => undefined);
+  }
+  return promise;
+}
+
+// 已确认不支持 maker:get-workflow-progress 的被控设备(收到过 CHANNEL_NOT_ALLOWED):
+// 短路一段时间不再空耗隧道往返。带 TTL 而非进程级永久 —— deviceId 跨升级稳定,
+// 被控端升级到支持版本后负缓存到期自动重探,无需重启控制端。
+const WORKFLOW_PROGRESS_UNSUPPORTED_TTL_MS = 10 * 60 * 1000;
+const workflowProgressUnsupportedUntil = new Map<string, number>();
+
+/**
+ * workflow 逐 agent 进度树(只读,best-effort):记录文件真相在会话归属端 HOME,
+ * 远程会话必须隧道到被控端读(控制端本机读必落空)。老被控端无此 channel →
+ * CHANNEL_NOT_ALLOWED → 记入带 TTL 的短路表;其余错误一律返回 null,调用方回退
+ * workflow 级卡片。
+ */
+export function getWorkflowProgressFor(
+  sessionId: string,
+  taskId: string,
+): Promise<import('../../shared/workflow-progress').WorkflowProgress | null> {
+  // 粘滞归属(与 listSessionBackgroundTasksFor 同款):relay 瞬时重连清空注册表的
+  // 窗口内误判本机会在本地读必空,且详情视图不会因归属恢复而重试。
+  const deviceId = getStickySessionDeviceId(sessionId);
+  if (!deviceId) return window.electronAPI.maker.getWorkflowProgress(sessionId, taskId);
+  const blockedUntil = workflowProgressUnsupportedUntil.get(deviceId);
+  if (blockedUntil !== undefined && blockedUntil > Date.now()) return Promise.resolve(null);
+  return (
+    invokeRemote(deviceId, 'maker:get-workflow-progress', [sessionId, taskId]) as Promise<
+      import('../../shared/workflow-progress').WorkflowProgress | null
+    >
+  ).catch((err) => {
+    if (extractIpcError(err)?.code === 'DEVICE_LINK_CHANNEL_NOT_ALLOWED') {
+      workflowProgressUnsupportedUntil.set(
+        deviceId,
+        Date.now() + WORKFLOW_PROGRESS_UNSUPPORTED_TTL_MS,
+      );
+    }
+    return null;
+  });
+}
+
+/**
+ * 会话仍在运行的后台任务快照(只读,best-effort):后台任务面板挂载时补回
+ * 「订阅前已启动 / 重载清空 taskUpdates 后」的存量任务。远程会话任务真身在
+ * 被控端,必须隧道读(控制端 main 无该会话 handle,本机读必空);老被控端无此
+ * channel 或隧道失败一律降级空表,面板退化为事件流 + 消息扫描两源。
+ * 归属用粘滞解析(与 estimatedSessionValueFor 同款):这是一次性水合,relay
+ * 瞬时重连清空注册表的窗口内若误判为本机,会 seed 一张空表且面板不重试。
+ */
+export function listSessionBackgroundTasksFor(
+  sessionId: string,
+): ReturnType<typeof window.electronAPI.maker.listSessionBackgroundTasks> {
+  const deviceId = getStickySessionDeviceId(sessionId);
+  if (!deviceId) return window.electronAPI.maker.listSessionBackgroundTasks(sessionId);
+  return (
+    invokeRemote(deviceId, 'maker:session-background-tasks:list', [sessionId]) as ReturnType<
+      typeof window.electronAPI.maker.listSessionBackgroundTasks
+    >
+  ).catch(() => ({ tasks: [] }));
+}
+
+/**
+ * 订阅形态会话「本会话价值」历史汇总:远程走隧道(否则查控制端空库恒为 0,底部 $ chip
+ * 的历史初值永远缺失)。归属用粘滞解析(relay 瞬时重连清空注册表的窗口内不误判为本机,
+ * 与 goal/learn 链路同款);老被控端无此 channel → CHANNEL_NOT_ALLOWED,调用方 catch
+ * 后退化为只显示已加载消息 + 实时推送的部分值。
+ */
+export function estimatedSessionValueFor(sessionId: string): Promise<{
+  totalValueMoney?: import('../../shared/regionalMoney').RegionalMoney | null;
+  totalValueUsd?: number;
+  entries: Array<{
+    clientId: string;
+    money?: import('../../shared/regionalMoney').RegionalMoney;
+    costUsd?: number;
+    turnUsageDetails?: unknown;
+  }>;
+}> {
+  const deviceId = getStickySessionDeviceId(sessionId);
+  if (!deviceId) return messageService.estimatedSessionValue(sessionId);
+  return invokeRemote(deviceId, 'local-db:messages:estimatedSessionValue', [
+    sessionId,
+  ]) as ReturnType<typeof estimatedSessionValueFor>;
 }
 
 // 已确认不支持 maker:get-workflow-progress 的被控设备(收到过 CHANNEL_NOT_ALLOWED):
@@ -324,11 +445,10 @@ export function deleteMessageFor(
 ): Promise<MessageDeletionResult> {
   const deviceId = getSessionDeviceId(sessionId);
   if (!deviceId) return window.electronAPI.maker.deleteMessage(sessionId, clientId);
-  return invokeRemote(
-    deviceId,
-    'maker:message:delete',
-    [sessionId, clientId],
-  ) as Promise<MessageDeletionResult>;
+  return invokeRemote(deviceId, 'maker:message:delete', [
+    sessionId,
+    clientId,
+  ]) as Promise<MessageDeletionResult>;
 }
 
 /** interrupted-turn-resume:中断提示「忽略」的显式确认(写一次 last_turn_ended_at),

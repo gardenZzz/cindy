@@ -30,6 +30,7 @@ import type { AgentKind, Effort, PermissionMode, ReasoningDisplay, UserMessage, 
 import type { Capabilities, EffortDescriptor, ModelDescriptor } from '../types/capabilities.js';
 import { NotSupportedError } from '../types/capabilities.js';
 import type { AgentCredentialMode, AuthLoginOptions } from '../interfaces/auth-adapter.js';
+import type { ContactsPromptState } from '../contacts/system-prompt.js';
 import type {
   MemoryStatus,
   MemorySetResult,
@@ -188,6 +189,26 @@ export interface AgentDeps {
   capabilityAdditions?: AgentCapabilityAdditions;
 
   /**
+   * 解析某条**具体路由**上该模型已核实的上下文窗口上限（host 注入）；没有则返回 null。
+   *
+   * 用于把上游上报的窗口收敛到真实上限：app-server 对网关路由的模型常报**基础模型**的窗口
+   * （例：目录 372K 的 GPT-5.6-Sol 被报成 1M），虚高值会让上下文占比被低估、memory flush
+   * 阈值跟着推迟。
+   *
+   * 为什么不让 agent 自己查 `capabilities.availableModels`：那是跨 provider 去重后的扁平表，
+   * 同一 model id 由多个 provider 提供时归属已丢，按 id 回查可能命中另一条路由的元数据 ——
+   * 用错路由的上限收敛比不收敛更糟。host 同时持有完整目录与 provider 维度，由它按
+   * (providerId, modelId) 定夺；目录里那些**派生兜底**的窗口（上游不给元数据时补的常量）
+   * 一律不作为上限。
+   *
+   * 返回 null / 缺省不注入 = 不收敛，直接采信上报值（改动前行为）。
+   */
+  resolveVerifiedContextWindow?: (
+    providerId: string | null | undefined,
+    modelId: string,
+  ) => number | null;
+
+  /**
    * Agent 起 session 时追加到 system prompt 末尾的字符串（host 注入）。
    * **本轮一阶段不消费**，仅占位。后续接通后 desktop 可以传项目级 prompt。
    */
@@ -343,6 +364,24 @@ export interface AgentDeps {
   makerMemory?: MakerMemoryManager;
 
   /**
+   * 智能通讯录「本会话有效状态」(host 注入)。决定注入哪段 contacts prompt
+   * (enabled = 使用规范, disabled = 可选功能告示, unavailable = 不注入, 语义见
+   * contacts/system-prompt.ts 的 ContactsPromptState)。host 必须按**有效策略**
+   * 计算, 不能只读全局开关: desktop 侧 = 全局开关 ∧ PluginRegistry 的
+   * 工作区/用户覆盖(workingDir 传入即为此), codex 侧还要与实际应用到 running
+   * app-server 的 spawn 快照对齐(失效失败时 stale 配置里没有新工具面)。
+   * 求值时机与 MCP 工具注册对齐, 保证 prompt 状态与工具可用性不分叉:
+   *  - claude-code: 每次 buildQuery(含 rewind/fresh 重建)与 buildMcpServers
+   *    同点求值, enabled 还会与本次 build 实际注册的 server 集合取交;
+   *    单次 build 内恒定, 前缀缓存不受影响。
+   *  - codex: session 启动求值一次(MCP flags 冻结在 spawn 配置)。
+   * remote 会话两端都不注入(cindy_contacts 不随远端转发)。
+   *
+   * 缺省 / undefined → 两段都不注入 (host 未接线, 与改造前行为一致)。
+   */
+  getContactsPromptState?: (ctx: { workingDir?: string }) => ContactsPromptState;
+
+  /**
    * Host-side MCP approval policy, shared by **both** agents. `auto-approve`
    * skips the permission prompt; `prompt` preserves the normal approval UI and
    * its optional session grant; `prompt-each-time` always asks and never
@@ -406,6 +445,18 @@ export interface AgentDeps {
    * user reviewer，不能让未知路由进入无人值守审批。
    */
   registerCodexReviewerRouteContext?: (args: CodexReviewerRouteContextArgs) => boolean;
+
+  /**
+   * Codex 专用：app-server 创建子 Agent thread 后，把明确的父子 thread 关系同步给宿主。
+   *
+   * 子 thread 会独立发起 Responses 请求，但仍属于父业务 session；宿主据此继承
+   * provider / bridge 路由和 proxy prompt。该钩子必须是同步内存操作，确保在子
+   * thread 首个网络请求前完成登记。
+   */
+  registerCodexChildThreadForParent?: (args: {
+     parentThreadId: string;
+     childThreadId: string;
+   }) => void;
 
   /**
    * Claude 专用: host 明确认定可无提示执行的只读工具名, 透传到 SDK
@@ -792,7 +843,7 @@ export interface SendOptions {
 
 export type TurnPermissionOrigin =
   | { kind: 'desktop' }
-  | { kind: 'im'; channel: 'feishu' | 'discord' | 'slack' | 'wechat'; taskId?: string }
+  | { kind: 'im'; channel: 'feishu' | 'discord' | 'slack' | 'wechat' | 'telegram'; taskId?: string }
   | { kind: 'scheduler' }
   | { kind: 'hook'; source: string };
 

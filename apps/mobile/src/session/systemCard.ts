@@ -56,6 +56,31 @@ export function parseMobileLocalSystemCommand(text: string): MobileSystemCardTyp
   return parseLocalSystemCommand(text, MOBILE_LOCAL_SYSTEM_COMMANDS);
 }
 
+/**
+ * 出卡前需要「会话在被控端已存在」的本地命令。
+ *
+ * /context 要向被控端取上下文用量(maker.getContextUsage);/help /cost /pwd /status
+ * 都只是本地 projection 与会话行的视图,合成行上照样出得来,不该挡——挡了反而破坏
+ * 新建会话「一切正常」的观感。
+ */
+export const MOBILE_REMOTE_BACKED_LOCAL_COMMANDS: ReadonlySet<MobileSystemCardType> = new Set(['context']);
+
+/**
+ * 这次发送要执行的命令是否需要远端会话已经存在。
+ *
+ * desktop 命令一律算:手机端白名单(MOBILE_SUPPORTED_DESKTOP_COMMANDS)只有 /learn,
+ * 而它就是打被控端蒸馏管线的。会话还没建成时这类命令必须挡住而不是执行 —— 也不能
+ * 排队,outbox 的派发动作是「enqueue 一条消息」,命令原样入队 agent 只会当普通文本
+ * 忽略(review P1)。
+ */
+export function commandNeedsRemoteSession(
+  localCommand: MobileSystemCardType | null,
+  desktopCommand: { name: string } | null,
+): boolean {
+  if (desktopCommand) return true;
+  return localCommand !== null && MOBILE_REMOTE_BACKED_LOCAL_COMMANDS.has(localCommand);
+}
+
 export function mergeMobileLocalSlashCommands(
   remoteCommands: readonly MobileSlashCommand[],
 ): MobileSlashCommand[] {
@@ -99,10 +124,29 @@ export function formatMobileSystemCard(
       rows: [],
     };
   }
-  if (type === 'auto-resume') return { title: i18n.t('message.systemCard.autoResume'), rows: [] };
+  if (type === 'auto-resume') return formatAutoResumeCard(data);
   if (type === 'agent-switch') return formatAgentSwitchCard(data);
   if (type === 'learn') return formatLearnCard(data);
   return formatSystemCard(type, data);
+}
+
+function formatAutoResumeCard(data: Record<string, unknown> | undefined): SystemCardPresentation {
+  const number = (value: unknown) => typeof value === 'number' && Number.isFinite(value) && value > 0 ? value : undefined;
+  const error = typeof data?.error === 'string' && data.error.trim() ? data.error : undefined;
+  const attempt = number(data?.attempt);
+  const maxAttempts = number(data?.maxAttempts);
+  const sessionTotal = number(data?.sessionTotal);
+  const outcome = data?.outcome === 'succeeded' || data?.outcome === 'failed' ? data.outcome : undefined;
+  const hasInterruptionContext = !!(data?.live === true || error || attempt || maxAttempts || sessionTotal || outcome);
+  if (!hasInterruptionContext) return { title: i18n.t('message.systemCard.autoResume.separator'), rows: [] };
+  const title = data?.live === true
+    ? attempt && maxAttempts
+      ? i18n.t('message.systemCard.autoResume.pendingWithProgress', { attempt, total: maxAttempts })
+      : i18n.t('message.systemCard.autoResume.pending')
+    : i18n.t(`message.systemCard.autoResume.${outcome ?? 'neutral'}`);
+  const subtitle = attempt && maxAttempts && sessionTotal
+    ? i18n.t('message.systemCard.autoResume.details', { attempt, total: maxAttempts, count: sessionTotal }) : undefined;
+  return { title, ...(error ? { body: error } : {}), subtitle, rows: [] };
 }
 
 /**

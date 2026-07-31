@@ -1482,7 +1482,7 @@ describe('buildNoProviderMessage', () => {
         ],
         cursor: [],
     })),
-    });
+  });
 
     // 显式 model 且未显式来源时既有语义是强制默认路由(providerId=null);
     // 标准面板显式选定来源后必须原样生效,不再被强制回落。

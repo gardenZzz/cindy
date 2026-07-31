@@ -2,6 +2,7 @@
 
 import { cleanup, fireEvent, render, screen } from '@testing-library/react';
 import { createElement, type ReactElement } from 'react';
+import type { WebviewTag } from 'electron';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import type { UseBrowserWebviewResult } from '../../../hooks/useBrowserWebview';
@@ -23,6 +24,10 @@ vi.mock('react-i18next', () => ({
 
 vi.mock('../../../hooks/useBrowserWebview', () => ({
   useBrowserWebview: () => browserState,
+}));
+
+vi.mock('../useLocalHtmlAutoReload', () => ({
+  useLocalHtmlAutoReload: vi.fn(),
 }));
 
 vi.mock('../../../lib/browserWebviewPool', () => ({
@@ -47,6 +52,7 @@ function makeBrowserState(
 ): UseBrowserWebviewResult {
   return {
     wrapper: sharedWrapper,
+    webview: null,
     url: 'https://www.taptap.cn/',
     title: '',
     favicon: '',
@@ -163,6 +169,27 @@ describe('BrowserTabBody navigation', () => {
     expect(sharedWrapper.isConnected).toBe(false);
     expect(replacement.isConnected).toBe(true);
     expect(replacement.parentElement).not.toBe(parking);
+  });
+
+  it('only exposes page comments while a WebView generation exists', () => {
+    browserState = makeBrowserState({ webview: null });
+    const view = render(renderBrowserTab('https://www.taptap.cn/'));
+
+    expect(
+      screen.queryByRole('button', { name: 'rightSidebar.browser.comment' }),
+    ).toBeNull();
+
+    const webview = {
+      send: vi.fn(),
+      addEventListener: vi.fn(),
+      removeEventListener: vi.fn(),
+    } as unknown as WebviewTag;
+    browserState = makeBrowserState({ webview });
+    view.rerender(renderBrowserTab('https://www.taptap.cn/'));
+
+    expect(
+      screen.getByRole('button', { name: 'rightSidebar.browser.comment' }),
+    ).toBeTruthy();
   });
 
   it('does not patch the old webview URL back over a user-entered navigation while loading', () => {
@@ -365,7 +392,6 @@ describe('BrowserTabBody navigation', () => {
 
     expect(patchState).toHaveBeenCalledWith({ url: 'https://www.google.com/' });
   });
-
 
   it('does not patch about:blank back over a user-entered navigation before loading flips true', () => {
     browserState = makeBrowserState({

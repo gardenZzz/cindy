@@ -84,7 +84,6 @@ describe('maker:auto-title — sender 断言', () => {
       agentKind: 'codex',
     });
   });
-
   it('受信来源 + agentKind=cursor 完整走到 runSessionAutoTitle（#11 AC）', async () => {
     await expect(
       invoke({ sessionId: 's-cursor', text: '帮我改一下这个组件', agentKind: 'cursor' }),

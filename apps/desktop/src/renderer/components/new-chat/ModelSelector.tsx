@@ -8,7 +8,7 @@ import {
   type PointerEvent as ReactPointerEvent,
   type ReactNode,
 } from 'react';
-import { Check, ChevronDown, PlugZap, Plus, Search, Unplug, Zap } from 'lucide-react';
+import { Check, ChevronDown, Loader2, PlugZap, Plus, Search, Unplug, Zap } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 
 import { cn } from '@/lib/utils';
@@ -21,6 +21,7 @@ import { CursorMark } from '@/components/icons/CursorMark';
 import { XDIncMark } from '@/components/icons/XDIncMark';
 import { hasProviderLogo, ProviderLogoMark } from '@/components/icons/ProviderLogoMark';
 import { FastModeToggle } from './FastModeToggle';
+import { useModelDiscoveryPending } from './useModelDiscoveryPending';
 import { VendorSegmentedSwitcher } from './VendorSegmentedSwitcher';
 import { useAgentCapabilities, type AgentKind } from '@/hooks/useAgentCapabilities';
 import { useApiKey } from '@/hooks/useApiKey';
@@ -57,6 +58,7 @@ import {
   modelSupportsFastMode,
   providerOffersModel,
   resolveModelIconKind,
+  resolveCodexCompatibilityWireProtocol,
   sourcesForModel,
   visibleModelUnion,
   type ProviderView,
@@ -247,6 +249,8 @@ interface RowModel {
   effortDisplayNames?: Partial<Record<string, string>>;
   supportsFastMode?: boolean;
   supportsThinkingMode?: boolean;
+  /** 模型级 Codex bridge 协议；仅同一 Provider 内混合原生/桥接模型时存在。 */
+  codexCompatibilityWireProtocol?: 'openai-chat' | 'anthropic-messages';
   /** 展示图标 id(AI Gateway / 目录设定,SectionModel.icon);flat 列表的 ModelDescriptor 无此字段。 */
   icon?: string;
 }
@@ -490,6 +494,17 @@ interface ModelSelectorContentProps {
       providerId: string | null,
     ) => void | Promise<void>;
   };
+  /**
+   * 打开选择器触发的那次供应商模型发现是否仍在途。
+   *
+   * 为什么需要它:发现不是本地读取 —— ChatGPT 订阅那条要起一个 codex app-server 再 RPC 列
+   * 模型,秒级到十几秒。以前这个过程完全静默,列表在用户看完关掉之后才更新,于是「只能看到
+   * 少数模型,进一次设置页再回来就全了」——用户以为是设置页刷新的功劳,其实是那几秒没等到。
+   *
+   * 刻意做成列表**下方追加一行**,不是 loading 态界面:已有清单照常可读可选(它多半是上次
+   * 成功的结果),列表结构不动、不产生跳变,只是明说「还在找」。
+   */
+  discoveringModels?: boolean;
 }
 
 function vendorKeyToAgentKind(v?: 'cc' | 'codex' | 'cursor'): AgentKind | null {
@@ -529,6 +544,7 @@ function ModelSelectorContentView({
   pointerRevealRequiresIntent = false,
   fluidWidth = false,
   agentSwitch,
+  discoveringModels = false,
   pricing,
 }: ModelSelectorContentProps & { pricing: ModelPricingCatalog | null }) {
   // 当前来源解析器:已建会话 = 实际路由口径(含停用拷贝),其余 = 准入口径。
@@ -1154,6 +1170,9 @@ function ModelSelectorContentView({
   const editingPricePresentation = editingModel
     ? pricePresentationOf(editingProvider?.id ?? editingProviderId, editingModel.id)
     : null;
+  const editingCodexCompatibilityProtocol = editingProvider
+    ? resolveCodexCompatibilityWireProtocol(editingProvider, currentAgentKind, editingModel)
+    : null;
   const editingDiscount =
     editingPricePresentation?.kind === 'priced' ? editingPricePresentation.discount : undefined;
   const editingPromotionLabel =
@@ -1318,6 +1337,11 @@ function ModelSelectorContentView({
             <span>{t('newChat.modelSelector.meta.fastBadge')}</span>
           )}
         </div>
+        {editingCodexCompatibilityProtocol && (
+          <div className="mt-0.5 text-11 font-normal leading-[1.4] text-[var(--text-tertiary)]">
+            {t('newChat.modelSelector.meta.codexCompatibilityMode')}
+          </div>
+        )}
       </div>
     </div>
   ) : null;
@@ -1657,9 +1681,13 @@ function ModelSelectorContentView({
         }}
       >
         {!hasAnyModel ? (
-          <div className="px-3 py-6 text-center text-13 text-[var(--text-tertiary)]">
-            {t('newChat.modelSelector.search.noResults')}
-          </div>
+          // 发现还在途、且用户没在搜索时不摆「无结果」:那句话和下方的「正在获取」自相矛盾,
+          // 而用户看到「没有模型」就会走。搜索无命中是本地过滤的确定结论,照常显示。
+          discoveringModels && query.trim().length === 0 ? null : (
+            <div className="px-3 py-6 text-center text-13 text-[var(--text-tertiary)]">
+              {t('newChat.modelSelector.search.noResults')}
+            </div>
+          )
         ) : sections ? (
           // 平铺:每行带来源 mark 前缀,无分组标题(同供应商行仍因 buildProviderSections 顺序而相邻)。
           sections.flatMap((sec) => sec.models.map((m) => renderModelItem(sec.provider, m)))
@@ -1667,6 +1695,17 @@ function ModelSelectorContentView({
           (flatModels ?? []).map((m) => renderModelItem(null, m))
         )}
       </div>
+
+      {/* 发现在途提示 —— 追加在列表下方,不接管列表(见 discoveringModels 注释)。
+          spinner 挂 HTML wrapper + animate-spinner(DESIGN.md §14.4 / 工程规范 §7)。 */}
+      {discoveringModels && (
+        <div className="flex items-center gap-1.5 px-3 pt-0.5 text-12 text-[var(--text-tertiary)]">
+          <span className="inline-flex shrink-0 animate-spinner motion-reduce:animate-none">
+            <Loader2 size={12} />
+          </span>
+          <span className="truncate">{t('newChat.modelSelector.discovering')}</span>
+        </div>
+      )}
 
       {/* 「连接来源」footer(供应商入口)—— device-link 远程会话隐藏(无法替被控端连来源)。 */}
       {onNavigateToProviders && !deviceId && (
@@ -1732,6 +1771,8 @@ export function ModelSelector({
   const [open, setOpen] = useState(false);
   const openRef = useRef(false);
   const [keepOpenForAgentConfirmation, setKeepOpenForAgentConfirmation] = useState(false);
+  // 打开触发的那次模型发现是否仍在途(并发语义与理由见 useModelDiscoveryPending)。
+  const discovery = useModelDiscoveryPending();
   const setOpenWithoutAutoRefresh = useCallback((next: boolean): void => {
     openRef.current = next;
     setOpen(next);
@@ -1742,13 +1783,14 @@ export function ModelSelector({
       const wasOpen = openRef.current;
       openRef.current = nextOpen;
       if (nextOpen && !wasOpen && !deviceId) {
-        void window.electronAPI.maker
-          .requestProviderModelsAutoRefresh('model-selector-open')
-          .catch(() => undefined);
+        discovery.begin(() =>
+          window.electronAPI.maker.requestProviderModelsAutoRefresh('model-selector-open'),
+        );
       }
+      if (!nextOpen) discovery.reset();
       setOpen(nextOpen);
     },
-    [deviceId, disabled],
+    [deviceId, disabled, discovery],
   );
 
   // AlertDialog 打开时会被 Popover 视作外部交互并请求关闭。Agent 分段确认期间
@@ -2255,6 +2297,7 @@ export function ModelSelector({
       pointerRevealRequiresIntent={morphEnabled}
       fluidWidth={isFieldTrigger}
       agentSwitch={contentAgentSwitch}
+      discoveringModels={discovery.pending}
       pricing={pricing}
       followSession={
         fallbackOption

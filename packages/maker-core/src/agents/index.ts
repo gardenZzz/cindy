@@ -32,6 +32,10 @@ export {
   toCursorProductModelId,
 } from './cursor/models.js';
 export { CURSOR_ONESHOT_DEFAULT_MODEL } from './cursor/oneShot.js';
+// host 导入本地 Codex rollout 历史时也要做 citation 归一化(流式路径在 translator
+// 内部做,导入路径拿到的是 rollout 原文),复用同一实现避免口径分叉。
+// finalizeCodexCitationText = 剥截断残尾 + 归一化(与流式 completed 完全同口径)。
+export { finalizeCodexCitationText, normalizeCodexFileCitations } from './codex/translator.js';
 export {
   canReuseCodexHostForCredentialMode,
   canReuseHostForCredentialMode,
@@ -72,6 +76,9 @@ export {
   type OverloadError,
   type OverloadErrorKind,
 } from './shared/overload-error.js';
+// 同上理由(同 bundle 直接复用,不造第三份):desktop 的中断自愈判据要认「网络到不了
+// 上游」这一类 —— 那类同样是"连不上"而不是"请求有问题",续跑一次就能过去。
+export { isNetworkishErrorMessage } from './shared/network-error.js';
 // host 侧会话分享(导出/导入 .xdtshare)需要按 cwd 复算 CLI 转录目录、
 // 定位/落位 jsonl。规则单点维护在 claude-projects-fs.ts,这里仅 re-export。
 export {
