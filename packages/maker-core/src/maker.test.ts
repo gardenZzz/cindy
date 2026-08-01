@@ -1295,7 +1295,11 @@ describe('Maker invalid-resume persistence bridge', () => {
     let captured: CreateSessionOptions['onInvalidResumeSession'];
     const startSession = vi.fn(async (opts: CreateSessionOptions) => {
       captured = opts.onInvalidResumeSession;
-      return createHandle({ id: 'sdk-fresh', agentKind: 'claude-code' });
+      return createHandle({
+        id: 'sdk-fresh',
+        agentKind: 'claude-code',
+        startupEvents: [{ type: 'session_id', data: 'sdk-fresh', source: 'claude-code' }],
+      });
     });
     const maker = new Maker({
       agents: { 'claude-code': createAgent(startSession, 'claude-code') },

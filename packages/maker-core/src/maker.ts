@@ -312,34 +312,19 @@ export class Maker {
       elapsedMs: Date.now() - startedAt,
     });
 
-    // 落地元数据 —— storage 已有同 id 的 row 时跳过 insert, 走 update 把 sdkSessionId 写回
+    // 落地业务元数据。SDK session id 与 Cursor 初始模型回退都由下面的事件 listener
+    // 回写，不能在 startSession 返回时同步读取 handle（Cursor 冷启动会让这两个值尚未就绪）。
     let meta: SessionMeta;
-    const cursorModelFallback = opts.agentKind === 'cursor' && (
-      handle.startupEvents?.some((event) => (
-        event.type === 'error' &&
-        (event.data as { reason?: unknown } | undefined)?.reason === 'initial_model_unavailable'
-      )) ?? false
-    );
     const existingRow = opts.id ? await this.storage.get(opts.id) : null;
     if (existingRow) {
-      const patch = {
-        ...(handle.id !== '<pending>' && existingRow.sdkSessionId !== handle.id
-          ? { sdkSessionId: handle.id }
-          : {}),
-        ...(cursorModelFallback && existingRow.model !== handle.model
-          ? { model: handle.model }
-          : {}),
-      };
-      meta = Object.keys(patch).length > 0
-        ? await this.storage.update(id, patch)
-        : existingRow;
+      meta = existingRow;
     } else {
       meta = await this.storage.create({
         id,
         agentKind: opts.agentKind,
         workDir: opts.workingDir,
         title: opts.title ?? DEFAULT_DRAFT_SESSION_TITLE,
-        model: cursorModelFallback ? handle.model : opts.model,
+        model: opts.model,
         workspaceKind: opts.workspaceKind,
         effort: opts.effort,
         permissionMode: opts.permissionMode,
@@ -348,7 +333,6 @@ export class Maker {
         // remoteHostId: 远端 session 把目标机器持久化, 之后 resume / list 都能识别。
         // 本地 session 留 undefined (sqlite 落空), 跟历史行为兼容。
         remoteHostId: opts.remoteHostId,
-        sdkSessionId: handle.id !== '<pending>' ? handle.id : undefined,
       });
     }
 
@@ -387,14 +371,33 @@ export class Maker {
       remoteHostId: meta.remoteHostId ?? null,
     });
 
-    // 当 SDK 回填 sdkSessionId 时持久化
+    // 当 SDK 回填 sdkSessionId 或 Cursor 初始模型回退时持久化。默认重放 startupEvents，
+    // 这样 handle 返回前产生的事件与 events() 中晚到的事件走同一条幂等路径。
+    let lastSdkSessionId: string | undefined;
+    let cursorModelFallbackHandled = false;
     session.onEvent((evt) => {
       if (evt.type === 'session_id' && typeof evt.data === 'string' && evt.data) {
+        if (evt.data === lastSdkSessionId) return;
+        lastSdkSessionId = evt.data;
         void this.persistSdkSessionId(meta.id, evt.data).catch((e) => {
           this.logger.warn('failed to persist sdkSessionId', { error: String(e) });
         });
       }
-    }, { replayStartupEvents: false });
+      if (
+        opts.agentKind === 'cursor' &&
+        evt.type === 'error' &&
+        (evt.data as { reason?: unknown } | undefined)?.reason === 'initial_model_unavailable' &&
+        !cursorModelFallbackHandled
+      ) {
+        cursorModelFallbackHandled = true;
+        const activeModel = session.model;
+        if (meta.model !== activeModel) {
+          void this.storage.update(meta.id, { model: activeModel }).catch((e) => {
+            this.logger.warn('failed to persist cursor fallback model', { error: String(e) });
+          });
+        }
+      }
+    });
 
     session.onStatusChange((status) => {
       if (status === 'closed') {

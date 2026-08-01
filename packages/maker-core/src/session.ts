@@ -45,7 +45,7 @@ export type SessionEventListener = (event: AgentEvent) => void;
 export interface SessionEventSubscriptionOptions {
   /**
    * 是否接收 Agent 在 Session/host listeners 挂载前产生的启动期事件。
-   * Maker 自己的 session_id 持久化 listener 关闭此项；host listeners 默认接收。
+   * Maker 的元数据持久化 listener 与 host listeners 默认都接收。
    */
   replayStartupEvents?: boolean;
 }
