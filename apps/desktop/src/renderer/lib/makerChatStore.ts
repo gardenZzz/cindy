@@ -1925,11 +1925,13 @@ function normalizeAgentTaskUpdate(
       ? rawStatus
       : 'running';
   const provider =
-    raw.provider === 'codex' || raw.provider === 'claude-code'
+    raw.provider === 'codex' || raw.provider === 'claude-code' || raw.provider === 'cursor'
       ? raw.provider
       : source === 'codex'
         ? 'codex'
-        : 'claude-code';
+        : source === 'cursor'
+          ? 'cursor'
+          : 'claude-code';
   const usageRaw =
     raw.usage && typeof raw.usage === 'object' ? (raw.usage as Record<string, unknown>) : null;
   const usage = usageRaw

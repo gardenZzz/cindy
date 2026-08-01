@@ -31,20 +31,17 @@ import {
 } from '../base-agent.js';
 import type { Capabilities, EffortDescriptor, PermissionModeDescriptor } from '../../types/capabilities.js';
 import { NotSupportedError } from '../../types/capabilities.js';
+import { promises as fs } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { extname } from 'node:path';
 import type {
   AgentEvent,
+  AgentTaskStatus,
   InteractionDecision,
   InteractionRequest,
   InteractionResolver,
   UsageSnapshot,
 } from '../../types/events.js';
-import type {
-  AgentSkillCommand,
-  ListAgentSkillsOptions,
-  ListAgentSkillsResult,
-} from '../../types/palette.js';
-import { promises as fs } from 'node:fs';
-import { extname } from 'node:path';
 import type { Effort, PermissionMode, UserContentBlock, UserMessage } from '../../types/common.js';
 import { createAsyncQueue, type AsyncQueue } from '../shared/async-queue.js';
 import { getDefaultImageResizer } from '../shared/image-resizer.js';
@@ -105,15 +102,16 @@ import {
   cursorGenerateImageAcceptedResponse,
   cursorGenerateImageToEvents,
   cursorTaskAcceptedResponse,
-  cursorTaskStableId,
   cursorTaskToEvents,
   inferCursorTaskStatus,
+  isCursorTaskTerminalStatus,
   mergeCursorTodos,
   parseAskQuestionParams,
   parseCreatePlanParams,
   parseCursorGenerateImageParams,
   parseCursorTaskParams,
   parseUpdateTodosParams,
+  preflightCursorGenerateImage,
   stopCursorTaskEvents,
   toAskUserQuestionRequest,
   todosToUpdatePlanEvents,
@@ -121,6 +119,11 @@ import {
   updateTodosAcceptedResponse,
   type CursorTodoItem,
 } from './extensions.js';
+import type {
+  AgentSkillCommand,
+  ListAgentSkillsOptions,
+  ListAgentSkillsResult,
+} from '../../types/palette.js';
 import {
   createToolIdleWatchdog,
   formatCursorInvalidResumeCasConflictMessage,
@@ -787,8 +790,12 @@ export class CursorAgent extends BaseAgent {
     let cursorTodos: CursorTodoItem[] = [];
     /** cursor/task：已发过 tool_use 的 toolCallId，避免重复卡。 */
     const emittedCursorTaskToolUseIds = new Set<string>();
-    /** 仍标记为 running 的 Cursor 子任务（取消/关闭时 stopped 收口）。 */
+    /** 仍标记为 running 的 Cursor 子任务（键一律 toolCallId；取消/关闭时 stopped 收口）。 */
     const runningCursorTasks = new Map<string, { toolCallId: string; title?: string }>();
+    /** toolCallId → 已达终态；忽略晚到 running / 重复终态（#49）。 */
+    const terminalCursorTasks = new Map<string, AgentTaskStatus>();
+    /** cursor/generate_image：已处理的 toolCallId（幂等）。 */
+    const emittedCursorGenerateImageIds = new Set<string>();
     let extensionSeq = 0;
     let pendingPrompt: {
       token: number;
@@ -1414,8 +1421,21 @@ export class CursorAgent extends BaseAgent {
 
     const stopRunningCursorTasks = (reason: string): void => {
       if (runningCursorTasks.size === 0) return;
+      for (const [toolCallId] of runningCursorTasks) {
+        terminalCursorTasks.set(toolCallId, 'stopped');
+      }
       pushAll(stopCursorTaskEvents(runningCursorTasks, reason));
       runningCursorTasks.clear();
+    };
+
+    const clearRunningCursorTask = (toolCallId: string, agentId?: string): void => {
+      runningCursorTasks.delete(toolCallId);
+      // 兼容旧键（曾用 agentId ?? toolCallId）：同时清别名，避免 close 误标 stopped。
+      if (agentId) runningCursorTasks.delete(agentId);
+      const displayId = agentId?.trim();
+      if (displayId && displayId !== toolCallId) {
+        runningCursorTasks.delete(displayId);
+      }
     };
 
     const applyCursorTaskNotification = (params: unknown): unknown => {
@@ -1430,6 +1450,18 @@ export class CursorAgent extends BaseAgent {
         });
         return { outcome: { outcome: 'rejected', reason: 'invalid cursor/task params' } };
       }
+      const status = inferCursorTaskStatus(parsed);
+      const priorTerminal = terminalCursorTasks.get(parsed.toolCallId);
+      if (priorTerminal) {
+        log.warn('cursor/task ignoring stale or duplicate transition', {
+          toolCallId: parsed.toolCallId,
+          priorTerminal,
+          attempted: status,
+          agentId: parsed.agentId,
+        });
+        return cursorTaskAcceptedResponse(parsed);
+      }
+
       const already = emittedCursorTaskToolUseIds.has(parsed.toolCallId);
       pushAll(
         cursorTaskToEvents(parsed, {
@@ -1438,15 +1470,15 @@ export class CursorAgent extends BaseAgent {
         }),
       );
       emittedCursorTaskToolUseIds.add(parsed.toolCallId);
-      const taskId = cursorTaskStableId(parsed);
-      const status = inferCursorTaskStatus(parsed);
-      if (status === 'running') {
-        runningCursorTasks.set(taskId, {
+
+      if (isCursorTaskTerminalStatus(status)) {
+        terminalCursorTasks.set(parsed.toolCallId, status);
+        clearRunningCursorTask(parsed.toolCallId, parsed.agentId);
+      } else if (status === 'running') {
+        runningCursorTasks.set(parsed.toolCallId, {
           toolCallId: parsed.toolCallId,
           title: parsed.description.trim() || undefined,
         });
-      } else {
-        runningCursorTasks.delete(taskId);
       }
       return cursorTaskAcceptedResponse(parsed);
     };
@@ -1458,11 +1490,32 @@ export class CursorAgent extends BaseAgent {
         log.warn('cursor/generate_image invalid params');
         return { outcome: { outcome: 'rejected', reason: 'invalid cursor/generate_image params' } };
       }
+      if (emittedCursorGenerateImageIds.has(parsed.toolCallId)) {
+        log.warn('cursor/generate_image duplicate toolCallId ignored', {
+          toolCallId: parsed.toolCallId,
+        });
+        // 幂等：不重复推 image 事件；对 Cursor 仍 ACK generated（若仍有媒体字段）。
+        return cursorGenerateImageAcceptedResponse(parsed);
+      }
+      const allowedRoots = [opts.workingDir, tmpdir()].filter(
+        (r): r is string => typeof r === 'string' && r.trim().length > 0,
+      );
+      const rejectReason = preflightCursorGenerateImage(parsed, { allowedRoots });
+      if (rejectReason) {
+        log.warn('cursor/generate_image rejected by preflight', {
+          toolCallId: parsed.toolCallId,
+          reason: rejectReason,
+        });
+        return { outcome: { outcome: 'rejected', reason: rejectReason } };
+      }
       const events = cursorGenerateImageToEvents(parsed, { source: 'cursor' });
       if (events.length === 0) {
         log.warn('cursor/generate_image missing media', { toolCallId: parsed.toolCallId });
         return { outcome: { outcome: 'rejected', reason: 'missing filePath/imageData' } };
       }
+      // 仅在预检通过后标记；主机物化失败由 main 合成 isError tool_result（#50）。
+      // ACP ACK 仍用 generated（Cursor 协议），但不在预检失败时宣称成功。
+      emittedCursorGenerateImageIds.add(parsed.toolCallId);
       pushAll(events);
       return cursorGenerateImageAcceptedResponse(parsed);
     };

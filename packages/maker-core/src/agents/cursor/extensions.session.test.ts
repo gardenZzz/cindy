@@ -434,6 +434,191 @@ describe('CursorAgent planMode + extensions (FakeTransport)', () => {
     await consume;
   });
 
+  it('cursor/task start→done(agentId)→close does not re-stop completed card', async () => {
+    const transport = new FakeTransport();
+    const { handle } = await boot(transport);
+    const events: AgentEvent[] = [];
+    const consume = (async () => {
+      for await (const ev of handle.events()) events.push(ev);
+    })();
+
+    transport.emit({
+      jsonrpc: JSONRPC_VERSION,
+      method: CursorMethod.Task,
+      params: {
+        toolCallId: 'call_alias',
+        description: 'Explore',
+        prompt: 'auth',
+        subagentType: 'explore',
+        status: 'running',
+      },
+    });
+    transport.emit({
+      jsonrpc: JSONRPC_VERSION,
+      method: CursorMethod.Task,
+      params: {
+        toolCallId: 'call_alias',
+        description: 'Explore',
+        prompt: 'auth',
+        subagentType: 'explore',
+        agentId: 'ag-alias',
+        durationMs: 10,
+      },
+    });
+    // late/duplicate after terminal — ignored
+    transport.emit({
+      jsonrpc: JSONRPC_VERSION,
+      method: CursorMethod.Task,
+      params: {
+        toolCallId: 'call_alias',
+        description: 'Explore',
+        prompt: 'auth',
+        subagentType: 'explore',
+        status: 'running',
+      },
+    });
+
+    const deadline = Date.now() + 2000;
+    while (
+      Date.now() < deadline &&
+      events.filter((e) => e.type === 'agent_task_update').length < 2
+    ) {
+      await new Promise((r) => setTimeout(r, 10));
+    }
+
+    const updates = events.filter((e) => e.type === 'agent_task_update');
+    expect(updates.map((e) => (e.data as { status: string }).status)).toEqual([
+      'running',
+      'completed',
+    ]);
+
+    await handle.close();
+    await consume;
+
+    const afterClose = events.filter((e) => e.type === 'agent_task_update');
+    expect(afterClose.some((e) => (e.data as { status: string }).status === 'stopped')).toBe(
+      false,
+    );
+  });
+
+  it('cursor/generate_image rejects outside path and dedupes duplicate notifications', async () => {
+    const transport = new FakeTransport();
+    const { handle } = await boot(transport);
+    const events: AgentEvent[] = [];
+    const consume = (async () => {
+      for await (const ev of handle.events()) events.push(ev);
+    })();
+
+    transport.emit({
+      jsonrpc: JSONRPC_VERSION,
+      id: 9201,
+      method: CursorMethod.GenerateImage,
+      params: {
+        toolCallId: 'call_bad',
+        description: 'x',
+        filePath: '/Users/not-allowed/secret.png',
+      },
+    });
+    const d1 = Date.now() + 2000;
+    while (Date.now() < d1 && !transport.findResponse(9201)) {
+      await new Promise((r) => setTimeout(r, 10));
+    }
+    expect(transport.findResponse(9201)).toMatchObject({
+      outcome: { outcome: 'rejected', reason: 'filePath outside allowed directories' },
+    });
+    expect(events.filter((e) => e.type === 'image')).toHaveLength(0);
+
+    const okPath = join(tmpdir(), 'cindy-cursor-img-ok.png');
+    transport.emit({
+      jsonrpc: JSONRPC_VERSION,
+      id: 9202,
+      method: CursorMethod.GenerateImage,
+      params: {
+        toolCallId: 'call_dup',
+        description: 'icon',
+        filePath: okPath,
+      },
+    });
+    transport.emit({
+      jsonrpc: JSONRPC_VERSION,
+      id: 9203,
+      method: CursorMethod.GenerateImage,
+      params: {
+        toolCallId: 'call_dup',
+        description: 'icon',
+        filePath: okPath,
+      },
+    });
+    const d2 = Date.now() + 2000;
+    while (Date.now() < d2 && (!transport.findResponse(9202) || !transport.findResponse(9203))) {
+      await new Promise((r) => setTimeout(r, 10));
+    }
+    expect(transport.findResponse(9202)).toMatchObject({
+      outcome: { outcome: 'generated', filePath: okPath },
+    });
+    expect(transport.findResponse(9203)).toMatchObject({
+      outcome: { outcome: 'generated', filePath: okPath },
+    });
+    expect(events.filter((e) => e.type === 'image')).toHaveLength(1);
+
+    await handle.close();
+    await consume;
+  });
+
+  it('transport disconnect stops running cursor tasks', async () => {
+    const transport = new FakeTransport();
+    const { handle } = await boot(transport);
+    const events: AgentEvent[] = [];
+    const consume = (async () => {
+      for await (const ev of handle.events()) events.push(ev);
+    })();
+
+    transport.emit({
+      jsonrpc: JSONRPC_VERSION,
+      method: CursorMethod.Task,
+      params: {
+        toolCallId: 'call_run',
+        description: 'Still going',
+        prompt: 'work',
+        subagentType: 'explore',
+        status: 'running',
+      },
+    });
+    const deadline = Date.now() + 2000;
+    while (
+      Date.now() < deadline &&
+      !events.some(
+        (e) =>
+          e.type === 'agent_task_update' && (e.data as { status: string }).status === 'running',
+      )
+    ) {
+      await new Promise((r) => setTimeout(r, 10));
+    }
+
+    await transport.close('fake transport disconnect');
+    const waitStop = Date.now() + 3000;
+    while (
+      Date.now() < waitStop &&
+      !events.some(
+        (e) =>
+          e.type === 'agent_task_update' && (e.data as { status: string }).status === 'stopped',
+      )
+    ) {
+      await new Promise((r) => setTimeout(r, 20));
+    }
+    expect(
+      events.some(
+        (e) =>
+          e.type === 'agent_task_update' &&
+          (e.data as { status: string; parentToolUseId?: string }).status === 'stopped' &&
+          (e.data as { parentToolUseId?: string }).parentToolUseId === 'call_run',
+      ),
+    ).toBe(true);
+
+    await handle.close().catch(() => undefined);
+    await consume;
+  });
+
   it('send with armed planMode emits plan_mode_changed(false)', async () => {
     const transport = new FakeTransport();
     const { handle } = await boot(transport);

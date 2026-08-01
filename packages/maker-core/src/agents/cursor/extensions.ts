@@ -10,6 +10,8 @@
  * 协议形状以官方 docs + cursor-agent / 第三方 ACP 客户端对照为准；不进 agents/acp 标准面。
  */
 
+import { isAbsolute, relative, resolve } from 'node:path';
+
 import type {
   AgentEvent,
   AgentTaskStatus,
@@ -486,6 +488,14 @@ export function inferCursorTaskStatus(params: CursorTaskParams): AgentTaskStatus
   return 'completed';
 }
 
+export function isCursorTaskTerminalStatus(status: AgentTaskStatus): boolean {
+  return status === 'completed' || status === 'failed' || status === 'stopped';
+}
+
+/**
+ * 展示用 taskId：优先 agentId（有则更稳）。
+ * running Map / 终态机一律用 toolCallId，避免 start 无 agentId、done 带 agentId 时清不掉。
+ */
 export function cursorTaskStableId(params: CursorTaskParams): string {
   return params.agentId?.trim() || params.toolCallId;
 }
@@ -645,6 +655,29 @@ function isUrlLikeImage(s: string): boolean {
   return /^(https?:|data:)/i.test(s);
 }
 
+/**
+ * base64 / data URL 字符上限（约 15MiB 解码体积）。在拼 data: URL / 推事件前拦截，
+ * 避免超大串进入主进程事件队列。
+ */
+export const MAX_CURSOR_GENERATE_IMAGE_DATA_CHARS = 22 * 1024 * 1024;
+
+/** 路径是否落在允许根内（不做 realpath；主机侧再做实盘校验）。 */
+export function isCursorGenerateImagePathUnderRoots(
+  filePath: string,
+  allowedRoots: readonly string[],
+): boolean {
+  if (!filePath || isUrlLikeImage(filePath)) return false;
+  if (!isAbsolute(filePath)) return false;
+  const resolved = resolve(filePath);
+  for (const root of allowedRoots) {
+    if (!root || !isAbsolute(root)) continue;
+    const rootResolved = resolve(root);
+    const rel = relative(rootResolved, resolved);
+    if (rel === '' || (!rel.startsWith('..') && !isAbsolute(rel))) return true;
+  }
+  return false;
+}
+
 /** 映射为共享 image(generation) 事件；缺媒体时返回空数组。 */
 export function cursorGenerateImageToEvents(
   params: CursorGenerateImageParams,
@@ -668,6 +701,32 @@ export function cursorGenerateImageToEvents(
     return [];
   }
   return [{ type: 'image', data, source }];
+}
+
+/**
+ * 在推事件 / ACK 前做轻量拒绝：缺媒体、超长 imageData、路径不在允许根。
+ * 返回 null 表示可继续；否则为 rejected reason。
+ */
+export function preflightCursorGenerateImage(
+  params: CursorGenerateImageParams,
+  opts: { allowedRoots: readonly string[] },
+): string | null {
+  if (!params.filePath && !params.imageData) {
+    return 'missing filePath/imageData';
+  }
+  if (params.imageData && params.imageData.length > MAX_CURSOR_GENERATE_IMAGE_DATA_CHARS) {
+    return 'imageData exceeds size limit';
+  }
+  if (params.filePath && !isUrlLikeImage(params.filePath)) {
+    if (!isCursorGenerateImagePathUnderRoots(params.filePath, opts.allowedRoots)) {
+      return 'filePath outside allowed directories';
+    }
+  }
+  // data: 塞在 filePath 里时也限长
+  if (params.filePath?.startsWith('data:') && params.filePath.length > MAX_CURSOR_GENERATE_IMAGE_DATA_CHARS) {
+    return 'filePath data URL exceeds size limit';
+  }
+  return null;
 }
 
 export function cursorGenerateImageAcceptedResponse(

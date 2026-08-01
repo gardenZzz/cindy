@@ -15,12 +15,15 @@ import {
   cursorTaskToEvents,
   formatCreatePlanReviewText,
   inferCursorTaskStatus,
+  isCursorTaskTerminalStatus,
+  MAX_CURSOR_GENERATE_IMAGE_DATA_CHARS,
   mergeCursorTodos,
   parseAskQuestionParams,
   parseCreatePlanParams,
   parseCursorGenerateImageParams,
   parseCursorTaskParams,
   parseUpdateTodosParams,
+  preflightCursorGenerateImage,
   stopCursorTaskEvents,
   toAskUserQuestionRequest,
   todosToUpdatePlanEvents,
@@ -416,5 +419,38 @@ describe('cursor/generate_image mapping', () => {
       data: { url: 'data:image/png;base64,AAAA', blockId: 'img1' },
     });
     expect(parseCursorGenerateImageParams(null)).toBeNull();
+  });
+
+  it('preflight rejects outside paths and overlong imageData', () => {
+    const roots = ['/Users/me/project'];
+    expect(
+      preflightCursorGenerateImage(
+        parseCursorGenerateImageParams({
+          toolCallId: 'a',
+          filePath: '/Users/me/private.png',
+        })!,
+        { allowedRoots: roots },
+      ),
+    ).toBe('filePath outside allowed directories');
+    expect(
+      preflightCursorGenerateImage(
+        parseCursorGenerateImageParams({
+          toolCallId: 'b',
+          filePath: '/Users/me/project/out.png',
+        })!,
+        { allowedRoots: roots },
+      ),
+    ).toBeNull();
+    expect(
+      preflightCursorGenerateImage(
+        parseCursorGenerateImageParams({
+          toolCallId: 'c',
+          imageData: 'A'.repeat(MAX_CURSOR_GENERATE_IMAGE_DATA_CHARS + 1),
+        })!,
+        { allowedRoots: roots },
+      ),
+    ).toBe('imageData exceeds size limit');
+    expect(isCursorTaskTerminalStatus('completed')).toBe(true);
+    expect(isCursorTaskTerminalStatus('running')).toBe(false);
   });
 });

@@ -121,6 +121,10 @@ import { shouldUseComputerPermissionGuide } from './computerPermissionGuideEligi
 import * as imageCacheStore from '../imageCacheStore.js';
 import { collectCindyMediaUrls, commitChatImageUrls } from '../cindy-media/chatAttachments.js';
 import * as cindyChatAttachments from '../cindy-media/chatAttachments.js';
+import {
+  defaultCursorGeneratedImageRoots,
+  materializeCursorGeneratedImageSource,
+} from '../cindy-media/cursorGeneratedImage.js';
 import { materializeGeneratedImage } from '../cindy-media/generatedMedia.js';
 import { getDbClient } from '../localDb/client/current.js';
 import {
@@ -9052,6 +9056,33 @@ export function registerMakerIpc(maker: Maker, options: RegisterMakerIpcOptions)
   log.info('maker:* IPC handlers registered');
 }
 
+/** sessionId → 已成功/已失败广播过的 imagegen toolCallId（幂等，防重复三联事件）。 */
+const generatedImageBroadcastIds = new Map<string, Set<string>>();
+
+function noteGeneratedImageBroadcast(sessionId: string, toolUseId: string): boolean {
+  let set = generatedImageBroadcastIds.get(sessionId);
+  if (!set) {
+    set = new Set();
+    generatedImageBroadcastIds.set(sessionId, set);
+  }
+  if (set.has(toolUseId)) return false;
+  set.add(toolUseId);
+  return true;
+}
+
+async function resolveSessionWorkingDirForMedia(sessionId: string): Promise<string | null> {
+  try {
+    const live = getMaker().getSession(sessionId);
+    if (live && typeof live.workDir === 'string' && live.workDir.trim()) {
+      return live.workDir;
+    }
+  } catch {
+    // maker 未就绪时走 DB 快照。
+  }
+  const row = await getSessionRowSnapshot(sessionId);
+  return typeof row?.workingDir === 'string' && row.workingDir.trim() ? row.workingDir : null;
+}
+
 async function broadcastGeneratedImageAsToolResult(
   sessionId: string,
   event: AgentEvent,
@@ -9059,21 +9090,37 @@ async function broadcastGeneratedImageAsToolResult(
   const data = event.data as CodexImageEventData | null;
   if (data?.kind !== 'generation') return;
   const source = event.source === 'cursor' ? 'cursor' : 'codex';
+  const toolUseId = data.blockId || `${source}-image-${Date.now()}`;
+
+  // Cursor：同一 toolCallId 只物化/广播一次（imagegen 不可更新）。
+  if (source === 'cursor' && data.blockId && !noteGeneratedImageBroadcast(sessionId, toolUseId)) {
+    log.info('cursor generated image already broadcast; skipping duplicate', {
+      sessionId,
+      toolUseId,
+    });
+    return;
+  }
 
   try {
-    const cached = await materializeCodexImage(sessionId, data);
+    const cached =
+      source === 'cursor'
+        ? await materializeCursorImage(sessionId, data)
+        : await materializeCodexImage(sessionId, data);
     if (!cached) {
-      log.warn('generated image event missing materializable image', {
+      const reason = 'generated image missing or could not be materialized';
+      log.warn(reason, {
         sessionId,
         source,
         blockId: data.blockId,
         hasPath: !!data.path,
         hasUrl: !!data.url,
       });
+      if (source === 'cursor') {
+        broadcastGeneratedImageFailure(sessionId, event, toolUseId, reason);
+      }
       return;
     }
 
-    const toolUseId = data.blockId || `${source}-image-${Date.now()}`;
     const toolInput = {
       ...(data.revisedPrompt ? { prompt: data.revisedPrompt } : {}),
       ...(data.status ? { status: data.status } : {}),
@@ -9120,13 +9167,63 @@ async function broadcastGeneratedImageAsToolResult(
       },
     } satisfies AgentEvent);
   } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
     log.warn('failed to materialize generated image event', {
       sessionId,
       source,
       blockId: data?.blockId,
-      error: err instanceof Error ? err.message : String(err),
+      error: message,
     });
+    if (source === 'cursor') {
+      broadcastGeneratedImageFailure(sessionId, event, toolUseId, message);
+    }
   }
+}
+
+function broadcastGeneratedImageFailure(
+  sessionId: string,
+  event: AgentEvent,
+  toolUseId: string,
+  reason: string,
+): void {
+  const source = 'cursor' as const;
+  const data = event.data as CodexImageEventData | null;
+  broadcastSyntheticToolEvent(sessionId, {
+    type: 'tool_use',
+    source,
+    agentMeta: event.agentMeta,
+    data: {
+      toolUseId,
+      toolName: 'imagegen',
+      input: {
+        ...(data?.revisedPrompt ? { prompt: data.revisedPrompt } : {}),
+        ...(data?.status ? { status: data.status } : {}),
+      },
+    },
+  } satisfies AgentEvent);
+  broadcastSyntheticToolEvent(sessionId, {
+    type: 'tool_result_full',
+    source,
+    agentMeta: event.agentMeta,
+    data: {
+      toolUseId,
+      fullText: JSON.stringify({
+        ok: false,
+        kind: 'generation',
+        error: reason,
+      }),
+      isError: true,
+    },
+  } satisfies AgentEvent);
+  broadcastSyntheticToolEvent(sessionId, {
+    type: 'tool_result',
+    source,
+    agentMeta: event.agentMeta,
+    data: {
+      summary: reason,
+      toolUseIds: [toolUseId],
+    },
+  } satisfies AgentEvent);
 }
 
 function broadcastSyntheticToolEvent(
@@ -9144,6 +9241,20 @@ function broadcastSyntheticToolEvent(
     persistId: prepared.persistId,
     resolvedContent: prepared.resolvedContent,
   });
+}
+
+async function materializeCursorImage(
+  sessionId: string,
+  data: CodexImageEventData,
+): Promise<{ url: string; filename: string } | null> {
+  const workingDir = await resolveSessionWorkingDirForMedia(sessionId);
+  return materializeCursorGeneratedImageSource(
+    { path: data.path, url: data.url },
+    {
+      allowedRoots: defaultCursorGeneratedImageRoots(workingDir),
+      ingestBuffer: cindyChatAttachments.ingestChatImageBuffer,
+    },
+  );
 }
 
 async function materializeCodexImage(
