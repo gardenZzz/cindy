@@ -1583,6 +1583,75 @@ describe('CursorAgent lifecycle (FakeTransport)', () => {
         ).toBeUndefined();
       });
     });
+
+    // #45 盲区：上游断流文案经 agent_message_chunk 文本流进来，prompt 又以正常 end_turn
+    // resolve。修前走 success 分支 -> 文案被当 assistant 正文落库、正常 done 收尾、自愈不
+    // 触发；修后拦截 delta 并在 success 分支升级为 cursor-stream-disconnect 终态 error。
+    it('upgrades stream-disconnect text delta + normal resolve to terminal error', async () => {
+      await withBootedSession(async ({ transport, handle }) => {
+        const events: AgentEvent[] = [];
+        const consume = (async () => {
+          for await (const ev of handle.events()) events.push(ev);
+        })();
+
+        const sendPromise = handle.send({ type: 'user', content: 'hi' });
+        const deadline = Date.now() + 1000;
+        while (Date.now() < deadline && !transport.findRequest(Method.SessionPrompt)) {
+          await new Promise((r) => setTimeout(r, 10));
+        }
+        expect(transport.findRequest(Method.SessionPrompt)).toBeTruthy();
+
+        // 形态 2：断流文案走 agent_message_chunk 文本流（而非 JSON-RPC reject）。
+        transport.emit({
+          jsonrpc: JSONRPC_VERSION,
+          method: Method.SessionUpdate,
+          params: {
+            sessionId: handle.id,
+            update: {
+              sessionUpdate: 'agent_message_chunk',
+              content: {
+                type: 'text',
+                text: 'RetriableError: [canceled] http/2 stream closed with error code CANCEL (0x8)',
+              },
+            },
+          },
+        });
+
+        // 同一故障下 prompt 反而以正常 end_turn resolve。
+        const prompt = transport.findRequest(Method.SessionPrompt)!;
+        transport.emit({
+          jsonrpc: JSONRPC_VERSION,
+          id: prompt.id,
+          result: { stopReason: 'end_turn' },
+        });
+
+        const drained = await drainUntil(
+          (async function* () {
+            for (const ev of events) yield ev;
+            for await (const ev of handle.events()) yield ev;
+          })(),
+          (ev) =>
+            ev.type === 'error' ||
+            (ev.type === 'status' && !(ev.data as { isRunning?: boolean }).isRunning),
+          1000,
+        );
+
+        const errEv = drained.find((e) => e.type === 'error');
+        expect(errEv, 'should emit terminal error instead of text+done').toBeTruthy();
+        const data = (errEv!.data as { message?: string; reason?: string; isTerminal?: boolean });
+        expect(data.reason).toBe(CURSOR_STREAM_DISCONNECT_REASON);
+        expect(data.isTerminal).toBe(true);
+        expect(data.message).toContain('http/2 stream closed');
+        // 断流文案不得被当成 assistant 正文吐出。
+        expect(drained.some((e) => e.type === 'text')).toBe(false);
+        // 不得以正常 done 收尾（error 是终态）。
+        expect(drained.some((e) => e.type === 'done')).toBe(false);
+
+        await sendPromise;
+        await handle.close();
+        await consume;
+      });
+    });
   });
 });
 
