@@ -8,11 +8,20 @@ import {
   askQuestionResponseFromDecision,
   createPlanResponseFromDecision,
   CURSOR_TODOS_TOOL_USE_ID,
+  cursorGenerateImageAcceptedResponse,
+  cursorGenerateImageToEvents,
+  cursorTaskAcceptedResponse,
+  cursorTaskStableId,
+  cursorTaskToEvents,
   formatCreatePlanReviewText,
+  inferCursorTaskStatus,
   mergeCursorTodos,
   parseAskQuestionParams,
   parseCreatePlanParams,
+  parseCursorGenerateImageParams,
+  parseCursorTaskParams,
   parseUpdateTodosParams,
+  stopCursorTaskEvents,
   toAskUserQuestionRequest,
   todosToUpdatePlanEvents,
   toPlanReviewRequest,
@@ -246,5 +255,166 @@ describe('cursor update_todos mapping', () => {
       { id: '3', content: 'C', status: 'pending' },
     ]);
     expect(updateTodosAcceptedResponse(todos).outcome.outcome).toBe('accepted');
+  });
+});
+
+describe('cursor/task mapping', () => {
+  const sampleStart = {
+    toolCallId: 'call_126',
+    description: 'Explore codebase',
+    prompt: 'Find auth handlers',
+    subagentType: 'explore',
+    status: 'running',
+  };
+
+  const sampleDone = {
+    toolCallId: 'call_126',
+    description: 'Explore codebase',
+    prompt: 'Find auth handlers',
+    subagentType: 'explore',
+    agentId: 'agent-9',
+    durationMs: 1200,
+  };
+
+  it('parses official completion sample and maps to Task + agent_task_update', () => {
+    const parsed = parseCursorTaskParams(sampleDone)!;
+    expect(cursorTaskStableId(parsed)).toBe('agent-9');
+    expect(inferCursorTaskStatus(parsed)).toBe('completed');
+    const events = cursorTaskToEvents(parsed);
+    expect(events.map((e) => e.type)).toEqual([
+      'tool_use',
+      'agent_task_update',
+      'tool_result_full',
+      'tool_result',
+    ]);
+    expect(events[0]).toMatchObject({
+      type: 'tool_use',
+      data: { toolUseId: 'call_126', toolName: 'Task' },
+      source: 'cursor',
+    });
+    expect(events[1]).toMatchObject({
+      type: 'agent_task_update',
+      data: {
+        provider: 'cursor',
+        taskId: 'agent-9',
+        parentToolUseId: 'call_126',
+        status: 'completed',
+        title: 'Explore codebase',
+        usage: { durationMs: 1200 },
+      },
+    });
+    expect(cursorTaskAcceptedResponse(parsed).outcome).toMatchObject({
+      outcome: 'completed',
+      agentId: 'agent-9',
+      durationMs: 1200,
+    });
+  });
+
+  it('keeps stable card id across resume and skips duplicate tool_use', () => {
+    const start = parseCursorTaskParams(sampleStart)!;
+    expect(inferCursorTaskStatus(start)).toBe('running');
+    const first = cursorTaskToEvents(start);
+    expect(first[0]?.type).toBe('tool_use');
+    expect(first[1]).toMatchObject({
+      type: 'agent_task_update',
+      data: { taskId: 'call_126', status: 'running' },
+    });
+
+    const resume = parseCursorTaskParams({
+      ...sampleDone,
+      agentId: 'agent-9',
+      status: 'running',
+      durationMs: undefined,
+    })!;
+    const second = cursorTaskToEvents(resume, { alreadyEmittedToolUse: true });
+    expect(second.map((e) => e.type)).toEqual(['agent_task_update']);
+    expect(second[0]).toMatchObject({
+      data: { taskId: 'agent-9', parentToolUseId: 'call_126', status: 'running' },
+    });
+  });
+
+  it('maps failed/stopped and rejects invalid payloads without throwing', () => {
+    expect(parseCursorTaskParams({})).toBeNull();
+    expect(parseCursorTaskParams(null)).toBeNull();
+    const failed = parseCursorTaskParams({
+      toolCallId: 't1',
+      description: 'x',
+      prompt: 'y',
+      subagentType: { custom: 'verifier' },
+      status: 'failed',
+    })!;
+    expect(inferCursorTaskStatus(failed)).toBe('failed');
+    const events = cursorTaskToEvents(failed);
+    expect(events.find((e) => e.type === 'agent_task_update')).toMatchObject({
+      data: { status: 'failed', taskType: 'verifier' },
+    });
+    const stopped = stopCursorTaskEvents(
+      new Map([['agent-9', { toolCallId: 'call_126', title: 'Explore' }]]),
+      'user_abort',
+    );
+    expect(stopped).toEqual([
+      {
+        type: 'agent_task_update',
+        source: 'cursor',
+        data: {
+          provider: 'cursor',
+          taskId: 'agent-9',
+          parentToolUseId: 'call_126',
+          status: 'stopped',
+          title: 'Explore',
+          summary: 'user_abort',
+        },
+      },
+    ]);
+  });
+});
+
+describe('cursor/generate_image mapping', () => {
+  it('maps filePath completion sample to image generation event', () => {
+    const parsed = parseCursorGenerateImageParams({
+      toolCallId: 'call_127',
+      description: 'Minimal flat app icon',
+      filePath: '/tmp/icon.png',
+      referenceImagePaths: ['/tmp/reference.png'],
+    })!;
+    const events = cursorGenerateImageToEvents(parsed);
+    expect(events).toEqual([
+      {
+        type: 'image',
+        source: 'cursor',
+        data: {
+          kind: 'generation',
+          blockId: 'call_127',
+          path: '/tmp/icon.png',
+          revisedPrompt: 'Minimal flat app icon',
+          status: 'completed',
+        },
+      },
+    ]);
+    expect(cursorGenerateImageAcceptedResponse(parsed)).toEqual({
+      outcome: { outcome: 'generated', filePath: '/tmp/icon.png' },
+    });
+  });
+
+  it('accepts data URL / base64 and rejects missing media safely', () => {
+    expect(parseCursorGenerateImageParams({ toolCallId: 'x' })).toMatchObject({
+      toolCallId: 'x',
+    });
+    expect(cursorGenerateImageToEvents(parseCursorGenerateImageParams({ toolCallId: 'x' })!)).toEqual(
+      [],
+    );
+    expect(cursorGenerateImageAcceptedResponse(parseCursorGenerateImageParams({ toolCallId: 'x' })!)).toEqual({
+      outcome: { outcome: 'rejected', reason: 'missing filePath/imageData' },
+    });
+
+    const withData = parseCursorGenerateImageParams({
+      toolCallId: 'img1',
+      description: 'd',
+      imageData: 'AAAA',
+    })!;
+    expect(cursorGenerateImageToEvents(withData)[0]).toMatchObject({
+      data: { url: 'data:image/png;base64,AAAA', blockId: 'img1' },
+    });
+    expect(parseCursorGenerateImageParams(null)).toBeNull();
   });
 });

@@ -5136,6 +5136,7 @@
       "provider": {
         "claude": "Claude Code",
         "codex": "Codex",
+        "cursor": "Cursor",
         "workflow": "Workflow",
         "shell": "Background command"
       },

@@ -1,14 +1,23 @@
 /**
  * Cursor ACP vendor 扩展方法 ↔ Cindy InteractionRequest / AgentEvent。
  *
- *  - cursor/ask_question  → ask_user_question
- *  - cursor/create_plan   → plan_review
- *  - cursor/update_todos  → tool_use(update_plan)（复用 messageRender todo 卡）
+ *  - cursor/ask_question     → ask_user_question
+ *  - cursor/create_plan      → plan_review
+ *  - cursor/update_todos     → tool_use(update_plan)（复用 messageRender todo 卡）
+ *  - cursor/task             → tool_use(Task) + agent_task_update（共享任务卡）
+ *  - cursor/generate_image   → image(kind=generation)（host 入 cindy-media）
  *
- * 协议形状以官方 docs + cursor-agent 实测为准；不进 agents/acp 标准面。
+ * 协议形状以官方 docs + cursor-agent / 第三方 ACP 客户端对照为准；不进 agents/acp 标准面。
  */
 
-import type { AgentEvent, AskUserQuestionItem, InteractionDecision } from '../../types/events.js';
+import type {
+  AgentEvent,
+  AgentTaskStatus,
+  AgentTaskUpdateEventData,
+  AskUserQuestionItem,
+  ImageEventData,
+  InteractionDecision,
+} from '../../types/events.js';
 
 export type CursorTodoStatus = 'pending' | 'in_progress' | 'completed' | 'cancelled';
 
@@ -376,4 +385,311 @@ export function updateTodosAcceptedResponse(
       todos: todos.map((t) => ({ ...t })),
     },
   };
+}
+
+// ── cursor/task ──────────────────────────────────────────────────────────────
+
+export type CursorSubagentType =
+  | 'unspecified'
+  | 'computer_use'
+  | 'explore'
+  | 'video_review'
+  | 'browser_use'
+  | 'shell'
+  | 'vm_setup_helper'
+  | { custom: string };
+
+export interface CursorTaskParams {
+  toolCallId: string;
+  description: string;
+  prompt: string;
+  subagentType: CursorSubagentType;
+  model?: string;
+  agentId?: string;
+  durationMs?: number;
+  /** 官方 schema 未列；防御式支持 start/update 显式状态。 */
+  status?: string;
+}
+
+export type CursorTaskResponse = {
+  outcome:
+    | { outcome: 'completed'; agentId?: string; durationMs?: number }
+    | { outcome: 'rejected'; reason?: string }
+    | { outcome: 'cancelled' };
+};
+
+export function formatCursorSubagentType(value: unknown): string | undefined {
+  if (typeof value === 'string') {
+    const trimmed = value.trim();
+    return trimmed || undefined;
+  }
+  if (isRecord(value)) {
+    const custom = readString(value.custom)?.trim();
+    return custom || undefined;
+  }
+  return undefined;
+}
+
+export function parseCursorTaskParams(params: unknown): CursorTaskParams | null {
+  if (!isRecord(params)) return null;
+  const toolCallId = readString(params.toolCallId)?.trim();
+  if (!toolCallId) return null;
+  const description = readString(params.description)?.trim() ?? '';
+  const prompt = readString(params.prompt) ?? '';
+  const subagentRaw = params.subagentType;
+  let subagentType: CursorSubagentType = 'unspecified';
+  if (typeof subagentRaw === 'string' && subagentRaw.trim()) {
+    subagentType = subagentRaw.trim() as CursorSubagentType;
+  } else if (isRecord(subagentRaw)) {
+    const custom = readString(subagentRaw.custom)?.trim();
+    if (custom) subagentType = { custom };
+  }
+  const durationRaw = params.durationMs;
+  const durationMs =
+    typeof durationRaw === 'number' && Number.isFinite(durationRaw) ? durationRaw : undefined;
+  return {
+    toolCallId,
+    description,
+    prompt,
+    subagentType,
+    model: readString(params.model)?.trim() || undefined,
+    agentId: readString(params.agentId)?.trim() || undefined,
+    ...(durationMs !== undefined ? { durationMs } : {}),
+    status: readString(params.status)?.trim() || undefined,
+  };
+}
+
+/**
+ * 推断任务卡状态。官方 `cursor/task` 多为 completion-only；
+ * 缺 status 且带 durationMs → completed；全缺 → completed（对齐 HAPI/happier）；
+ * 显式 running/started 等 → running，便于未来 start/update 样本。
+ */
+export function inferCursorTaskStatus(params: CursorTaskParams): AgentTaskStatus {
+  const raw = params.status?.trim().toLowerCase();
+  if (raw) {
+    if (
+      raw === 'running' ||
+      raw === 'in_progress' ||
+      raw === 'inprogress' ||
+      raw === 'pending' ||
+      raw === 'started'
+    ) {
+      return 'running';
+    }
+    if (raw === 'failed' || raw === 'error') return 'failed';
+    if (raw === 'cancelled' || raw === 'canceled' || raw === 'stopped' || raw === 'killed') {
+      return 'stopped';
+    }
+    if (raw === 'completed' || raw === 'done' || raw === 'success') return 'completed';
+  }
+  if (typeof params.durationMs === 'number') return 'completed';
+  return 'completed';
+}
+
+export function cursorTaskStableId(params: CursorTaskParams): string {
+  return params.agentId?.trim() || params.toolCallId;
+}
+
+/**
+ * 映射为共享 Task 工具卡 + agent_task_update。
+ * alreadyEmittedToolUse：同一 toolCallId 已发过 tool_use 时只补 update（避免重复卡）。
+ */
+export function cursorTaskToEvents(
+  params: CursorTaskParams,
+  opts?: { alreadyEmittedToolUse?: boolean; source?: 'cursor' },
+): AgentEvent[] {
+  const source = opts?.source ?? 'cursor';
+  const taskId = cursorTaskStableId(params);
+  const status = inferCursorTaskStatus(params);
+  const subagentType = formatCursorSubagentType(params.subagentType) ?? 'unspecified';
+  const title = params.description.trim() || subagentType;
+  const events: AgentEvent[] = [];
+  if (!opts?.alreadyEmittedToolUse) {
+    events.push({
+      type: 'tool_use',
+      data: {
+        toolUseId: params.toolCallId,
+        toolName: 'Task',
+        input: {
+          description: title,
+          prompt: params.prompt,
+          subagent_type: subagentType,
+          ...(params.model ? { model: params.model } : {}),
+          ...(params.agentId ? { agentId: params.agentId } : {}),
+          ...(params.durationMs !== undefined ? { durationMs: params.durationMs } : {}),
+        },
+      },
+      source,
+    });
+  }
+  const update: AgentTaskUpdateEventData = {
+    provider: 'cursor',
+    taskId,
+    parentToolUseId: params.toolCallId,
+    status,
+    title,
+    ...(params.prompt.trim() ? { description: params.prompt } : {}),
+    ...(params.model ? { model: params.model } : {}),
+    taskType: subagentType,
+    ...(typeof params.durationMs === 'number'
+      ? { usage: { durationMs: params.durationMs }, summary: status === 'completed' ? 'completed' : undefined }
+      : {}),
+    raw: {
+      subagentType: params.subagentType,
+      agentId: params.agentId,
+      durationMs: params.durationMs,
+      status: params.status,
+    },
+  };
+  events.push({ type: 'agent_task_update', data: update, source });
+  if (status === 'completed' || status === 'failed' || status === 'stopped') {
+    const isError = status === 'failed';
+    const fullText =
+      status === 'completed'
+        ? params.prompt.trim() || title || 'completed'
+        : status;
+    events.push({
+      type: 'tool_result_full',
+      data: { toolUseId: params.toolCallId, fullText, isError },
+      source,
+    });
+    events.push({
+      type: 'tool_result',
+      data: { summary: status, toolUseIds: [params.toolCallId] },
+      source,
+    });
+  }
+  return events;
+}
+
+export function cursorTaskAcceptedResponse(params: CursorTaskParams): CursorTaskResponse {
+  return {
+    outcome: {
+      outcome: 'completed',
+      ...(params.agentId ? { agentId: params.agentId } : { agentId: params.toolCallId }),
+      ...(typeof params.durationMs === 'number' ? { durationMs: params.durationMs } : {}),
+    },
+  };
+}
+
+export function stopCursorTaskEvents(
+  tasks: ReadonlyMap<string, { toolCallId: string; title?: string }>,
+  reason: string,
+): AgentEvent[] {
+  const events: AgentEvent[] = [];
+  for (const [taskId, meta] of tasks) {
+    events.push({
+      type: 'agent_task_update',
+      data: {
+        provider: 'cursor',
+        taskId,
+        parentToolUseId: meta.toolCallId,
+        status: 'stopped',
+        ...(meta.title ? { title: meta.title } : {}),
+        summary: reason,
+      } satisfies AgentTaskUpdateEventData,
+      source: 'cursor',
+    });
+  }
+  return events;
+}
+
+// ── cursor/generate_image ────────────────────────────────────────────────────
+
+export interface CursorGenerateImageParams {
+  toolCallId: string;
+  description: string;
+  filePath?: string;
+  referenceImagePaths?: string[];
+  /** 防御式：部分实现可能在通知里带 base64 / data URL。 */
+  imageData?: string;
+}
+
+export type CursorGenerateImageResponse = {
+  outcome:
+    | { outcome: 'generated'; filePath: string; imageData?: string }
+    | { outcome: 'rejected'; reason?: string }
+    | { outcome: 'cancelled' };
+};
+
+export function parseCursorGenerateImageParams(
+  params: unknown,
+): CursorGenerateImageParams | null {
+  if (!isRecord(params)) return null;
+  const toolCallId = readString(params.toolCallId)?.trim();
+  if (!toolCallId) return null;
+  const description = readString(params.description)?.trim() ?? '';
+  const filePath = readString(params.filePath)?.trim() || undefined;
+  const imageData = readString(params.imageData)?.trim() || undefined;
+  const refs: string[] = [];
+  if (Array.isArray(params.referenceImagePaths)) {
+    for (const item of params.referenceImagePaths) {
+      const p = readString(item)?.trim();
+      if (p) refs.push(p);
+    }
+  }
+  if (!filePath && !imageData) {
+    // 仍解析成功但无媒体 —— 调用方返回 rejected，不崩溃。
+    return { toolCallId, description, referenceImagePaths: refs.length ? refs : undefined };
+  }
+  return {
+    toolCallId,
+    description,
+    ...(filePath ? { filePath } : {}),
+    ...(imageData ? { imageData } : {}),
+    ...(refs.length ? { referenceImagePaths: refs } : {}),
+  };
+}
+
+function isUrlLikeImage(s: string): boolean {
+  return /^(https?:|data:)/i.test(s);
+}
+
+/** 映射为共享 image(generation) 事件；缺媒体时返回空数组。 */
+export function cursorGenerateImageToEvents(
+  params: CursorGenerateImageParams,
+  opts?: { source?: 'cursor' },
+): AgentEvent[] {
+  const source = opts?.source ?? 'cursor';
+  const data: ImageEventData = {
+    kind: 'generation',
+    blockId: params.toolCallId,
+    status: 'completed',
+    ...(params.description ? { revisedPrompt: params.description } : {}),
+  };
+  if (params.filePath) {
+    if (isUrlLikeImage(params.filePath)) data.url = params.filePath;
+    else data.path = params.filePath;
+  } else if (params.imageData) {
+    data.url = params.imageData.startsWith('data:')
+      ? params.imageData
+      : `data:image/png;base64,${params.imageData}`;
+  } else {
+    return [];
+  }
+  return [{ type: 'image', data, source }];
+}
+
+export function cursorGenerateImageAcceptedResponse(
+  params: CursorGenerateImageParams,
+): CursorGenerateImageResponse {
+  if (params.filePath) {
+    return {
+      outcome: {
+        outcome: 'generated',
+        filePath: params.filePath,
+        ...(params.imageData ? { imageData: params.imageData } : {}),
+      },
+    };
+  }
+  if (params.imageData) {
+    return {
+      outcome: {
+        outcome: 'generated',
+        filePath: `cursor-generated:${params.toolCallId}`,
+        imageData: params.imageData,
+      },
+    };
+  }
+  return { outcome: { outcome: 'rejected', reason: 'missing filePath/imageData' } };
 }

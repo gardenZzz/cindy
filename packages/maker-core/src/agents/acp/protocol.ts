@@ -50,11 +50,18 @@ export const Method = {
   SessionSetMode: 'session/set_mode',
 } as const;
 
-/** Cursor ACP vendor 扩展方法（blocking request；agent 侧 update_todos 亦走 request）。 */
+/**
+ * Cursor ACP vendor 扩展方法。
+ * ask_question / create_plan 为 blocking request；
+ * update_todos / task / generate_image 官方标为 notification，但 cursor-agent
+ * 常以带 id 的 request 发出（需 ACK），故客户端同时注册 request + notification。
+ */
 export const CursorMethod = {
   AskQuestion: 'cursor/ask_question',
   CreatePlan: 'cursor/create_plan',
   UpdateTodos: 'cursor/update_todos',
+  Task: 'cursor/task',
+  GenerateImage: 'cursor/generate_image',
 } as const;
 
 export type CursorAcpModeId = 'agent' | 'plan' | 'ask';
