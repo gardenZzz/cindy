@@ -1210,6 +1210,8 @@ export function getMaker(): Maker {
             buildCursorAcpMcpServers(ctx, {
               ensureBridgeStarted: ensureCodexMcpBridgeStartedForRemote,
               isCollabEnabled: () => pluginRegistry.isEnabled('collab'),
+              getDisabledRuntimePluginIds: (workingDir) =>
+                getPluginRegistry().getDisabledRuntimePluginIds(workingDir),
             }),
           onCursorLocalModelsListed: (listing) => {
             const maker = _maker;
