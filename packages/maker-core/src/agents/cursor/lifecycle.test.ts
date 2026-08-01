@@ -15,8 +15,10 @@ import {
   __setCursorImageBytesReaderForTesting,
   __setCursorPromptImageMaxBytesForTesting,
 } from './index.js';
+import { Maker } from '../../maker.js';
 import { createConsoleLogger, type Logger } from '../../interfaces/logger.js';
 import type { AuthAdapter } from '../../interfaces/auth-adapter.js';
+import type { SessionMeta, SessionStorage } from '../../interfaces/session-storage.js';
 import type { AgentEvent } from '../../types/events.js';
 import type { CloseHandler, LineHandler, StderrHandler, Transport } from '../acp/transport.js';
 import { JSONRPC_VERSION, Method } from '../acp/protocol.js';
@@ -178,6 +180,46 @@ function recordingLogger(records: RecordedLog[], scope = 'maker'): Logger {
     fatal: (msg, ctx) => record('fatal', msg, ctx),
     child: (sub) => recordingLogger(records, `${scope}/${sub}`),
   };
+}
+
+function createSessionStorage(): {
+  storage: SessionStorage;
+  updates: Array<{ id: string; patch: Partial<SessionMeta> }>;
+} {
+  const rows = new Map<string, SessionMeta>();
+  const updates: Array<{ id: string; patch: Partial<SessionMeta> }> = [];
+  const storage: SessionStorage = {
+    async create(meta) {
+      const now = Date.now();
+      const row = { ...meta, createdAt: now, updatedAt: now };
+      rows.set(row.id, row);
+      return row;
+    },
+    async get(id) {
+      return rows.get(id) ?? null;
+    },
+    async list() {
+      return [...rows.values()];
+    },
+    async update(id, patch) {
+      const row = rows.get(id);
+      if (!row) throw new Error(`missing ${id}`);
+      updates.push({ id, patch });
+      const next = { ...row, ...patch, updatedAt: Date.now() };
+      rows.set(id, next);
+      return next;
+    },
+    async compareAndClearSdkSessionId(id, expectedSdkSessionId) {
+      const row = rows.get(id);
+      if (!row || row.sdkSessionId !== expectedSdkSessionId) return false;
+      rows.set(id, { ...row, sdkSessionId: undefined, updatedAt: Date.now() });
+      return true;
+    },
+    async delete(id) {
+      rows.delete(id);
+    },
+  };
+  return { storage, updates };
 }
 
 const MODELS = {
@@ -491,6 +533,83 @@ describe('CursorAgent lifecycle (FakeTransport)', () => {
     }
   });
 
+  it('writes Maker metadata from startup and live events on new and load paths', async () => {
+    const cases = [
+      {
+        id: 'cursor-maker-new',
+        resumeSessionId: undefined,
+        expectedSdkSessionId: 'fresh-session-id',
+        method: Method.SessionNew,
+      },
+      {
+        id: 'cursor-maker-load',
+        resumeSessionId: 'resume-maker-session',
+        expectedSdkSessionId: 'resume-maker-session',
+        method: Method.SessionLoad,
+      },
+    ] as const;
+
+    for (const testCase of cases) {
+      const transport = new FakeTransport();
+      // 让 initial_model_unavailable 进入 startupEvents；session_id 仍从 events()
+      // 流出，覆盖 Maker listener 的两种时序。
+      transport.configResponseErrors.add('model');
+      const { storage, updates } = createSessionStorage();
+      if (testCase.resumeSessionId) {
+        await storage.create({
+          id: testCase.id,
+          agentKind: 'cursor',
+          workDir: '/tmp',
+          title: 'Cursor resume',
+          model: 'claude-opus-5',
+          sdkSessionId: testCase.resumeSessionId,
+        });
+      }
+
+      const { agent, handle, userDataPath } = await bootWithTransport(transport, {
+        model: 'claude-opus-5',
+        ...(testCase.resumeSessionId ? { resumeSessionId: testCase.resumeSessionId } : {}),
+      });
+      // 同一个 id 同时出现在启动期重放与 live 流，验证 Maker 去重而不是重复写库。
+      (handle.startupEvents as AgentEvent[]).push({
+        type: 'session_id',
+        data: testCase.expectedSdkSessionId,
+        source: 'cursor',
+      });
+      vi.spyOn(agent, 'startSession').mockResolvedValue(handle);
+      const maker = new Maker({
+        agents: { cursor: agent },
+        storage,
+        logger: createConsoleLogger('cursor-maker'),
+      });
+
+      try {
+        await maker.createSession({
+          id: testCase.id,
+          agentKind: 'cursor',
+          workingDir: '/tmp',
+          model: 'claude-opus-5',
+          ...(testCase.resumeSessionId ? { resumeSessionId: testCase.resumeSessionId } : {}),
+          vendorOptions: { createAcpTransport: () => transport },
+        });
+
+        await vi.waitFor(async () => {
+          const row = await storage.get(testCase.id);
+          expect(row?.sdkSessionId).toBe(testCase.expectedSdkSessionId);
+          expect(row?.model).toBe('auto');
+        });
+
+        expect(transport.findRequest(testCase.method)).toBeTruthy();
+        expect(updates.filter(({ patch }) => patch.sdkSessionId)).toHaveLength(1);
+        expect(updates.filter(({ patch }) => patch.model)).toHaveLength(1);
+      } finally {
+        await maker.closeSession(testCase.id).catch(() => undefined);
+        await agent.dispose().catch(() => undefined);
+        rmSync(userDataPath, { recursive: true, force: true });
+      }
+    }
+  });
+
   it('resume via session/load skips upstream history replay', async () => {
     await withBootedSession(async ({ transport, handle }) => {
       const load = transport.findRequest(Method.SessionLoad);
@@ -514,6 +633,7 @@ describe('CursorAgent lifecycle (FakeTransport)', () => {
         .filter((e) => e.type === 'text')
         .map((e) => String((e.data as { text?: string }).text ?? ''));
       expect(textBlobs.join('')).not.toContain('REPLAYED_HISTORY');
+      expect(early.find((e) => e.type === 'session_id')?.data).toBe('resume-me-please');
     }, { resumeSessionId: 'resume-me-please' });
   });
 
@@ -537,6 +657,7 @@ describe('CursorAgent lifecycle (FakeTransport)', () => {
       expect(hint).toBeTruthy();
       expect(String((hint!.data as { message?: string }).message)).toContain('无法恢复');
       expect((hint!.data as { isTerminal?: boolean }).isTerminal).toBe(false);
+      expect(events.find((e) => e.type === 'session_id')?.data).toBe('fresh-session-id');
     }, {
       resumeSessionId: 'dead-session',
       onInvalidResumeSession: cas,

@@ -1671,7 +1671,7 @@ export class CursorAgent extends BaseAgent {
 
       eventQueue.push({
         type: 'session_id',
-        data: { sessionId },
+        data: sessionId,
         source: 'cursor',
       });
     } catch (e) {
