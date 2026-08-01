@@ -1288,6 +1288,48 @@ describe('Maker invalid-resume persistence bridge', () => {
     expect((await storage.get('session-1'))?.sdkSessionId).toBeUndefined();
   });
 
+  it('retries sdkSessionId persistence after a failed write instead of latching the dedupe gate', async () => {
+    // 回写已是 fire-and-forget (异常不再抛给 createSession), 所以去重闸门必须在写失败时
+    // 放回去 —— 否则同一个 id 再推也会被当成重复而吞掉, sdk id 永久丢失。
+    const storage = createStorage();
+    const realUpdate = storage.update.bind(storage);
+    let failNextUpdate = true;
+    storage.update = async (id, patch) => {
+      if (failNextUpdate && patch.sdkSessionId) {
+        failNextUpdate = false;
+        throw new Error('storage unavailable');
+      }
+      return realUpdate(id, patch);
+    };
+    const events = createAsyncQueue<AgentEvent>();
+    const handle = createHandle({ id: '<pending>', agentKind: 'claude-code' });
+    handle.events = () => events;
+    handle.close = vi.fn(async () => events.end());
+    const maker = new Maker({
+      agents: { 'claude-code': createAgent(async () => handle, 'claude-code') },
+      storage,
+      logger: createLogger(),
+    });
+
+    await maker.createSession({
+      id: 'session-retry',
+      agentKind: 'claude-code',
+      workingDir: '/repo',
+      model: 'claude-opus-4-6',
+    });
+
+    events.push({ type: 'session_id', data: 'sdk-1', source: 'claude-code' });
+    await vi.waitFor(() => expect(failNextUpdate).toBe(false));
+    expect((await storage.get('session-retry'))?.sdkSessionId).toBeUndefined();
+
+    // 同一个 id 再推一次: 闸门已放回, 这次必须真的写进去。
+    events.push({ type: 'session_id', data: 'sdk-1', source: 'claude-code' });
+    await vi.waitFor(async () =>
+      expect((await storage.get('session-retry'))?.sdkSessionId).toBe('sdk-1'),
+    );
+    await maker.closeSession('session-retry');
+  });
+
   it('injects a compare-and-clear callback for fresh (non-resume) Claude sessions too', async () => {
     // 全新会话(无 resumeSessionId)也可能把首个 turn 崩溃前落库的 fresh sdk id 变成幽灵 id,
     // 需要同一把 CAS 才能清掉。之前该回调只对 resume 会话装配,全新会话会漏。
