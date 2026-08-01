@@ -23,14 +23,16 @@ export function resolveRegisteredMcpToolTarget(
 }
 
 /**
- * Cursor ACP 权限回调里可能出现的 MCP 工具名候选。
- * 实测 session/update 常不带 server/tool；permission 的 title / name / rawInput
- * 仍可能是 `mcp__<server>__<tool>`，逐个试归属。
+ * Cursor ACP 权限回调里的 MCP 工具名候选。
+ *
+ * **只采 ACP/transport 权威字段**（toolName / toolCall.title / toolCall.name）。
+ * 绝不读 `rawInput` / 业务 args 里的 name/tool/toolName —— 那些可由模型伪造，
+ * 会把 contacts_delete 冒充成 browser::list_tools 静默放行。
  */
 export function collectMcpToolNameCandidates(
   toolName: string,
   toolCall: Record<string, unknown>,
-  toolInput: Record<string, unknown>,
+  _toolInput?: Record<string, unknown>,
 ): string[] {
   const out: string[] = [];
   const push = (value: unknown) => {
@@ -42,9 +44,6 @@ export function collectMcpToolNameCandidates(
   push(toolName);
   push(toolCall.title);
   push(toolCall.name);
-  push(toolInput.name);
-  push(toolInput.tool);
-  push(toolInput.toolName);
   return out;
 }
 
@@ -57,4 +56,42 @@ export function resolveMcpTargetFromCandidates(
     if (hit) return hit;
   }
   return null;
+}
+
+/** 标题/名称是否只是泛化 MCP 占位（无 server/tool 身份）。 */
+export function isGenericMcpToolLabel(value: string): boolean {
+  const normalized = value.trim().toLowerCase();
+  if (!normalized) return true;
+  return (
+    normalized === 'mcp' ||
+    normalized === 'mcp: tool' ||
+    normalized === 'mcp tool' ||
+    normalized === 'tool' ||
+    /^mcp\s*:\s*tool$/i.test(normalized)
+  );
+}
+
+/**
+ * 权限请求是否「看起来像 MCP」但缺少可解析的权威身份。
+ * 此类必须 prompt-each-time，不能走 Auto/Full 静默放行。
+ */
+export function looksLikeUnresolvedMcpPermission(
+  toolName: string,
+  toolCall: Record<string, unknown>,
+): boolean {
+  const kind = typeof toolCall.kind === 'string' ? toolCall.kind.trim().toLowerCase() : '';
+  if (kind === 'mcp' || kind.startsWith('mcp')) return true;
+  const labels = [toolName, toolCall.title, toolCall.name]
+    .filter((v): v is string => typeof v === 'string')
+    .map((v) => v.trim())
+    .filter(Boolean);
+  if (labels.some((l) => l.startsWith('mcp__'))) return true;
+  if (labels.some((l) => isGenericMcpToolLabel(l))) return true;
+  if (labels.some((l) => /^mcp[\s:_-]/i.test(l))) return true;
+  return false;
+}
+
+/** 会话「不再问」指纹：MCP 必须绑定 server+tool，禁止复用泛化 kind:title。 */
+export function mcpSessionAllowKey(serverName: string, toolName: string): string {
+  return `mcp:${serverName}:${toolName}`;
 }

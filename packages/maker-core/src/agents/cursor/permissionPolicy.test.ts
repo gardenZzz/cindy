@@ -9,7 +9,7 @@ import { join } from 'node:path';
 
 import { createConsoleLogger } from '../../interfaces/logger.js';
 import type { AuthAdapter } from '../../interfaces/auth-adapter.js';
-import type { InteractionRequest } from '../../types/events.js';
+import type { InteractionDecision, InteractionRequest } from '../../types/events.js';
 import { CursorAgent } from './index.js';
 import type { Transport, LineHandler, CloseHandler, StderrHandler } from '../acp/transport.js';
 import { AcpClient } from '../acp/client.js';
@@ -98,10 +98,7 @@ async function bootCursorSession(args: {
   permissionMode?: 'ask' | 'auto' | 'bypassPermissions';
   prepareAcpMcpServers?: ConstructorParameters<typeof CursorAgent>[0]['prepareAcpMcpServers'];
   getMcpToolApprovalPolicy?: ConstructorParameters<typeof CursorAgent>[0]['getMcpToolApprovalPolicy'];
-  interactionResolver?: (req: InteractionRequest) => Promise<{
-    kind: 'permission';
-    behavior: 'allow' | 'deny';
-  }>;
+  interactionResolver?: (req: InteractionRequest) => Promise<InteractionDecision>;
 }) {
   const userDataPath = mkdtempSync(join(tmpdir(), 'cindy-cursor-perm-'));
   const agent = new CursorAgent({
@@ -504,6 +501,104 @@ describe('CursorAgent MCP approval policy (shared host classifier)', () => {
     expect(result).toEqual({
       outcome: { outcome: 'selected', optionId: 'reject-once' },
     });
+  });
+
+  it('prompt-each-time forces a card even under Full access', async () => {
+    const transport = new FakeTransport();
+    const seen: InteractionRequest[] = [];
+    await bootCursorSession({
+      transport,
+      permissionMode: 'bypassPermissions',
+      prepareAcpMcpServers: prepareBrowserMcp,
+      getMcpToolApprovalPolicy: () => 'prompt-each-time',
+      interactionResolver: async (req) => {
+        seen.push(req);
+        return { kind: 'permission', behavior: 'deny' };
+      },
+    });
+
+    const result = await emitPermission(transport, {
+      toolCallId: 't-mcp-full',
+      kind: 'other',
+      title: 'mcp__cindy_browser__call_tool',
+      rawInput: { name: 'contacts_delete' },
+    });
+    expect(seen).toHaveLength(1);
+    expect(result).toEqual({
+      outcome: { outcome: 'selected', optionId: 'reject-once' },
+    });
+  });
+
+  it('generic MCP: tool title never auto-approves via rawInput impersonation', async () => {
+    const transport = new FakeTransport();
+    const seen: InteractionRequest[] = [];
+    const policy = vi.fn(() => 'auto-approve' as const);
+    await bootCursorSession({
+      transport,
+      permissionMode: 'bypassPermissions',
+      prepareAcpMcpServers: prepareBrowserMcp,
+      getMcpToolApprovalPolicy: policy,
+      interactionResolver: async (req) => {
+        seen.push(req);
+        return { kind: 'permission', behavior: 'deny' };
+      },
+    });
+
+    const result = await emitPermission(transport, {
+      toolCallId: 't-spoof',
+      kind: 'mcp',
+      title: 'MCP: tool',
+      rawInput: {
+        name: 'contacts_delete',
+        toolName: 'mcp__cindy_browser__list_tools',
+      },
+    });
+    expect(policy).not.toHaveBeenCalled();
+    expect(seen).toHaveLength(1);
+    expect(result).toEqual({
+      outcome: { outcome: 'selected', optionId: 'reject-once' },
+    });
+  });
+
+  it('switching to Full cancels pending prompt-each-time instead of allowing', async () => {
+    const transport = new FakeTransport();
+    let resolveCard: ((d: InteractionDecision) => void) | null = null;
+    const { handle } = await bootCursorSession({
+      transport,
+      permissionMode: 'ask',
+      prepareAcpMcpServers: prepareBrowserMcp,
+      getMcpToolApprovalPolicy: () => 'prompt-each-time',
+      interactionResolver: async () =>
+        await new Promise<InteractionDecision>((resolve) => {
+          resolveCard = resolve;
+        }),
+    });
+
+    const id = 8801;
+    transport.emitLine({
+      jsonrpc: '2.0',
+      id,
+      method: Method.SessionRequestPermission,
+      params: {
+        sessionId: 'sess-perm',
+        toolCall: {
+          toolCallId: 't-pending',
+          kind: 'other',
+          title: 'mcp__cindy_browser__call_tool',
+          rawInput: {},
+        },
+        options: OPTIONS,
+      },
+    });
+    await vi.waitFor(() => expect(resolveCard).not.toBeNull());
+    await handle.setPermissionMode!('bypassPermissions');
+    await vi.waitFor(() => expect(transport.findResponse(id)).toBeDefined());
+    expect(transport.findResponse(id)).toEqual({
+      outcome: { outcome: 'cancelled' },
+    });
+    // Avoid hanging the unresolved InteractionDecision promise.
+    resolveCard?.({ kind: 'permission', behavior: 'deny' });
+    await handle.close();
   });
 });
 

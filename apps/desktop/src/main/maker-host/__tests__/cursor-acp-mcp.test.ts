@@ -52,6 +52,15 @@ describe('selectCursorInjectableServerNames', () => {
       ),
     ).toEqual(['cindy_browser', 'cindy_ssh']);
   });
+
+  it('strips project-disabled plugins while keeping others', () => {
+    expect(
+      selectCursorInjectableServerNames(
+        ['cindy_orca', 'cindy_browser', 'cindy_ssh', 'cindy_scheduler'],
+        { collabEnabled: true, disabledPluginIds: ['browser', 'ssh'] },
+      ),
+    ).toEqual(['cindy_orca', 'cindy_scheduler']);
+  });
 });
 
 describe('buildCursorAcpMcpServers', () => {
@@ -128,7 +137,28 @@ describe('buildCursorAcpMcpServers', () => {
     expect(registered.get('w-1')).toMatchObject({
       agentKind: 'cursor',
       sessionId: 'w-1',
-      vendorOptions: { orcaRole: 'worker', orcaWorkerId: 'worker-1' },
+      vendorOptions: {
+        orcaRole: 'worker',
+        orcaWorkerId: 'worker-1',
+        __cindyDisabledBuiltinPluginIds: [],
+      },
+    });
+  });
+
+  it('filters project-disabled servers and freezes disabled snapshot on ctx', async () => {
+    const { bridge, registered } = fakeBridge();
+    const out = await buildCursorAcpMcpServers(
+      { sessionId: 's-disabled', workingDir: '/proj' },
+      {
+        ensureBridgeStarted: STARTED(bridge),
+        getDisabledRuntimePluginIds: () => ['browser', 'ssh'],
+      },
+    );
+    expect(out.servers.map((s) => s.name)).toEqual(['cindy_orca', 'orca_worker_bridge']);
+    expect(registered.get('s-disabled')).toMatchObject({
+      vendorOptions: {
+        __cindyDisabledBuiltinPluginIds: ['browser', 'ssh'],
+      },
     });
   });
 
