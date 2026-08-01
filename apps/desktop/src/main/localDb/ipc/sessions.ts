@@ -595,7 +595,10 @@ export async function getOverwritableAutoTitle(
   const db = getDbClient().drizzle;
   const row = await selectSessionWithCount(db, id);
   if (!row) return null;
-  const agentKind = row.agentKind === 'codex' ? 'codex' : 'claude-code';
+  // ponytail: 与 readSessionAgentKindFromDb / 本文件 :965 同口径的三元判定 --
+  // cursor 必须显式命中,否则被二元兜底成 claude-code,标题会走错供应商。
+  const agentKind =
+    row.agentKind === 'codex' ? 'codex' : row.agentKind === 'cursor' ? 'cursor' : 'claude-code';
   const overwritable =
     row.title === DEFAULT_DRAFT_SESSION_TITLE ||
     (!!row.parentSessionId && row.title.startsWith(FORK_PLACEHOLDER_TITLE_PREFIX)) ||

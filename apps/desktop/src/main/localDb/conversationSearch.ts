@@ -228,7 +228,7 @@ function normalizeStatusFilter(
 }
 
 function normalizeAgentFilter(value: ConversationSearchFilters['agentKind']): ConversationSearchAgentFilter {
-  return value === 'cc' || value === 'codex' ? value : 'all';
+  return value === 'cc' || value === 'codex' || value === 'cursor' ? value : 'all';
 }
 
 function normalizeLastActivity(
@@ -332,7 +332,7 @@ function sessionSummaryFromRow(
     title: row.title,
     workingDir: row.workingDir,
     workspaceKind: row.workspaceKind,
-    agentKind: row.agentKind === 'codex' ? 'codex' : 'cc',
+    agentKind: row.agentKind === 'codex' ? 'codex' : row.agentKind === 'cursor' ? 'cursor' : 'cc',
     status: row.status,
     source: row.source,
     orcaRole: row.orcaRole,

@@ -5981,7 +5981,8 @@
       "filterVendor": {
         "all": "전체",
         "cc": "Claude",
-        "codex": "Codex"
+        "codex": "Codex",
+        "cursor": "Cursor"
       },
       "filterGroupBy": {
         "project": "프로젝트",
