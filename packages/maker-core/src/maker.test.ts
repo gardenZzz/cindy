@@ -1373,29 +1373,38 @@ describe('Maker invalid-resume persistence bridge', () => {
       sdkSessionId: 'sdk-old',
     });
 
-    let releaseOldWrite!: () => void;
-    let markOldWriteStarted!: () => void;
-    const oldWriteStarted = new Promise<void>((resolve) => {
-      markOldWriteStarted = resolve;
+    let releaseOldRead!: () => void;
+    let markOldReadStarted!: () => void;
+    const oldReadStarted = new Promise<void>((resolve) => {
+      markOldReadStarted = resolve;
     });
-    const oldWriteGate = new Promise<void>((resolve) => {
-      releaseOldWrite = resolve;
+    const oldReadGate = new Promise<void>((resolve) => {
+      releaseOldRead = resolve;
     });
-    let shouldBlockOldWrite = true;
+    // 第 1 次 get('session-1' 且库内 sdk-old) 是 createSession 读 existingRow;
+    // 第 2 次 (getCountForSdkOld === 2) 才是 persistSdkSessionId 的判等 get。
+    // 用计数区分两者, 把 barrier 卡在第 2 次 -- 即 old query 的判等操作上。
+    let getCountForSdkOld = 0;
     const persistedSdkSessionIds: string[] = [];
     const compareAndClear = vi.fn((id: string, expectedSdkSessionId: string) =>
       baseStorage.compareAndClearSdkSessionId(id, expectedSdkSessionId),
     );
     const storage: SessionStorage = {
       ...baseStorage,
+      async get(id) {
+        const row = await baseStorage.get(id);
+        if (id === 'session-1' && row?.sdkSessionId === 'sdk-old') {
+          getCountForSdkOld += 1;
+          if (getCountForSdkOld === 2) {
+            markOldReadStarted();
+            await oldReadGate;
+          }
+        }
+        return row;
+      },
       async update(id, patch) {
         if (typeof patch.sdkSessionId === 'string') {
           persistedSdkSessionIds.push(patch.sdkSessionId);
-          if (patch.sdkSessionId === 'sdk-old' && shouldBlockOldWrite) {
-            shouldBlockOldWrite = false;
-            markOldWriteStarted();
-            await oldWriteGate;
-          }
         }
         return baseStorage.update(id, patch);
       },
@@ -1432,7 +1441,7 @@ describe('Maker invalid-resume persistence bridge', () => {
       resumeSessionId: 'sdk-old',
     });
     oldEvents.push({ type: 'session_id', data: 'sdk-old', source: 'claude-code' });
-    await oldWriteStarted;
+    await oldReadStarted;
     await maker.closeSession('session-1');
 
     const recoveredSessionPromise = maker.createSession({
@@ -1445,18 +1454,20 @@ describe('Maker invalid-resume persistence bridge', () => {
     await vi.waitFor(() => expect(startSession).toHaveBeenCalledTimes(2));
     expect(compareAndClear).not.toHaveBeenCalled();
 
-    releaseOldWrite();
+    releaseOldRead();
     await recoveredSessionPromise;
     expect(compareAndClear).toHaveBeenCalledTimes(1);
     expect((await storage.get('session-1'))?.sdkSessionId).toBeUndefined();
 
     // CAS 后晚到的旧 query 事件必须跳过；fresh query 的新 id 仍按原路径回填。
+    // old 的 sdk-old 因判等命中（库内已是 sdk-old）不再触发 update (#46)，
+    // 故持久化序列只剩 fresh query 的 sdk-fresh 一次写入。
     freshEvents.push({ type: 'session_id', data: 'sdk-old', source: 'claude-code' });
     freshEvents.push({ type: 'session_id', data: 'sdk-fresh', source: 'claude-code' });
     await vi.waitFor(async () =>
       expect((await storage.get('session-1'))?.sdkSessionId).toBe('sdk-fresh'),
     );
-    expect(persistedSdkSessionIds).toEqual(['sdk-old', 'sdk-fresh']);
+    expect(persistedSdkSessionIds).toEqual(['sdk-fresh']);
     await maker.closeSession('session-1');
   });
 

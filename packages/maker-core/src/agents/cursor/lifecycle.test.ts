@@ -653,7 +653,10 @@ describe('CursorAgent lifecycle (FakeTransport)', () => {
         });
 
         expect(transport.findRequest(testCase.method)).toBeTruthy();
-        expect(updates.filter(({ patch }) => patch.sdkSessionId)).toHaveLength(1);
+        // resume 场景库内已存期望 id, SDK 重推同 id 时 Maker 判等跳过 update (#46),
+        // 不再冗余写库顶 updatedAt; 全新会话库内无 id, 仍恰好写一次。
+        const expectedSdkWrites = testCase.resumeSessionId ? 0 : 1;
+        expect(updates.filter(({ patch }) => patch.sdkSessionId)).toHaveLength(expectedSdkWrites);
         expect(updates.filter(({ patch }) => patch.model)).toHaveLength(1);
       } finally {
         await maker.closeSession(testCase.id).catch(() => undefined);

@@ -507,6 +507,13 @@ export class Maker {
         });
         return;
       }
+      // resume 时 SDK 会重推同一个 session_id 事件; 库内已是该 id 就跳过 update,
+      // 否则无条件写入会把 updatedAt 顶到当前时间, 让侧边栏按 updatedAt 排序的
+      // 会话仅因"打开续跑"就窜到顶部 (#46)。判等放在队列操作内: 同 session 持久化
+      // 单通道串行, get 与 update 之间无同 session 操作插队, CAS 也走同一队列排在之后。
+      if ((await this.storage.get(sessionId))?.sdkSessionId === sdkSessionId) {
+        return;
+      }
       await retryOnce(() => this.storage.update(sessionId, { sdkSessionId }));
     });
   }
