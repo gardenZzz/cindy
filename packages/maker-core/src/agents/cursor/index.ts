@@ -731,6 +731,28 @@ export class CursorAgent extends BaseAgent {
     let turnGeneration = 0;
     /** 已由 abort / tool-idle 推过终态的 generation；同 token 的 prompt 收尾跳过二次 done/error。 */
     let lastFinalizedGeneration = 0;
+    /**
+     * #45 接的是 SessionPrompt 的 JSON-RPC reject 路径。但 Cursor 上游断流还有另一种
+     * 形态：断流文案（如 `RetriableError: [canceled] http/2 stream closed …`）经
+     * `agent_message_chunk` 文本 delta 流进来，prompt 又以正常 `end_turn` resolve --
+     * 于是走 settlePromptTurn 的 success 分支，文案被当成 assistant 正文落库，且不发
+     * error 事件，既有自愈判据（isInterruptedTurnError）根本不触发。
+     *
+     * 这里在 delta 层拦截：命中断流签名就记下文案、不推 text 事件（不污染 textBuf /
+     * 不广播给 register 落库），settlePromptTurn 的 success 分支据此把正常 done 升级
+     * 成 `cursor-stream-disconnect` 终态 error，复用既有自愈。见 streamDisconnect.ts。
+     */
+    let streamDisconnectText: string | null = null;
+    function extractAgentMessageChunkText(params: unknown): string | null {
+      if (!isRecord(params)) return null;
+      const update = (params as { update?: unknown }).update;
+      if (!isRecord(update) || update.sessionUpdate !== 'agent_message_chunk') return null;
+      const content = update.content;
+      if (!isRecord(content) || content.type !== 'text' || typeof content.text !== 'string') {
+        return null;
+      }
+      return content.text;
+    }
     let sessionId = '';
     let mutablePermissionMode = normalizeCursorPermissionMode(opts.permissionMode);
     /** UI 武装态：send 消耗后熄灭；ACP 侧 sticky plan 另用 acpInPlanMode。 */
@@ -906,6 +928,20 @@ export class CursorAgent extends BaseAgent {
       }
       if (suppressHistoryReplay) {
         // 上游 session/load 会回放历史；Cindy 用自有存储渲染，这里整段丢弃。
+        return;
+      }
+      // 断流文案形态：上游把错误塞进 agent_message_chunk 文本流而非 JSON-RPC reject
+      // （#45 盲区）。命中则记下文案、不推 text 事件 -- 否则文案会被当成 assistant
+      // 正文落库、且正常 done 收尾使自愈判据不触发。settlePromptTurn 据此升级为
+      // cursor-stream-disconnect 终态 error。
+      const chunkText = extractAgentMessageChunkText(params);
+      if (chunkText !== null && isCursorStreamDisconnectError(chunkText)) {
+        streamDisconnectText = streamDisconnectText ?? chunkText;
+        log.warn('cursor stream disconnect detected via agent_message_chunk text', {
+          sessionId,
+          turnGeneration,
+          text: chunkText,
+        });
         return;
       }
       trackToolActivityFromUpdate(params);
@@ -1487,7 +1523,20 @@ export class CursorAgent extends BaseAgent {
             return;
           }
           toolIdle.clear();
-          pushAll(finishPromptTurn(response ?? { stopReason: 'end_turn' }, translateCtx));
+          // 断流文案形态：prompt 以正常 end_turn resolve，但断流文案已走文本流进来。
+          // 不走 finishPromptTurn（会把残留 textBuf 当正文吐 + 正常 done）；升级为
+          // cursor-stream-disconnect 终态 error，复用既有 isInterruptedTurnError 自愈。
+          if (streamDisconnectText) {
+            const text = streamDisconnectText;
+            streamDisconnectText = null;
+            pushAll(
+              translateAcpError(new Error(text), translateCtx, {
+                reason: CURSOR_STREAM_DISCONNECT_REASON,
+              }),
+            );
+          } else {
+            pushAll(finishPromptTurn(response ?? { stopReason: 'end_turn' }, translateCtx));
+          }
         } catch (e) {
           if (token !== turnGeneration || closed || lastFinalizedGeneration === token) {
             log.debug('discarding stale cursor prompt error', {
@@ -2056,6 +2105,7 @@ export class CursorAgent extends BaseAgent {
         turnInFlight = true;
         usageTracker.beginTurn();
         resetAcpTurn(rt);
+        streamDisconnectText = null;
         toolIdle.clear();
 
         /** 本 token 仍是活跃轮：未 close、未被更新的 generation 抢占、未被 abort/watchdog finalize。 */
