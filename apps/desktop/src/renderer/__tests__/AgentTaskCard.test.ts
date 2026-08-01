@@ -9,6 +9,7 @@ vi.mock('react-i18next', () => ({
     t: (key: string, vars?: Record<string, unknown>) => {
       if (key === 'chat.agentTask.provider.claude') return 'Claude Code';
       if (key === 'chat.agentTask.provider.codex') return 'Codex';
+      if (key === 'chat.agentTask.provider.cursor') return 'Cursor';
       if (key === 'chat.agentTask.status.completed') return 'Completed';
       if (key === 'chat.agentTask.status.running') return 'Running';
       if (key === 'chat.agentTask.tokens') return `${vars?.count} tokens`;
@@ -62,6 +63,21 @@ const withPanelHost = (hostSessionId: string, element: React.ReactElement) =>
   });
 
 describe('AgentTaskCard', () => {
+  it('renders Cursor provider label for cursor tasks', () => {
+    const { container } = render(
+      React.createElement(AgentTaskCard, {
+        update: {
+          provider: 'cursor',
+          taskId: 'c1',
+          status: 'completed',
+          title: 'Explore',
+        },
+      }),
+    );
+    expect(container.textContent).toContain('Cursor');
+    expect(container.textContent).not.toContain('Claude Code');
+  });
+
   it('renders the full expanded task result instead of truncating it', () => {
     const tail = 'TAIL_MARKER_KEPT_VISIBLE';
     const longResult = `Summary start\n\n${'x'.repeat(500)}\n${tail}`;
