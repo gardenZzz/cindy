@@ -7262,27 +7262,25 @@ async function sendMessageCore(
   // 首条与补起名共用同一套素材推导:用户没打字时 seed.isUserText=false,
   // 只写合成占位、不调标题模型。
   const autoTitleSeed = deriveAutoTitleSeed(queued, autoTitleFallbackLabels());
-  if (wasFirst) {
-    // 用会话真实 agentKind 起名 — 之前写死 'claude-code',导致 Codex 会话也
-    // 用 Claude haiku 起标题:纯 Codex 用户(无 Claude 鉴权)会 oneShot 失败 →
-    // fallback 原话,表现为"Codex 会话标题没有智能总结"。current.agentKind 已是
-    // maker 格式(AgentKind),直接透传。起名走立即占位 + 后台覆盖。
-    if (autoTitleSeed) {
-      scheduleAutoName(sessionId, autoTitleSeed.text, current.agentKind, autoTitleSeed.isUserText);
+  const runAutoName = () => {
+    if (wasFirst) {
+      // 用会话真实 agentKind 起名 - 之前写死 'claude-code',导致 Codex 会话也
+      // 用 Claude haiku 起标题:纯 Codex 用户(无 Claude 鉴权)会 oneShot 失败 ->
+      // fallback 原话,表现为"Codex 会话标题没有智能总结"。current.agentKind 已是
+      // maker 格式(AgentKind),直接透传。起名走立即占位 + 后台覆盖。
+      if (autoTitleSeed) {
+        scheduleAutoName(sessionId, autoTitleSeed.text, current.agentKind, autoTitleSeed.isUserText);
+      }
+    } else {
+      // 补起名:首条是纯附件(只贴图没打字)、标题还是合成占位或默认名的会话,以及
+      // fork 出来的占位标题会话,都在第一条带文字的消息上把标题换成用户写的内容。
+      maybeAutoNameUnnamedSession(sessionId, autoTitleSeed, current.agentKind);
     }
-  } else {
-    // 补起名:首条是纯附件(只贴图没打字)、标题还是合成占位或默认名的会话,以及
-    // fork 出来的占位标题会话,都在第一条带文字的消息上把标题换成用户写的内容。
-    maybeAutoNameUnnamedSession(sessionId, autoTitleSeed, current.agentKind);
-  }
+  };
+  // Cursor 标题另起 `cursor-agent -p`；先让 enqueue 建立/接管 ACP session，
+  // main 再等 session/new 就绪后起标题，避免两个冷启动同时争抢资源。
+  if (current.agentKind !== 'cursor') runAutoName();
 
-  // 视觉连续性: agent 空闲 + 队列为空时, main coordinator 会立即派发这条(见
-  // agent-input-coordinator.enqueue 的 immediate 分支)。提前乐观把 user 气泡 push
-  // 进消息流, 让"按 Enter → 气泡出现"既无队列灰字闪烁、也没有等 DB 广播回投的空窗。
-  // busy 判定取镜像于 main getDrainableHead(isSendBusyForQueue = boundary busy ||
-  // 队列非空)。派发落库后 localDb.messages.onCreated 广播按 clientId dedupe 不会重复;
-  // 若 race 导致 main 实际排了队 / 派发失败回退, applyInputProjection 会按 pendingQueue
-  // 的 clientId 撤回这条乐观气泡, 回落到队列态。
   if (!isSendBusyForQueue(current)) {
     setState(sessionId, (s) =>
       s.messages.some((m) => m.clientId === queued.clientId)
@@ -7305,6 +7303,7 @@ async function sendMessageCore(
       }
       applyInputProjection(projection);
       markSessionHasUserMessage(sessionId);
+      runAutoName();
       return true;
     })
     .catch((err) => {

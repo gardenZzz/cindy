@@ -8,6 +8,9 @@ import type { AgentKind } from '@cindy/maker-core';
 
 export const MAKER_INVOKE = {
   CREATE_SESSION: 'maker:create-session',
+  PREWARM_SESSION: 'maker:prewarm-session',
+  CLAIM_PREWARM_SESSION: 'maker:claim-prewarm-session',
+  CANCEL_PREWARM_SESSION: 'maker:cancel-prewarm-session',
   MARK_ORCA_ROLE: 'maker:mark-orca-role',
   /**
    * F-COLLAB: 中途开关协同模式 (Orca workflow toggle)。

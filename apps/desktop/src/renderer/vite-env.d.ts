@@ -4092,6 +4092,22 @@ interface ElectronAPI {
       truncated?: boolean;
     }>;
 
+    prewarmSession: (opts: {
+      id: string;
+      agentKind: 'cursor';
+      workingDir?: string;
+      workspaceKind: 'project' | 'dialogue';
+      model: string;
+      effort?: string;
+      fastMode?: boolean;
+      permissionMode?: string;
+      planMode?: boolean;
+      providerId?: string | null;
+      vendorOptions?: Record<string, unknown>;
+    }) => Promise<{ ready: true; workDir: string }>;
+    claimPrewarmSession: (sessionId: string) => Promise<{ claimed: boolean }>;
+    cancelPrewarmSession: (sessionId: string) => Promise<void>;
+
     createSession: (opts: {
       /** 可选: 复用外部 sessionId(本端 chat 用 local-db:sessions:create 拿到的 id) */
       id?: string;

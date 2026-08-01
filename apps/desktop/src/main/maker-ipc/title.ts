@@ -133,7 +133,10 @@ export async function generateMakerSessionTitle(
   const trimmed = message.trim();
   if (!trimmed) return null;
   if (agentKind === 'cursor') {
-    return generateCursorSessionTitle(TITLE_PROMPT_TEMPLATE(trimmed, getResolvedMainLocale()));
+    return generateCursorSessionTitle(
+      TITLE_PROMPT_TEMPLATE(trimmed, getResolvedMainLocale()),
+      sessionId,
+    );
   }
   return generateTitleViaProvider(
     {
@@ -148,10 +151,15 @@ export async function generateMakerSessionTitle(
   );
 }
 
-async function generateCursorSessionTitle(prompt: string): Promise<string | null> {
+async function generateCursorSessionTitle(
+  prompt: string,
+  sessionId?: string,
+): Promise<string | null> {
   try {
     const maker = getMakerIfReady();
     if (!maker || !maker.listAvailableAgents().includes('cursor')) return null;
+    // `cursor-agent -p` 自带冷启动；等 ACP session/new 就绪后再起，避免两次冷启动争抢资源。
+    if (sessionId) await maker.waitForSessionBootstrap(sessionId);
     const text = await maker.oneShot('cursor', prompt, {
       model: CURSOR_ONESHOT_DEFAULT_MODEL,
       timeoutMs: TITLE_TIMEOUT_MS_CURSOR,
@@ -195,7 +203,7 @@ const defaultRegenerateDeps: RegenerateTitleDeps = {
   readSessionAgentKind: readSessionAgentKindFromDb,
   collectMaterial: regenerateTitleMaterial,
   generateTitle: async (sessionId, agentKind, prompt) => {
-    if (agentKind === 'cursor') return generateCursorSessionTitle(prompt);
+    if (agentKind === 'cursor') return generateCursorSessionTitle(prompt, sessionId);
     return generateTitleViaProvider(
       { sessionId, agentKind, prompt },
       {

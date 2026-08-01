@@ -33,11 +33,13 @@ import {
   type RegenerateTitleDeps,
 } from '../title.js';
 import { generateTitleViaProvider } from '../../maker-host/title-one-shot.js';
+import { getMakerIfReady } from '../../maker-host/index.js';
 import { getResolvedMainLocale } from '../../i18n.js';
 import type { RegenerateTitleMaterial } from '../../localDb/latestMessageText.js';
 
 beforeEach(() => {
   vi.mocked(getResolvedMainLocale).mockReturnValue('en');
+  vi.mocked(getMakerIfReady).mockReturnValue(null);
 });
 
 /** 默认素材:短会话——最近窗口已覆盖会话开头(开场消息就是窗口第一条)。 */
@@ -256,6 +258,25 @@ describe('generateMakerSessionTitle', () => {
     expect(request.agentKind).toBe('claude-code');
     expect(request.prompt).toContain('帮我排查登录失败');
     expect(request.prompt).not.toContain('  帮我排查登录失败');
+  });
+
+  it('Cursor 标题 oneShot 等 ACP session/new 就绪后再启动', async () => {
+    const waitForSessionBootstrap = vi.fn(async () => true);
+    const oneShot = vi.fn(async () => 'Cursor 标题');
+    vi.mocked(getMakerIfReady).mockReturnValue({
+      listAvailableAgents: () => ['cursor'],
+      waitForSessionBootstrap,
+      oneShot,
+    } as unknown as NonNullable<ReturnType<typeof getMakerIfReady>>);
+
+    await expect(generateMakerSessionTitle('修复首发延迟', 'cursor', 'cursor-session')).resolves.toBe(
+      'Cursor 标题',
+    );
+
+    expect(waitForSessionBootstrap).toHaveBeenCalledWith('cursor-session');
+    expect(waitForSessionBootstrap.mock.invocationCallOrder[0]).toBeLessThan(
+      oneShot.mock.invocationCallOrder[0],
+    );
   });
 
   it.each([

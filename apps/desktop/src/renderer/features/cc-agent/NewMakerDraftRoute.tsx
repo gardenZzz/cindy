@@ -69,6 +69,7 @@ import { useProportionalWidth } from '@/hooks/useProportionalWidth';
 import { useCCSessions } from '@/hooks/useCCSessions';
 import { useVendorAuthGate } from '@/hooks/useVendorAuthGate';
 import { useCursorAvailability } from '@/hooks/useCursorAvailable';
+import { setCursorAuthState } from '@/state/cursorAuthState';
 import { useAttachments } from '@/hooks/useAttachments';
 import {
   useNewMakerDraft,
@@ -1464,6 +1465,121 @@ export function NewMakerDraftRoute() {
     capabilityAgentKind,
   ]);
 
+  const cursorPrewarmOptionsRef = useRef({
+    model: draftInitialModel,
+    effort: draftInitialEffort,
+    fastMode: effectiveFastMode,
+    permissionMode: chatInitialPermissionMode,
+    planMode: effectivePlanMode,
+    providerId: chatInitialProviderId,
+  });
+  cursorPrewarmOptionsRef.current = {
+    model: draftInitialModel,
+    effort: draftInitialEffort,
+    fastMode: effectiveFastMode,
+    permissionMode: chatInitialPermissionMode,
+    planMode: effectivePlanMode,
+    providerId: chatInitialProviderId,
+  };
+  const cursorPrewarmRef = useRef<{
+    sessionId: string;
+    claimed: boolean;
+    ready: Promise<{ ready: true; workDir: string }>;
+  } | null>(null);
+  const cursorPrewarmClaimedRef = useRef(false);
+
+  useEffect(() => {
+    if (
+      persistedAgentKind !== 'cursor' ||
+      includeCursor === false ||
+      isDeviceLinkDraft ||
+      effectiveRemoteHostId ||
+      wtEnabled ||
+      cursorPrewarmClaimedRef.current
+    ) {
+      return;
+    }
+
+    const sessionId = makeDraftSessionId();
+    const workingDir = effectiveWorkingDir?.trim() || undefined;
+    const prewarm = {
+      sessionId,
+      claimed: false,
+      ready: window.electronAPI.maker.prewarmSession({
+        id: sessionId,
+        agentKind: 'cursor',
+        workingDir,
+        workspaceKind: workingDir ? 'project' : 'dialogue',
+        ...cursorPrewarmOptionsRef.current,
+      }),
+    };
+    cursorPrewarmRef.current = prewarm;
+    let active = true;
+    void prewarm.ready
+      .then(() => {
+        if (active) setCursorAuthState(true);
+      })
+      .catch((err) => {
+        if (!active) return;
+        const message = err instanceof Error ? err.message : String(err);
+        if (/auth|log[ -]?in/i.test(message)) setCursorAuthState(false);
+      });
+
+    return () => {
+      active = false;
+      if (cursorPrewarmRef.current === prewarm) cursorPrewarmRef.current = null;
+      if (!prewarm.claimed) {
+        void window.electronAPI.maker.cancelPrewarmSession(sessionId).catch(() => undefined);
+      }
+    };
+  }, [
+    persistedAgentKind,
+    includeCursor,
+    isDeviceLinkDraft,
+    effectiveRemoteHostId,
+    effectiveWorkingDir,
+    wtEnabled,
+  ]);
+
+  const claimCursorPrewarmSession = useCallback(
+    async (fallbackWorkingDir?: string): Promise<{
+      sessionId: string;
+      workingDir?: string;
+      prewarmed: boolean;
+    }> => {
+      const prewarm = cursorPrewarmRef.current;
+      if (persistedAgentKind !== 'cursor' || !prewarm) {
+        return { sessionId: makeDraftSessionId(), workingDir: fallbackWorkingDir, prewarmed: false };
+      }
+      prewarm.claimed = true;
+      cursorPrewarmClaimedRef.current = true;
+      try {
+        const claim = await window.electronAPI.maker.claimPrewarmSession(prewarm.sessionId);
+        if (!claim.claimed) {
+          cursorPrewarmRef.current = null;
+          cursorPrewarmClaimedRef.current = false;
+          return { sessionId: makeDraftSessionId(), workingDir: fallbackWorkingDir, prewarmed: false };
+        }
+        const ready = await prewarm.ready;
+        return { sessionId: prewarm.sessionId, workingDir: ready.workDir, prewarmed: true };
+      } catch (err) {
+        cursorPrewarmRef.current = null;
+        cursorPrewarmClaimedRef.current = false;
+        void window.electronAPI.maker.cancelPrewarmSession(prewarm.sessionId).catch(() => undefined);
+        throw err;
+      }
+    },
+    [persistedAgentKind],
+  );
+
+  const releaseCursorPrewarmClaim = useCallback((sessionId: string): void => {
+    const prewarm = cursorPrewarmRef.current;
+    if (!prewarm || prewarm.sessionId !== sessionId) return;
+    cursorPrewarmRef.current = null;
+    cursorPrewarmClaimedRef.current = false;
+    void window.electronAPI.maker.cancelPrewarmSession(sessionId).catch(() => undefined);
+  }, []);
+
   /**
    * 把草稿转移到一个新的运行目标(设备 + 工作区)——**四条路径唯一的转移动作**。
    *
@@ -2227,6 +2343,7 @@ export function NewMakerDraftRoute() {
       // catch 里撤回,否则空会话会跨列表刷新一直显示一句**没发出去**的话
       // (PR #1031 review P1;worktree 与 goal 两条路径各有自己的撤回点)。
       let optimisticTitleSessionId: string | null = null;
+      let claimedCursorPrewarmSessionId: string | null = null;
       void (async () => {
         try {
           if (isDeviceLinkDraft && !isCurrentDataOwner()) return;
@@ -2543,8 +2660,10 @@ export function NewMakerDraftRoute() {
           // Send 流程会先 createSession (本段下方) 创建 Lead,然后立刻调 enableOrca
           // 拉起 Worker (见下方 "F-COLLAB: draft 阶段开了协同 toggle" 段)。
 
-          const sessionId = makeDraftSessionId();
-          const workingDir = selectedWorkingDir;
+          const cursorPrewarm = await claimCursorPrewarmSession(selectedWorkingDir);
+          const sessionId = cursorPrewarm.sessionId;
+          const workingDir = cursorPrewarm.workingDir;
+          claimedCursorPrewarmSessionId = cursorPrewarm.prewarmed ? sessionId : null;
           const wt = selectedWorktree;
           // 生效条件 = 勾选 && baseRepo 已就绪;不合格时静默普通启动(同 device-link 分支,
           // 见 2026-07-29 状态不变量:勾选记忆永不因环境被改动或报错拦截)。
@@ -2574,6 +2693,8 @@ export function NewMakerDraftRoute() {
               providerId,
             });
             if (!newSession) {
+              releaseCursorPrewarmClaim(sessionId);
+              claimedCursorPrewarmSessionId = null;
               toastCreateSessionFailed();
               return;
             }
@@ -2768,13 +2889,15 @@ export function NewMakerDraftRoute() {
             workingDir: workingDir ?? undefined,
             // 没选项目目录 = 创建 standalone dialogue;main 端会按 workspaceKind='dialogue'
             // 自动分配 <userData>/dialogues/<date>/<sid>/ 作为运行目录,不进入项目段。
-            workspaceKind: workingDir ? 'project' : 'dialogue',
-            remoteHostId: workingDir ? (effectiveRemoteHostId ?? undefined) : undefined,
+            workspaceKind: selectedWorkingDir ? 'project' : 'dialogue',
+            remoteHostId: selectedWorkingDir ? (effectiveRemoteHostId ?? undefined) : undefined,
             // extraDirs 是 vendor 无关字段；Claude 与 Codex 都按只读引用目录透传。
             extraDirs: effectiveExtraDirs,
             providerId,
           });
           if (!newSession) {
+            releaseCursorPrewarmClaim(sessionId);
+            claimedCursorPrewarmSessionId = null;
             toastCreateSessionFailed();
             return;
           }
@@ -2846,6 +2969,8 @@ export function NewMakerDraftRoute() {
               ? { slashCommandRanges: opts.slashCommandRanges }
               : {}),
           });
+          // 从这里起首条消息已交给 SessionView；预热句柄由后续 lazy-create 接管。
+          claimedCursorPrewarmSessionId = null;
           opts?.onAccepted?.();
           // 草稿已经成功移交给新会话(setPending),清掉 NEW_MAKER_DRAFT_KEY
           // 下的 store 条目,防止下次回到 /cc-agent/new 还看到本次刚发送的内容。
@@ -2865,6 +2990,10 @@ export function NewMakerDraftRoute() {
               : undefined,
           });
         } catch (err) {
+          if (claimedCursorPrewarmSessionId) {
+            releaseCursorPrewarmClaim(claimedCursorPrewarmSessionId);
+            claimedCursorPrewarmSessionId = null;
+          }
           if (isRemotePrecreatedWorktreeOwnerChangedError(err)) return;
           log.error('[draft send]', err);
           // 交接失败 → 撤回乐观标题预览(理由见上面 optimisticTitleSessionId 的注释)。
@@ -2925,6 +3054,8 @@ export function NewMakerDraftRoute() {
       localProvidersLoading,
       vendorAuthGate,
       createSession,
+      claimCursorPrewarmSession,
+      releaseCursorPrewarmClaim,
       navigate,
       crossAgentDialog.runMigrationFlow,
       attachmentState,
