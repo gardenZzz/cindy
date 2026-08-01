@@ -80,6 +80,10 @@ import {
 } from './isolatedConfig.js';
 import { isCursorResumeSessionNotFound } from './invalidResume.js';
 import {
+  CURSOR_STREAM_DISCONNECT_REASON,
+  isCursorStreamDisconnectError,
+} from './streamDisconnect.js';
+import {
   askQuestionResponseFromDecision,
   createPlanResponseFromDecision,
   CURSOR_TODOS_TOOL_USE_ID,
@@ -1312,7 +1316,10 @@ export class CursorAgent extends BaseAgent {
             return;
           }
           toolIdle.clear();
-          pushAll(translateAcpError(e as Error, translateCtx));
+          const reason = isCursorStreamDisconnectError(e)
+            ? CURSOR_STREAM_DISCONNECT_REASON
+            : undefined;
+          pushAll(translateAcpError(e as Error, translateCtx, { reason }));
         } finally {
           if (token === turnGeneration) {
             turnInFlight = false;

@@ -388,7 +388,7 @@ export function finishPromptTurn(
 export function translateAcpError(
   err: Error,
   ctx: AcpTranslateContext,
-  opts?: { isTerminal?: boolean },
+  opts?: { isTerminal?: boolean; reason?: string },
 ): AgentEvent[] {
   const isTerminal = opts?.isTerminal !== false;
   const events: AgentEvent[] = [
@@ -397,6 +397,7 @@ export function translateAcpError(
       data: {
         message: err.message,
         isTerminal,
+        ...(opts?.reason ? { reason: opts.reason } : {}),
       },
       source: ctx.source ?? 'cursor',
     },
