@@ -5992,7 +5992,8 @@
       "filterVendor": {
         "all": "All",
         "cc": "Claude",
-        "codex": "Codex"
+        "codex": "Codex",
+        "cursor": "Cursor"
       },
       "filterGroupBy": {
         "project": "Project",

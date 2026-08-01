@@ -5981,7 +5981,8 @@
       "filterVendor": {
         "all": "全部",
         "cc": "Claude",
-        "codex": "Codex"
+        "codex": "Codex",
+        "cursor": "Cursor"
       },
       "filterGroupBy": {
         "project": "项目",
