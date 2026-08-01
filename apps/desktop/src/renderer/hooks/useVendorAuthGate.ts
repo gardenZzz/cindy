@@ -32,7 +32,8 @@ import {
 import { useConfirmDialog } from '@/components/ui/confirm-dialog-provider';
 import { useVendorReadiness, type Readiness } from '@/hooks/useVendorReadiness';
 import { remoteProjectsStore } from '@/features/device-link/remoteProjectsStore';
-import { getCursorAvailability } from '@/state/cursorAvailability';
+import { peekCursorAvailability } from '@/state/cursorAvailability';
+import { peekCursorAuthState } from '@/state/cursorAuthState';
 import type { AgentKind } from '@/lib/ccAgent.types';
 
 interface DialogCopy {
@@ -235,9 +236,8 @@ export function useVendorAuthGate(): UseVendorAuthGateReturn {
           });
           return { proceed: false };
         }
-        // 全局只在启动和设置页手动点击刷新时重探，门禁严格从缓存读取（spec #38）。
-        const installed = await getCursorAvailability();
-        if (!installed) {
+        // 发送热路径只读启动期缓存；未知态乐观放行，由已在途的 ACP session/new 权威裁决。
+        if (peekCursorAvailability() === false) {
           const ok = await confirm({
             title: t('settings.providers.cursor.title'),
             description: t('settings.providers.cursor.missingDescription'),
@@ -248,13 +248,8 @@ export function useVendorAuthGate(): UseVendorAuthGateReturn {
           if (ok) navigate('/settings?tab=providers');
           return { proceed: false };
         }
-        let authenticated = false;
-        try {
-          authenticated = (await window.electronAPI.maker.auth.getState('cursor')).authenticated;
-        } catch {
-          authenticated = false;
-        }
-        if (authenticated) return { proceed: true };
+        // 设置页查询和 ACP 预热会更新这份快照；不在 Enter→气泡之前 spawn `cursor-agent status`。
+        if (peekCursorAuthState() !== false) return { proceed: true };
         const ok = await confirm({
           title: t('settings.providers.cursor.authRequiredTitle'),
           description: t('settings.providers.cursor.authRequiredDescription'),

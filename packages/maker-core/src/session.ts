@@ -594,6 +594,11 @@ export class Session {
     return this.status;
   }
 
+  /** 等后台启动型 agent 完成 initialize + session/new；同步启动型 agent 立即返回。 */
+  async waitForBootstrapReady(): Promise<void> {
+    await this.handle.bootstrapReady;
+  }
+
   /**
    * 底层 agent handle 的会话 id —— cc = SDK session id(也是出站请求的 `x-claude-code-session-id`
    * header 值);SDK 尚未回填时为 '<pending>'。只读、不触发任何行为,供 host 把 loopback proxy

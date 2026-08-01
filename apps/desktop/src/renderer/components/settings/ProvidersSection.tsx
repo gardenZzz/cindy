@@ -31,6 +31,7 @@ import { isChatGptConnectionConnected, useCodexAuth } from '@/hooks/useCodexAuth
 import { useApiKey } from '@/hooks/useApiKey';
 import { useModelAccessStatus } from '@/hooks/useModelAccessStatus';
 import { getCursorAvailability, setCursorAvailability } from '@/state/cursorAvailability';
+import { setCursorAuthState } from '@/state/cursorAuthState';
 import { useConfirmDialog } from '@/components/ui/confirm-dialog-provider';
 import { useSignInToCindy } from '@/hooks/useSignInToCindy';
 import { useProviderOAuthDeviceCode } from '@/hooks/useProviderOAuthDeviceCode';
@@ -1366,11 +1367,13 @@ function CursorDetail() {
   const refreshAuth = useCallback(async () => {
     const authApi = window.electronAPI?.maker?.auth;
     if (!authApi?.getState) {
+      setCursorAuthState(false);
       setAuth({ kind: 'unauthenticated' });
       return;
     }
     try {
       const state = await authApi.getState(CURSOR_ROW_ID);
+      setCursorAuthState(state.authenticated);
       setAuth(
         state.authenticated
           ? { kind: 'authenticated', identity: state.identity }
@@ -1378,6 +1381,7 @@ function CursorDetail() {
       );
     } catch {
       // Agent 未注册(极少见:探测说已装但 Maker 未挂 Cursor)→ 按未登录降级。
+      setCursorAuthState(false);
       setAuth({ kind: 'unauthenticated' });
     }
   }, []);
@@ -1458,6 +1462,7 @@ function CursorDetail() {
     if (!authApi?.onStateChanged || !authApi?.onLoginProgress) return;
     const offState = authApi.onStateChanged((payload) => {
       if (payload.agentKind !== CURSOR_ROW_ID) return;
+      setCursorAuthState(payload.authenticated);
       setAuth(
         payload.authenticated
           ? { kind: 'authenticated', identity: payload.identity }
