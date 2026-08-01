@@ -1288,16 +1288,16 @@ describe('Maker invalid-resume persistence bridge', () => {
     expect((await storage.get('session-1'))?.sdkSessionId).toBeUndefined();
   });
 
-  it('retries sdkSessionId persistence after a failed write instead of latching the dedupe gate', async () => {
-    // 回写已是 fire-and-forget (异常不再抛给 createSession), 所以去重闸门必须在写失败时
-    // 放回去 —— 否则同一个 id 再推也会被当成重复而吞掉, sdk id 永久丢失。
+  it('retries a failed sdkSessionId write within the same one-shot event', async () => {
+    // session_id 是一次性事件: 回写失败后没有「下一条同类事件」可以依赖, 不在写入处重试
+    // 就等于永久丢掉 resume 能力。所以这里只推**一次**事件, 首写失败仍必须落库。
     const storage = createStorage();
     const realUpdate = storage.update.bind(storage);
-    let failNextUpdate = true;
+    let sdkUpdateAttempts = 0;
     storage.update = async (id, patch) => {
-      if (failNextUpdate && patch.sdkSessionId) {
-        failNextUpdate = false;
-        throw new Error('storage unavailable');
+      if (patch.sdkSessionId) {
+        sdkUpdateAttempts += 1;
+        if (sdkUpdateAttempts === 1) throw new Error('storage unavailable');
       }
       return realUpdate(id, patch);
     };
@@ -1319,14 +1319,11 @@ describe('Maker invalid-resume persistence bridge', () => {
     });
 
     events.push({ type: 'session_id', data: 'sdk-1', source: 'claude-code' });
-    await vi.waitFor(() => expect(failNextUpdate).toBe(false));
-    expect((await storage.get('session-retry'))?.sdkSessionId).toBeUndefined();
-
-    // 同一个 id 再推一次: 闸门已放回, 这次必须真的写进去。
-    events.push({ type: 'session_id', data: 'sdk-1', source: 'claude-code' });
     await vi.waitFor(async () =>
       expect((await storage.get('session-retry'))?.sdkSessionId).toBe('sdk-1'),
     );
+    // 恰好两次: 首写失败 + 重试成功。多于两次说明退避逻辑跑飞了。
+    expect(sdkUpdateAttempts).toBe(2);
     await maker.closeSession('session-retry');
   });
 
