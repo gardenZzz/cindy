@@ -156,6 +156,7 @@ async function bootCursorSession(args: {
       permissionMode: args.permissionMode ?? 'auto',
       vendorOptions: { createAcpTransport: () => args.transport },
     });
+    await handle.bootstrapReady;
     if (args.interactionResolver) {
       handle.setInteractionResolver(async (req) => {
         if (req.kind !== 'permission') {

@@ -211,6 +211,7 @@ async function bootSession(transport: SessionWritebackTransport) {
     workingDir: '/tmp',
     vendorOptions: { createAcpTransport: () => transport },
   });
+  await handle.bootstrapReady;
   return { agent, handle, userDataPath, published };
 }
 

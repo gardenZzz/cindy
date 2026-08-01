@@ -634,20 +634,12 @@ export class CursorAgent extends BaseAgent {
   }
 
   async startSession(opts: StartSessionOptions): Promise<AgentSessionHandle> {
+    const startSessionStartedAt = Date.now();
     // ADR: 不消费 userPrompt / makerMemoryEnabled / runtimeConfig.systemPrompt。
     // 与 Claude Code 对齐：scope 中带 business session id，host logger 才能路由到
     // sessions/<id>/<date>.ndjson。
     const sid = opts.sessionId ?? '';
     const log = this.deps.logger.child(sid ? `s:${sid}/cursor-agent` : 'cursor-agent');
-
-    // Auth gate：未登录直接拒，给出可读 reason（no_credentials），不 spawn ACP。
-    const authState = await this.deps.auth.getState();
-    if (!authState.authenticated) {
-      throw new AgentNotAuthenticatedError(
-        'cursor',
-        `cursor not authenticated: ${authState.errorReason ?? 'no_credentials'}`,
-      );
-    }
 
     const eventQueue: AsyncQueue<AgentEvent> = createAsyncQueue();
     const startupEvents: AgentEvent[] = [];
@@ -662,6 +654,19 @@ export class CursorAgent extends BaseAgent {
 
     let interactionResolver: InteractionResolver | null = null;
     let closed = false;
+    let bootstrapReady = false;
+    let bootstrapError: Error | null = null;
+    let handleReturnMs = 0;
+    const bootstrapAbortController = new AbortController();
+    let resolveBootstrapReady!: () => void;
+    let rejectBootstrapReady!: (reason?: unknown) => void;
+    const bootstrapReadyPromise = new Promise<void>((resolve, reject) => {
+      resolveBootstrapReady = resolve;
+      rejectBootstrapReady = reject;
+    });
+    // The promise is an intentionally non-public observability seam for tests
+    // and diagnostics. Callers use normal session events, never this property.
+    bootstrapReadyPromise.catch(() => undefined);
     let turnInFlight = false;
     /**
      * Per-turn generation token。每次 send 递增；abort / watchdog / prompt 收尾
@@ -678,8 +683,14 @@ export class CursorAgent extends BaseAgent {
     /** 上游 session 当前是否处于 plan mode（session/set_mode）。 */
     let acpInPlanMode = opts.planMode === true;
     let mutableModel = toCursorProductModelId(opts.model || CURSOR_AUTO_MODEL.id);
+    let desiredModel = mutableModel;
+    let modelSelectionChanged = false;
+    let desiredConfigRevision = 0;
+    let appliedConfigRevision = -1;
     let mutableEffort: Effort | undefined = opts.effort;
+    let desiredEffort: Effort | undefined = opts.effort;
     let mutableFastMode = opts.fastMode === true;
+    let desiredFastMode: boolean | undefined = opts.fastMode;
     // Thinking 非可选：有 ACP thinking option 时始终 true（对齐 Codex/CC，忽略 start false）。
     let mutableThinkingMode = true;
     let latestConfigOptions: AcpConfigOption[] = [];
@@ -694,29 +705,43 @@ export class CursorAgent extends BaseAgent {
     /** cursor/update_todos merge 用的会话内快照。 */
     let cursorTodos: CursorTodoItem[] = [];
     let extensionSeq = 0;
-
-    const userDataPath = this.deps.runtimeConfig.userDataPath;
-    if (!userDataPath || !userDataPath.trim()) {
-      throw new Error(
-        'CursorAgent requires runtimeConfig.userDataPath (host must inject; no HOME fallback)',
-      );
-    }
-    const isolated = createCursorIsolatedConfigDir(process.env, {
-      stableKey: opts.sessionId,
-      userDataPath,
-      networkConfigReader: this.deps.networkConfigReader ?? readUserNetworkConfigFromEnv,
-    });
+    let pendingPrompt: {
+      token: number;
+      prompt: ContentBlock[];
+      requestedPlanTurn: boolean;
+    } | null = null;
+    let isolated: ReturnType<typeof createCursorIsolatedConfigDir> | null = null;
 
     const pushAll = (events: AgentEvent[]): void => {
       for (const ev of events) eventQueue.push(ev);
     };
 
+    const getIsolatedConfig = (): ReturnType<typeof createCursorIsolatedConfigDir> => {
+      if (isolated) return isolated;
+      const userDataPath = this.deps.runtimeConfig.userDataPath;
+      if (!userDataPath || !userDataPath.trim()) {
+        throw new Error('CursorAgent requires runtimeConfig.userDataPath (host must inject; no HOME fallback)');
+      }
+      isolated = createCursorIsolatedConfigDir(process.env, {
+        stableKey: opts.sessionId,
+        userDataPath,
+        networkConfigReader: this.deps.networkConfigReader ?? readUserNetworkConfigFromEnv,
+      });
+      return isolated;
+    };
+
     const client = new AcpClient({
-      createTransport: resolveCreateTransport(opts, this.deps, isolated.env),
+      createTransport: () => {
+        const injected = opts.vendorOptions?.createAcpTransport;
+        if (typeof injected === 'function') {
+          return injected() as Transport;
+        }
+        return resolveCreateTransport(opts, this.deps, getIsolatedConfig().env)();
+      },
       logger: log,
       onTransportError: (err) => {
         log.error('transport error', { message: err.message });
-        if (!closed) {
+        if (!closed && bootstrapReady) {
           pushAll(translateAcpError(err, translateCtx));
           eventQueue.end();
         }
@@ -1304,15 +1329,13 @@ export class CursorAgent extends BaseAgent {
 
     const applyInitialModelConfig = async () => {
       const modelRaw = typeof opts.model === 'string' ? opts.model.trim() : '';
-      const desiredModel = toCursorProductModelId(modelRaw || mutableModel);
       const modelExplicit = opts.vendorOptions?.cursorModelExplicit === true;
       // 未选择 / 空白 model / 显式 follow：采用 ACP current，不发 set_config_option。
       // 种子默认 `auto`（New Maker 未碰 picker）也走 follow；显式选 Auto 需
       // vendorOptions.cursorModelExplicit === true（#8 / review P1）。
       const followAcpCurrent =
         opts.vendorOptions?.followAcpCurrentModel === true ||
-        !modelRaw ||
-        (!modelExplicit && desiredModel === CURSOR_AUTO_MODEL.id);
+        (!modelSelectionChanged && (!modelRaw || (!modelExplicit && desiredModel === CURSOR_AUTO_MODEL.id)));
 
       if (!followAcpCurrent) {
         // 模型设不上不得毁掉整个会话：codex / claude 起会话都不校验模型，且同函数
@@ -1329,7 +1352,7 @@ export class CursorAgent extends BaseAgent {
             log.warn('cursor initial setModel failed', { model: desiredModel, switching, message });
             // 只有「用户要的模型没换上」才提示；同模型 refresh 失败无行为差异。
             if (switching) {
-              startupEvents.push({
+              eventQueue.push({
                 type: 'error',
                 data: {
                   message: formatCursorInitialModelFailedMessage(desiredModel, mutableModel, message),
@@ -1353,10 +1376,10 @@ export class CursorAgent extends BaseAgent {
       };
       const requests: InitialConfigRequest[] = [];
 
-      const initialEffortOpt = opts.effort ? findCursorEffortOption(baseOptions) : undefined;
+      const initialEffortOpt = desiredEffort ? findCursorEffortOption(baseOptions) : undefined;
       const initialEffortValue =
-        initialEffortOpt && opts.effort
-          ? toCursorConfigEffortValue(initialEffortOpt, opts.effort)
+        initialEffortOpt && desiredEffort
+          ? toCursorConfigEffortValue(initialEffortOpt, desiredEffort)
           : null;
       if (initialEffortOpt && initialEffortValue) {
         requests.push({
@@ -1366,13 +1389,13 @@ export class CursorAgent extends BaseAgent {
         });
       }
 
-      if (opts.fastMode !== undefined && baseOptions.some((o) => o.id === 'fast')) {
+      if (desiredFastMode !== undefined && baseOptions.some((o) => o.id === 'fast')) {
         requests.push({
           kind: 'fast',
           configId: 'fast',
-          value: opts.fastMode ? 'true' : 'false',
+          value: desiredFastMode ? 'true' : 'false',
         });
-      } else if (opts.fastMode !== undefined) {
+      } else if (desiredFastMode !== undefined) {
         // 初始 Fast 被请求但目标模型当前未暴露 fast option -> 跳过下发。
         // 隔离 config dir 下 session/new 的当前模型常是 `default`(Auto)，其
         // configOptions 不含 fast/effort/thinking，需先 set_config_option('model',…)
@@ -1381,7 +1404,7 @@ export class CursorAgent extends BaseAgent {
         // 恒开，fast 是用户可拨开关，被跳过意味着 UI 与 ACP 不一致）。
         log.warn('cursor initial setFastMode skipped: no fast option exposed', {
           model: mutableModel,
-          fastMode: opts.fastMode,
+          fastMode: desiredFastMode,
           followAcpCurrent,
         });
       }
@@ -1458,12 +1481,12 @@ export class CursorAgent extends BaseAgent {
         const message = result.reason instanceof Error ? result.reason.message : String(result.reason);
         if (request.kind === 'effort') {
           log.warn('cursor initial setEffort failed', {
-            effort: opts.effort,
+            effort: desiredEffort,
             message,
           });
         } else if (request.kind === 'fast') {
           log.warn('cursor initial setFastMode failed', {
-            fastMode: opts.fastMode,
+            fastMode: desiredFastMode,
             message,
           });
         } else {
@@ -1479,10 +1502,20 @@ export class CursorAgent extends BaseAgent {
     // 后续流水线化后这里仍然记录整段墙钟耗时。
     const applyInitialModelConfigWithTiming = async () => {
       const startedAt = Date.now();
+      const revisionAtStart = desiredConfigRevision;
       try {
         await applyInitialModelConfig();
       } finally {
         initialConfigMs = Date.now() - startedAt;
+        appliedConfigRevision = revisionAtStart;
+      }
+    };
+
+    const applyLatestInitialModelConfig = async (): Promise<void> => {
+      let attempts = 0;
+      while (appliedConfigRevision !== desiredConfigRevision && attempts < 4) {
+        attempts += 1;
+        await applyInitialModelConfigWithTiming();
       }
     };
 
@@ -1496,21 +1529,33 @@ export class CursorAgent extends BaseAgent {
     // McpServer instance。host 未接线 / 失败时按「无 MCP」降级,不阻断会话。
     let mcpServers: unknown[] = [];
     let mcpCleanup: (() => void) | undefined;
-    if (this.deps.prepareAcpMcpServers) {
-      try {
-        const prepared = await this.deps.prepareAcpMcpServers({
-          sessionId: opts.sessionId,
-          workingDir: opts.workingDir,
-          vendorOptions: vo,
-        });
-        mcpServers = prepared.servers;
-        mcpCleanup = prepared.cleanup;
-      } catch (err) {
-        log.warn('cursor MCP injection skipped', {
-          message: err instanceof Error ? err.message : String(err),
-        });
-      }
-    }
+
+    let resourcesClosed = false;
+    const cleanupResources = async (reason: string): Promise<void> => {
+      if (resourcesClosed) return;
+      resourcesClosed = true;
+      await client.close({ reason });
+      isolated?.dispose();
+      isolated = null;
+      mcpCleanup?.();
+      mcpCleanup = undefined;
+      eventQueue.end();
+    };
+
+    const liveSessionClosers = this.liveSessionClosers;
+    const closeSession = async (): Promise<void> => {
+      if (closed && resourcesClosed) return;
+      closed = true;
+      liveSessionClosers.delete(closeSession);
+      bootstrapAbortController.abort();
+      pendingPrompt = null;
+      turnInFlight = false;
+      lastFinalizedGeneration = turnGeneration;
+      toolIdle.clear();
+      dismissAllPending('session_closed', 'deny');
+      await cleanupResources('CursorAgentSession.close()');
+    };
+    liveSessionClosers.add(closeSession);
 
     const createFreshSession = async (): Promise<void> => {
       const startedAt = Date.now();
@@ -1532,184 +1577,260 @@ export class CursorAgent extends BaseAgent {
       await applyInitialModelConfigWithTiming();
     };
 
-    const spawnInitializeStartedAt = Date.now();
-    client.start();
-
-    try {
-      await client.initialize({
-        protocolVersion: ACP_PROTOCOL_VERSION,
-        clientCapabilities: {
-          fs: { readTextFile: false, writeTextFile: false },
-          _meta: { parameterizedModelPicker: true },
-        },
-        clientInfo: {
-          name: 'cindy',
-          title: 'Cindy',
-          version: '0.0.0',
-        },
-      });
-      spawnInitializeMs = Date.now() - spawnInitializeStartedAt;
-
-      const resumeId =
-        typeof opts.resumeSessionId === 'string' && opts.resumeSessionId.length > 0
-          ? opts.resumeSessionId
-          : undefined;
-      /** session/load 真正成功才为 true（不是「请求了 resume」）。 */
-      let resumedSuccessfully = false;
-
-      if (resumeId) {
-        suppressHistoryReplay = true;
-        try {
-          const loadStartedAt = Date.now();
-          let loaded: LoadSessionResponse;
-          try {
-            loaded = await client.request<LoadSessionResponse>(Method.SessionLoad, {
-              cwd: opts.workingDir,
-              sessionId: resumeId,
-              mcpServers,
-            });
-          } finally {
-            sessionMs = Date.now() - loadStartedAt;
-            sessionMethod = 'session/load';
-          }
-          sessionId = resumeId;
-          resumedSuccessfully = true;
-          await applyModelsFromSessionPayload(loaded ?? {});
-          await applyInitialModelConfigWithTiming();
-          log.info('session loaded', {
-            sessionId,
-            model: mutableModel,
-            permissionMode: mutablePermissionMode,
-          });
-        } catch (loadErr) {
-          const err = loadErr as Error;
-          if (
-            isCursorResumeSessionNotFound(err, resumeId) &&
-            opts.onInvalidResumeSession
-          ) {
-            let cleared = false;
-            try {
-              cleared = await opts.onInvalidResumeSession(resumeId);
-            } catch (casErr) {
-              log.error('onInvalidResumeSession threw', {
-                message: casErr instanceof Error ? casErr.message : String(casErr),
-              });
-              cleared = false;
-            }
-            if (!cleared) {
-              throw new Error(formatCursorInvalidResumeCasConflictMessage());
-            }
-            log.warn('invalid resume id cleared; creating fresh cursor session', {
-              resumeId,
-              evidence: err.message,
-            });
-            pushAll([
-              {
-                type: 'error',
-                data: {
-                  message: formatCursorInvalidResumeMessage(resumeId),
-                  isTerminal: false,
-                  reason: 'resume_session_not_found',
-                },
-                source: 'cursor',
-              },
-            ]);
-            await createFreshSession();
-          } else if (isCursorResumeSessionNotFound(err, resumeId)) {
-            // 无 CAS 钩子：仍可读提示 + 新建，避免卡死在协议错。
-            log.warn('invalid resume without CAS hook; creating fresh session', {
-              resumeId,
-              evidence: err.message,
-            });
-            pushAll([
-              {
-                type: 'error',
-                data: {
-                  message: formatCursorInvalidResumeMessage(resumeId),
-                  isTerminal: false,
-                  reason: 'resume_session_not_found',
-                },
-                source: 'cursor',
-              },
-            ]);
-            await createFreshSession();
-          } else {
-            throw err;
-          }
-        } finally {
-          suppressHistoryReplay = false;
-        }
-      } else {
-        await createFreshSession();
+    const dispatchPendingPrompt = async (): Promise<void> => {
+      const pending = pendingPrompt;
+      if (!pending || !bootstrapReady || closed || bootstrapError) return;
+      pendingPrompt = null;
+      if (
+        pending.token !== turnGeneration ||
+        lastFinalizedGeneration === pending.token
+      ) {
+        return;
       }
-
-      log.info('session ready', {
-        sessionId,
-        model: mutableModel,
-        effort: opts.effort ?? 'default',
-        workDir: opts.workingDir,
-        resume: opts.resumeSessionId ?? 'new',
-        spawnInitializeMs,
-        sessionMs,
-        sessionMethod,
-        initialConfigMs,
-        permissionMode: mutablePermissionMode,
-        planMode: mutablePlanMode,
-        listedModels: this.listedModels.length,
-        resumed: resumedSuccessfully,
-      });
-
-      if (mutablePlanMode) {
+      if (pending.requestedPlanTurn && !acpInPlanMode) {
         try {
           await applyAcpSessionMode('plan');
         } catch (e) {
-          log.warn('initial session/set_mode(plan) failed', {
+          log.warn('session/set_mode(plan) before queued prompt failed', {
             message: e instanceof Error ? e.message : String(e),
           });
         }
       }
-
-      eventQueue.push({
-        type: 'session_id',
-        data: sessionId,
-        source: 'cursor',
-      });
-    } catch (e) {
-      const err = e as Error;
-      pushAll(translateAcpError(err, translateCtx));
-      eventQueue.end();
-      await client.close({ reason: `startSession failed: ${err.message}` });
-      isolated.dispose();
-      mcpCleanup?.();
-      throw err;
-    }
-
-    const liveSessionClosers = this.liveSessionClosers;
-    const closeSession = async (): Promise<void> => {
-      if (closed) return;
-      closed = true;
-      turnInFlight = false;
-      lastFinalizedGeneration = turnGeneration;
-      toolIdle.clear();
-      dismissAllPending('session_closed', 'deny');
-      await client.close({ reason: 'CursorAgentSession.close()' });
-      isolated.dispose();
-      mcpCleanup?.();
-      eventQueue.end();
+      if (
+        closed ||
+        bootstrapError ||
+        pending.token !== turnGeneration ||
+        lastFinalizedGeneration === pending.token ||
+        pendingPrompt
+      ) {
+        return;
+      }
+      try {
+        settlePromptTurn(
+          pending.token,
+          client.request<PromptResponse>(Method.SessionPrompt, {
+            sessionId,
+            prompt: pending.prompt,
+          }),
+        );
+      } catch (e) {
+        if (pending.token === turnGeneration && lastFinalizedGeneration !== pending.token) {
+          turnInFlight = false;
+          pushAll(translateAcpError(e as Error, translateCtx));
+        }
+      }
     };
-    liveSessionClosers.add(closeSession);
+
+    const bootstrap = async (): Promise<void> => {
+      const assertBootstrapActive = (): void => {
+        if (closed || bootstrapAbortController.signal.aborted) {
+          throw new Error('Cursor session bootstrap cancelled');
+        }
+      };
+
+      try {
+        assertBootstrapActive();
+        if (this.deps.prepareAcpMcpServers) {
+          try {
+            const prepared = await this.deps.prepareAcpMcpServers({
+              sessionId: opts.sessionId,
+              workingDir: opts.workingDir,
+              vendorOptions: vo,
+            });
+            if (closed || bootstrapAbortController.signal.aborted) {
+              prepared.cleanup?.();
+              rejectBootstrapReady(new Error('Cursor session bootstrap cancelled'));
+              return;
+            }
+            mcpServers = prepared.servers;
+            mcpCleanup = prepared.cleanup;
+          } catch (err) {
+            log.warn('cursor MCP injection skipped', {
+              message: err instanceof Error ? err.message : String(err),
+            });
+          }
+        }
+        assertBootstrapActive();
+
+        const spawnInitializeStartedAt = Date.now();
+        client.start();
+        await client.initialize({
+          protocolVersion: ACP_PROTOCOL_VERSION,
+          clientCapabilities: {
+            fs: { readTextFile: false, writeTextFile: false },
+            _meta: { parameterizedModelPicker: true },
+          },
+          clientInfo: {
+            name: 'cindy',
+            title: 'Cindy',
+            version: '0.0.0',
+          },
+        });
+        spawnInitializeMs = Date.now() - spawnInitializeStartedAt;
+        assertBootstrapActive();
+
+        const resumeId =
+          typeof opts.resumeSessionId === 'string' && opts.resumeSessionId.length > 0
+            ? opts.resumeSessionId
+            : undefined;
+        /** session/load 真正成功才为 true（不是「请求了 resume」）。 */
+        let resumedSuccessfully = false;
+
+        if (resumeId) {
+          suppressHistoryReplay = true;
+          try {
+            const loadStartedAt = Date.now();
+            let loaded: LoadSessionResponse;
+            try {
+              loaded = await client.request<LoadSessionResponse>(Method.SessionLoad, {
+                cwd: opts.workingDir,
+                sessionId: resumeId,
+                mcpServers,
+              });
+            } finally {
+              sessionMs = Date.now() - loadStartedAt;
+              sessionMethod = 'session/load';
+            }
+            sessionId = resumeId;
+            resumedSuccessfully = true;
+            await applyModelsFromSessionPayload(loaded ?? {});
+            await applyInitialModelConfigWithTiming();
+            log.info('session loaded', {
+              sessionId,
+              model: mutableModel,
+              permissionMode: mutablePermissionMode,
+            });
+          } catch (loadErr) {
+            const err = loadErr as Error;
+            if (
+              isCursorResumeSessionNotFound(err, resumeId) &&
+              opts.onInvalidResumeSession
+            ) {
+              let cleared = false;
+              try {
+                cleared = await opts.onInvalidResumeSession(resumeId);
+              } catch (casErr) {
+                log.error('onInvalidResumeSession threw', {
+                  message: casErr instanceof Error ? casErr.message : String(casErr),
+                });
+                cleared = false;
+              }
+              if (!cleared) {
+                throw new Error(formatCursorInvalidResumeCasConflictMessage());
+              }
+              log.warn('invalid resume id cleared; creating fresh cursor session', {
+                resumeId,
+                evidence: err.message,
+              });
+              pushAll([
+                {
+                  type: 'error',
+                  data: {
+                    message: formatCursorInvalidResumeMessage(resumeId),
+                    isTerminal: false,
+                    reason: 'resume_session_not_found',
+                  },
+                  source: 'cursor',
+                },
+              ]);
+              await createFreshSession();
+            } else if (isCursorResumeSessionNotFound(err, resumeId)) {
+              // 无 CAS 钩子：仍可读提示 + 新建，避免卡死在协议错。
+              log.warn('invalid resume without CAS hook; creating fresh session', {
+                resumeId,
+                evidence: err.message,
+              });
+              pushAll([
+                {
+                  type: 'error',
+                  data: {
+                    message: formatCursorInvalidResumeMessage(resumeId),
+                    isTerminal: false,
+                    reason: 'resume_session_not_found',
+                  },
+                  source: 'cursor',
+                },
+              ]);
+              await createFreshSession();
+            } else {
+              throw err;
+            }
+          } finally {
+            suppressHistoryReplay = false;
+          }
+        } else {
+          await createFreshSession();
+        }
+        await applyLatestInitialModelConfig();
+        assertBootstrapActive();
+
+        log.info('session ready', {
+          sessionId,
+          model: mutableModel,
+          effort: desiredEffort ?? 'default',
+          workDir: opts.workingDir,
+          resume: opts.resumeSessionId ?? 'new',
+          handleReturnMs,
+          spawnInitializeMs,
+          sessionMs,
+          sessionMethod,
+          initialConfigMs,
+          permissionMode: mutablePermissionMode,
+          planMode: mutablePlanMode,
+          listedModels: this.listedModels.length,
+          resumed: resumedSuccessfully,
+        });
+
+        if (mutablePlanMode) {
+          try {
+            await applyAcpSessionMode('plan');
+          } catch (e) {
+            log.warn('initial session/set_mode(plan) failed', {
+              message: e instanceof Error ? e.message : String(e),
+            });
+          }
+        }
+
+        eventQueue.push({
+          type: 'session_id',
+          data: sessionId,
+          source: 'cursor',
+        });
+        bootstrapReady = true;
+        resolveBootstrapReady();
+        void dispatchPendingPrompt();
+      } catch (e) {
+        const err = e as Error;
+        if (closed || bootstrapAbortController.signal.aborted) {
+          rejectBootstrapReady(err);
+          await cleanupResources(`CursorAgentSession bootstrap cancelled: ${err.message}`);
+          return;
+        }
+        bootstrapError = err;
+        pendingPrompt = null;
+        turnInFlight = false;
+        lastFinalizedGeneration = turnGeneration;
+        closed = true;
+        pushAll(translateAcpError(err, translateCtx));
+        rejectBootstrapReady(err);
+        await cleanupResources(`CursorAgentSession bootstrap failed: ${err.message}`);
+        liveSessionClosers.delete(closeSession);
+      }
+    };
 
     const handle: AgentSessionHandle = {
       get id() {
-        return sessionId;
+        return sessionId || '<pending>';
       },
       agentKind: 'cursor',
       get model() {
         return mutableModel;
       },
       startupEvents,
+      bootstrapReady: bootstrapReadyPromise,
 
       async send(message: UserMessage, sendOpts?: SendOptions) {
+        if (bootstrapError) throw bootstrapError;
         if (closed) throw new Error('Cursor session is closed');
         if (sendOpts?.signal?.aborted) {
           throw new Error('Cursor send cancelled before acceptance');
@@ -1748,7 +1869,7 @@ export class CursorAgent extends BaseAgent {
               source: 'cursor',
             });
           }
-          if (!acpInPlanMode) {
+          if (bootstrapReady && !acpInPlanMode) {
             try {
               await applyAcpSessionMode('plan');
             } catch (e) {
@@ -1780,6 +1901,11 @@ export class CursorAgent extends BaseAgent {
           },
         ]);
 
+        if (!bootstrapReady) {
+          pendingPrompt = { token, prompt, requestedPlanTurn };
+          return;
+        }
+
         // 与 Claude/Codex 对齐：send() 只表示 accept，不等整轮 session/prompt。
         // Session 靠 isTurnRunning() 持有产品层 busy；abort/watchdog 翻 false 后即可发下一轮。
         const promptPromise = client.request<PromptResponse>(Method.SessionPrompt, {
@@ -1794,7 +1920,16 @@ export class CursorAgent extends BaseAgent {
       },
 
       async abort() {
-        if (closed || (!turnInFlight && pendingApprovals.size === 0 && pendingExtensions.size === 0)) {
+        if (closed) return;
+        if (!bootstrapReady) {
+          bootstrapAbortController.abort();
+          if (turnInFlight || pendingApprovals.size > 0 || pendingExtensions.size > 0) {
+            await finalizeTurnCancel({ reason: 'user_abort' });
+          }
+          await closeSession();
+          return;
+        }
+        if (!turnInFlight && pendingApprovals.size === 0 && pendingExtensions.size === 0) {
           return;
         }
         await finalizeTurnCancel({ reason: 'user_abort' });
@@ -1830,6 +1965,13 @@ export class CursorAgent extends BaseAgent {
       async setModel(newModel: string) {
         if (closed) throw new Error('Cursor session is closed');
         const productId = toCursorProductModelId(newModel);
+        desiredModel = productId;
+        modelSelectionChanged = true;
+        desiredConfigRevision += 1;
+        if (!bootstrapReady) {
+          mutableModel = productId;
+          return;
+        }
         // 切模型前的会话 Fast 快照：ACP 的 fast 是 per-model 持久，set model 回包
         // 会被目标模型的记录值覆盖（见下方 applyConfigSessionState 同步 mutableFastMode），
         // 补发要用切模型**前**用户拨的值，不是被回包覆盖后的值。
@@ -1878,6 +2020,12 @@ export class CursorAgent extends BaseAgent {
 
       async setEffort(newEffort: Effort) {
         if (closed) throw new Error('Cursor session is closed');
+        desiredEffort = newEffort;
+        desiredConfigRevision += 1;
+        if (!bootstrapReady) {
+          mutableEffort = newEffort;
+          return;
+        }
         if (!findCursorEffortOption(latestConfigOptions)) {
           const refreshed = await setConfigOption('model', toCursorAcpModelId(mutableModel));
           applyConfigSessionState(refreshed);
@@ -1906,6 +2054,12 @@ export class CursorAgent extends BaseAgent {
 
       async setFastMode(enabled: boolean) {
         if (closed) throw new Error('Cursor session is closed');
+        desiredFastMode = enabled;
+        desiredConfigRevision += 1;
+        if (!bootstrapReady) {
+          mutableFastMode = enabled;
+          return;
+        }
         if (!latestConfigOptions.some((o) => o.id === 'fast')) {
           const refreshed = await setConfigOption('model', toCursorAcpModelId(mutableModel));
           applyConfigSessionState(refreshed);
@@ -1925,7 +2079,6 @@ export class CursorAgent extends BaseAgent {
       getFastMode() {
         return mutableFastMode;
       },
-
 
       async setPermissionMode(newMode: PermissionMode) {
         const normalized = normalizeCursorPermissionMode(newMode);
@@ -1947,6 +2100,7 @@ export class CursorAgent extends BaseAgent {
         log.debug('setPlanMode', { enabled });
         // turn 流式中只记账武装态；idle 时立即推 ACP mode。
         if (turnInFlight) return;
+        if (!bootstrapReady) return;
         const moreOpen =
           !enabled &&
           (mutablePermissionMode === 'auto' || mutablePermissionMode === 'bypassPermissions');
@@ -1971,6 +2125,18 @@ export class CursorAgent extends BaseAgent {
     Object.defineProperty(handle, '_acpPid', {
       get: () => client.getPid(),
       enumerable: false,
+    });
+
+    // Keep all auth/config-dir/transport work off the startSession stack. A
+    // microtask is intentional: even an AuthAdapter or injected transport
+    // whose first operation is synchronous must not delay handle creation.
+    queueMicrotask(() => {
+      handleReturnMs = Date.now() - startSessionStartedAt;
+      log.info('session handle returned', {
+        handleReturnMs,
+        sessionId: handle.id,
+      });
+      void bootstrap();
     });
 
     return handle;
