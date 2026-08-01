@@ -117,6 +117,7 @@ async function boot(
     model: 'default',
     vendorOptions: { createAcpTransport: () => transport, orcaRole: 'worker' },
   });
+  await handle.bootstrapReady;
   const prevClose = handle.close.bind(handle);
   handle.close = async () => {
     try {

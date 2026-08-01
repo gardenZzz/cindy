@@ -153,6 +153,7 @@ async function boot(transport: FakeTransport, startOpts: Record<string, unknown>
       vendorOptions: { createAcpTransport: () => transport },
       ...startOpts,
     });
+    await handle.bootstrapReady;
     const prevClose = handle.close.bind(handle);
     handle.close = async () => {
       try {

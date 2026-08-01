@@ -35,6 +35,10 @@ class FakeTransport implements Transport {
   pendingSetModeIds: Array<number | string> = [];
   /** session/new|load 附带的 ACP configOptions（thinking/fast/effort 等）。 */
   sessionConfigOptions: unknown[] | null = null;
+  /** 为 T2 时序测试暂缓 initialize 回包，确保 listener 先挂载。 */
+  deferInitializeResponse = false;
+  initializeError: string | null = null;
+  pendingInitializeIds: Array<number | string> = [];
   /** 为初始配置流水线测试暂缓非 model 的 set_config_option 回包。 */
   deferConfigResponses = false;
   /** 指定 config id 回错误，验证单项失败不阻断其它项。 */
@@ -122,6 +126,32 @@ class FakeTransport implements Transport {
       });
     }
     this.pendingSetModeIds = [];
+  }
+
+  resolveInitializeResponse(): void {
+    const pending = this.pendingInitializeIds.splice(0);
+    for (const id of pending) {
+      this.emit(
+        this.initializeError
+          ? {
+              jsonrpc: JSONRPC_VERSION,
+              id,
+              error: { code: -32000, message: this.initializeError },
+            }
+          : {
+              jsonrpc: JSONRPC_VERSION,
+              id,
+              result: {
+                protocolVersion: 1,
+                agentCapabilities: {
+                  loadSession: true,
+                  promptCapabilities: { image: true },
+                },
+                authMethods: [],
+              },
+            },
+      );
+    }
   }
 
   get deferredConfigResponseCount(): number {
@@ -257,6 +287,7 @@ async function bootWithTransport(
   startOpts: Record<string, unknown> = {},
   models: { currentModelId: string; availableModels: Array<{ modelId: string; name: string }> } = MODELS,
   logger: Logger = createConsoleLogger('cursor-lifecycle-unit'),
+  waitUntilReady = true,
 ): Promise<{
   agent: CursorAgent;
   handle: Awaited<ReturnType<CursorAgent['startSession']>>;
@@ -284,17 +315,21 @@ async function bootWithTransport(
     const msg = JSON.parse(line) as Record<string, unknown>;
     if (typeof msg.id !== 'number' && typeof msg.id !== 'string') return;
     if (msg.method === Method.Initialize) {
-      queueMicrotask(() =>
-        transport.emit({
-          jsonrpc: JSONRPC_VERSION,
-          id: msg.id,
-          result: {
-            protocolVersion: 1,
-            agentCapabilities: { loadSession: true, promptCapabilities: { image: true } },
-            authMethods: [],
-          },
-        }),
-      );
+      if (transport.deferInitializeResponse) {
+        transport.pendingInitializeIds.push(msg.id as number | string);
+      } else {
+        queueMicrotask(() =>
+          transport.emit({
+            jsonrpc: JSONRPC_VERSION,
+            id: msg.id,
+            result: {
+              protocolVersion: 1,
+              agentCapabilities: { loadSession: true, promptCapabilities: { image: true } },
+              authMethods: [],
+            },
+          }),
+        );
+      }
       return;
     }
     if (msg.method === Method.SessionNew) {
@@ -437,11 +472,18 @@ async function bootWithTransport(
         ...(isRecord(startVendorOptions) ? startVendorOptions : {}),
       },
     });
+    if (waitUntilReady) await waitForBootstrapReady(handle);
     return { agent, handle, userDataPath };
   } catch (err) {
     rmSync(userDataPath, { recursive: true, force: true });
     throw err;
   }
+}
+
+async function waitForBootstrapReady(handle: Awaited<ReturnType<CursorAgent['startSession']>>): Promise<void> {
+  const ready = handle.bootstrapReady;
+  if (!ready) throw new Error('Cursor test handle is missing bootstrap readiness seam');
+  await ready;
 }
 
 async function withBootedSession(
@@ -456,6 +498,7 @@ async function withBootedSession(
   const transport = new FakeTransport();
   const { agent, handle, userDataPath } = await bootWithTransport(transport, startOpts, models);
   try {
+    await waitForBootstrapReady(handle);
     await run({ transport, handle, agent });
   } finally {
     await handle.close().catch(() => undefined);
@@ -533,7 +576,7 @@ describe('CursorAgent lifecycle (FakeTransport)', () => {
     }
   });
 
-  it('writes Maker metadata from startup and live events on new and load paths', async () => {
+  it('writes Maker metadata when handle returns early and model fallback arrives later', async () => {
     const cases = [
       {
         id: 'cursor-maker-new',
@@ -551,8 +594,9 @@ describe('CursorAgent lifecycle (FakeTransport)', () => {
 
     for (const testCase of cases) {
       const transport = new FakeTransport();
-      // 让 initial_model_unavailable 进入 startupEvents；session_id 仍从 events()
-      // 流出，覆盖 Maker listener 的两种时序。
+      // Hold initialize until Maker has mounted its listener. The fallback error
+      // is then produced after handle return, which is the T2 regression shape.
+      transport.deferInitializeResponse = true;
       transport.configResponseErrors.add('model');
       const { storage, updates } = createSessionStorage();
       if (testCase.resumeSessionId) {
@@ -566,10 +610,17 @@ describe('CursorAgent lifecycle (FakeTransport)', () => {
         });
       }
 
-      const { agent, handle, userDataPath } = await bootWithTransport(transport, {
-        model: 'claude-opus-5',
-        ...(testCase.resumeSessionId ? { resumeSessionId: testCase.resumeSessionId } : {}),
-      });
+      const { agent, handle, userDataPath } = await bootWithTransport(
+        transport,
+        {
+          model: 'claude-opus-5',
+          ...(testCase.resumeSessionId ? { resumeSessionId: testCase.resumeSessionId } : {}),
+        },
+        MODELS,
+        createConsoleLogger('cursor-lifecycle-early-return'),
+        false,
+      );
+      expect(handle.id).toBe('<pending>');
       // 同一个 id 同时出现在启动期重放与 live 流，验证 Maker 去重而不是重复写库。
       (handle.startupEvents as AgentEvent[]).push({
         type: 'session_id',
@@ -592,6 +643,7 @@ describe('CursorAgent lifecycle (FakeTransport)', () => {
           ...(testCase.resumeSessionId ? { resumeSessionId: testCase.resumeSessionId } : {}),
           vendorOptions: { createAcpTransport: () => transport },
         });
+        transport.resolveInitializeResponse();
 
         await vi.waitFor(async () => {
           const row = await storage.get(testCase.id);
@@ -607,6 +659,140 @@ describe('CursorAgent lifecycle (FakeTransport)', () => {
         await agent.dispose().catch(() => undefined);
         rmSync(userDataPath, { recursive: true, force: true });
       }
+    }
+  });
+
+  it('closes an in-flight bootstrap before initialize without leaving a transport', async () => {
+    const transport = new FakeTransport();
+    transport.deferInitializeResponse = true;
+    const { agent, handle, userDataPath } = await bootWithTransport(
+      transport,
+      {},
+      MODELS,
+      createConsoleLogger('cursor-lifecycle-close-before-ready'),
+      false,
+    );
+    try {
+      expect(handle.id).toBe('<pending>');
+      await handle.close();
+      expect(transport.getPid()).toBeNull();
+      expect(transport.findRequest(Method.SessionNew)).toBeUndefined();
+      await expect(handle.bootstrapReady).rejects.toThrow(/bootstrap cancelled|closed/);
+    } finally {
+      await agent.dispose().catch(() => undefined);
+      rmSync(userDataPath, { recursive: true, force: true });
+    }
+  });
+
+  it('accepts and cancels the first turn before bootstrap is ready', async () => {
+    const transport = new FakeTransport();
+    transport.deferInitializeResponse = true;
+    const { agent, handle, userDataPath } = await bootWithTransport(
+      transport,
+      {},
+      MODELS,
+      createConsoleLogger('cursor-lifecycle-abort-before-ready'),
+      false,
+    );
+    try {
+      await expect(handle.send({ type: 'user', content: 'queued before ready' })).resolves.toBeUndefined();
+      await handle.abort();
+      expect(transport.getPid()).toBeNull();
+      expect(transport.findRequest(Method.SessionNew)).toBeUndefined();
+      expect(transport.findRequest(Method.SessionPrompt)).toBeUndefined();
+    } finally {
+      await handle.close().catch(() => undefined);
+      await agent.dispose().catch(() => undefined);
+      rmSync(userDataPath, { recursive: true, force: true });
+    }
+  });
+
+  it('applies the last pre-ready model, effort, fast, and plan selections after bootstrap', async () => {
+    const transport = new FakeTransport();
+    transport.deferInitializeResponse = true;
+    transport.sessionConfigOptions = pipelineOptions();
+    const { agent, handle, userDataPath } = await bootWithTransport(
+      transport,
+      {},
+      pipelineModels(),
+      createConsoleLogger('cursor-lifecycle-pre-ready-options'),
+      false,
+    );
+    try {
+      await handle.setModel!('claude-opus-5');
+      await handle.setModel!('gpt-5.5');
+      await handle.setEffort!('low');
+      await handle.setEffort!('high');
+      await handle.setFastMode!(false);
+      await handle.setFastMode!(true);
+      await handle.setPermissionMode!('ask');
+      await handle.setPermissionMode!('auto');
+      await handle.setPlanMode!(false);
+      await handle.setPlanMode!(true);
+
+      transport.resolveInitializeResponse();
+      await handle.bootstrapReady;
+
+      const configRequests = transport.findAllRequests(Method.SessionSetConfigOption);
+      expect(
+        configRequests
+          .filter((request) => (request.params as { configId?: string }).configId === 'model')
+          .at(-1)?.params,
+      ).toMatchObject({ value: 'gpt-5.5' });
+      expect(
+        configRequests
+          .filter((request) => (request.params as { configId?: string }).configId === 'effort')
+          .at(-1)?.params,
+      ).toMatchObject({ value: 'high' });
+      expect(
+        configRequests
+          .filter((request) => (request.params as { configId?: string }).configId === 'fast')
+          .at(-1)?.params,
+      ).toMatchObject({ value: 'true' });
+      expect(handle.model).toBe('gpt-5.5');
+      expect(handle.getFastMode?.()).toBe(true);
+      expect(
+        transport
+          .findAllRequests(Method.SessionSetMode)
+          .some((request) => (request.params as { modeId?: string }).modeId === 'plan'),
+      ).toBe(true);
+    } finally {
+      await handle.close().catch(() => undefined);
+      await agent.dispose().catch(() => undefined);
+      rmSync(userDataPath, { recursive: true, force: true });
+    }
+  });
+
+  it('terminates a queued first turn with the bootstrap error and reuses it on later send', async () => {
+    const transport = new FakeTransport();
+    transport.deferInitializeResponse = true;
+    transport.initializeError = 'cursor-agent is not authenticated; run cursor-agent login';
+    const { agent, handle, userDataPath } = await bootWithTransport(
+      transport,
+      {},
+      MODELS,
+      createConsoleLogger('cursor-lifecycle-bootstrap-error'),
+      false,
+    );
+    try {
+      await expect(handle.send({ type: 'user', content: 'first message' })).resolves.toBeUndefined();
+      transport.resolveInitializeResponse();
+      await expect(handle.bootstrapReady).rejects.toThrow(/cursor-agent login/);
+
+      const events = await drainUntil(
+        handle.events(),
+        (event) =>
+          event.type === 'error' &&
+          (event.data as { isTerminal?: boolean }).isTerminal === true,
+      );
+      expect(String((events.at(-1)?.data as { message?: string }).message)).toContain(
+        'cursor-agent login',
+      );
+      await expect(handle.send({ type: 'user', content: 'second message' })).rejects.toThrow(/cursor-agent login/);
+    } finally {
+      await handle.close().catch(() => undefined);
+      await agent.dispose().catch(() => undefined);
+      rmSync(userDataPath, { recursive: true, force: true });
     }
   });
 
@@ -900,31 +1086,43 @@ describe('CursorAgent lifecycle (FakeTransport)', () => {
     });
   });
 
-  it('startSession throws AgentNotAuthenticatedError when auth is missing', async () => {
-    const { AgentNotAuthenticatedError } = await import('../base-agent.js');
+  it('defers auth/bootstrap failures until after handle return and reuses the readable error', async () => {
+    const userDataPath = mkdtempSync(join(tmpdir(), 'cindy-cursor-auth-failure-'));
+    const getState = vi.fn(async () => ({
+      authenticated: false,
+      errorReason: 'no_credentials',
+    }));
     const agent = new CursorAgent({
       auth: {
-        getState: async () => ({ authenticated: false, errorReason: 'no_credentials' }),
+        getState,
         triggerLogin: async () => ({ authenticated: false }),
         logout: async () => undefined,
         getAuthEnv: async () => ({}),
       },
-      runtimeConfig: {},
+      runtimeConfig: { userDataPath },
       binaryPath: '/dev/null/cursor-agent',
       logger: createConsoleLogger(),
       networkConfigReader: () => undefined,
     });
-    await expect(
-      agent.startSession({
+    const handle = await agent.startSession({
         workingDir: '/tmp',
         model: 'auto',
         vendorOptions: {
           createAcpTransport: () => {
-            throw new Error('should not spawn when unauthenticated');
+          throw new Error('cursor-agent is not authenticated; run cursor-agent login');
           },
         },
-      }),
-    ).rejects.toBeInstanceOf(AgentNotAuthenticatedError);
+    });
+    try {
+      expect(handle.id).toBe('<pending>');
+      expect(getState).not.toHaveBeenCalled();
+      await expect(waitForBootstrapReady(handle)).rejects.toThrow(/cursor-agent login/);
+      await expect(handle.send({ type: 'user', content: 'retry' })).rejects.toThrow(/cursor-agent login/);
+    } finally {
+      await handle.close().catch(() => undefined);
+      await agent.dispose().catch(() => undefined);
+      rmSync(userDataPath, { recursive: true, force: true });
+    }
   });
 
   it('forces thinking=true when model exposes thinking option', async () => {
@@ -1169,8 +1367,9 @@ describe('CursorAgent lifecycle (FakeTransport)', () => {
       const warning = records.find((entry) => entry.msg === 'cursor initial setModel failed');
       expect(warning?.ctx).toMatchObject({ model: 'claude-opus-5' });
 
-      expect(booted.handle.startupEvents).toHaveLength(1);
-      expect(booted.handle.startupEvents?.[0]).toMatchObject({
+      const fallbackEvents = await drainUntil(booted.handle.events(), (event) => event.type === 'error' && (event.data as { reason?: string }).reason === 'initial_model_unavailable');
+      expect(fallbackEvents).toHaveLength(1);
+      expect(fallbackEvents[0]).toMatchObject({
         type: 'error',
         data: {
           isTerminal: false,
@@ -1178,8 +1377,7 @@ describe('CursorAgent lifecycle (FakeTransport)', () => {
         },
         source: 'cursor',
       });
-      expect(String((booted.handle.startupEvents?.[0]?.data as { message?: string }).message))
-        .toContain('claude-opus-5');
+      expect(String((fallbackEvents[0]?.data as { message?: string }).message)).toContain('claude-opus-5');
     } finally {
       await booted.handle.close().catch(() => undefined);
       await booted.agent.dispose().catch(() => undefined);
@@ -1277,9 +1475,7 @@ describe('CursorAgent lifecycle (FakeTransport)', () => {
       // setModel 内部 set_config_option('model',...) 后 FakeTransport 回 sessionConfigOptions，
       // 故把 fast currentValue 重置回 'false' 模拟目标模型的记录值。
       const setFastCurrent = (value: string) => {
-        transport.sessionConfigOptions = (transport.sessionConfigOptions ?? []).map((raw) =>
-          isRecord(raw) && raw.id === 'fast' ? { ...raw, currentValue: value } : raw,
-        );
+        transport.sessionConfigOptions = (transport.sessionConfigOptions ?? []).map((raw) => (isRecord(raw) && raw.id === 'fast' ? { ...raw, currentValue: value } : raw));
       };
       setFastCurrent('false');
       await handle.setModel!('claude-opus-4-8');
@@ -1427,7 +1623,11 @@ describe('userMessageToPromptBlocks (async image path)', () => {
       });
 
       expect(blocks).toHaveLength(1);
-      const imageBlock = blocks[0] as { type: string; data?: string; mimeType?: string };
+      const imageBlock = blocks[0] as {
+        type: string;
+        data?: string;
+        mimeType?: string;
+      };
       expect(imageBlock.type).toBe('image');
       expect(imageBlock.mimeType).toBe('image/webp');
       expect(imageBlock.data).toBeTruthy();

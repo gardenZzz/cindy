@@ -942,6 +942,8 @@ export interface AgentSessionHandle {
    * 仅用于启动期可恢复告警；普通流式事件继续走 events()。
    */
   readonly startupEvents?: readonly AgentEvent[];
+  /** 后台 bootstrap 就绪信号；仅支持后台启动的 agent 提供。 */
+  readonly bootstrapReady?: Promise<void>;
   /** Codex-only: 当前会话绑定的 app-server host 是否经 loopback proxy 出口。 */
   readonly codexProxyActive?: boolean;
   /**

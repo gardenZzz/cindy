@@ -215,6 +215,7 @@ async function bootSession(
     workingDir: '/tmp',
     vendorOptions: { createAcpTransport: () => transport },
   });
+  await handle.bootstrapReady;
 
   const session = new Session({
     id: 'biz-reservation',
