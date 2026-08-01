@@ -3801,21 +3801,29 @@ export function CCAgentSessionView({
                       deviceLinkDeviceId={remoteDeviceId ?? null}
                     />
                   )}
-                  <ContextCapacityRing
-                    contextTokens={agentStatus.contextTokens}
-                    model={agentSwitchIntent?.model ?? session?.model ?? ''}
-                    vendorKey={displayVendorKey}
-                    sdkContextWindow={agentStatus.contextWindow}
-                    deviceId={remoteDeviceId}
-                    onCompact={
-                      // 仅 Claude Code 支持手动 compact;codex/cursor 保持纯展示
-                      displayAgentKind === 'claude-code' &&
-                      session != null &&
-                      agentStatus.contextTokens > 0
-                        ? handleCompactRequest
-                        : undefined
-                    }
-                  />
+                  {/* Cursor 的 ACP 上游不上报 usage(usage_update 不发送、
+                      PromptResponse.usage 为空,见 acp/protocol.ts UsageUpdate 注释),
+                      圆环永远 0/200K 是在冒充"空上下文"。与上方 TodaySpendChip 同一处理:
+                      拿到真实数据(contextTokens/contextWindow 任一 > 0)前不渲染。 */}
+                  {(!isCursor ||
+                    agentStatus.contextTokens > 0 ||
+                    agentStatus.contextWindow > 0) && (
+                    <ContextCapacityRing
+                      contextTokens={agentStatus.contextTokens}
+                      model={agentSwitchIntent?.model ?? session?.model ?? ''}
+                      vendorKey={displayVendorKey}
+                      sdkContextWindow={agentStatus.contextWindow}
+                      deviceId={remoteDeviceId}
+                      onCompact={
+                        // 仅 Claude Code 支持手动 compact;codex/cursor 保持纯展示
+                        displayAgentKind === 'claude-code' &&
+                        session != null &&
+                        agentStatus.contextTokens > 0
+                          ? handleCompactRequest
+                          : undefined
+                      }
+                    />
+                  )}
                 </div>
               </div>
             </div>
