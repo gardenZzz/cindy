@@ -91,7 +91,7 @@ export function filterSlashCommands(
 export async function loadAllCommands(
   agentKind: AgentKind,
   workingDir: string | null | undefined,
-  opts?: { forceReload?: boolean; skipAgentSkills?: boolean },
+  opts?: { forceReload?: boolean; skipAgentSkills?: boolean; sessionId?: string },
   deviceId?: string,
 ): Promise<UnifiedCommand[]> {
   const api = window.electronAPI.maker;
@@ -113,6 +113,8 @@ export async function loadAllCommands(
   const skillParams = {
     ...(workingDir ? { workingDir } : {}),
     ...(opts?.forceReload !== undefined ? { forceReload: opts.forceReload } : {}),
+    // Cursor 运行时命令按会话隔离（ACP available_commands_update）。
+    ...(opts?.sessionId ? { sessionId: opts.sessionId } : {}),
   };
   const skillP: Promise<SkillRes> = shouldLoadSkills
     ? (

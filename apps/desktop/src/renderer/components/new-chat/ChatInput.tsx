@@ -2997,7 +2997,11 @@ export function ChatInput({
       loadAllCommands(
         paletteAgentKind,
         workingDir,
-        { ...opts, skipAgentSkills: isRemoteSession },
+        {
+          ...opts,
+          skipAgentSkills: isRemoteSession,
+          ...(sessionId ? { sessionId } : {}),
+        },
         deviceLinkDeviceId,
       )
         .then((cmds) => {
@@ -3007,7 +3011,7 @@ export function ChatInput({
           if (slashCommandLoadSeqRef.current === seq) setMergedCommands([]);
         });
     },
-    [workingDir, paletteAgentKind, isRemoteSession, deviceLinkDeviceId],
+    [workingDir, paletteAgentKind, isRemoteSession, deviceLinkDeviceId, sessionId],
   );
   // context(workingDir / agentKind / remote)变化时先同步清空命令缓存:切换会话(尤其
   // local→remote)那一瞬,reloadSlashCommands 是异步的,清空可避免 palette 在刷新完成前
@@ -3015,7 +3019,7 @@ export function ChatInput({
   // biome-ignore lint/correctness/useExhaustiveDependencies: 这里用依赖数组表达上下文切换触发清空，effect 内不直接读取这些值。
   useEffect(() => {
     setMergedCommands([]);
-  }, [workingDir, paletteAgentKind, isRemoteSession, deviceLinkDeviceId]);
+  }, [workingDir, paletteAgentKind, isRemoteSession, deviceLinkDeviceId, sessionId]);
   useEffect(() => {
     reloadSlashCommands();
   }, [reloadSlashCommands]);

@@ -4019,7 +4019,7 @@ interface ElectronAPI {
 
     listAgentSkills: (
       agentKind: AgentKind,
-      params: { workingDir?: string; forceReload?: boolean },
+      params: { workingDir?: string; forceReload?: boolean; sessionId?: string },
     ) => Promise<{
       success: boolean;
       error?: string;

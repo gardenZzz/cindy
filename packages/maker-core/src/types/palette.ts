@@ -67,6 +67,11 @@ export interface ListAgentSkillsOptions {
   /** Omit to list only agent-global skills without a project scope. */
   workingDir?: string;
   forceReload?: boolean;
+  /**
+   * Cindy business session id. Cursor 运行时命令按会话隔离（ACP
+   * available_commands_update）；有 sessionId 时只返回该会话清单。
+   */
+  sessionId?: string;
 }
 
 export interface ListAgentSkillsResult {

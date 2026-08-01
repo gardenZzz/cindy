@@ -38,6 +38,11 @@ import type {
   InteractionResolver,
   UsageSnapshot,
 } from '../../types/events.js';
+import type {
+  AgentSkillCommand,
+  ListAgentSkillsOptions,
+  ListAgentSkillsResult,
+} from '../../types/palette.js';
 import { promises as fs } from 'node:fs';
 import { extname } from 'node:path';
 import type { Effort, PermissionMode, UserContentBlock, UserMessage } from '../../types/common.js';
@@ -78,6 +83,10 @@ import {
   collectMcpToolNameCandidates,
   resolveMcpTargetFromCandidates,
 } from '../shared/mcp-tool-target.js';
+import {
+  parseAvailableCommandsUpdate,
+  toAgentSkillCommands,
+} from './availableCommands.js';
 import {
   createCursorIsolatedConfigDir,
   readUserNetworkConfigFromEnv,
@@ -430,9 +439,38 @@ export class CursorAgent extends BaseAgent {
   /** 仍存活的会话 close 钩子 — dispose() 时 drain，防孤儿。 */
   private readonly liveSessionClosers = new Set<() => Promise<void>>();
 
+  /**
+   * ACP available_commands_update 按 Cindy business sessionId 隔离。
+   * listAgentSkills({ sessionId }) 读这里；关闭会话时清空，避免串会话。
+   */
+  private readonly runtimeCommandsBySessionId = new Map<string, AgentSkillCommand[]>();
+
   constructor(deps: AgentDeps) {
     super(deps);
     this.capabilities = this.buildCapabilities(CAPABILITIES);
+  }
+
+  /**
+   * Cursor 无本地目录扫描；仅返回当前会话 ACP 上报的命令 / Skill 投影。
+   * 无 sessionId → 空（避免把其它会话清单泄漏到新建草稿）。
+   */
+  override async listAgentSkills(opts: ListAgentSkillsOptions): Promise<ListAgentSkillsResult> {
+    void opts.workingDir;
+    void opts.forceReload;
+    const sessionId = typeof opts.sessionId === 'string' ? opts.sessionId.trim() : '';
+    if (!sessionId) return { skills: [] };
+    const skills = this.runtimeCommandsBySessionId.get(sessionId) ?? [];
+    return { skills: skills.map((s) => ({ ...s })) };
+  }
+
+  private setRuntimeCommands(sessionId: string | undefined, skills: AgentSkillCommand[]): void {
+    if (!sessionId) return;
+    this.runtimeCommandsBySessionId.set(sessionId, skills);
+  }
+
+  private clearRuntimeCommands(sessionId: string | undefined): void {
+    if (!sessionId) return;
+    this.runtimeCommandsBySessionId.delete(sessionId);
   }
 
   /**
@@ -848,6 +886,11 @@ export class CursorAgent extends BaseAgent {
     };
 
     client.onNotification(Method.SessionUpdate, (params) => {
+      // 命令清单不是历史内容：session/load 回放抑制期间也要收下，否则 resume 丢 palette。
+      const parsedCommands = parseAvailableCommandsUpdate(params);
+      if (parsedCommands) {
+        this.setRuntimeCommands(opts.sessionId, toAgentSkillCommands(parsedCommands));
+      }
       if (suppressHistoryReplay) {
         // 上游 session/load 会回放历史；Cindy 用自有存储渲染，这里整段丢弃。
         return;
@@ -1621,6 +1664,7 @@ export class CursorAgent extends BaseAgent {
       lastFinalizedGeneration = turnGeneration;
       toolIdle.clear();
       dismissAllPending('session_closed', 'deny');
+      this.clearRuntimeCommands(opts.sessionId);
       await cleanupResources('CursorAgentSession.close()');
     };
     liveSessionClosers.add(closeSession);
