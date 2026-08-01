@@ -428,8 +428,9 @@ export interface AgentDeps {
    *
    * 实现位置:
    *  - codex/index.ts mcpServerElicitation handler 在 dispatchInteraction 之前查这里;
-   *  - claude-code/index.ts canUseTool 对 `mcp__<server>__<tool>` 形态的工具查这里。
-   * 两侧同义: auto-approve 直接放行, prompt-each-time 禁掉 session persistence。
+   *  - claude-code/index.ts canUseTool 对 `mcp__<server>__<tool>` 形态的工具查这里;
+   *  - cursor/index.ts session/request_permission 对能归属到已注册 MCP server 的工具查这里。
+   * 三端同义: auto-approve 直接放行, prompt-each-time 禁掉 session persistence。
    *
    * 缺省 / undefined → 走原 dispatchInteraction (弹 UI), 行为与改动前一致。
    */

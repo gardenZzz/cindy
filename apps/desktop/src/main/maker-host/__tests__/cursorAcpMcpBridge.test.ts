@@ -2,10 +2,11 @@
  * buildCursorAcpMcpServers × 真实 codexHttpBridge 的接线验收。
  *
  * 单测那份（cursor-acp-mcp.test.ts）用 fake bridge 只锁形状；这里起真 bridge，
- * 按产出的 url + headers 真发 MCP 请求，验证三条只读代码看不出来的事：
- *   1. persistent token 走 additionalBearerTokens 能过鉴权，且被 scope 到协同白名单；
+ * 按产出的 url + headers 真发 MCP 请求，验证只读代码看不出来的事：
+ *   1. 默认主 token 全通，已启用的非协同 server（如 cindy_ssh）也可初始化；
  *   2. `?session=<id>` 真能把 cursor 的 session ctx 送进 tool handler；
- *   3. cleanup 注销后同一 URL 立刻 401（ctx 不残留）。
+ *   3. cleanup 注销后同一 URL 立刻 401（ctx 不残留）；
+ *   4. 若测试强制注入 scoped persistent token，非白名单 server 仍 403。
  */
 
 import { afterEach, describe, expect, it } from 'vitest';
@@ -142,12 +143,16 @@ describe('buildCursorAcpMcpServers × real codexHttpBridge', () => {
           serverNames: ['cindy_orca', 'orca_worker_bridge', 'cindy_ssh'],
           bridge: started,
         }),
-        getBridgeToken: () => PERSISTENT_TOKEN,
       },
     );
 
-    // cindy_ssh 不在协同白名单，不该被下发。
-    expect(servers.map((s) => s.name)).toEqual(['cindy_orca', 'orca_worker_bridge']);
+    // 本地 Cursor 用主 token：全量已启用 lizi（含 cindy_ssh）都应下发。
+    expect(servers.map((s) => s.name)).toEqual([
+      'cindy_orca',
+      'orca_worker_bridge',
+      'cindy_ssh',
+    ]);
+    expect(servers[0].headers[0]?.value).toBe(`Bearer ${started.token}`);
 
     const { initStatus, payload } = await callCurrentSession(servers[0]);
     expect(initStatus).toBe(200);
@@ -159,31 +164,35 @@ describe('buildCursorAcpMcpServers × real codexHttpBridge', () => {
       orcaRole: 'worker',
     });
 
+    // 非协同 server 在主 token 下也可初始化。
+    const ssh = servers.find((s) => s.name === 'cindy_ssh');
+    expect(ssh).toBeDefined();
+    const sshInit = await callCurrentSession(ssh!);
+    expect(sshInit.initStatus).toBe(200);
+
     // cleanup 后同一 URL 的 ?session= 不再命中注册表 → fail-closed 401。
     cleanup?.();
     const after = await callCurrentSession(servers[0]);
     expect(after.initStatus).toBe(401);
   });
 
-  it('rejects a non-collab server even with a valid persistent token (scope guard)', async () => {
+  it('rejects a non-collab server when forced onto the scoped persistent token', async () => {
     const started = await startBridge();
     const { servers } = await buildCursorAcpMcpServers(
       { sessionId: 'lead-1', workingDir: '/repo', vendorOptions: { orcaRole: 'lead' } },
       {
         ensureBridgeStarted: async () => ({
           port: started.port,
-          serverNames: ['cindy_orca'],
+          serverNames: ['cindy_orca', 'cindy_ssh'],
           bridge: started,
         }),
+        // 显式注入 scoped token：验证远端白名单仍 fail-closed（本地默认不用这条路径）。
         getBridgeToken: () => PERSISTENT_TOKEN,
       },
     );
-    // 手工把 URL 改指非白名单 server：拿到 token 也不得初始化其余本机 server。
-    const forged = {
-      ...servers[0],
-      url: servers[0].url.replace('/mcp/cindy_orca', '/mcp/cindy_ssh'),
-    };
-    const { initStatus } = await callCurrentSession(forged);
+    expect(servers.map((s) => s.name)).toEqual(['cindy_orca', 'cindy_ssh']);
+    const ssh = servers.find((s) => s.name === 'cindy_ssh')!;
+    const { initStatus } = await callCurrentSession(ssh);
     expect(initStatus).toBe(403);
   });
 });

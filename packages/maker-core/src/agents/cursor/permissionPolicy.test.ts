@@ -96,6 +96,8 @@ async function bootCursorSession(args: {
     status: number;
   }) => void;
   permissionMode?: 'ask' | 'auto' | 'bypassPermissions';
+  prepareAcpMcpServers?: ConstructorParameters<typeof CursorAgent>[0]['prepareAcpMcpServers'];
+  getMcpToolApprovalPolicy?: ConstructorParameters<typeof CursorAgent>[0]['getMcpToolApprovalPolicy'];
   interactionResolver?: (req: InteractionRequest) => Promise<{
     kind: 'permission';
     behavior: 'allow' | 'deny';
@@ -110,6 +112,8 @@ async function bootCursorSession(args: {
     networkConfigReader: () => undefined,
     classifyAutoPermission: args.classifyAutoPermission,
     onAutoPermissionClassifierUnavailable: args.onAutoPermissionClassifierUnavailable,
+    prepareAcpMcpServers: args.prepareAcpMcpServers,
+    getMcpToolApprovalPolicy: args.getMcpToolApprovalPolicy,
   });
 
   const origWrite = args.transport.writeLine.bind(args.transport);
@@ -410,6 +414,96 @@ describe('CursorAgent Auto classifier injection', () => {
     } finally {
       vi.useRealTimers();
     }
+  });
+});
+
+describe('CursorAgent MCP approval policy (shared host classifier)', () => {
+  async function emitPermission(
+    transport: FakeTransport,
+    toolCall: Record<string, unknown>,
+    id = 11,
+  ): Promise<unknown> {
+    transport.emitLine({
+      jsonrpc: '2.0',
+      id,
+      method: Method.SessionRequestPermission,
+      params: {
+        sessionId: 'sess-perm',
+        toolCall,
+        options: OPTIONS,
+      },
+    });
+    await vi.waitFor(() => expect(transport.findResponse(id)).toBeDefined());
+    return transport.findResponse(id);
+  }
+
+  const prepareBrowserMcp: NonNullable<
+    ConstructorParameters<typeof CursorAgent>[0]['prepareAcpMcpServers']
+  > = async () => ({
+    servers: [{ type: 'http', name: 'cindy_browser', url: 'http://127.0.0.1/mcp/cindy_browser' }],
+  });
+
+  it('auto-approves trusted MCP tools without opening the permission card', async () => {
+    const transport = new FakeTransport();
+    const seen: InteractionRequest[] = [];
+    const policy = vi.fn(() => 'auto-approve' as const);
+    await bootCursorSession({
+      transport,
+      permissionMode: 'ask',
+      prepareAcpMcpServers: prepareBrowserMcp,
+      getMcpToolApprovalPolicy: policy,
+      interactionResolver: async (req) => {
+        seen.push(req);
+        return { kind: 'permission', behavior: 'deny' };
+      },
+    });
+
+    const result = await emitPermission(transport, {
+      toolCallId: 't-mcp',
+      kind: 'other',
+      title: 'mcp__cindy_browser__list_tools',
+      rawInput: {},
+    });
+    expect(policy).toHaveBeenCalledWith({
+      serverName: 'cindy_browser',
+      toolName: 'list_tools',
+      toolParams: {},
+    });
+    expect(seen).toHaveLength(0);
+    expect(result).toEqual({
+      outcome: { outcome: 'selected', optionId: 'allow-once' },
+    });
+  });
+
+  it('prompt-each-time forces a card even under Auto', async () => {
+    const transport = new FakeTransport();
+    const seen: InteractionRequest[] = [];
+    await bootCursorSession({
+      transport,
+      permissionMode: 'auto',
+      classifyAutoPermission: async () => 'allow',
+      prepareAcpMcpServers: prepareBrowserMcp,
+      getMcpToolApprovalPolicy: () => 'prompt-each-time',
+      interactionResolver: async (req) => {
+        seen.push(req);
+        return { kind: 'permission', behavior: 'deny' };
+      },
+    });
+
+    const result = await emitPermission(transport, {
+      toolCallId: 't-mcp-risk',
+      kind: 'other',
+      title: 'mcp__cindy_browser__call_tool',
+      rawInput: { name: 'navigate' },
+    });
+    expect(seen).toHaveLength(1);
+    expect(seen[0]?.kind).toBe('permission');
+    if (seen[0]?.kind === 'permission') {
+      expect(seen[0].suggestions).toBeUndefined();
+    }
+    expect(result).toEqual({
+      outcome: { outcome: 'selected', optionId: 'reject-once' },
+    });
   });
 });
 

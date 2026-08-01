@@ -75,6 +75,10 @@ import {
   type Transport,
 } from '../acp/index.js';
 import {
+  collectMcpToolNameCandidates,
+  resolveMcpTargetFromCandidates,
+} from '../shared/mcp-tool-target.js';
+import {
   createCursorIsolatedConfigDir,
   readUserNetworkConfigFromEnv,
 } from './isolatedConfig.js';
@@ -703,6 +707,8 @@ export class CursorAgent extends BaseAgent {
     let sessionMethod: 'session/new' | 'session/load' = 'session/new';
     let initialConfigMs = 0;
     const sessionAllowKeys = new Set<string>();
+    /** 本会话冻入的 MCP server 名（prepareAcpMcpServers 快照），供审批归属。 */
+    const registeredMcpServerNames = new Set<string>();
     let autoFallbackNotified = false;
     /** session/load 回放历史期间为 true — Cindy 自有存储渲染，跳过上游回放。 */
     let suppressHistoryReplay = false;
@@ -984,6 +990,46 @@ export class CursorAgent extends BaseAgent {
       }
     };
 
+    const classifyMcpApprovalPolicy = (
+      toolName: string,
+      toolCall: Partial<Record<string, unknown>>,
+      toolInput: Record<string, unknown>,
+    ): 'auto-approve' | 'prompt' | 'prompt-each-time' | null => {
+      const classifier = this.deps.getMcpToolApprovalPolicy;
+      if (!classifier || registeredMcpServerNames.size === 0) return null;
+      const target = resolveMcpTargetFromCandidates(
+        collectMcpToolNameCandidates(toolName, toolCall, toolInput),
+        registeredMcpServerNames,
+      );
+      if (!target) return null;
+      try {
+        const policy = classifier({
+          serverName: target.serverName,
+          toolName: target.toolName,
+          toolParams: toolInput,
+        });
+        if (policy === 'auto-approve' || policy === 'prompt' || policy === 'prompt-each-time') {
+          if (policy === 'auto-approve') {
+            log.debug('mcp tool auto-approved by host policy', {
+              serverName: target.serverName,
+              toolName: target.toolName,
+            });
+          }
+          return policy;
+        }
+        log.error('invalid MCP approval policy -> prompt each time', {
+          serverName: target.serverName,
+          policy,
+        });
+      } catch (error) {
+        log.error('MCP approval policy threw -> prompt each time', {
+          serverName: target.serverName,
+          error: error instanceof Error ? error.message : String(error),
+        });
+      }
+      return 'prompt-each-time';
+    };
+
     const handleRequestPermission = async (
       params: unknown,
       meta: { id: string | number; method: string },
@@ -998,8 +1044,10 @@ export class CursorAgent extends BaseAgent {
       const options = Array.isArray(permParams.options) ? permParams.options : [];
       const toolName = toolNameFromAcpToolCall(toolCall);
       const toolInput = toolInputFromAcpToolCall(toolCall);
+      const toolCallRecord = isRecord(toolCall) ? toolCall : {};
 
       // Full access: 静默放行 (只回 allow-once, 不写机器级 allowlist)
+      // 与 Claude 同语义：bypass 档不经 MCP 策略（canUseTool 根本不会被调）。
       if (mutablePermissionMode === 'bypassPermissions') {
         return toRequestPermissionResult(
           { kind: 'permission', behavior: 'allow' },
@@ -1007,8 +1055,18 @@ export class CursorAgent extends BaseAgent {
         );
       }
 
-      // 本会话已批准的指纹
-      if (sessionAllowKeys.has(sessionAllowKey)) {
+      // 与 Claude/Codex 同一 getMcpToolApprovalPolicy 真源。
+      const mcpPolicy = classifyMcpApprovalPolicy(toolName, toolCallRecord, toolInput);
+      if (mcpPolicy === 'auto-approve') {
+        return toRequestPermissionResult(
+          { kind: 'permission', behavior: 'allow' },
+          options,
+        );
+      }
+      const forcePromptEachTime = mcpPolicy === 'prompt-each-time';
+
+      // 本会话已批准的指纹（prompt-each-time 禁止复用会话记忆）
+      if (!forcePromptEachTime && sessionAllowKeys.has(sessionAllowKey)) {
         return toRequestPermissionResult(
           { kind: 'permission', behavior: 'allow' },
           options,
@@ -1016,7 +1074,8 @@ export class CursorAgent extends BaseAgent {
       }
 
       // Auto: 调用注入的分类器（tool 名 + 完整 input）；缺失/超时/抛错 → Ask + fallback hook
-      if (mutablePermissionMode === 'auto') {
+      // MCP prompt-each-time 跳过 Auto 静默放行，强制弹卡。
+      if (!forcePromptEachTime && mutablePermissionMode === 'auto') {
         const classify = this.deps.classifyAutoPermission;
         if (!classify) {
           log.warn('auto classifier missing — falling back to ask');
@@ -1059,7 +1118,8 @@ export class CursorAgent extends BaseAgent {
       const req = toInteractionRequest({
         requestId,
         params: permParams,
-        suggestions: sessionSuggestionsFor(sessionAllowKey),
+        // prompt-each-time：不下发「本会话不再问」建议
+        suggestions: forcePromptEachTime ? undefined : sessionSuggestionsFor(sessionAllowKey),
       });
 
       return await new Promise<RequestPermissionResult>((resolve) => {
@@ -1085,6 +1145,7 @@ export class CursorAgent extends BaseAgent {
               return;
             }
             if (
+              !forcePromptEachTime &&
               decision.behavior === 'allow' &&
               this.permissionDecisionRequestsSessionApproval(decision)
             ) {
@@ -1651,6 +1712,18 @@ export class CursorAgent extends BaseAgent {
             }
             mcpServers = prepared.servers;
             mcpCleanup = prepared.cleanup;
+            registeredMcpServerNames.clear();
+            for (const server of prepared.servers) {
+              if (
+                server &&
+                typeof server === 'object' &&
+                'name' in server &&
+                typeof (server as { name: unknown }).name === 'string' &&
+                (server as { name: string }).name
+              ) {
+                registeredMcpServerNames.add((server as { name: string }).name);
+              }
+            }
           } catch (err) {
             log.warn('cursor MCP injection skipped', {
               message: err instanceof Error ? err.message : String(err),
