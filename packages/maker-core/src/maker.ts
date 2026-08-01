@@ -147,6 +147,22 @@ function capabilitiesForSession(
   };
 }
 
+/**
+ * 立即重试一次。用于启动期元数据回写 (sdkSessionId / cursor 降级后的 model):
+ * 这些都是**一次性事件**驱动的写入, 失败后没有「下一条同类事件」可以依赖,
+ * 不重试就等于永久丢掉 resume 能力或让界面一直显示错的模型。
+ *
+ * ponytail: 只重一次、不退避 —— 目标是吃掉 sqlite busy 这类瞬时失败,
+ * 真正的持久故障该让它报出来, 不靠无限重试掩盖。
+ */
+async function retryOnce<T>(op: () => Promise<T>): Promise<T> {
+  try {
+    return await op();
+  } catch {
+    return await op();
+  }
+}
+
 export class Maker {
   protected readonly agents: Partial<Record<AgentKind, BaseAgent>>;
   protected readonly storage: SessionStorage;
@@ -373,6 +389,11 @@ export class Maker {
 
     // 当 SDK 回填 sdkSessionId 或 Cursor 初始模型回退时持久化。默认重放 startupEvents，
     // 这样 handle 返回前产生的事件与 events() 中晚到的事件走同一条幂等路径。
+    // 闸门只进不退。曾经试过「写失败就把闸门放回去, 等下一条同类事件重试」, 那是错的:
+    // session_id 与 initial_model_unavailable 都是**一次性事件**, 失败后根本没有下一条可等;
+    // 而且回滚存的是「上一个收到的值」而非「上一个落库成功的值」, 事件 A→B→A 时会错误地
+    // 滚掉后一个 A 设下的闸门。可靠性改由写入处的有界重试负责 (retryOnce)。
+    //
     // 闸门初值刻意留 undefined, 不拿 meta.sdkSessionId 预填: resume 成功时 SDK 重推同一个
     // id 的那次写入是 invalid-resume CAS 排序的承重结构 (CAS 必须等它落定, 否则晚到的写
     // 会把已清空的 id 又写回来)。claude-code / codex 的 resume 本来就每次照写, cursor 走
@@ -382,12 +403,8 @@ export class Maker {
     session.onEvent((evt) => {
       if (evt.type === 'session_id' && typeof evt.data === 'string' && evt.data) {
         if (evt.data === lastSdkSessionId) return;
-        const previousSdkSessionId = lastSdkSessionId;
         lastSdkSessionId = evt.data;
         void this.persistSdkSessionId(meta.id, evt.data).catch((e) => {
-          // 写失败要把闸门放回去, 否则同一个 id 再推也会被当成重复而吞掉, sdk id 永久丢失
-          // (回写已是 fire-and-forget, 异常不再像同步写那样抛给 createSession)。
-          if (lastSdkSessionId === evt.data) lastSdkSessionId = previousSdkSessionId;
           this.logger.warn('failed to persist sdkSessionId', { error: String(e) });
         });
       }
@@ -400,9 +417,7 @@ export class Maker {
         cursorModelFallbackHandled = true;
         const activeModel = session.model;
         if (meta.model !== activeModel) {
-          void this.storage.update(meta.id, { model: activeModel }).catch((e) => {
-            // 同上: 失败即放回闸门, 留给后续同类事件重试。
-            cursorModelFallbackHandled = false;
+          void retryOnce(() => this.storage.update(meta.id, { model: activeModel })).catch((e) => {
             this.logger.warn('failed to persist cursor fallback model', { error: String(e) });
           });
         }
@@ -492,7 +507,7 @@ export class Maker {
         });
         return;
       }
-      await this.storage.update(sessionId, { sdkSessionId });
+      await retryOnce(() => this.storage.update(sessionId, { sdkSessionId }));
     });
   }
 
