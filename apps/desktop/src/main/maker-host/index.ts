@@ -1202,9 +1202,10 @@ export function getMaker(): Maker {
           // Cursor 无 vendor Auto reviewer；注入 Cindy 侧分类器（看 tool 名 + input）。
           classifyAutoPermission: async (args) => classifyAcpAutoPermission(args),
           onAutoPermissionClassifierUnavailable: notifyAutoPermissionClassifierUnavailable,
-          // 协同 MCP(cindy_orca / orca_worker_bridge)经同一座 HTTP bridge 注入
-          // ACP session/new + session/load,让 Cursor 会话既能当 Orca Lead 派活,
-          // 也能作为 Worker 手动 send_to_lead。
+          // 与 Claude/Codex 同一 MCP 审批真源（#47）。
+          getMcpToolApprovalPolicy: getDesktopMcpToolApprovalPolicy,
+          // 全量已启用 lizi MCP 经 HTTP bridge 注入 ACP session/new|load（#47）；
+          // 本地用主 token 全通。协同两件套仍受 collab 开关约束。
           prepareAcpMcpServers: (ctx) =>
             buildCursorAcpMcpServers(ctx, {
               ensureBridgeStarted: ensureCodexMcpBridgeStartedForRemote,
