@@ -15,6 +15,7 @@ import {
   __setCursorImageBytesReaderForTesting,
   __setCursorPromptImageMaxBytesForTesting,
 } from './index.js';
+import { CURSOR_STREAM_DISCONNECT_REASON } from './streamDisconnect.js';
 import { Maker } from '../../maker.js';
 import { createConsoleLogger, type Logger } from '../../interfaces/logger.js';
 import type { AuthAdapter } from '../../interfaces/auth-adapter.js';
@@ -1513,6 +1514,72 @@ describe('CursorAgent lifecycle (FakeTransport)', () => {
       await agent.dispose().catch(() => undefined);
       rmSync(userDataPath, { recursive: true, force: true });
     }
+  });
+
+  describe('stream disconnect integration (Seam 3)', () => {
+    it('attaches CURSOR_STREAM_DISCONNECT_REASON on prompt stream disconnect error response', async () => {
+      await withBootedSession(async ({ transport, handle }) => {
+        const events: AgentEvent[] = [];
+        const consume = (async () => {
+          for await (const ev of handle.events()) {
+            events.push(ev);
+          }
+        })();
+
+        const sendPromise = handle.send({ type: 'user', content: 'hello' });
+        const deadline = Date.now() + 1000;
+        while (Date.now() < deadline && !transport.findRequest(Method.SessionPrompt)) {
+          await new Promise((r) => setTimeout(r, 10));
+        }
+        const prompt = transport.findRequest(Method.SessionPrompt)!;
+        expect(prompt).toBeTruthy();
+
+        // Emit stream disconnect JSON-RPC error
+        transport.emit({
+          jsonrpc: JSONRPC_VERSION,
+          id: prompt.id,
+          error: {
+            code: -32000,
+            message:
+              'RetriableError: [canceled] http/2 stream closed with error code CANCEL (0x8)',
+          },
+        });
+
+        await sendPromise.catch(() => undefined);
+        await handle.close();
+        await consume;
+
+        const errorEvents = events.filter((e) => e.type === 'error');
+        expect(errorEvents.length).toBeGreaterThan(0);
+        expect(errorEvents[0]?.data).toMatchObject({
+          reason: CURSOR_STREAM_DISCONNECT_REASON,
+          isTerminal: true,
+        });
+      });
+    });
+
+    it('does not attach CURSOR_STREAM_DISCONNECT_REASON on transport close', async () => {
+      await withBootedSession(async ({ transport, handle }) => {
+        const events: AgentEvent[] = [];
+        const consume = (async () => {
+          for await (const ev of handle.events()) {
+            events.push(ev);
+          }
+        })();
+
+        // Trigger transport close (e.g. process exit)
+        await transport.close('acp closed');
+
+        await handle.close();
+        await consume;
+
+        const errorEvents = events.filter((e) => e.type === 'error');
+        expect(errorEvents.length).toBeGreaterThan(0);
+        expect(
+          (errorEvents[0]?.data as { reason?: string } | undefined)?.reason,
+        ).toBeUndefined();
+      });
+    });
   });
 });
 

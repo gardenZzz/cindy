@@ -261,11 +261,11 @@ describe('finishPromptTurn + translateAcpError', () => {
     expect(events[1]?.data).toMatchObject({ isRunning: false, status: 'Cancelled' });
   });
 
-  it('emits terminal error + idle status', () => {
+  it('emits terminal error + idle status with optional reason', () => {
     const ctx = makeCtx();
-    const events = translateAcpError(new Error('boom'), ctx);
+    const events = translateAcpError(new Error('boom'), ctx, { reason: 'custom-reason' });
     expect(events.map((e) => e.type)).toEqual(['error', 'status']);
-    expect(events[0]?.data).toMatchObject({ message: 'boom', isTerminal: true });
+    expect(events[0]?.data).toMatchObject({ message: 'boom', isTerminal: true, reason: 'custom-reason' });
     expect(events[1]?.data).toMatchObject({ isRunning: false, status: 'Error' });
   });
 });
