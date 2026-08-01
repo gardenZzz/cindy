@@ -198,7 +198,9 @@ export function AgentTaskCard({ toolCall, update, result, subagentModel, session
       ? t('chat.agentTask.provider.shell')
       : provider === 'codex'
         ? t('chat.agentTask.provider.codex')
-        : t('chat.agentTask.provider.claude');
+        : provider === 'cursor'
+          ? t('chat.agentTask.provider.cursor')
+          : t('chat.agentTask.provider.claude');
 
   // 停止按钮:running + 本会话可定位 + claude-code(codex 无 stopTask 通道)。
   // 点击后交给 main 的 stopAgentTask;成功与否都由 task_notification 事件流收口

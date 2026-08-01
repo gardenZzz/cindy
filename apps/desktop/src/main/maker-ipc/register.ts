@@ -2726,8 +2726,11 @@ export function wireSessionToIpc(session: ReturnType<Maker['getSession']>): void
       broadcastToAllWindows(MAKER_PUSH.INTERACTION_DISMISSED, { sessionId: session.id, ...(event.data as object) });
       return;
     }
-    if (event.type === 'image' && event.source === 'codex') {
-      void broadcastCodexImageAsToolResult(session.id, event);
+    if (
+      event.type === 'image' &&
+      (event.source === 'codex' || event.source === 'cursor')
+    ) {
+      void broadcastGeneratedImageAsToolResult(session.id, event);
       return;
     }
     if (event.type === 'plan_mode_changed') {
@@ -9049,18 +9052,20 @@ export function registerMakerIpc(maker: Maker, options: RegisterMakerIpcOptions)
   log.info('maker:* IPC handlers registered');
 }
 
-async function broadcastCodexImageAsToolResult(
+async function broadcastGeneratedImageAsToolResult(
   sessionId: string,
   event: AgentEvent,
 ): Promise<void> {
   const data = event.data as CodexImageEventData | null;
   if (data?.kind !== 'generation') return;
+  const source = event.source === 'cursor' ? 'cursor' : 'codex';
 
   try {
     const cached = await materializeCodexImage(sessionId, data);
     if (!cached) {
-      log.warn('codex image event missing materializable image', {
+      log.warn('generated image event missing materializable image', {
         sessionId,
+        source,
         blockId: data.blockId,
         hasPath: !!data.path,
         hasUrl: !!data.url,
@@ -9068,11 +9073,12 @@ async function broadcastCodexImageAsToolResult(
       return;
     }
 
-    const toolUseId = data.blockId || `codex-image-${Date.now()}`;
+    const toolUseId = data.blockId || `${source}-image-${Date.now()}`;
     const toolInput = {
       ...(data.revisedPrompt ? { prompt: data.revisedPrompt } : {}),
       ...(data.status ? { status: data.status } : {}),
     };
+    // Cursor 生图不把宿主机绝对路径暴露给 Renderer（媒体规则 + #50 AC）。
     const fullText = JSON.stringify({
       ok: true,
       kind: 'generation',
@@ -9081,12 +9087,12 @@ async function broadcastCodexImageAsToolResult(
       filename: cached.filename,
       ...(data.revisedPrompt ? { revised_prompt: data.revisedPrompt } : {}),
       ...(data.status ? { status: data.status } : {}),
-      ...(data.path ? { original_path: data.path } : {}),
+      ...(source === 'codex' && data.path ? { original_path: data.path } : {}),
     });
 
     broadcastSyntheticToolEvent(sessionId, {
       type: 'tool_use',
-      source: 'codex',
+      source,
       agentMeta: event.agentMeta,
       data: {
         toolUseId,
@@ -9096,7 +9102,7 @@ async function broadcastCodexImageAsToolResult(
     } satisfies AgentEvent);
     broadcastSyntheticToolEvent(sessionId, {
       type: 'tool_result_full',
-      source: 'codex',
+      source,
       agentMeta: event.agentMeta,
       data: {
         toolUseId,
@@ -9106,7 +9112,7 @@ async function broadcastCodexImageAsToolResult(
     } satisfies AgentEvent);
     broadcastSyntheticToolEvent(sessionId, {
       type: 'tool_result',
-      source: 'codex',
+      source,
       agentMeta: event.agentMeta,
       data: {
         summary: 'image generated',
@@ -9114,8 +9120,9 @@ async function broadcastCodexImageAsToolResult(
       },
     } satisfies AgentEvent);
   } catch (err) {
-    log.warn('failed to materialize codex image event', {
+    log.warn('failed to materialize generated image event', {
       sessionId,
+      source,
       blockId: data?.blockId,
       error: err instanceof Error ? err.message : String(err),
     });

@@ -100,10 +100,19 @@ import {
   askQuestionResponseFromDecision,
   createPlanResponseFromDecision,
   CURSOR_TODOS_TOOL_USE_ID,
+  cursorGenerateImageAcceptedResponse,
+  cursorGenerateImageToEvents,
+  cursorTaskAcceptedResponse,
+  cursorTaskStableId,
+  cursorTaskToEvents,
+  inferCursorTaskStatus,
   mergeCursorTodos,
   parseAskQuestionParams,
   parseCreatePlanParams,
+  parseCursorGenerateImageParams,
+  parseCursorTaskParams,
   parseUpdateTodosParams,
+  stopCursorTaskEvents,
   toAskUserQuestionRequest,
   todosToUpdatePlanEvents,
   toPlanReviewRequest,
@@ -752,6 +761,10 @@ export class CursorAgent extends BaseAgent {
     let suppressHistoryReplay = false;
     /** cursor/update_todos merge 用的会话内快照。 */
     let cursorTodos: CursorTodoItem[] = [];
+    /** cursor/task：已发过 tool_use 的 toolCallId，避免重复卡。 */
+    const emittedCursorTaskToolUseIds = new Set<string>();
+    /** 仍标记为 running 的 Cursor 子任务（取消/关闭时 stopped 收口）。 */
+    const runningCursorTasks = new Map<string, { toolCallId: string; title?: string }>();
     let extensionSeq = 0;
     let pendingPrompt: {
       token: number;
@@ -1316,11 +1329,77 @@ export class CursorAgent extends BaseAgent {
       return updateTodosAcceptedResponse(cursorTodos);
     };
 
+    const stopRunningCursorTasks = (reason: string): void => {
+      if (runningCursorTasks.size === 0) return;
+      pushAll(stopCursorTaskEvents(runningCursorTasks, reason));
+      runningCursorTasks.clear();
+    };
+
+    const applyCursorTaskNotification = (params: unknown): unknown => {
+      toolIdle.noteActivity();
+      const parsed = parseCursorTaskParams(params);
+      if (!parsed) {
+        log.warn('cursor/task invalid params', {
+          preview:
+            typeof params === 'object' && params
+              ? Object.keys(params as object).slice(0, 8)
+              : typeof params,
+        });
+        return { outcome: { outcome: 'rejected', reason: 'invalid cursor/task params' } };
+      }
+      const already = emittedCursorTaskToolUseIds.has(parsed.toolCallId);
+      pushAll(
+        cursorTaskToEvents(parsed, {
+          alreadyEmittedToolUse: already,
+          source: 'cursor',
+        }),
+      );
+      emittedCursorTaskToolUseIds.add(parsed.toolCallId);
+      const taskId = cursorTaskStableId(parsed);
+      const status = inferCursorTaskStatus(parsed);
+      if (status === 'running') {
+        runningCursorTasks.set(taskId, {
+          toolCallId: parsed.toolCallId,
+          title: parsed.description.trim() || undefined,
+        });
+      } else {
+        runningCursorTasks.delete(taskId);
+      }
+      return cursorTaskAcceptedResponse(parsed);
+    };
+
+    const applyCursorGenerateImage = (params: unknown): unknown => {
+      toolIdle.noteActivity();
+      const parsed = parseCursorGenerateImageParams(params);
+      if (!parsed) {
+        log.warn('cursor/generate_image invalid params');
+        return { outcome: { outcome: 'rejected', reason: 'invalid cursor/generate_image params' } };
+      }
+      const events = cursorGenerateImageToEvents(parsed, { source: 'cursor' });
+      if (events.length === 0) {
+        log.warn('cursor/generate_image missing media', { toolCallId: parsed.toolCallId });
+        return { outcome: { outcome: 'rejected', reason: 'missing filePath/imageData' } };
+      }
+      pushAll(events);
+      return cursorGenerateImageAcceptedResponse(parsed);
+    };
+
     client.setRequestHandler(CursorMethod.AskQuestion, handleAskQuestion);
     client.setRequestHandler(CursorMethod.CreatePlan, handleCreatePlan);
     client.setRequestHandler(CursorMethod.UpdateTodos, handleUpdateTodos);
+    client.setRequestHandler(CursorMethod.Task, async (params) => applyCursorTaskNotification(params));
+    client.setRequestHandler(CursorMethod.GenerateImage, async (params) =>
+      applyCursorGenerateImage(params),
+    );
+    client.onNotification(CursorMethod.Task, (params) => {
+      applyCursorTaskNotification(params);
+    });
+    client.onNotification(CursorMethod.GenerateImage, (params) => {
+      applyCursorGenerateImage(params);
+    });
 
     const pushCancelledIdle = (statusText: string) => {
+      stopRunningCursorTasks('cancelled');
       pushAll([
         {
           type: 'done',
@@ -1663,6 +1742,7 @@ export class CursorAgent extends BaseAgent {
       turnInFlight = false;
       lastFinalizedGeneration = turnGeneration;
       toolIdle.clear();
+      stopRunningCursorTasks('session_closed');
       dismissAllPending('session_closed', 'deny');
       this.clearRuntimeCommands(opts.sessionId);
       await cleanupResources('CursorAgentSession.close()');

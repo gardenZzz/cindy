@@ -5134,6 +5134,7 @@
       "provider": {
         "claude": "Claude Code",
         "codex": "Codex",
+        "cursor": "Cursor",
         "workflow": "Workflow",
         "shell": "백그라운드 명령"
       },

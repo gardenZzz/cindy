@@ -359,6 +359,81 @@ describe('CursorAgent planMode + extensions (FakeTransport)', () => {
     await consume;
   });
 
+  it('cursor/task request emits Task card + agent_task_update and ACKs completed', async () => {
+    const transport = new FakeTransport();
+    const { handle } = await boot(transport);
+    const events: AgentEvent[] = [];
+    const consume = (async () => {
+      for await (const ev of handle.events()) events.push(ev);
+    })();
+
+    transport.emit({
+      jsonrpc: JSONRPC_VERSION,
+      id: 9101,
+      method: CursorMethod.Task,
+      params: {
+        toolCallId: 'call_task',
+        description: 'Explore codebase',
+        prompt: 'Find auth',
+        subagentType: 'explore',
+        agentId: 'ag-1',
+        durationMs: 42,
+      },
+    });
+
+    const deadline = Date.now() + 2000;
+    while (Date.now() < deadline && !transport.findResponse(9101)) {
+      await new Promise((r) => setTimeout(r, 10));
+    }
+    expect(transport.findResponse(9101)).toMatchObject({
+      outcome: { outcome: 'completed', agentId: 'ag-1', durationMs: 42 },
+    });
+    expect(events.find((e) => e.type === 'tool_use')).toMatchObject({
+      data: { toolName: 'Task', toolUseId: 'call_task' },
+    });
+    expect(events.find((e) => e.type === 'agent_task_update')).toMatchObject({
+      data: { provider: 'cursor', taskId: 'ag-1', status: 'completed' },
+    });
+
+    await handle.close();
+    await consume;
+  });
+
+  it('cursor/generate_image request emits image generation event', async () => {
+    const transport = new FakeTransport();
+    const { handle } = await boot(transport);
+    const events: AgentEvent[] = [];
+    const consume = (async () => {
+      for await (const ev of handle.events()) events.push(ev);
+    })();
+
+    transport.emit({
+      jsonrpc: JSONRPC_VERSION,
+      id: 9102,
+      method: CursorMethod.GenerateImage,
+      params: {
+        toolCallId: 'call_img',
+        description: 'icon',
+        filePath: '/tmp/icon.png',
+      },
+    });
+
+    const deadline = Date.now() + 2000;
+    while (Date.now() < deadline && !transport.findResponse(9102)) {
+      await new Promise((r) => setTimeout(r, 10));
+    }
+    expect(transport.findResponse(9102)).toMatchObject({
+      outcome: { outcome: 'generated', filePath: '/tmp/icon.png' },
+    });
+    expect(events.find((e) => e.type === 'image')).toMatchObject({
+      source: 'cursor',
+      data: { kind: 'generation', blockId: 'call_img', path: '/tmp/icon.png' },
+    });
+
+    await handle.close();
+    await consume;
+  });
+
   it('send with armed planMode emits plan_mode_changed(false)', async () => {
     const transport = new FakeTransport();
     const { handle } = await boot(transport);
