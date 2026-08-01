@@ -373,13 +373,21 @@ export class Maker {
 
     // 当 SDK 回填 sdkSessionId 或 Cursor 初始模型回退时持久化。默认重放 startupEvents，
     // 这样 handle 返回前产生的事件与 events() 中晚到的事件走同一条幂等路径。
+    // 闸门初值刻意留 undefined, 不拿 meta.sdkSessionId 预填: resume 成功时 SDK 重推同一个
+    // id 的那次写入是 invalid-resume CAS 排序的承重结构 (CAS 必须等它落定, 否则晚到的写
+    // 会把已清空的 id 又写回来)。claude-code / codex 的 resume 本来就每次照写, cursor 走
+    // 这条路只是与它们对齐, 不是回归。
     let lastSdkSessionId: string | undefined;
     let cursorModelFallbackHandled = false;
     session.onEvent((evt) => {
       if (evt.type === 'session_id' && typeof evt.data === 'string' && evt.data) {
         if (evt.data === lastSdkSessionId) return;
+        const previousSdkSessionId = lastSdkSessionId;
         lastSdkSessionId = evt.data;
         void this.persistSdkSessionId(meta.id, evt.data).catch((e) => {
+          // 写失败要把闸门放回去, 否则同一个 id 再推也会被当成重复而吞掉, sdk id 永久丢失
+          // (回写已是 fire-and-forget, 异常不再像同步写那样抛给 createSession)。
+          if (lastSdkSessionId === evt.data) lastSdkSessionId = previousSdkSessionId;
           this.logger.warn('failed to persist sdkSessionId', { error: String(e) });
         });
       }
@@ -393,6 +401,8 @@ export class Maker {
         const activeModel = session.model;
         if (meta.model !== activeModel) {
           void this.storage.update(meta.id, { model: activeModel }).catch((e) => {
+            // 同上: 失败即放回闸门, 留给后续同类事件重试。
+            cursorModelFallbackHandled = false;
             this.logger.warn('failed to persist cursor fallback model', { error: String(e) });
           });
         }
