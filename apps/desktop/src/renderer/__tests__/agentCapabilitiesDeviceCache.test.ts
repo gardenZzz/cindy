@@ -98,7 +98,7 @@ describe('useAgentCapabilities deviceId-aware cache', () => {
     );
   });
 
-  it('本机目录快照在可选 Pi 不可用时仍返回 Claude Code 与 Codex 能力', async () => {
+  it('本机目录快照在可选 Pi 不可用时仍返回 Claude Code、Codex 与 Cursor 能力', async () => {
     const { getCapabilities } = stubElectron();
     getCapabilities.mockImplementation(async (agent: string) => {
       if (agent === 'pi') throw new Error("Agent 'pi' is not registered");
@@ -109,6 +109,7 @@ describe('useAgentCapabilities deviceId-aware cache', () => {
     await expect(mod.loadLocalCapabilitiesSnapshot()).resolves.toEqual([
       ['claude-code', caps('local:claude-code')],
       ['codex', caps('local:codex')],
+      ['cursor', caps('local:cursor')],
     ]);
     expect(getCapabilities).toHaveBeenCalledWith('pi');
   });
