@@ -711,6 +711,54 @@ describe('CursorAgent lifecycle (FakeTransport)', () => {
     }
   });
 
+  it('send() before bootstrap ready queues into pendingPrompt and flushes when bootstrap completes', async () => {
+    // 回退 ACP 预热后，首条消息在 bootstrap 未就绪时进 pendingPrompt 排队。
+    // bootstrap 完成后自动 flush，prompt 被发出（SessionPrompt 到达 transport）。
+    const transport = new FakeTransport();
+    transport.deferInitializeResponse = true;
+    const { agent, handle, userDataPath } = await bootWithTransport(
+      transport,
+      {},
+      MODELS,
+      createConsoleLogger('cursor-lifecycle-pending-prompt'),
+      false,
+    );
+    try {
+      // send() 在 bootstrap 未就绪时应立即返回（进 pendingPrompt 排队），不阻塞、不抛错。
+      await expect(
+        handle.send({ type: 'user', content: 'queued first message' }),
+      ).resolves.toBeUndefined();
+      // bootstrap 未就绪 -> prompt 尚未发出。
+      expect(transport.findRequest(Method.SessionPrompt)).toBeUndefined();
+
+      // bootstrap 完成后 pendingPrompt 自动 flush，prompt 被发出。
+      transport.resolveInitializeResponse();
+      await handle.bootstrapReady;
+
+      const deadline = Date.now() + 1000;
+      while (Date.now() < deadline && !transport.findRequest(Method.SessionPrompt)) {
+        await new Promise((r) => setTimeout(r, 10));
+      }
+      const prompt = transport.findRequest(Method.SessionPrompt);
+      expect(prompt).toBeTruthy();
+      const params = prompt!.params as { prompt: Array<{ type: string; text?: string }> };
+      expect(params.prompt).toEqual([
+        { type: 'text', text: 'queued first message' },
+      ]);
+
+      // 收尾 prompt 避免悬挂。
+      transport.emit({
+        jsonrpc: JSONRPC_VERSION,
+        id: prompt!.id,
+        result: { stopReason: 'end_turn' },
+      });
+    } finally {
+      await handle.close().catch(() => undefined);
+      await agent.dispose().catch(() => undefined);
+      rmSync(userDataPath, { recursive: true, force: true });
+    }
+  });
+
   it('applies the last pre-ready model, effort, fast, and plan selections after bootstrap', async () => {
     const transport = new FakeTransport();
     transport.deferInitializeResponse = true;

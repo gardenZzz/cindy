@@ -132,12 +132,6 @@ export type MakerEvent =
 
 export type MakerEventListener = (event: MakerEvent) => void;
 
-interface PrewarmedSessionHandle {
-  opts: CreateSessionOptions;
-  handle: Promise<AgentSessionHandle>;
-  claimed: boolean;
-}
-
 function capabilitiesForSession(
   agentKind: AgentKind,
   base: Capabilities,
@@ -186,8 +180,6 @@ export class Maker {
     string,
     { promise: Promise<Session> }
   >();
-  /** New Maker 的 Cursor 句柄预热池；不落 session 元数据，正式创建时按同 id 接管。 */
-  private readonly prewarmedSessionHandles = new Map<string, PrewarmedSessionHandle>();
   /**
    * 同一 business session 的 vendor id 写入必须串行。invalid-resume CAS 只有排在
    * 已在途的 session_id update 之后执行，才能保证旧写入不会在清空后反向覆盖。
@@ -247,117 +239,14 @@ export class Maker {
     }
   }
 
-  /** 提前完成 Cursor ACP initialize + session/new；不写 storage、不发布 Session。 */
-  async prewarmSession(opts: CreateSessionOptions): Promise<void> {
-    if (
-      opts.agentKind !== 'cursor' ||
-      !opts.id ||
-      opts.remoteHostId ||
-      opts.resumeSessionId
-    ) {
-      throw new Error('Cursor prewarm requires a new local session with an explicit id');
-    }
-    if (this.activeSessions.has(opts.id) || this.inFlightSessionCreations.has(opts.id)) return;
-
-    const previous = this.prewarmedSessionHandles.get(opts.id);
-    if (previous?.claimed) {
-      const handle = await previous.handle;
-      await handle.bootstrapReady;
-      return;
-    }
-    if (previous) {
-      this.prewarmedSessionHandles.delete(opts.id);
-      void previous.handle.then((handle) => handle.close()).catch(() => undefined);
-    }
-
-    const agent = this.requireAgent('cursor');
-    const entry: PrewarmedSessionHandle = {
-      opts: { ...opts },
-      handle: agent.startSession({ ...opts, sessionId: opts.id }),
-      claimed: false,
-    };
-    this.prewarmedSessionHandles.set(opts.id, entry);
-    try {
-      const handle = await entry.handle;
-      await handle.bootstrapReady;
-    } catch (err) {
-      // 被外部 cancel（草稿 effect 重跑 / 用户切走）抢先 delete 了 entry：
-      // 这是预期内的竞态，不是故障，不得向调用方（IPC handler）抛错刷屏日志。
-      if (this.prewarmedSessionHandles.get(opts.id) === entry) {
-        this.prewarmedSessionHandles.delete(opts.id);
-        await entry.handle.then((handle) => handle.close()).catch(() => undefined);
-      }
-      return;
-    }
-  }
-
-  /** 锁定预热句柄，防草稿 effect 的迟到重预热在正式创建前替换它。 */
-  async claimPrewarmedSession(id: string): Promise<boolean> {
-    const entry = this.prewarmedSessionHandles.get(id);
-    if (!entry) return false;
-    entry.claimed = true;
-    const handle = await entry.handle;
-    await handle.bootstrapReady;
-    return true;
-  }
-
-  /** 取消尚未被正式 createSession 接管的预热句柄。 */
-  async cancelPrewarmedSession(id: string): Promise<void> {
-    const entry = this.prewarmedSessionHandles.get(id);
-    if (!entry) return;
-    this.prewarmedSessionHandles.delete(id);
-    await entry.handle.then((handle) => handle.close()).catch(() => undefined);
-  }
-
-  /** 等指定会话（或尚未发布的预热句柄）完成后台 bootstrap。 */
+  /** 等指定会话完成后台 bootstrap（#3 标题错峰用）。 */
   async waitForSessionBootstrap(id: string): Promise<boolean> {
     const active = this.activeSessions.get(id);
     if (active) {
       await active.waitForBootstrapReady();
       return true;
     }
-    const prewarmed = this.prewarmedSessionHandles.get(id);
-    if (!prewarmed) return false;
-    const handle = await prewarmed.handle;
-    await handle.bootstrapReady;
-    return true;
-  }
-
-  private canAdoptPrewarmedSession(
-    entry: PrewarmedSessionHandle,
-    opts: CreateSessionOptions,
-  ): boolean {
-    return (
-      opts.agentKind === 'cursor' &&
-      entry.claimed &&
-      entry.opts.id === opts.id &&
-      entry.opts.workingDir === opts.workingDir &&
-      !opts.remoteHostId &&
-      !opts.resumeSessionId
-    );
-  }
-
-  private async reconcilePrewarmedSession(
-    handle: AgentSessionHandle,
-    warmed: CreateSessionOptions,
-    current: CreateSessionOptions,
-  ): Promise<void> {
-    if (warmed.model !== current.model) await handle.setModel?.(current.model);
-    if (warmed.effort !== current.effort && current.effort) {
-      await handle.setEffort?.(current.effort);
-    }
-    if (warmed.fastMode !== current.fastMode && current.fastMode !== undefined) {
-      await handle.setFastMode?.(current.fastMode);
-    }
-    if (warmed.permissionMode !== current.permissionMode && current.permissionMode) {
-      await handle.setPermissionMode?.(current.permissionMode);
-    }
-    if (warmed.planMode !== current.planMode) {
-      await handle.setPlanMode?.(current.planMode === true);
-    }
-    if (current.vendorOptions) {
-      await handle.setVendorOptions?.(current.vendorOptions);
-    }
+    return false;
   }
 
   /** 执行一次真实 session startup；带 id 的并发去重由 createSession 统一负责。 */
@@ -421,44 +310,33 @@ export class Maker {
     // provider ctx 时塞到 ctx.sessionId 上 (claude-code/index.ts buildMcpServers)。
     // MCP server 工厂据此闭包绑定 "我属于哪个 session", 控制类工具 (如
     // start_team / create_worker) 需要它把回调路由到对应 session 的业务函数。
-    const prewarmed = opts.id ? this.prewarmedSessionHandles.get(opts.id) : undefined;
-    const reusedPrewarm = Boolean(prewarmed && this.canAdoptPrewarmedSession(prewarmed, startOpts));
-    let handle: AgentSessionHandle;
-    if (prewarmed && reusedPrewarm) {
-      this.prewarmedSessionHandles.delete(id);
-      handle = await prewarmed.handle;
-      await this.reconcilePrewarmedSession(handle, prewarmed.opts, startOpts);
-    } else {
-      if (prewarmed) await this.cancelPrewarmedSession(id);
-      handle = await agent.startSession({
-        ...startOpts,
-        sessionId: id,
-        // 强制由 Maker 注入持久化 CAS，不能信任外部 CreateSessionOptions 自带回调。
-        // Claude adapter 只在精确识别 invalid-resume 时调用；Cursor 只在 session/load
-        // 判定 resume 失效时调用（cursor/index.ts）；Codex 不消费该字段。
-        //
-        // 对所有 claude-code 会话装配(不止 resume):全新会话也可能在首个 turn 崩溃前
-        // 就把 SDK 回填、已落库的 sdk_session_id 变成幽灵 id(见 claude-code/index.ts
-        // 的 fresh-session self-reference 恢复),需要同一把 CAS 才能把它清掉,否则下一次
-        // send 会 resume 同一个不存在的会话反复失败。
-        //
-        // Cursor 没有 Claude 那种 fresh-session self-reference 恢复，消费点仅 resume
-        // 失效。但仍对**所有** cursor 会话注入（不只 resume）：否则生产路径拿不到
-        // 回调，invalid-resume 会无 CAS 地 fresh create，随后 Maker 的普通 update 会
-        // 无条件覆盖并发 actor 已写入的有效 sdk id。注入对全新 cursor 会话无害
-        // （未触发 resume 失败时不会调用）。
-        onInvalidResumeSession:
-          opts.agentKind === 'claude-code' || opts.agentKind === 'cursor'
-            ? (expectedSdkSessionId) =>
-                this.invalidateAndClearSdkSessionId(id, expectedSdkSessionId)
-            : undefined,
-      });
-    }
+    const handle = await agent.startSession({
+      ...startOpts,
+      sessionId: id,
+      // 强制由 Maker 注入持久化 CAS，不能信任外部 CreateSessionOptions 自带回调。
+      // Claude adapter 只在精确识别 invalid-resume 时调用；Cursor 只在 session/load
+      // 判定 resume 失效时调用（cursor/index.ts）；Codex 不消费该字段。
+      //
+      // 对所有 claude-code 会话装配(不止 resume):全新会话也可能在首个 turn 崩溃前
+      // 就把 SDK 回填、已落库的 sdk_session_id 变成幽灵 id(见 claude-code/index.ts
+      // 的 fresh-session self-reference 恢复),需要同一把 CAS 才能把它清掉,否则下一次
+      // send 会 resume 同一个不存在的会话反复失败。
+      //
+      // Cursor 没有 Claude 那种 fresh-session self-reference 恢复，消费点仅 resume
+      // 失效。但仍对**所有** cursor 会话注入（不只 resume）：否则生产路径拿不到
+      // 回调，invalid-resume 会无 CAS 地 fresh create，随后 Maker 的普通 update 会
+      // 无条件覆盖并发 actor 已写入的有效 sdk id。注入对全新 cursor 会话无害
+      // （未触发 resume 失败时不会调用）。
+      onInvalidResumeSession:
+        opts.agentKind === 'claude-code' || opts.agentKind === 'cursor'
+          ? (expectedSdkSessionId) =>
+              this.invalidateAndClearSdkSessionId(id, expectedSdkSessionId)
+          : undefined,
+    });
     this.logger.debug('createSession ↑ agent.startSession returned', {
       localSessionId: id,
       sdkSessionId: handle.id,
       elapsedMs: Date.now() - startedAt,
-      prewarmed: reusedPrewarm,
     });
 
     // 落地业务元数据。SDK session id 与 Cursor 初始模型回退都由下面的事件 listener

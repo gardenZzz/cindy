@@ -70,7 +70,6 @@ import { useProportionalWidth } from '@/hooks/useProportionalWidth';
 import { useCCSessions } from '@/hooks/useCCSessions';
 import { useVendorAuthGate } from '@/hooks/useVendorAuthGate';
 import { useCursorAvailability } from '@/hooks/useCursorAvailable';
-import { setCursorAuthState } from '@/state/cursorAuthState';
 import { useAttachments } from '@/hooks/useAttachments';
 import {
   useNewMakerDraft,
@@ -233,14 +232,6 @@ import type { AgentKind } from '@cindy/maker-core';
 const log = createLogger('NewMakerDraftRoute');
 const IS_MAC_PLATFORM = typeof window !== 'undefined' && window.electronAPI?.platform === 'darwin';
 
-/**
- * Cursor ACP 预热发起前的去抖窗口。草稿打开初期 effectiveWorkingDir /
- * effectiveRemoteHostId 会异步 resolve 多次，立即 prewarm 会反复 cancel+重建
- * cursor-agent 进程（SIGTERM + 冷启动 session/new ~10s 重来）。在此窗口内
- * 依赖反复变化只重置计时器、不发起 prewarm，稳定后才起一次预热。用户打字 +
- * 选目录的时间足以让 debounce 命中，发送时拿到已就绪的暖 session。
- */
-const PREWARM_DEBOUNCE_MS = 400;
 // F-COLLAB (2026-05): 老的 vendor='orca' 入口已退役,OrcaHeaderStrip 组件随之
 // 删除(它是给 isOrca 分支的 ChatInput.topSlot 用的)。Lead/Worker 协作组合现在
 // 由 ChatInput「+」菜单里的协同模式项控制,Lead 是当前 vendor 本身,
@@ -1519,133 +1510,6 @@ export function NewMakerDraftRoute() {
     capabilityAgentKind,
   ]);
 
-  const cursorPrewarmOptionsRef = useRef({
-    model: draftInitialModel,
-    effort: draftInitialEffort,
-    fastMode: effectiveFastMode,
-    permissionMode: chatInitialPermissionMode,
-    planMode: effectivePlanMode,
-    providerId: chatInitialProviderId,
-  });
-  cursorPrewarmOptionsRef.current = {
-    model: draftInitialModel,
-    effort: draftInitialEffort,
-    fastMode: effectiveFastMode,
-    permissionMode: chatInitialPermissionMode,
-    planMode: effectivePlanMode,
-    providerId: chatInitialProviderId,
-  };
-  const cursorPrewarmRef = useRef<{
-    sessionId: string;
-    claimed: boolean;
-    ready: Promise<{ ready: true; workDir: string }>;
-  } | null>(null);
-  const cursorPrewarmClaimedRef = useRef(false);
-
-  useEffect(() => {
-    if (
-      persistedAgentKind !== 'cursor' ||
-      includeCursor === false ||
-      isDeviceLinkDraft ||
-      effectiveRemoteHostId ||
-      wtEnabled ||
-      cursorPrewarmClaimedRef.current
-    ) {
-      return;
-    }
-
-    // 草稿打开初期 effectiveWorkingDir / effectiveRemoteHostId 会异步 resolve 多次
-    // （空 -> 有值 / 选目录变化）。若每次变化都立即 prewarm，旧预热会被 cancel 杀进程
-    // （cursor-agent SIGTERM）、新 prewarm 又从冷启动重跑，session/new 的 ~10s 冷启动
-    // 每次重来，发送时仍在等一个没就绪的 session。debounce：等依赖稳定 400ms 再发起，
-    // 期间反复变化只重置计时器，进程零开销。用户打字 + 选目录的时间足够 debounce 命中。
-    let cancelled = false;
-    const workingDir = effectiveWorkingDir?.trim() || undefined;
-    const sessionId = makeDraftSessionId();
-    const timer = setTimeout(() => {
-      if (cancelled || cursorPrewarmClaimedRef.current) return;
-      const prewarm = {
-        sessionId,
-        claimed: false,
-        ready: window.electronAPI.maker.prewarmSession({
-          id: sessionId,
-          agentKind: 'cursor',
-          workingDir,
-          workspaceKind: workingDir ? 'project' : 'dialogue',
-          ...cursorPrewarmOptionsRef.current,
-        }),
-      };
-      cursorPrewarmRef.current = prewarm;
-      void prewarm.ready
-        .then(() => {
-          if (!cancelled) setCursorAuthState(true);
-        })
-        .catch((err) => {
-          if (cancelled) return;
-          const message = err instanceof Error ? err.message : String(err);
-          if (/auth|log[ -]?in/i.test(message)) setCursorAuthState(false);
-        });
-    }, PREWARM_DEBOUNCE_MS);
-
-    return () => {
-      cancelled = true;
-      clearTimeout(timer);
-      const prewarm = cursorPrewarmRef.current;
-      if (prewarm?.sessionId === sessionId) {
-        cursorPrewarmRef.current = null;
-        if (!prewarm.claimed) {
-          void window.electronAPI.maker.cancelPrewarmSession(sessionId).catch(() => undefined);
-        }
-      }
-    };
-  }, [
-    persistedAgentKind,
-    includeCursor,
-    isDeviceLinkDraft,
-    effectiveRemoteHostId,
-    effectiveWorkingDir,
-    wtEnabled,
-  ]);
-
-  const claimCursorPrewarmSession = useCallback(
-    async (fallbackWorkingDir?: string): Promise<{
-      sessionId: string;
-      workingDir?: string;
-      prewarmed: boolean;
-    }> => {
-      const prewarm = cursorPrewarmRef.current;
-      if (persistedAgentKind !== 'cursor' || !prewarm) {
-        return { sessionId: makeDraftSessionId(), workingDir: fallbackWorkingDir, prewarmed: false };
-      }
-      prewarm.claimed = true;
-      cursorPrewarmClaimedRef.current = true;
-      try {
-        const claim = await window.electronAPI.maker.claimPrewarmSession(prewarm.sessionId);
-        if (!claim.claimed) {
-          cursorPrewarmRef.current = null;
-          cursorPrewarmClaimedRef.current = false;
-          return { sessionId: makeDraftSessionId(), workingDir: fallbackWorkingDir, prewarmed: false };
-        }
-        const ready = await prewarm.ready;
-        return { sessionId: prewarm.sessionId, workingDir: ready.workDir, prewarmed: true };
-      } catch (err) {
-        cursorPrewarmRef.current = null;
-        cursorPrewarmClaimedRef.current = false;
-        void window.electronAPI.maker.cancelPrewarmSession(prewarm.sessionId).catch(() => undefined);
-        throw err;
-      }
-    },
-    [persistedAgentKind],
-  );
-
-  const releaseCursorPrewarmClaim = useCallback((sessionId: string): void => {
-    const prewarm = cursorPrewarmRef.current;
-    if (!prewarm || prewarm.sessionId !== sessionId) return;
-    cursorPrewarmRef.current = null;
-    cursorPrewarmClaimedRef.current = false;
-    void window.electronAPI.maker.cancelPrewarmSession(sessionId).catch(() => undefined);
-  }, []);
-
   /**
    * 把草稿转移到一个新的运行目标(设备 + 工作区)——**四条路径唯一的转移动作**。
    *
@@ -2489,7 +2353,6 @@ export function NewMakerDraftRoute() {
       // catch 里撤回,否则空会话会跨列表刷新一直显示一句**没发出去**的话
       // (PR #1031 review P1;worktree 与 goal 两条路径各有自己的撤回点)。
       let optimisticTitleSessionId: string | null = null;
-      let claimedCursorPrewarmSessionId: string | null = null;
       void (async () => {
         try {
           if (isDeviceLinkDraft && !isCurrentDataOwner()) return;
@@ -2806,10 +2669,8 @@ export function NewMakerDraftRoute() {
           // Send 流程会先 createSession (本段下方) 创建 Lead,然后立刻调 enableOrca
           // 拉起 Worker (见下方 "F-COLLAB: draft 阶段开了协同模式" 段)。
 
-          const cursorPrewarm = await claimCursorPrewarmSession(selectedWorkingDir);
-          const sessionId = cursorPrewarm.sessionId;
-          const workingDir = cursorPrewarm.workingDir;
-          claimedCursorPrewarmSessionId = cursorPrewarm.prewarmed ? sessionId : null;
+          const sessionId = makeDraftSessionId();
+          const workingDir = selectedWorkingDir;
           const wt = selectedWorktree;
           // 生效条件 = 勾选 && baseRepo 已就绪;不合格时静默普通启动(同 device-link 分支,
           // 见 2026-07-29 状态不变量:勾选记忆永不因环境被改动或报错拦截)。
@@ -2839,8 +2700,6 @@ export function NewMakerDraftRoute() {
               providerId,
             });
             if (!newSession) {
-              releaseCursorPrewarmClaim(sessionId);
-              claimedCursorPrewarmSessionId = null;
               toastCreateSessionFailed();
               return;
             }
@@ -3052,11 +2911,8 @@ export function NewMakerDraftRoute() {
             sessionId,
             agentKind: persistedAgentKind,
             elapsedMs: Date.now() - _createSessionStartedAt,
-            prewarmed: Boolean(claimedCursorPrewarmSessionId),
           });
           if (!newSession) {
-            releaseCursorPrewarmClaim(sessionId);
-            claimedCursorPrewarmSessionId = null;
             toastCreateSessionFailed();
             return;
           }
@@ -3128,8 +2984,7 @@ export function NewMakerDraftRoute() {
               ? { slashCommandRanges: opts.slashCommandRanges }
               : {}),
           });
-          // 从这里起首条消息已交给 SessionView；预热句柄由后续 lazy-create 接管。
-          claimedCursorPrewarmSessionId = null;
+          // 从这里起首条消息已交给 SessionView。
           opts?.onAccepted?.();
           // 草稿已经成功移交给新会话(setPending),清掉 NEW_MAKER_DRAFT_KEY
           // 下的 store 条目,防止下次回到 /cc-agent/new 还看到本次刚发送的内容。
@@ -3149,10 +3004,6 @@ export function NewMakerDraftRoute() {
               : undefined,
           });
         } catch (err) {
-          if (claimedCursorPrewarmSessionId) {
-            releaseCursorPrewarmClaim(claimedCursorPrewarmSessionId);
-            claimedCursorPrewarmSessionId = null;
-          }
           if (isRemotePrecreatedWorktreeOwnerChangedError(err)) return;
           log.error('[draft send]', err);
           // 交接失败 → 撤回乐观标题预览(理由见上面 optimisticTitleSessionId 的注释)。
@@ -3210,8 +3061,6 @@ export function NewMakerDraftRoute() {
       localProvidersLoading,
       vendorAuthGate,
       createSession,
-      claimCursorPrewarmSession,
-      releaseCursorPrewarmClaim,
       navigate,
       crossAgentDialog.runMigrationFlow,
       attachmentState,

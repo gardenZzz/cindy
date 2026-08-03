@@ -4530,25 +4530,6 @@ contextBridge.exposeInMainWorld('electronAPI', {
       truncated?: boolean;
     }> => ipcRenderer.invoke('maker:scan-at-resources', agentKind, params),
 
-    prewarmSession: (opts: {
-      id: string;
-      agentKind: 'cursor';
-      workingDir?: string;
-      workspaceKind: 'project' | 'dialogue';
-      model: string;
-      effort?: string;
-      fastMode?: boolean;
-      permissionMode?: string;
-      planMode?: boolean;
-      providerId?: string | null;
-      vendorOptions?: Record<string, unknown>;
-    }): Promise<{ ready: true; workDir: string }> =>
-      ipcRenderer.invoke('maker:prewarm-session', opts),
-    claimPrewarmSession: (sessionId: string): Promise<{ claimed: boolean }> =>
-      ipcRenderer.invoke('maker:claim-prewarm-session', sessionId),
-    cancelPrewarmSession: (sessionId: string): Promise<void> =>
-      ipcRenderer.invoke('maker:cancel-prewarm-session', sessionId),
-
     createSession: (opts: {
       /** 可选: 复用外部 sessionId(本端 chat 用 local-db:sessions:create 拿到的 id) */
       id?: string;
