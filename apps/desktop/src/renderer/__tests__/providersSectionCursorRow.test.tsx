@@ -30,7 +30,7 @@ vi.mock('react-i18next', () => ({
 }));
 
 vi.mock('@/hooks/useProviders', () => ({
-  useProviders: () => ({ providers: providersState.providers, loading: false, refetch: vi.fn() }),
+  useProviders: () => ({ providers: providersState.providers, providerOrder: [], ownerGeneration: 0, loading: false, refetch: vi.fn() }),
 }));
 
 vi.mock('@/contexts/AuthContext', () => ({
@@ -144,6 +144,7 @@ beforeEach(() => {
     maker: {
       scanLocalCli: vi.fn(async () => ({ detections: [] })),
       requestProviderModelsAutoRefresh: vi.fn(async () => ({ ok: true })),
+      setProviderOrder: vi.fn(async () => ({ ok: true })),
       agent: {
         getCursorBinaryStatus: vi.fn(async () => ({ installed: cursorState.installed })),
         installCursorAgent: vi.fn(async () => ({ installed: true })),

@@ -47,9 +47,10 @@ describe('resolveCursorGeneratedImagePath', () => {
   it('allows regular files under workdir', async () => {
     const file = path.join(workDir, 'ok.png');
     fs.writeFileSync(file, PNG_BYTES);
-    await expect(resolveCursorGeneratedImagePath(file, [workDir])).resolves.toBe(
-      fs.realpathSync(file),
-    );
+    // Windows 上 os.tmpdir() 可能是短路径(RUNNER~1),realpath 返回长路径(runneradmin);
+    // 两侧都 realpath 一次再比,避免 8.3 vs 长路径假失败。
+    const expected = fs.realpathSync(file);
+    await expect(resolveCursorGeneratedImagePath(file, [workDir])).resolves.toBe(expected);
   });
 
   it('rejects paths outside allowed roots', async () => {
