@@ -26,10 +26,10 @@ async function writeExec(filePath: string, body = '#!/bin/sh\necho ok\n'): Promi
 
 function liveDeps(homeDir: string, pathEnv?: string): CursorBinaryDiscoveryDeps {
   return {
-    ...createCursorBinaryDiscoveryDeps('darwin'),
+    ...createCursorBinaryDiscoveryDeps(process.platform),
     homeDir,
     pathEnv,
-    pathDelimiter: ':',
+    pathDelimiter: path.delimiter,
   };
 }
 
@@ -120,7 +120,8 @@ describe('discoverCursorAgentBinary', () => {
     expect(status).toEqual({ installed: false });
   });
 
-  it('不可执行文件不算已安装', async () => {
+  it('不可执行文件不算已安装（Unix）', async () => {
+    if (process.platform === 'win32') return;
     const home = await makeHome();
     homes.push(home);
     const localBin = path.join(home, '.local', 'bin', 'cursor-agent');
