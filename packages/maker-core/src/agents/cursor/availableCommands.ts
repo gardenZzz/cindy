@@ -1,7 +1,8 @@
 /**
  * ACP available_commands_update → Cindy agent-skill palette 条目。
  *
- * 真源是 Cursor 运行时上报的清单；Cindy 不扫描 ~/.cursor 或工作区目录。
+ * 磁盘 skill（~/.agents/skills、~/.cursor/skills）由 customization-scanner 扫；
+ * 本模块只处理 ACP 运行时上报，并与磁盘结果按名合并。
  * 未知 / 畸形条目跳过，整包非法时返回空数组（调用方清空会话清单）。
  */
 
@@ -71,4 +72,19 @@ export function toAgentSkillCommands(
       enabled: true,
     };
   });
+}
+
+/**
+ * 磁盘 skill ∪ ACP 运行时命令。同名保留磁盘条目（带 path）；ACP 补磁盘没有的内置/额外命令。
+ */
+export function mergeDiskAndRuntimeSkills(
+  disk: readonly AgentSkillCommand[],
+  runtime: readonly AgentSkillCommand[],
+): AgentSkillCommand[] {
+  const byName = new Map<string, AgentSkillCommand>();
+  for (const skill of disk) byName.set(skill.name, skill);
+  for (const skill of runtime) {
+    if (!byName.has(skill.name)) byName.set(skill.name, skill);
+  }
+  return Array.from(byName.values()).sort((a, b) => a.name.localeCompare(b.name));
 }

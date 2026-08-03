@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 
 import {
+  mergeDiskAndRuntimeSkills,
   parseAvailableCommandsUpdate,
   toAgentSkillCommands,
 } from './availableCommands.js';
@@ -73,6 +74,41 @@ describe('toAgentSkillCommands', () => {
         source: 'user',
         enabled: true,
       },
+    ]);
+  });
+});
+
+describe('mergeDiskAndRuntimeSkills', () => {
+  it('keeps disk entry on name clash and adds ACP-only commands', () => {
+    const disk = [
+      {
+        kind: 'agent-skill' as const,
+        name: 'to-tickets',
+        description: 'from disk',
+        source: 'skill' as const,
+        path: '/home/.agents/skills/to-tickets',
+        enabled: true,
+      },
+    ];
+    const runtime = [
+      {
+        kind: 'agent-skill' as const,
+        name: 'to-tickets',
+        description: 'from acp',
+        source: 'user' as const,
+        enabled: true,
+      },
+      {
+        kind: 'agent-skill' as const,
+        name: 'web',
+        description: 'Search',
+        source: 'user' as const,
+        enabled: true,
+      },
+    ];
+    expect(mergeDiskAndRuntimeSkills(disk, runtime)).toEqual([
+      disk[0],
+      runtime[1],
     ]);
   });
 });

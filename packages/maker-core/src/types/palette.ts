@@ -68,8 +68,8 @@ export interface ListAgentSkillsOptions {
   workingDir?: string;
   forceReload?: boolean;
   /**
-   * Cindy business session id. Cursor 运行时命令按会话隔离（ACP
-   * available_commands_update）；有 sessionId 时只返回该会话清单。
+   * Cindy business session id. Cursor 在磁盘扫盘结果之上，再合并该会话的 ACP
+   * available_commands_update（无 sessionId 时只返回磁盘 skill）。
    */
   sessionId?: string;
 }
