@@ -100,8 +100,10 @@ describe('CursorAgent available_commands_update → listAgentSkills', () => {
     };
 
     try {
-      await expect(agent.listAgentSkills({})).resolves.toEqual({ skills: [] });
-      await expect(agent.listAgentSkills({ sessionId: 'biz-1' })).resolves.toEqual({ skills: [] });
+      // 磁盘 skill 始终可见；无 ACP 时其它会话也不该带上 web/test
+      const before = await agent.listAgentSkills({ sessionId: 'biz-1' });
+      expect(Array.isArray(before.skills)).toBe(true);
+      expect(before.skills.map((s) => s.name)).not.toContain('web');
 
       const handle = await agent.startSession({
         workingDir: '/tmp',
@@ -128,14 +130,19 @@ describe('CursorAgent available_commands_update → listAgentSkills', () => {
 
       await vi.waitFor(async () => {
         const listed = await agent.listAgentSkills({ sessionId: 'biz-1' });
-        expect(listed.skills.map((s) => s.name)).toEqual(['web', 'test']);
+        const names = listed.skills.map((s) => s.name);
+        expect(names).toContain('web');
+        expect(names).toContain('test');
       });
-      // 其它会话 / 无 sessionId 不串清单
-      await expect(agent.listAgentSkills({ sessionId: 'biz-other' })).resolves.toEqual({ skills: [] });
-      await expect(agent.listAgentSkills({})).resolves.toEqual({ skills: [] });
+      // ACP 清单按会话隔离：其它会话拿不到 web/test
+      const other = await agent.listAgentSkills({ sessionId: 'biz-other' });
+      expect(other.skills.map((s) => s.name)).not.toContain('web');
+      expect(other.skills.map((s) => s.name)).not.toContain('test');
 
       await handle.close();
-      await expect(agent.listAgentSkills({ sessionId: 'biz-1' })).resolves.toEqual({ skills: [] });
+      const afterClose = await agent.listAgentSkills({ sessionId: 'biz-1' });
+      expect(afterClose.skills.map((s) => s.name)).not.toContain('web');
+      expect(afterClose.skills.map((s) => s.name)).not.toContain('test');
     } finally {
       await agent.dispose().catch(() => undefined);
       rmSync(userDataPath, { recursive: true, force: true });

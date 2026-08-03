@@ -83,9 +83,11 @@ import {
   resolveMcpTargetFromCandidates,
 } from '../shared/mcp-tool-target.js';
 import {
+  mergeDiskAndRuntimeSkills,
   parseAvailableCommandsUpdate,
   toAgentSkillCommands,
 } from './availableCommands.js';
+import { scanCursorCustomizations } from './customization-scanner.js';
 import {
   createCursorIsolatedConfigDir,
   readUserNetworkConfigFromEnv,
@@ -119,6 +121,10 @@ import {
   updateTodosAcceptedResponse,
   type CursorTodoItem,
 } from './extensions.js';
+import type {
+  ListCustomizationsOptions,
+  ListCustomizationsResult,
+} from '../../types/customizations.js';
 import type {
   AgentSkillCommand,
   ListAgentSkillsOptions,
@@ -455,7 +461,7 @@ export class CursorAgent extends BaseAgent {
 
   /**
    * ACP available_commands_update 按 Cindy business sessionId 隔离。
-   * listAgentSkills({ sessionId }) 读这里；关闭会话时清空，避免串会话。
+   * listAgentSkills 与磁盘扫盘合并时读这里；关闭会话时清空，避免串会话。
    */
   private readonly runtimeCommandsBySessionId = new Map<string, AgentSkillCommand[]>();
 
@@ -465,16 +471,41 @@ export class CursorAgent extends BaseAgent {
   }
 
   /**
-   * Cursor 无本地目录扫描；仅返回当前会话 ACP 上报的命令 / Skill 投影。
-   * 无 sessionId → 空（避免把其它会话清单泄漏到新建草稿）。
+   * ChatInput `/` palette 的 agent-skill：扫 ~/.agents/skills + ~/.cursor/skills
+   * （及项目同名目录），再与当前会话 ACP available_commands_update 按名合并。
+   * 无 sessionId 时仍返回磁盘 skill（新建草稿也能看见 /to-tickets）。
    */
   override async listAgentSkills(opts: ListAgentSkillsOptions): Promise<ListAgentSkillsResult> {
-    void opts.workingDir;
     void opts.forceReload;
+    const { items, errors } = await scanCursorCustomizations({
+      workingDirs: opts.workingDir ? [opts.workingDir] : [],
+    });
+    const disk: AgentSkillCommand[] = items
+      .filter((it) => it.kind === 'skill' && it.enabled !== false)
+      .map((it) => ({
+        kind: 'agent-skill' as const,
+        name: it.name,
+        description: it.description,
+        source: 'skill' as const,
+        path: it.absolutePath,
+        scope: (it.scope === 'repo' ? 'repo' : 'user') as 'user' | 'repo',
+        enabled: it.enabled ?? true,
+      }));
+
     const sessionId = typeof opts.sessionId === 'string' ? opts.sessionId.trim() : '';
-    if (!sessionId) return { skills: [] };
-    const skills = this.runtimeCommandsBySessionId.get(sessionId) ?? [];
-    return { skills: skills.map((s) => ({ ...s })) };
+    const runtime = sessionId ? (this.runtimeCommandsBySessionId.get(sessionId) ?? []) : [];
+    const out: ListAgentSkillsResult = {
+      skills: mergeDiskAndRuntimeSkills(disk, runtime),
+    };
+    if (errors.length > 0) out.errors = errors;
+    return out;
+  }
+
+  /** SkillHub：与 listAgentSkills 同源扫盘，不 spawn cursor-agent。 */
+  override async listCustomizations(
+    opts: ListCustomizationsOptions,
+  ): Promise<ListCustomizationsResult> {
+    return scanCursorCustomizations(opts);
   }
 
   private setRuntimeCommands(sessionId: string | undefined, skills: AgentSkillCommand[]): void {
