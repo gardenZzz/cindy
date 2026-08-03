@@ -281,11 +281,13 @@ export class Maker {
       const handle = await entry.handle;
       await handle.bootstrapReady;
     } catch (err) {
+      // 被外部 cancel（草稿 effect 重跑 / 用户切走）抢先 delete 了 entry：
+      // 这是预期内的竞态，不是故障，不得向调用方（IPC handler）抛错刷屏日志。
       if (this.prewarmedSessionHandles.get(opts.id) === entry) {
         this.prewarmedSessionHandles.delete(opts.id);
         await entry.handle.then((handle) => handle.close()).catch(() => undefined);
       }
-      throw err;
+      return;
     }
   }
 

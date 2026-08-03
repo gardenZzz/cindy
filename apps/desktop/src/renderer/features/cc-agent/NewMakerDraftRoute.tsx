@@ -232,6 +232,15 @@ import type { AgentKind } from '@cindy/maker-core';
 
 const log = createLogger('NewMakerDraftRoute');
 const IS_MAC_PLATFORM = typeof window !== 'undefined' && window.electronAPI?.platform === 'darwin';
+
+/**
+ * Cursor ACP 预热发起前的去抖窗口。草稿打开初期 effectiveWorkingDir /
+ * effectiveRemoteHostId 会异步 resolve 多次，立即 prewarm 会反复 cancel+重建
+ * cursor-agent 进程（SIGTERM + 冷启动 session/new ~10s 重来）。在此窗口内
+ * 依赖反复变化只重置计时器、不发起 prewarm，稳定后才起一次预热。用户打字 +
+ * 选目录的时间足以让 debounce 命中，发送时拿到已就绪的暖 session。
+ */
+const PREWARM_DEBOUNCE_MS = 400;
 // F-COLLAB (2026-05): 老的 vendor='orca' 入口已退役,OrcaHeaderStrip 组件随之
 // 删除(它是给 isOrca 分支的 ChatInput.topSlot 用的)。Lead/Worker 协作组合现在
 // 由 ChatInput「+」菜单里的协同模式项控制,Lead 是当前 vendor 本身,
@@ -1545,36 +1554,48 @@ export function NewMakerDraftRoute() {
       return;
     }
 
-    const sessionId = makeDraftSessionId();
+    // 草稿打开初期 effectiveWorkingDir / effectiveRemoteHostId 会异步 resolve 多次
+    // （空 -> 有值 / 选目录变化）。若每次变化都立即 prewarm，旧预热会被 cancel 杀进程
+    // （cursor-agent SIGTERM）、新 prewarm 又从冷启动重跑，session/new 的 ~10s 冷启动
+    // 每次重来，发送时仍在等一个没就绪的 session。debounce：等依赖稳定 400ms 再发起，
+    // 期间反复变化只重置计时器，进程零开销。用户打字 + 选目录的时间足够 debounce 命中。
+    let cancelled = false;
     const workingDir = effectiveWorkingDir?.trim() || undefined;
-    const prewarm = {
-      sessionId,
-      claimed: false,
-      ready: window.electronAPI.maker.prewarmSession({
-        id: sessionId,
-        agentKind: 'cursor',
-        workingDir,
-        workspaceKind: workingDir ? 'project' : 'dialogue',
-        ...cursorPrewarmOptionsRef.current,
-      }),
-    };
-    cursorPrewarmRef.current = prewarm;
-    let active = true;
-    void prewarm.ready
-      .then(() => {
-        if (active) setCursorAuthState(true);
-      })
-      .catch((err) => {
-        if (!active) return;
-        const message = err instanceof Error ? err.message : String(err);
-        if (/auth|log[ -]?in/i.test(message)) setCursorAuthState(false);
-      });
+    const sessionId = makeDraftSessionId();
+    const timer = setTimeout(() => {
+      if (cancelled || cursorPrewarmClaimedRef.current) return;
+      const prewarm = {
+        sessionId,
+        claimed: false,
+        ready: window.electronAPI.maker.prewarmSession({
+          id: sessionId,
+          agentKind: 'cursor',
+          workingDir,
+          workspaceKind: workingDir ? 'project' : 'dialogue',
+          ...cursorPrewarmOptionsRef.current,
+        }),
+      };
+      cursorPrewarmRef.current = prewarm;
+      void prewarm.ready
+        .then(() => {
+          if (!cancelled) setCursorAuthState(true);
+        })
+        .catch((err) => {
+          if (cancelled) return;
+          const message = err instanceof Error ? err.message : String(err);
+          if (/auth|log[ -]?in/i.test(message)) setCursorAuthState(false);
+        });
+    }, PREWARM_DEBOUNCE_MS);
 
     return () => {
-      active = false;
-      if (cursorPrewarmRef.current === prewarm) cursorPrewarmRef.current = null;
-      if (!prewarm.claimed) {
-        void window.electronAPI.maker.cancelPrewarmSession(sessionId).catch(() => undefined);
+      cancelled = true;
+      clearTimeout(timer);
+      const prewarm = cursorPrewarmRef.current;
+      if (prewarm?.sessionId === sessionId) {
+        cursorPrewarmRef.current = null;
+        if (!prewarm.claimed) {
+          void window.electronAPI.maker.cancelPrewarmSession(sessionId).catch(() => undefined);
+        }
       }
     };
   }, [
@@ -3007,6 +3028,9 @@ export function NewMakerDraftRoute() {
             return;
           }
 
+          // 计时 createSession：内部走预热接管时应是毫秒级；若仍卡秒级，说明预热未命中
+          // （草稿抖动 cancel / worktree 不预热），据此时序再评估乐观跳页。
+          const _createSessionStartedAt = Date.now();
           const newSession = await createSession({
             id: sessionId,
             agentKind: persistedAgentKind,
@@ -3023,6 +3047,12 @@ export function NewMakerDraftRoute() {
             // extraDirs 是 vendor 无关字段；Claude 与 Codex 都按只读引用目录透传。
             extraDirs: effectiveExtraDirs,
             providerId,
+          });
+          log.info('[draft send] createSession resolved', {
+            sessionId,
+            agentKind: persistedAgentKind,
+            elapsedMs: Date.now() - _createSessionStartedAt,
+            prewarmed: Boolean(claimedCursorPrewarmSessionId),
           });
           if (!newSession) {
             releaseCursorPrewarmClaim(sessionId);
