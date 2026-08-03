@@ -2901,8 +2901,8 @@ export function NewMakerDraftRoute() {
             workingDir: workingDir ?? undefined,
             // 没选项目目录 = 创建 standalone dialogue;main 端会按 workspaceKind='dialogue'
             // 自动分配 <userData>/dialogues/<date>/<sid>/ 作为运行目录,不进入项目段。
-            workspaceKind: selectedWorkingDir ? 'project' : 'dialogue',
-            remoteHostId: selectedWorkingDir ? (effectiveRemoteHostId ?? undefined) : undefined,
+            workspaceKind: workingDir ? 'project' : 'dialogue',
+            remoteHostId: workingDir ? (effectiveRemoteHostId ?? undefined) : undefined,
             // extraDirs 是 vendor 无关字段；Claude 与 Codex 都按只读引用目录透传。
             extraDirs: effectiveExtraDirs,
             providerId,
