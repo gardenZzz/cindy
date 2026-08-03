@@ -19,6 +19,7 @@ import type { ModelDescriptor, AgentKind } from '@cindy/maker-core';
 import {
   deriveAvailableModels,
   refreshCatalogDerivedModels,
+  resolvePiRuntimeModelDescriptor,
   resolveVerifiedContextWindow,
 } from '../catalog-to-descriptors.js';
 
@@ -59,14 +60,24 @@ function injectedCatalog(): Catalog {
 }
 
 describe('deriveAvailableModels — dynamic-first catalog contract', () => {
+  it('adds native minimal thinking to reasoning-capable Pi models only', () => {
+    const pi = deriveAvailableModels(BUNDLED_CATALOG, 'pi');
+    expect(pi.find((m) => m.id === 'xai/grok-4.3')?.efforts[0]).toBe('minimal');
+    expect(pi.find((m) => m.id === 'xai/grok-code-fast')?.efforts).toEqual([]);
+  });
+
   it('bundled(未注入)派生 = 仅 xai 静态清单,动态供应商不贡献任何条目', () => {
     const cc = deriveAvailableModels(BUNDLED_CATALOG, 'claude-code');
     const codex = deriveAvailableModels(BUNDLED_CATALOG, 'codex');
     expect(cc.map((m) => m.id)).toEqual([
-      'xai/grok-4.5', 'xai/grok-4.3', 'xai/grok-4.20', 'xai/grok-code-fast',
+      'xai/grok-4.5', 'xai/grok-4.3', 'xai/grok-build-0.1',
+      'xai/grok-4.20-multi-agent-0309', 'xai/grok-4.20-0309-reasoning',
+      'xai/grok-4.20-0309-non-reasoning', 'xai/grok-4.20', 'xai/grok-code-fast',
     ]);
     expect(codex.map((m) => m.id)).toEqual([
-      'xai/grok-4.5', 'xai/grok-4.3', 'xai/grok-4.20', 'xai/grok-code-fast',
+      'xai/grok-4.5', 'xai/grok-4.3', 'xai/grok-build-0.1',
+      'xai/grok-4.20-multi-agent-0309', 'xai/grok-4.20-0309-reasoning',
+      'xai/grok-4.20-0309-non-reasoning', 'xai/grok-4.20', 'xai/grok-code-fast',
     ]);
   });
 
@@ -106,7 +117,9 @@ describe('deriveAvailableModels — dynamic-first catalog contract', () => {
     expect(ids).toEqual([
       'claude-opus-4-8',
       'chatgpt/gpt-5.5',
-      'xai/grok-4.5', 'xai/grok-4.3', 'xai/grok-4.20', 'xai/grok-code-fast',
+      'xai/grok-4.5', 'xai/grok-4.3', 'xai/grok-build-0.1',
+      'xai/grok-4.20-multi-agent-0309', 'xai/grok-4.20-0309-reasoning',
+      'xai/grok-4.20-0309-non-reasoning', 'xai/grok-4.20', 'xai/grok-code-fast',
       'gpt-5.5',
     ]);
     // 首见胜出:opus 取 anthropic 条目(supportsFastMode=true),不是 xd 的 false。
@@ -168,13 +181,57 @@ describe('deriveAvailableModels — dynamic-first catalog contract', () => {
     expect(xd.models['claude-code']!.some((m) => m.id === 'text-embedding-3-large')).toBe(true);
   });
 
+  it('retired 模型不进面向旧客户端的新选择清单，但仍留在完整 catalog 供运行中会话解析', () => {
+    const catalog = structuredClone(BUNDLED_CATALOG);
+    const provider = catalog.providers.find((entry) => entry.models['claude-code']?.length);
+    expect(provider).toBeDefined();
+    const retired = provider!.models['claude-code']![0]!;
+    retired.status = 'retired';
+
+    expect(deriveAvailableModels(catalog, 'claude-code').some((entry) => entry.id === retired.id))
+      .toBe(false);
+    expect(provider!.models['claude-code']!.some((entry) => entry.id === retired.id)).toBe(true);
+  });
+
+  it('纯 Registry retired 不进入公开清单,但可按统一投影重建 Pi 续跑描述符', () => {
+    const catalog = structuredClone(BUNDLED_CATALOG);
+    catalog.modelRegistry = {
+      schemaVersion: 1,
+      updatedAt: '2026-08-02T00:00:00.000Z',
+      models: [{
+        id: 'openai/gpt-retired',
+        name: 'GPT Retired',
+        status: 'retired',
+        contextWindow: 300_000,
+        maxOutputTokens: 96_000,
+        efforts: ['low', 'max'],
+        defaultEffort: 'max',
+        routes: [{ providerId: 'openai', modelId: 'gpt-retired', agents: ['codex'] }],
+      }],
+    };
+
+    expect(deriveAvailableModels(catalog, 'pi').some((m) => m.id === 'chatgpt/gpt-retired')).toBe(false);
+    expect(resolvePiRuntimeModelDescriptor(catalog, 'openai', 'chatgpt/gpt-retired')).toMatchObject({
+      id: 'chatgpt/gpt-retired',
+      displayName: 'GPT Retired',
+      contextWindow: 300_000,
+      maxOutputTokens: 96_000,
+      efforts: ['minimal', 'low'],
+      defaultEffort: 'low',
+    });
+    expect(resolvePiRuntimeModelDescriptor(catalog, 'anthropic', 'chatgpt/gpt-retired')).toBeNull();
+  });
+
   it('runtime refresh replaces both agent model lists in place so existing sessions keep the live reference', () => {
     const claudeModels: ModelDescriptor[] = [{ id: 'stale-claude', displayName: 'Stale', contextWindow: 1, efforts: [], defaultEffort: null }];
     const codexModels: ModelDescriptor[] = [{ id: 'stale-codex', displayName: 'Stale', contextWindow: 1, efforts: [], defaultEffort: null }];
+    const piModels: ModelDescriptor[] = [{ id: 'stale-pi', displayName: 'Stale', contextWindow: 1, efforts: [], defaultEffort: null }];
     const claudeRef = claudeModels;
     const codexRef = codexModels;
+    const piRef = piModels;
     const target = {
       getCapabilities(agent: AgentKind) {
+        if (agent === 'pi') return { availableModels: piModels };
         return { availableModels: agent === 'claude-code' ? claudeModels : codexModels };
       },
     };
@@ -183,8 +240,10 @@ describe('deriveAvailableModels — dynamic-first catalog contract', () => {
 
     expect(claudeModels).toBe(claudeRef);
     expect(codexModels).toBe(codexRef);
+    expect(piModels).toBe(piRef);
     expect(claudeModels).toEqual(deriveAvailableModels(injectedCatalog(), 'claude-code'));
     expect(codexModels).toEqual(deriveAvailableModels(injectedCatalog(), 'codex'));
+    expect(piModels).toEqual(deriveAvailableModels(injectedCatalog(), 'pi'));
   });
 });
 

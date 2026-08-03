@@ -30,30 +30,29 @@
  * 纯函数 + 注入依赖(规则 14), Electron / maker 绑定在 session-runner 组装。
  */
 
-import type { Effort, AgentKind } from '@cindy/maker-core';
-import type { ImDefaultAgentKind } from '../../shared/imDefaultSettings.js';
+import type { Effort } from '@cindy/maker-core';
 
 /** 依赖注入面: IM 默认值 + 各 agent 当前可用模型清单。 */
 export interface HookDefaultsDeps {
   readDefaults: () => {
-    agentKind: ImDefaultAgentKind;
+    agentKind: 'claude-code' | 'codex' | 'pi';
     agents: Record<
-      ImDefaultAgentKind,
+      'claude-code' | 'codex' | 'pi',
       { providerId: string | null; model: string; effort: string }
     >;
   };
-  getModels: (agentKind: AgentKind) => Array<{
+  getModels: (agentKind: 'claude-code' | 'codex' | 'pi') => Array<{
     id: string;
     efforts: readonly string[];
     defaultEffort: string | null;
   }>;
   /** 该 agent 支持的权限档 id 清单(capabilities.permissionModes)。 */
-  getPermissionModes: (agentKind: AgentKind) => readonly string[];
+  getPermissionModes: (agentKind: 'claude-code' | 'codex' | 'pi') => readonly string[];
   log: { warn(msg: string): void };
 }
 
 export interface ResolvedHookSessionConfig {
-  agentKind: AgentKind;
+  agentKind: 'claude-code' | 'codex' | 'pi';
   model: string;
   effort: Effort | undefined;
   permissionMode: string;
@@ -65,7 +64,7 @@ export interface ResolvedHookSessionConfig {
   providerId: string | null;
 }
 
-const AGENT_KINDS = new Set<string>(['claude-code', 'codex']);
+const AGENT_KINDS = new Set(['claude-code', 'codex', 'pi']);
 
 /**
  * 合成新 hook 会话的 agent/model/effort。
@@ -82,10 +81,10 @@ export function resolveHookSessionConfig(
 ): ResolvedHookSessionConfig {
   const defaults = deps.readDefaults();
 
-  // 1. agent: 显式合法值 > 草稿默认（IM 默认面不含 cursor，#5）
-  const agentKind: ImDefaultAgentKind =
+  // 1. agent: 显式合法值 > 草稿默认
+  const agentKind: 'claude-code' | 'codex' | 'pi' =
     overrides.agentKind !== null && AGENT_KINDS.has(overrides.agentKind)
-      ? (overrides.agentKind as ImDefaultAgentKind)
+      ? (overrides.agentKind as 'claude-code' | 'codex' | 'pi')
       : defaults.agentKind;
 
   const models = deps.getModels(agentKind);

@@ -10,12 +10,13 @@ interface MobileVendorIconProps {
   color?: string;
   running?: boolean;
   size?: number;
-  vendor: 'cc' | 'codex' | 'cursor' | string;
+  vendor: 'cc' | 'codex' | 'cursor' | 'pi' | string;
 }
 
 function vendorAccessibilityLabel(vendor: string): string {
   if (vendor === 'codex') return 'Codex';
   if (vendor === 'cursor') return 'Cursor';
+  if (vendor === 'pi') return 'Pi';
   return 'Claude Code';
 }
 

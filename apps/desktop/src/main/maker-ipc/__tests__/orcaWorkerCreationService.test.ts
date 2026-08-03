@@ -18,6 +18,24 @@ import { isActiveWorkerStatus } from '../../../shared/orca-worker-status';
 const UUID_V4_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
 const WORKER_SESSION_ID = '123e4567-e89b-42d3-a456-426614174000';
 
+describe('buildNoProviderMessage (pi first-class)', () => {
+  const snap = (name: string): OrcaWorkerProviderSnapshot => ({ name }) as OrcaWorkerProviderSnapshot;
+  it('names Pi (not Claude Code) when pi has no connected provider', () => {
+    const msg = buildNoProviderMessage('pi', { 'claude-code': [], codex: [], cursor: [], pi: [] });
+    expect(msg).toContain('Pi 当前没有可用的模型供应商');
+    expect(msg).not.toContain('Claude Code 当前没有');
+  });
+  it('suggests pi as a fallback agent when pi alone has a connected provider', () => {
+    const msg = buildNoProviderMessage('codex', {
+      'claude-code': [],
+      codex: [],
+      cursor: [],
+      pi: [snap('Cindy AI')],
+    });
+    expect(msg).toContain('Pi(已连接:Cindy AI)');
+  });
+});
+
 describe('providerRouteRequiresExplicitSelection', () => {
   it.each(['api-key-header', 'oauth-token', 'none'] as const)(
     'keeps %s routes pinned to the selected provider',
@@ -48,8 +66,14 @@ describe('normalizeOrcaWorkerAgent', () => {
 });
 
 function providerRoutingContext(
-  availability: Record<AgentKind, OrcaWorkerProviderSnapshot[]>,
+  partial: Partial<Record<AgentKind, OrcaWorkerProviderSnapshot[]>>,
 ): OrcaWorkerProviderRoutingContext {
+  const availability: Record<AgentKind, OrcaWorkerProviderSnapshot[]> = {
+    'claude-code': partial['claude-code'] ?? [],
+    codex: partial.codex ?? [],
+    cursor: partial.cursor ?? [],
+    pi: partial.pi ?? [],
+  };
   return {
     availability,
     resolveDefaultProviderIdForModel: (agent, model) => (
@@ -72,6 +96,7 @@ function createDeps(overrides: Partial<OrcaWorkerCreationDeps> = {}) {
     getLeadSessionRow: vi.fn(async () => ({
       id: 'lead-1',
       agentKind: 'codex' as const,
+      workspaceKind: 'project' as const,
       workingDir: 'C:\\repo',
       model: 'gpt-5.5',
       effort: 'medium',
@@ -289,6 +314,7 @@ describe('OrcaWorkerCreationService', () => {
     const remoteLeadRow = {
       id: 'lead-1',
       agentKind: 'codex' as const,
+      workspaceKind: 'project' as const,
       workingDir: '/srv/repo',
       model: 'gpt-5.5',
       effort: 'medium',
@@ -517,6 +543,7 @@ describe('OrcaWorkerCreationService', () => {
       getLeadSessionRow: vi.fn(async () => ({
         id: 'lead-1',
         agentKind: 'codex' as const,
+        workspaceKind: 'project' as const,
         workingDir: '/remote/repo',
         model: 'gpt-5.5',
         effort: 'medium',
@@ -689,6 +716,7 @@ describe('OrcaWorkerCreationService', () => {
       getLeadSessionRow: vi.fn(async () => ({
         id: 'lead-1',
         agentKind: 'codex' as const,
+        workspaceKind: 'project' as const,
         workingDir: '/srv/repo',
         model: 'gpt-5.5',
         effort: 'medium',
@@ -731,11 +759,44 @@ describe('OrcaWorkerCreationService', () => {
     expect('remoteHostId' in arg).toBe(false);
   });
 
+  it('inherits dialogue workspace identity and the managed cwd from its lead', async () => {
+    const dialogueWorkingDir = '/app-managed/dialogues/2026-08-02/lead-1';
+    const { deps, service } = createDeps({
+      getLeadSessionRow: vi.fn(async () => ({
+        id: 'lead-1',
+        agentKind: 'codex' as const,
+        workspaceKind: 'dialogue' as const,
+        workingDir: dialogueWorkingDir,
+        model: 'gpt-5.5',
+        effort: 'medium',
+        permissionMode: 'default',
+        fastMode: false,
+        providerId: 'xd',
+        remoteHostId: null,
+      })),
+    });
+
+    await expect(
+      service.createWorker({
+        leadSessionId: 'lead-1',
+        role: 'reviewer',
+        agent: 'codex',
+        label: 'reviewer',
+      }),
+    ).resolves.toMatchObject({ ok: true });
+
+    expect(deps.buildCreateOptsWithStderr).toHaveBeenCalledWith(expect.objectContaining({
+      workspaceKind: 'dialogue',
+      workingDir: dialogueWorkingDir,
+    }));
+  });
+
   it('normalizes inherited minimal effort from the lead session to low for a Codex GPT worker', async () => {
     const { deps, service } = createDeps({
       getLeadSessionRow: vi.fn(async () => ({
         id: 'lead-1',
         agentKind: 'codex' as const,
+        workspaceKind: 'project' as const,
         workingDir: 'C:\\repo',
         model: 'gpt-5.4-mini',
         effort: 'minimal',
@@ -922,7 +983,7 @@ describe('OrcaWorkerCreationService', () => {
     }));
   });
 
-  // ── #25: Cursor worker 的 Fast 不再被硬绑在 Codex 上 ──────────────────
+// ── #25: Cursor worker 的 Fast 不再被硬绑在 Codex 上 ──────────────────
   it.each([
     ['adopts explicit fast=true for a cursor worker whose model supports fast', true, true],
     ['forces fast=false when cursor worker model does not support fast', false, false],
@@ -965,6 +1026,7 @@ describe('OrcaWorkerCreationService', () => {
       getLeadSessionRow: vi.fn(async () => ({
         id: 'lead-1',
         agentKind: 'cursor' as const,
+        workspaceKind: 'project' as const,
         workingDir: '/repo',
         model: 'claude-opus-5',
         effort: 'high',
@@ -990,6 +1052,74 @@ describe('OrcaWorkerCreationService', () => {
     ).resolves.toMatchObject({
       ok: true,
       resolved: { agent: 'cursor', fastMode: true },
+    });
+  });
+
+  it('honors an explicit fast request for a Pi worker on a fast-capable model', async () => {
+    // Pi 也支持 Fast:显式 fast:true 必须被消费(此前两处判定只认 codex,静默丢弃)。
+    // lead.fastMode 默认 false -- 若 pi 未接线,结果会退回 false,构成有效判别。
+    const { deps, service } = createDeps({
+      getAvailableModels: vi.fn((agent: AgentKind) => (
+        agent === 'pi'
+          ? [{ id: 'pi-fast-model', efforts: ['low', 'medium', 'high'], defaultEffort: 'high', supportsFastMode: true }]
+          : [{ id: 'gpt-5.5', efforts: ['low', 'medium', 'high', 'xhigh'], defaultEffort: 'high', supportsFastMode: true }]
+      )),
+      getProviderRoutingContext: vi.fn(async () => providerRoutingContext({
+        pi: [{ id: 'xd', name: 'XD Gateway', models: ['pi-fast-model'], fastModels: ['pi-fast-model'] }],
+      })),
+    });
+
+    await expect(
+      service.createWorker({
+        leadSessionId: 'lead-1',
+        role: 'reviewer',
+        agent: 'pi',
+        label: 'reviewer',
+        model: 'pi-fast-model',
+        fast: true,
+      }),
+    ).resolves.toMatchObject({
+      ok: true,
+      resolved: {
+        model: 'pi-fast-model',
+        fastMode: true,
+      },
+    });
+
+    expect(deps.buildCreateOptsWithStderr).toHaveBeenCalledWith(expect.objectContaining({
+      agentKind: 'pi',
+      model: 'pi-fast-model',
+      fastMode: true,
+    }));
+  });
+
+  it('drops an explicit fast request for a Pi worker when the model lacks Fast capability', async () => {
+    const { deps, service } = createDeps({
+      getAvailableModels: vi.fn((agent: AgentKind) => (
+        agent === 'pi'
+          ? [{ id: 'pi-no-fast', efforts: ['low', 'medium', 'high'], defaultEffort: 'high', supportsFastMode: false }]
+          : [{ id: 'gpt-5.5', efforts: ['low', 'medium', 'high', 'xhigh'], defaultEffort: 'high', supportsFastMode: true }]
+      )),
+      getProviderRoutingContext: vi.fn(async () => providerRoutingContext({
+        pi: [{ id: 'xd', name: 'XD Gateway', models: ['pi-no-fast'], fastModels: [] }],
+      })),
+    });
+
+    await expect(
+      service.createWorker({
+        leadSessionId: 'lead-1',
+        role: 'reviewer',
+        agent: 'pi',
+        label: 'reviewer',
+        model: 'pi-no-fast',
+        fast: true,
+      }),
+    ).resolves.toMatchObject({
+      ok: true,
+      resolved: {
+        model: 'pi-no-fast',
+        fastMode: false,
+      },
     });
   });
 
@@ -1203,6 +1333,7 @@ describe('OrcaWorkerCreationService', () => {
         { id: 'xd', name: 'XD Gateway', models: ['gpt-5.4'] },
       ],
       cursor: [],
+      pi: [],
     } satisfies Record<AgentKind, OrcaWorkerProviderSnapshot[]>;
     const { deps, service } = createDeps({
       getWorkerDefaults: vi.fn(() => ({ model: 'gpt-5.5', providerId: 'custom-codex' })),
@@ -1478,6 +1609,7 @@ describe('buildNoProviderMessage', () => {
   it('suggests the other agent when it has a connected provider', () => {
     const msg = buildNoProviderMessage('codex', {
       'claude-code': [{ id: 'xd', name: 'XD Gateway', models: ['claude-sonnet-4-6'] }],
+      pi: [],
       codex: [],
       cursor: [],
     });
@@ -1487,7 +1619,7 @@ describe('buildNoProviderMessage', () => {
   });
 
   it('omits the agent suggestion when no agent has a connected provider', () => {
-    const msg = buildNoProviderMessage('claude-code', { 'claude-code': [], codex: [], cursor: [] });
+    const msg = buildNoProviderMessage('claude-code', { 'claude-code': [], codex: [], cursor: [], pi: [] });
     expect(msg).toContain('Claude Code 当前没有可用的模型供应商');
     expect(msg).toContain('设置 → 模型供应商');
     expect(msg).not.toContain('改用');
@@ -1820,6 +1952,7 @@ describe('SSH remote worker model/provider compatibility gate (R23 P2)', () => {
   const remoteLeadRow = {
     id: 'lead-1',
     agentKind: 'codex' as const,
+    workspaceKind: 'project' as const,
     workingDir: '/srv/repo',
     model: 'gpt-5.5',
     effort: 'medium',
@@ -1900,6 +2033,32 @@ describe('SSH remote worker model/provider compatibility gate (R23 P2)', () => {
       }),
     ).resolves.toMatchObject({ ok: true });
   });
+
+  it('rejects Pi workers for a remote lead before bootstrap (pi sessions are local-only)', async () => {
+    // codex-connector 回归:PiAgent.startSession 对 remoteHostId 一律 NotSupportedError,
+    // 不在 preflight 拒绝会让远程 Lead + Pi 组合在 bootstrap 期落成笼统 INTERNAL。
+    const { service, deps } = createDeps({
+      getLeadSessionRow: vi.fn(async () => remoteLeadRow),
+      getProviderRoutingContext: vi.fn(async () => providerRoutingContext({
+        'claude-code': [],
+        codex: [{ id: 'xd', name: 'XD Gateway', models: ['gpt-5.5'] }],
+        pi: [{ id: 'xd', name: 'XD Gateway', models: ['claude-sonnet-4-6'] }],
+      })),
+    });
+    await expect(
+      service.createWorker({
+        leadSessionId: 'lead-1',
+        role: 'developer',
+        agent: 'pi',
+        label: 'pi-dev',
+      }),
+    ).resolves.toMatchObject({
+      ok: false,
+      errorCode: 'INVALID_PARAMS',
+      message: expect.stringContaining('local-only'),
+    });
+    expect(deps.bootstrapSession).not.toHaveBeenCalled();
+  });
 });
 
   it('rejects chat-bridged providers resolved through the default route (no explicit providerId)', async () => {
@@ -1909,6 +2068,7 @@ describe('SSH remote worker model/provider compatibility gate (R23 P2)', () => {
       getLeadSessionRow: vi.fn(async () => ({
         id: 'lead-1',
         agentKind: 'codex' as const,
+        workspaceKind: 'project' as const,
         workingDir: '/srv/repo',
         model: 'gpt-5.5',
         effort: 'medium',
@@ -1951,6 +2111,7 @@ describe('SSH remote worker model/provider compatibility gate (R23 P2)', () => {
       getLeadSessionRow: vi.fn(async () => ({
         id: 'lead-1',
         agentKind: 'codex' as const,
+        workspaceKind: 'project' as const,
         workingDir: '/srv/repo',
         model: 'deepseek-v4',
         effort: 'medium',

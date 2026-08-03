@@ -139,6 +139,10 @@
 
 Anthropic Messages API / wire protocol 的用户可见名称。四语统一保留官方英文名称，避免与普通的“消息”概念混译；先登记为 proposed，待产品术语评审后固化。
 
+### API Price Estimate
+
+用户为自有 API、OAuth 或订阅通道维护的本地 token 单价估算；只影响 Cindy 的用量价值估算，不代表供应商实际账单，也不覆盖 Cindy AI Gateway 的服务端实售价。先登记为 proposed，待产品术语评审后固化。
+
 ### Global region
 
 企业认证与业务服务所在区域的用户可见名称，用于组织登录检测到 Global 服务区域时的确认文案；它描述连接的服务区域，不是对当前安装版本的标签，也不同于项目配置里的 generic global scope。先按现有四语文案登记为 proposed。
@@ -146,6 +150,10 @@ Anthropic Messages API / wire protocol 的用户可见名称。四语统一保�
 ### Mainland China
 
 企业认证与业务服务所在区域的用户可见名称，用于组织登录检测到中国大陆服务区域时的确认文案；它描述连接的服务区域，不代表当前安装的是中国大陆版。先按现有四语文案登记为 proposed，避免后续出现“中国区／国内区／China region”等多套说法。
+
+### reply (the bot's public post on X)
+
+Cindy 在 X 上发出的那条公开回复。zh-CN 取「回帖」以强调它是**一条公开帖子**而不是私聊消息——这正是 X 与 Slack / Telegram 的性质差异, 也是风险告知的核心。与「消息」区分开: 后者按 task-and-conversation-naming 只用于任务内的单条往来。proposed 同上。
 
 ### Cindy Codex home
 
@@ -260,6 +268,22 @@ macOS TCC 的 kTCCServiceListenEvent(系统设置里叫「输入监控」)在 Ci
 ### WeChat
 
 个人微信连接的产品名称，沿用微信官方品牌写法；先登记为 proposed，待产品术语评审后再决定是否固化。
+
+### WeCom
+
+企业微信官方英文品牌名，用于智能机器人和群机器人能力；先登记为 proposed，待产品术语评审后再决定是否固化。
+
+### WeCom group bot
+
+企业微信群 Webhook 单向通知能力的名称；先登记为 proposed。
+
+### WeCom Intelligent Bot
+
+企业微信 WebSocket 长连接双向 IM 能力在设置页中的名称；先登记为 proposed。
+
+### withdraw (a reply)
+
+用户在 X 上让 Cindy 删掉它那条公开回帖的动作(在回帖下回 /delete)。zh-CN 取「撤回」而不是「删除」——「删除」在本仓已大量用于删任务/删会话/删文件, 而这个动作的对象是「已经发出去的公开内容」, 与 IM 里的消息撤回同义。刻意登记为 proposed: X 撤回是新功能(server PR #288 / client 侧告知), 四语只有这一处用例, 等更多用例出现后再定 decided。
 
 ## 怎么加一条术语
 

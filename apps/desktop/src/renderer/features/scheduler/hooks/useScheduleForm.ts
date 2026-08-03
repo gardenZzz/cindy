@@ -58,6 +58,7 @@ const DEFAULT_FORM: ScheduleFormState = {
   preRunHookTimeoutSec: '',
   notifyDesktop: true,
   notifyFeishu: false,
+  notifyWecomGroup: false,
 };
 
 const SCHEDULE_FORM_PREFS_KEY = 'xdt:scheduleFormPrefs:v1';
@@ -84,6 +85,7 @@ function defaultScheduleFormPrefs(): ScheduleFormPrefs {
       'claude-code': EMPTY_AGENT_PREFS,
       codex: EMPTY_AGENT_PREFS,
       cursor: EMPTY_AGENT_PREFS,
+      pi: EMPTY_AGENT_PREFS,
     },
   };
 }
@@ -99,7 +101,9 @@ function loadScheduleFormPrefs(): ScheduleFormPrefs {
         ? 'codex'
         : parsed.agentKind === 'cursor'
           ? 'cursor'
-          : 'claude-code';
+          : parsed.agentKind === 'pi'
+            ? 'pi'
+            : 'claude-code';
     const workingDir = typeof parsed.workingDir === 'string' ? parsed.workingDir : '';
     const workspaceKind = normalizePrefsWorkspaceKind(parsed.workspaceKind, workingDir);
     return {
@@ -111,6 +115,7 @@ function loadScheduleFormPrefs(): ScheduleFormPrefs {
         'claude-code': sanitizeAgentPrefs(parsed.lastByAgent?.['claude-code']),
         codex: sanitizeAgentPrefs(parsed.lastByAgent?.codex),
         cursor: sanitizeAgentPrefs(parsed.lastByAgent?.cursor),
+        pi: sanitizeAgentPrefs(parsed.lastByAgent?.pi),
       },
     };
   } catch {
@@ -160,6 +165,8 @@ export function getScheduleAgentPrefs(agentKind: ScheduleFormState['agentKind'])
 export function schedulerFallbackModel(agentKind: ScheduleFormState['agentKind']): string {
   if (agentKind === 'codex') return 'gpt-5.5';
   if (agentKind === 'cursor') return 'auto';
+  // Pi 的来源/模型来自动态连接目录；没有能与 providerId 解耦的静态默认。
+  if (agentKind === 'pi') return '';
   return 'claude-sonnet-4-6';
 }
 
@@ -174,7 +181,7 @@ export function getScheduleDefaultModel(agentKind: ScheduleFormState['agentKind'
   const prefs = getScheduleAgentPrefs(agentKind);
   if (prefs.model.trim()) return prefs.model;
   const chatVendor =
-    agentKind === 'codex' ? 'codex' : agentKind === 'cursor' ? 'cursor' : 'cc';
+    agentKind === 'codex' ? 'codex' : agentKind === 'cursor' ? 'cursor' : agentKind === 'pi' ? 'pi' : 'cc';
   const chatLast = getPersistedVendorModel(chatVendor);
   if (chatLast.trim()) return chatLast;
   return schedulerFallbackModel(agentKind);
@@ -255,6 +262,7 @@ export function makeFormFromSchedule(s: Schedule | null): ScheduleFormState {
       : '',
     notifyDesktop: s.notify.desktop,
     notifyFeishu: s.notify.feishu,
+    notifyWecomGroup: s.notify.wecomGroup === true,
   };
 }
 

@@ -12,6 +12,7 @@
     "sentTime": "Sent at {{time}}",
     "linkCopied": "Link copied",
     "turnCostEstimate": "This turn {{cost}}",
+    "turnTokens": "This turn used {{tokens}}",
     "turnCost": "This turn cost {{cost}}",
     "messageGenerating": "Message is generating",
     "generating": "Generating",
@@ -40,6 +41,7 @@
     "statusStopped": "Stopped",
     "toolUseCount": "{{n}} tool calls",
     "subagentTaskTitle": "Subagent task",
+    "subagentStarted": "Subagent {{name}} started",
     "recentTool": "Latest tool: {{name}}",
     "outputFile": "Output: {{file}}",
     "noMoreDetail": "No more details",
@@ -121,7 +123,8 @@
     "justNow": "Just now",
     "minutesAgo": "{{n}} min ago",
     "hoursAgo": "{{n}} h ago",
-    "turnCostValue": "Est. {{value}}"
+    "turnCostValue": "Est. {{value}}",
+    "turnTokens": "{{tokens}} tokens"
   },
   "lightbox": {
     "cancelAnnotation": "Cancel annotation",
@@ -144,6 +147,7 @@
     "systemInstruction": "System instruction",
     "retrySend": "Retry Send",
     "clearError": "Clear Error",
+    "piImageInputUnsupported": "Image input is not enabled for the current Pi model. Switch to a model that supports images. For a custom model, enable “Supports image input” in provider settings, then start a new Pi task.",
     "credentialSwitchWait": "Waiting for another Codex task to finish; it will send automatically once done",
     "aborting": "Stopping; queued messages will stay here",
     "paused": "Queue paused; queued messages won't send automatically",

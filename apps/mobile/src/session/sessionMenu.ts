@@ -207,7 +207,9 @@ function buildSessionMenuMetaLine(session: RemoteSession): string {
     ? 'Codex'
     : session.agentKind === 'cursor'
       ? 'Cursor'
-      : 'Claude';
+      : session.agentKind === 'pi'
+        ? 'Pi'
+        : 'Claude';
   const parts = [agentLabel];
   const worktree = sessionWorktreeInfo(session);
   const workspace = workspaceName(session);

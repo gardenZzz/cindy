@@ -29,6 +29,7 @@ export interface OrcaTeamSnapshot {
 export interface OrcaLeadSessionSnapshot {
   id: string;
   agentKind: AgentKind;
+  workspaceKind: 'project' | 'dialogue';
   workingDir: string | null;
   model: string;
   effort: string | null;
@@ -297,6 +298,7 @@ function normalizeRequiredText(value: string, field: string): { ok: true; value:
 export function normalizeOrcaWorkerAgent(value: unknown): AgentKind {
   if (value === 'codex') return 'codex';
   if (value === 'cursor') return 'cursor';
+  if (value === 'pi') return 'pi';
   return 'claude-code';
 }
 
@@ -390,13 +392,13 @@ function resolveWorkerConfig(params: {
   const { input, lead, defaults, availableModels } = params;
   const model = input.model
     ?? defaults.model
-    ?? (input.agent === lead.agentKind
-      ? lead.model
-      : input.agent === 'codex'
-        ? 'gpt-5.5'
-        : input.agent === 'cursor'
-          ? CURSOR_DEFAULT_WORKER_MODEL
-          : 'claude-sonnet-4-6');
+    // pi 显式列出(与 model-defaults.ts 对齐,避免将来改 cc 默认时 pi 静默跟随)。
+    // cursor 走 CURSOR_DEFAULT_WORKER_MODEL;其它回落 claude-sonnet-4-6。
+    ?? (input.agent === lead.agentKind ? lead.model
+        : input.agent === 'codex' ? 'gpt-5.5'
+        : input.agent === 'cursor' ? CURSOR_DEFAULT_WORKER_MODEL
+        : input.agent === 'pi' ? 'claude-sonnet-4-6'
+        : 'claude-sonnet-4-6');
   const modelCapabilities = availableModels.find((candidate) => candidate.id === model);
   if (!modelCapabilities) {
     return {
@@ -424,7 +426,7 @@ function resolveWorkerConfig(params: {
         : (input.agent === lead.agentKind ? lead.providerId : null),
     fastMode: modelCapabilities.supportsFastMode === false
       ? false
-      : (((input.agent === 'codex' || input.agent === 'cursor') && input.fast !== undefined)
+      : ((agentConsumesExplicitFast(input.agent) && input.fast !== undefined)
           ? input.fast
           : (defaults.fastMode ?? !!lead.fastMode)),
   };
@@ -442,7 +444,17 @@ export function budgetModelRequiresApiKeyMessage(model: string): string {
 function agentDisplayName(agent: AgentKind): string {
   if (agent === 'codex') return 'Codex';
   if (agent === 'cursor') return 'Cursor';
+  if (agent === 'pi') return 'Pi';
   return 'Claude Code';
+}
+
+/**
+ * 会消费显式 `fast` 输入的 agent:Codex / Cursor / Pi(三者 agent 层都支持 Fast 模式)。
+ * claude-code 的 fast 在 agent 层是 no-op,故不接线。实际是否生效仍由该 (来源, 模型)
+ * 的 `supportsFastMode` 收口 -- 与 Pi 自动任务路径同口径(runner 按模型能力裁决)。
+ */
+function agentConsumesExplicitFast(agent: AgentKind): boolean {
+  return agent === 'codex' || agent === 'cursor' || agent === 'pi';
 }
 
 /**
@@ -455,7 +467,7 @@ export function buildNoProviderMessage(
   availability: Record<AgentKind, OrcaWorkerProviderSnapshot[]>,
 ): string {
   const base = `${agentDisplayName(agent)} 当前没有可用的模型供应商(provider)。请在「设置 → 模型供应商」连接一个支持 ${agentDisplayName(agent)} 的供应商后重试`;
-  const others = (['claude-code', 'codex'] as AgentKind[]).filter(
+  const others = (['claude-code', 'codex', 'cursor', 'pi'] as AgentKind[]).filter(
     (a) => a !== agent && (availability[a]?.length ?? 0) > 0,
   );
   if (others.length === 0) return `${base}。`;
@@ -570,6 +582,19 @@ export function createOrcaWorkerCreationService(deps: OrcaWorkerCreationDeps): O
       return { ok: false, errorCode: 'NOT_FOUND', message: `lead session ${params.leadSessionId} not found` };
     }
 
+    // Pi 尚无远程 runtime:PiAgent.startSession 对 remoteHostId 一律 NotSupportedError,
+    // 远端 ensure 又对 pi 跳过,SSH 远程 Lead + Pi worker 必然在 bootstrap 期被包成笼统
+    // INTERNAL —— 在 preflight 就以可操作信息拒绝(codex-connector 报)。lead 侧的
+    // capabilities 层已拒 Pi 远程会话,此闸补上 worker 创建(UI popover / MCP / 批量)路径。
+    if (lead.remoteHostId && params.agent === 'pi') {
+      return {
+        ok: false,
+        errorCode: 'INVALID_PARAMS',
+        message:
+          'Pi workers are not available for SSH remote leads: pi sessions are local-only for now — pick Claude Code or Codex for this worker',
+      };
+    }
+
     const defaults = deps.getWorkerDefaults(params.agent);
     // 标准面板显式选定的来源(非空 string)直接生效,由下方精确 preflight 把关「已连接且
     // 提供该模型」;空串/null/undefined 一律按未显式处理(与 IPC 边界同口径,service 作为
@@ -635,7 +660,8 @@ export function createOrcaWorkerCreationService(deps: OrcaWorkerCreationDeps): O
     // 只有该来源确实带了 Fast 元数据才覆盖;无元数据(旧组装方)保留拍平解析。
     if (routeProvider?.fastModels) {
       const providerSupportsFast = routeProvider.fastModels.includes(resolved.model);
-      const requestedFast = (params.agent === 'codex' || params.agent === 'cursor') && params.fast !== undefined
+      const requestedFast = agentConsumesExplicitFast(params.agent) && params.fast !== undefined
+
         ? params.fast
         : (defaults.fastMode ?? !!lead.fastMode);
       resolved.fastMode = providerSupportsFast && requestedFast === true;
@@ -824,6 +850,9 @@ export function createOrcaWorkerCreationService(deps: OrcaWorkerCreationDeps): O
       const workerOpts = deps.buildCreateOptsWithStderr({
         id: workerSessionId,
         agentKind: params.agent,
+        // Worker 与 Lead 共享同一种 workspace 语义。dialogue Lead 虽然已有 main 自动分配
+        // 的运行目录,也不能把 Worker 落成 project,否则侧栏分组和项目能力都会误判。
+        workspaceKind: lead.workspaceKind,
         workingDir: lead.workingDir ?? '',
         // remote lead 的 worker 继承 remoteHostId:在同一台远端主机上 spawn,
         // 与 lead 共享远端 workingDir;本地 lead 不带此字段 (本地 worker)。

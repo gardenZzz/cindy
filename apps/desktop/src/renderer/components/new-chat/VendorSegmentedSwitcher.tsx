@@ -1,5 +1,9 @@
 /**
- * VendorSegmentedSwitcher —— NewMaker 主区域内的 Agent 引擎切换控件。
+ * VendorSegmentedSwitcher —— Agent 引擎切换分段(定宽等分)。
+ *
+ * 2026-08:New Maker 工具条上的引擎切换已改用 AgentSelect(下拉,触发器定宽)——
+ * 本控件宽度被引擎数量整除,引擎多了每段就放不下文字。它现在服务模型面板内的
+ * 两步切换(ModelSelector 的 agentSwitch)与设置页 IM 目录偏好等定值场景。
  * ---------------------------------------------------------------------------
  * 视觉规格:
  *   - 容器:pill (9999px),宽 220,padding 3,gap 2
@@ -7,21 +11,22 @@
  *   - segment:pill,padding [6,14],fill_container,justifyContent center,gap 6
  *     · Active : Light Card #ffffff + 1px Board #d7d7d4 / Dark #3c3c3a
  *     · Inactive: 透明,文字 Stone #737373
- *   - icon: 14×14 Agent 身份 mark (Claude Code / Codex CLI / Cursor)
+ *   - icon: 14×14 Agent 身份 mark (Claude Code / Codex CLI / Cursor / Pi)
  *   - 文字: Inter 14, active weight 500,inactive weight 400
  *
- * F-COLLAB (2026-05): 原本第 3 个 "协同模式" tab 已被 ChatInput 底部的
- * CollaborationModeToggle 取代 — 用户先选 Claude 走单 session,需要时再 toggle
- * 召集 Worker。删 tab 后整体回到 2-tab 220 宽,与历史版本视觉对齐。
- * T2: New Maker 可经 includeCursor 翻开 Cursor 第三段。
+ * F-COLLAB (2026-05): 原本第 3 个 "协同模式" tab 已移入 ChatInput 的「+」菜单 —
+ * 用户先选 Claude 走单 session,需要时再从菜单召集 Worker。删 tab 后整体回到
+ * 2-tab 220 宽,与历史版本视觉对齐。
+ * T2: New Maker 可经 includeCursor 翻开 Cursor 段;runtime 未注册 / 上下文不支持的
+ * 引擎(如 Pi)经 hiddenVendors 隐藏。
  */
 
 import type { ComponentType } from 'react';
+
 import { cn } from '@/lib/utils';
 import type { MakerVendor } from '@/lib/ccAgent.types';
-import { CodexMark } from '@/components/icons/CodexMark';
-import { ClaudeMark } from '@/components/icons/ClaudeMark';
-import { CursorMark } from '@/components/icons/CursorMark';
+
+import { AGENT_OPTIONS } from './agentOptions';
 
 interface VendorSegmentedSwitcherProps {
   value: MakerVendor;
@@ -55,43 +60,50 @@ interface VendorSegmentedSwitcherProps {
   /**
    * T2: New Maker 在探测到本机 cursor-agent 时翻开 Cursor 段。
    * 默认 false —— scheduler / Orca worker / IM / 会话内切换等面保持关闭。
+   * Cursor 不在 SELECTABLE_VENDORS(agentOptions) 里,由本 prop 单独注入。
    */
   includeCursor?: boolean;
+  /**
+   * 从选择器里**隐藏**的 vendor(如 runtime 未注册的 Pi、SSH 远程草稿下的 Pi)。
+   * 创建入口据 `maker:list-available-agents` 计算,避免用户创建出最终 `Agent 'pi' is not
+   * registered` 的会话(codex review P2)。调用方需保证 `value` 不在此列表(或自行 coerce)。
+   */
+  hiddenVendors?: readonly MakerVendor[];
 }
 
 interface SegmentOption {
   vendor: MakerVendor;
   label: string;
   Mark: ComponentType<{ size?: number; className?: string }>;
-  iconClassName?: string;
 }
 
-const BASE_OPTIONS: readonly SegmentOption[] = [
-  { vendor: 'cc', label: 'Claude', Mark: ClaudeMark },
-  { vendor: 'codex', label: 'Codex', Mark: CodexMark },
-] as const;
-
-const CURSOR_OPTION: SegmentOption = {
-  vendor: 'cursor',
-  label: 'Cursor',
-  Mark: CursorMark,
-};
 
 export function VendorSegmentedSwitcher({
   value,
   onChange,
   disabled,
   className,
-  width = 220,
+  width = 300,
   dense = false,
   iconOnly = false,
   visualVariant = 'default',
   reselectEmitsChange = false,
   ariaLabel,
   includeCursor = false,
+  hiddenVendors,
 }: VendorSegmentedSwitcherProps) {
   const isCreateAgentVariant = visualVariant === 'create-agent';
-  const OPTIONS = includeCursor ? [...BASE_OPTIONS, CURSOR_OPTION] : BASE_OPTIONS;
+  // 引擎条目(vendor / label / mark)的单一来源在 ./agentOptions —— 与 AgentSelect
+  // 共用一张表(含 cursor)。includeCursor 保留 API 兼容,不再额外注入(避免重复段)。
+  // 调用方用 hiddenVendors 控制 Cursor 是否可见。
+  void includeCursor;
+  const baseOptions: readonly SegmentOption[] = AGENT_OPTIONS;
+  // 隐藏 runtime 未注册 / 当前上下文不支持的 vendor;当前选中值即便被隐藏也保留一段(调用方
+  // coerce 前的过渡帧),避免 tablist 出现"无选中段"。
+  const visibleOptions =
+    hiddenVendors && hiddenVendors.length > 0
+      ? baseOptions.filter((opt) => opt.vendor === value || !hiddenVendors.includes(opt.vendor))
+      : baseOptions;
   return (
     <div
       className={cn(
@@ -114,7 +126,7 @@ export function VendorSegmentedSwitcher({
       role="tablist"
       aria-label={ariaLabel ?? 'Vendor switcher'}
     >
-      {OPTIONS.map((opt) => {
+      {visibleOptions.map((opt) => {
         const isActive = value === opt.vendor;
         return (
           <button
@@ -163,7 +175,7 @@ export function VendorSegmentedSwitcher({
                   ),
             )}
           >
-            <opt.Mark size={dense ? 13 : 14} className={cn('shrink-0', opt.iconClassName)} />
+            <opt.Mark size={dense ? 13 : 14} className="shrink-0" />
             {/* 文字下沉 0.5px —— Inter 在 leading-none 下视觉重心偏上,与 vendor mark
                 光学居中对齐微调,见 NewChat 视觉走查 2026-05-03。 */}
             {!iconOnly && <span className="translate-y-[0.5px] whitespace-nowrap">{opt.label}</span>}

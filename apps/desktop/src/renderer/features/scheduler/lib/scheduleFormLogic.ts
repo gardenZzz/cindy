@@ -120,6 +120,7 @@ export interface ScheduleFormState {
   preRunHookTimeoutSec: string;
   notifyDesktop: boolean;
   notifyFeishu: boolean;
+  notifyWecomGroup?: boolean;
 }
 
 /** bound 态"已选绑定但尚未挑会话"的占位 id;validate 用 selectThread 拦截。 */
@@ -263,10 +264,11 @@ export function applyRunMode(
 
 /** renderer Session.agentKind('cc'|'codex'|'cursor')→ schedule agentKind 映射。 */
 export function sessionAgentKindToScheduleAgentKind(
-  kind: 'cc' | 'codex' | 'cursor',
+  kind: 'cc' | 'codex' | 'cursor' | 'pi',
 ): ScheduleFormState['agentKind'] {
   if (kind === 'codex') return 'codex';
   if (kind === 'cursor') return 'cursor';
+  if (kind === 'pi') return 'pi';
   return 'claude-code';
 }
 
@@ -434,7 +436,11 @@ export function buildScheduleInput(form: ScheduleFormState): CreateScheduleInput
     silentWhenIdle: !isScript && form.silentWhenIdle,
     targetSessionId: !isScript ? (form.targetSessionId.trim() || undefined) : undefined,
     preRunHook: buildPreRunHook(form),
-    notify: { desktop: form.notifyDesktop, feishu: form.notifyFeishu },
+    notify: {
+      desktop: form.notifyDesktop,
+      feishu: form.notifyFeishu,
+      wecomGroup: form.notifyWecomGroup === true,
+    },
   };
 
   if (isScript) {
@@ -459,6 +465,7 @@ export function buildScheduleInput(form: ScheduleFormState): CreateScheduleInput
   if (form.model.trim()) base.model = form.model.trim();
   if (form.providerId.trim()) base.providerId = form.providerId.trim();
   if (form.effort && isEffortValue(form.effort)) base.effort = form.effort;
-  if (form.agentKind === 'codex' || form.agentKind === 'cursor') base.fastMode = form.fastMode;
+  // fastMode 对 Codex / Cursor / Pi 都生效;claude-code 忽略此字段。
+  if (form.agentKind === 'codex' || form.agentKind === 'cursor' || form.agentKind === 'pi') base.fastMode = form.fastMode;
   return base;
 }

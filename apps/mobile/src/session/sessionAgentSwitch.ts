@@ -13,12 +13,13 @@ import type { AgentKind } from '@cindy/maker-shared';
 export type MobileSessionAgentKind = AgentKind;
 
 /** DB 会话行的 agent_kind 值域（与 desktop sessions.agent_kind 对齐）。 */
-export type DbSessionAgentKind = 'cc' | 'codex' | 'cursor';
+export type DbSessionAgentKind = 'cc' | 'codex' | 'cursor' | 'pi';
 
-/** DB 'cc'/'codex'/'cursor' → maker-core AgentKind。 */
+/** DB 'cc'/'codex'/'cursor'/'pi' → maker-core AgentKind。 */
 export function toMakerAgentKind(dbKind: string | null | undefined): MobileSessionAgentKind {
   if (dbKind === 'codex') return 'codex';
   if (dbKind === 'cursor') return 'cursor';
+  if (dbKind === 'pi') return 'pi';
   return 'claude-code';
 }
 
@@ -26,6 +27,7 @@ export function toMakerAgentKind(dbKind: string | null | undefined): MobileSessi
 export function toDbAgentKind(kind: MobileSessionAgentKind): DbSessionAgentKind {
   if (kind === 'codex') return 'codex';
   if (kind === 'cursor') return 'cursor';
+  if (kind === 'pi') return 'pi';
   return 'cc';
 }
 
@@ -39,6 +41,7 @@ export function normalizeSessionAgentSwitchIntent(
     item.targetAgentKind !== 'claude-code'
     && item.targetAgentKind !== 'codex'
     && item.targetAgentKind !== 'cursor'
+    && item.targetAgentKind !== 'pi'
   ) {
     return null;
   }
@@ -81,6 +84,7 @@ export function supportsMobileSessionAgentSwitch(
 export function mobileAgentLabel(agentKind: MobileSessionAgentKind): string {
   if (agentKind === 'codex') return 'Codex';
   if (agentKind === 'cursor') return 'Cursor';
+  if (agentKind === 'pi') return 'Pi';
   return 'Claude Code';
 }
 
@@ -88,5 +92,20 @@ export function mobileAgentLabel(agentKind: MobileSessionAgentKind): string {
 export function mobileAgentShortLabel(agentKind: MobileSessionAgentKind): string {
   if (agentKind === 'codex') return 'Codex';
   if (agentKind === 'cursor') return 'Cursor';
+  if (agentKind === 'pi') return 'Pi';
   return 'Claude';
+}
+
+export function mobileAgentLabelFromUnknown(agentKind: unknown): string {
+  if (agentKind === 'codex') return 'Codex';
+  if (agentKind === 'cursor') return 'Cursor';
+  if (agentKind === 'pi') return 'Pi';
+  return 'Claude Code';
+}
+
+export function mobileAgentVendor(agentKind: MobileSessionAgentKind): DbSessionAgentKind {
+  if (agentKind === 'codex') return 'codex';
+  if (agentKind === 'cursor') return 'cursor';
+  if (agentKind === 'pi') return 'pi';
+  return 'cc';
 }

@@ -481,6 +481,12 @@ function isGoogleGeminiChatUpstream(upstream: string): boolean {
 const MOONSHOT_CHAT_HOSTS = new Set(['api.moonshot.cn', 'api.moonshot.ai']);
 /** 火山方舟(豆包)官方 DNS 边界:ark.<region>.volces.com(如 ark.cn-beijing.volces.com)。 */
 const VOLCENGINE_ARK_CHAT_HOST_RE = /^ark\.[a-z0-9-]+\.volces\.com$/;
+/** 阿里云百炼 Coding Plan / Token Plan / 按量付费官方 DNS 边界。 */
+const DASHSCOPE_CODING_CHAT_HOSTS = new Set([
+  'coding.dashscope.aliyuncs.com',
+  'dashscope.aliyuncs.com',
+  'token-plan.cn-beijing.maas.aliyuncs.com',
+]);
 /**
  * 豆包 Seed 系列 model id 的版本前缀:doubao-seed-<major>-<minor>-…。
  * 只放行 1.6 起的版本——Seed 品牌线从 1.6 开始原生多模态(官方 Chat Completions
@@ -496,6 +502,17 @@ function isDoubaoVisionModel(model: string): boolean {
   return major > 1 || (major === 1 && minor >= 6);
 }
 
+/** 已确认支持图片输入的 Qwen model id 白名单。 */
+const QWEN_IMAGE_CHAT_MODELS = new Set([
+  'qwen3.6-flash',
+  'qwen3.7-plus',
+  'qwen3.8-max-preview',
+]);
+
+function isQwenImageChatModel(model: string): boolean {
+  return QWEN_IMAGE_CHAT_MODELS.has(model);
+}
+
 function rewriteChatBridgeModel(model: string, stripPrefix: string | undefined): string {
   return stripPrefix && model.startsWith(stripPrefix)
     ? model.slice(stripPrefix.length)
@@ -504,10 +521,15 @@ function rewriteChatBridgeModel(model: string, stripPrefix: string | undefined):
 
 /**
  * 在模型级多模态能力元数据接入路由前,图片桥接先按已验证的上游能力显式开启。
- * 这里认官方 DNS 边界 + 上游 model
- * (Moonshot 的 Kimi K3、火山方舟的豆包 Seed 系列),不认 provider id(预设创建后
- * 会生成用户自定义 id),也不对所有 openai-chat 供应商放开。未命中继续沿用
- * fail-closed 默认——无图片能力的上游(如 DeepSeek)保持发送前显式报错,不静默吞图。
+ *
+ * 当前覆盖:
+ * - Moonshot Kimi K3
+ * - Volcengine Doubao Seed 系列
+ * - Alibaba Cloud Bailian Coding Plan Qwen 3.7 Plus
+ *
+ * 这里认官方 DNS 边界 + 上游 model,不认 provider id(预设创建后会生成用户自定义
+ * id),也不对所有 openai-chat 供应商放开。未命中继续沿用 fail-closed 默认——
+ * 无图片能力的上游(如 DeepSeek)保持发送前显式报错,不静默吞图。
  */
 export function chatBridgeCapabilitiesForRoute(
   upstream: string,
@@ -532,6 +554,7 @@ function isVerifiedImageChatRoute(upstream: string, realModel: string): boolean 
   const host = url.hostname.toLowerCase();
   if (realModel === 'kimi-k3') return MOONSHOT_CHAT_HOSTS.has(host);
   if (isDoubaoVisionModel(realModel)) return VOLCENGINE_ARK_CHAT_HOST_RE.test(host);
+  if (isQwenImageChatModel(realModel)) return DASHSCOPE_CODING_CHAT_HOSTS.has(host);
   return false;
 }
 
@@ -1139,6 +1162,30 @@ function normalizeXaiInputItem(item: unknown): { item: unknown; changed: boolean
       || typeof base.output !== 'string'
       || typeof base.call_id !== 'string'
       || Object.keys(base).some((key) => !['type', 'call_id', 'output'].includes(key));
+    return changed ? { item: next, changed: true } : { item: base, changed: false };
+  }
+
+  // 回放的 reasoning 项必须逐字回到上游签发时的形状 —— xAI 校验不过就整轮 400
+  // "Could not decode the compaction blob. Ensure it is unmodified from the compact response."
+  // codex 的结构体会把自己没用上的 `Option` 字段一并序列化(实测 `content: null`),
+  // 那是 xAI 从没发过的键;带着它回放等于「被改过」。这里收敛成 Responses 契约里
+  // reasoning 该有的四个键 —— 与 anthropic-responses-bridge 回放的形状同口径
+  // (那条路上的 grok-4.5 一直是通的)。
+  // encrypted_content / summary / id 原样搬,一个字节都不改写。
+  if (type === 'reasoning') {
+    const next: Record<string, unknown> = { type: 'reasoning' };
+    if (typeof base.id === 'string' && base.id.length > 0) next.id = base.id;
+    next.summary = Array.isArray(base.summary) ? base.summary : [];
+    if (typeof base.encrypted_content === 'string') next.encrypted_content = base.encrypted_content;
+    // changed 必须覆盖「键在允许列表里、但值被上面丢掉了」的情况(如 id 是空串
+    // 或非 string):只数键名会让这些项拿着原值原样发出去 —— 等于算出了规范形状
+    // 又扔掉。逐字段比对 next 与 base,判定和构造才是同一套口径。
+    const changed =
+      typedFromEasy ||
+      !Array.isArray(base.summary) ||
+      ('id' in base && next.id !== base.id) ||
+      ('encrypted_content' in base && next.encrypted_content !== base.encrypted_content) ||
+      Object.keys(base).some((key) => !['type', 'id', 'summary', 'encrypted_content'].includes(key));
     return changed ? { item: next, changed: true } : { item: base, changed: false };
   }
 

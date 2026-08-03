@@ -71,8 +71,8 @@ const D_GHOST_FORGE_GUIDE = [
   "管子 API(cindy.send)、面板与主题、沙箱红线、打包与测试流程。整本超出单次工具",
   '结果上限,分章取用:不传参数返回目录,传 section(章号如 "4.7" 或章标题关键词如',
   '"network")返回单章正文。用户说"帮我做一个 XX 插件 / 改一下某插件"时,先取目录、',
-  "先按第 0 章「设计对齐」用带选项的提问卡片和用户确认界面形态(停靠面板/右侧栏页签/",
-  "纯工具)等关键决策,再按需读相关章;新插件可用 ghost_forge_scaffold 生成骨架,",
+  "先按第 0 章「设计对齐」用带选项的提问卡片和用户确认界面形态(停靠面板/插件页内",
+  "面板/纯工具)等关键决策,再按需读相关章;新插件可用 ghost_forge_scaffold 生成骨架,",
   "修改完成后再用 ghost_forge_pack 打包装入。",
 ].join("\n");
 
@@ -732,17 +732,21 @@ export function createCindyGhostsMcpServer(
     version: "1.0.0",
   });
 
-  // 花名册快照:装配时取一次,拼进两件工具的描述(语义召回的数据源;
+  // 花名册快照:装配时取一次,只拼进 ghost_list 的描述(语义召回的数据源;
   // 会话内恒定,缓存安全)。无花名册 dep / 空清单 = 描述保持基线。
+  //
+  // 只拼一处:两件工具的描述都进 system prompt 固定前缀,同一份花名册拼两遍
+  // 等于让整份已装插件清单在上下文里出现两次(12 个插件实测约 1.5k 字符/份)。
+  // ghost_call 的调用前提是已知 ghost_id + tool,那必然来自 ghost_list 的描述
+  // 或返回值(D_GHOST_CALL 首行已写明这点),再挂一份花名册对路由没有增量作用。
   const roster = formatGhostRoster(deps.getRosterItems?.() ?? []);
   const dGhostList = roster ? `${D_GHOST_LIST}\n\n${roster}` : D_GHOST_LIST;
-  const dGhostCall = roster ? `${D_GHOST_CALL}\n\n${roster}` : D_GHOST_CALL;
 
   server.tool("ghost_list", dGhostList, {}, async () => handleGhostList(deps));
 
   server.tool(
     "ghost_call",
-    dGhostCall,
+    D_GHOST_CALL,
     {
       ghost_id: z.string().describe("目标插件 id(来自 ghost_list)"),
       tool: z.string().describe("工具名(来自 ghost_list 该插件的 tools)"),

@@ -95,13 +95,13 @@ describe('cursor AgentKind→DraftVendor 草稿偏好链', () => {
 
   it('register APPLY/SET_SESSION 与 NewMakerDraftRoute push 槽复用唯一映射（非二元兜底）', () => {
     const registerSrc = readFileSync(join(here, '../../maker-ipc/register.ts'), 'utf8');
-    expect(registerSrc).toContain('isMakerCoreAgentKind(p.agent)');
-    expect(registerSrc).toContain("agent must be claude-code|codex|cursor");
+    // 合并后 register 用显式四元校验(含 pi),不再走 isMakerCoreAgentKind 助手;
+    // 关键不变量:不得回落二元 claude-code|codex 兜底。
+    expect(registerSrc).toContain("p.agent !== 'claude-code' && p.agent !== 'codex' && p.agent !== 'cursor' && p.agent !== 'pi'");
     expect(registerSrc).toContain('buildNewMakerDraftChangedPayload()');
-    // APPLY / SET_SESSION / SYNC_SESSION 三处都不得再写二元 agent 校验
-    expect(registerSrc.match(/isMakerCoreAgentKind\(p\.agent\)/g)?.length).toBeGreaterThanOrEqual(3);
+    expect(registerSrc.match(/p\.agent !== 'claude-code' && p\.agent !== 'codex' && p\.agent !== 'cursor' && p\.agent !== 'pi'/g)?.length).toBeGreaterThanOrEqual(3);
     expect(registerSrc).not.toMatch(
-      /p\.agent !== 'claude-code' && p\.agent !== 'codex'/,
+      /p\.agent !== 'claude-code' && p\.agent !== 'codex'\)/,
     );
 
     const routeSrc = readFileSync(

@@ -3,6 +3,8 @@ import { describe, expect, it } from 'vitest';
 import {
   mobileAgentLabel,
   mobileAgentShortLabel,
+  mobileAgentLabelFromUnknown,
+  mobileAgentVendor,
   normalizeSessionAgentSwitchIntent,
   sessionAgentKind,
   supportsMobileSessionAgentSwitch,
@@ -55,17 +57,31 @@ describe('mobile session Agent switch contract', () => {
     expect(toMakerAgentKind('cc')).toBe('claude-code');
     expect(toMakerAgentKind('codex')).toBe('codex');
     expect(toMakerAgentKind('cursor')).toBe('cursor');
+    expect(toMakerAgentKind('pi')).toBe('pi');
     expect(toDbAgentKind('claude-code')).toBe('cc');
     expect(toDbAgentKind('codex')).toBe('codex');
     expect(toDbAgentKind('cursor')).toBe('cursor');
+    expect(toDbAgentKind('pi')).toBe('pi');
     expect(sessionAgentKind({ agentKind: 'cc' })).toBe('claude-code');
     expect(sessionAgentKind({ agentKind: 'codex' })).toBe('codex');
     expect(sessionAgentKind({ agentKind: 'cursor' })).toBe('cursor');
+    expect(sessionAgentKind({ agentKind: 'pi' })).toBe('pi');
     expect(mobileAgentLabel('claude-code')).toBe('Claude Code');
     expect(mobileAgentLabel('codex')).toBe('Codex');
     expect(mobileAgentLabel('cursor')).toBe('Cursor');
+    expect(mobileAgentLabel('pi')).toBe('Pi');
     expect(mobileAgentShortLabel('claude-code')).toBe('Claude');
     expect(mobileAgentShortLabel('cursor')).toBe('Cursor');
+    expect(mobileAgentShortLabel('pi')).toBe('Pi');
+    expect(mobileAgentLabelFromUnknown('pi')).toBe('Pi');
+    expect(mobileAgentLabelFromUnknown('cursor')).toBe('Cursor');
+    expect(mobileAgentVendor('claude-code')).toBe('cc');
+    expect(mobileAgentVendor('codex')).toBe('codex');
+    expect(mobileAgentVendor('cursor')).toBe('cursor');
+    expect(mobileAgentVendor('pi')).toBe('pi');
+    expect(normalizeSessionAgentSwitchIntent({
+      targetAgentKind: 'pi', model: 'gpt-5.5', providerId: 'openai',
+    })).toEqual({ targetAgentKind: 'pi', model: 'gpt-5.5', providerId: 'openai' });
   });
 
   it('requires host capability and excludes SSH / Orca / Cursor-source sessions', () => {

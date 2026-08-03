@@ -5,6 +5,7 @@ const AGENT_DISPLAY_LABELS: Record<AgentKind, string> = {
   codex: 'Codex',
   // Type-slot only (#5); cursor is not registered / not shown as available.
   cursor: 'Cursor',
+  pi: 'Pi',
 };
 
 export function providerAgentSupportLabel(provider?: Pick<ProviderView, 'agents'> | null): string {

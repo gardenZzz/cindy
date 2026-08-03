@@ -261,6 +261,9 @@ describe('getOverwritableAutoTitle — 覆写目标', () => {
     // (Claude provider 而非 cursor oneShot),会话永远停在默认名(根因回归)。
     h.sqlite!.prepare('UPDATE sessions SET agent_kind = ? WHERE id = ?').run('cursor', SESSION_ID);
     expect((await getOverwritableAutoTitle(SESSION_ID))?.agentKind).toBe('cursor');
+
+    h.sqlite!.prepare('UPDATE sessions SET agent_kind = ? WHERE id = ?').run('pi', SESSION_ID);
+    expect((await getOverwritableAutoTitle(SESSION_ID))?.agentKind).toBe('pi');
   });
 
   it('用它当期望值就能覆写 fork 占位(端到端条件写)', async () => {

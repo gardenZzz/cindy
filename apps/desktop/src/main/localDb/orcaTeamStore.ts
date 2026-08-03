@@ -9,6 +9,7 @@ import { throwIpcError } from '../utils/ipcValidate.js';
 import { tapWindowBroadcast } from '../device-link/broadcast-tap.js';
 import { notifyAgentIslandSessionPatch } from './agentIslandSessionPatch.js';
 import type { AgentKind } from '@cindy/maker-core';
+import { dbToMakerAgentKind } from '../../shared/agentKindConversion.js';
 
 const log = createLogger('orca-team-store');
 
@@ -598,11 +599,7 @@ function workerToRecord(
 }
 
 function fromDbAgentKind(agentKind: string): MakerAgentKind {
-  // DB 存 'cc' | 'codex' | 'cursor'（偶发历史 'claude-code'）；与
-  // sessionAgentSwitchHandler.toMakerAgentKind 同口径，禁止再二元塌缩。
-  if (agentKind === 'codex') return 'codex';
-  if (agentKind === 'cursor') return 'cursor';
-  return 'claude-code';
+  return dbToMakerAgentKind(agentKind);
 }
 
 function msToIso(ms: number | null | undefined): string | null {

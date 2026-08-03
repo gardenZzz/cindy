@@ -20,11 +20,7 @@ import { cn } from '@/lib/utils';
 import { useAppShortcutDisplay } from '@/hooks/useAppShortcut';
 import { useConfirmDialog } from '@/components/ui/confirm-dialog-provider';
 import { Tip } from '@/components/ui/tooltip';
-import { VendorIcon } from '@/components/sidebar/VendorIcon';
-import {
-  normalizeOrcaDisplayAgentKind,
-  orcaVendorForAgentKind,
-} from './lib/orcaAgentDisplay';
+import { VendorIcon, agentKindToVendor } from '@/components/sidebar/VendorIcon';
 import type { WorkerInfo } from './hooks/useWorkers';
 import { shouldShowWorkerLabel } from './workerLabel';
 import {
@@ -94,7 +90,7 @@ function WorkerAvatar({
   showAttentionDot?: boolean;
   selected?: boolean;
 }) {
-  const vendor = orcaVendorForAgentKind(normalizeOrcaDisplayAgentKind(agent));
+  const vendor = agentKindToVendor(agent);
   const selectedIdleClassName =
     selected && status !== 'running' && status !== 'error'
       ? 'text-[var(--surface-on-card)]'

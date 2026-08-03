@@ -160,13 +160,14 @@ export function ProjectChip({
   );
 }
 
-/** Agent tabs: Claude Code / Codex / Cursor (T8). */
-const VISIBLE_AGENT_KINDS: readonly AgentKind[] = ['claude-code', 'codex', 'cursor'];
+/** Agent tabs: Claude Code / Codex / Cursor / Pi. */
+const VISIBLE_AGENT_KINDS: readonly AgentKind[] = ['claude-code', 'codex', 'cursor', 'pi'];
 
-const AGENT_META: Record<AgentKind, { label: string; vendor: 'cc' | 'codex' | 'cursor' }> = {
+const AGENT_META: Record<AgentKind, { label: string; vendor: 'cc' | 'codex' | 'cursor' | 'pi' }> = {
   'claude-code': { label: 'Claude Code', vendor: 'cc' },
   codex: { label: 'Codex', vendor: 'codex' },
   cursor: { label: 'Cursor', vendor: 'cursor' },
+  pi: { label: 'Pi', vendor: 'pi' },
 };
 
 export function AgentTabs({ value, onChange, disabled }: { value: AgentKind; onChange: (v: AgentKind) => void; disabled?: boolean }) {
@@ -1149,8 +1150,7 @@ export function ModelEffortChip({
       : t('scheduler.chips.model.default');
 
   // railSources 仅用于 nativeDefault 归一化(下拉宽度由 ModelSelectorContent 内容自适应,见 w-auto)。
-  const vendorKey =
-    agentKind === 'codex' ? 'codex' : agentKind === 'cursor' ? 'cursor' : 'cc';
+  const vendorKey = agentKind === 'claude-code' ? 'cc' : agentKind;
   const railSources = useMemo(
     () => connectedProvidersForAgent(providers, agentKind),
     [providers, agentKind],
@@ -1335,7 +1335,9 @@ export function ThreadPickerInline({ value, onSelect, onOpen, reference }: {
                   ? 'Claude Code'
                   : s.agentKind === 'cursor'
                     ? 'Cursor'
-                    : 'Codex'}
+                    : s.agentKind === 'pi'
+                      ? 'Pi'
+                      : 'Codex'}
               </option>
             ))}
           </select>

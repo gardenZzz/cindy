@@ -51,6 +51,8 @@ export function agentAuthGateHint(agentKind: AgentKind): string {
     ? 'Claude'
     : agentKind === 'cursor'
       ? 'Cursor'
-      : 'Codex';
+      : agentKind === 'pi'
+        ? 'Pi'
+        : 'Codex';
   return i18n.t('session.row.authGateHint', { agent: label });
 }

@@ -314,6 +314,8 @@ export const MOBILE_REMOTE_INVOKE_CHANNELS = [
   'maker:goal:resume',
   'maker:goal:update',
   'maker:fork',
+  'maker:get-session-tree',
+  'maker:navigate-session-tree',
   'maker:rewind:preview',
   'maker:rewind:commit',
   'maker:message:delete',
@@ -475,7 +477,7 @@ export function connectionIssueHint(kind: DeviceLinkConnectionIssueKind): string
 }
 
 /**
- * agent 鉴权失败 message 的固定模板。maker-core 的 claude-code / codex / cursor 在
+ * agent 鉴权失败 message 的固定模板。maker-core 的 claude-code / codex / cursor / pi 在
  * startSession / 首次 send 的鉴权门禁抛 AgentNotAuthenticatedError 时统一用
  * `<agentKind> not authenticated: <reason>` 这个格式;reason(no_key 等)目前只
  * 存在于 message 字符串里,不随事件结构化下发,relay 又是哑中继原样透传——手机端
@@ -483,7 +485,7 @@ export function connectionIssueHint(kind: DeviceLinkConnectionIssueKind): string
  * message 加 `[CODE] ` 头,识别时一并容忍。
  */
 const AGENT_NOT_AUTHENTICATED_RE =
-  /^(?:\[[A-Z_]+\] )?(claude-code|codex|cursor) not authenticated: ?(.*)$/;
+  /^(?:\[[A-Z_]+\] )?(claude-code|codex|cursor|pi) not authenticated: ?(.*)$/;
 
 /**
  * 新版 mobile × 旧版 desktop：Cursor 新建 / 切换意图被 host 拒绝时的识别。
@@ -524,7 +526,9 @@ export function describeAgentAuthError(error: string | null | undefined): string
     ? 'Claude'
     : matched[1] === 'cursor'
       ? 'Cursor'
-      : 'Codex';
+      : matched[1] === 'pi'
+        ? 'Pi'
+        : 'Codex';
   const goSettings = `请在电脑端 ${BRAND_NAME} 的「设置 → 模型供应商」`;
   switch (matched[2]) {
     case 'no_key':

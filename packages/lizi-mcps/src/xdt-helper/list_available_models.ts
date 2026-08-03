@@ -47,6 +47,7 @@ export interface ListAvailableModelsDeps {
     codex?: ModelDescriptor[];
     claude_code?: ModelDescriptor[];
     cursor?: ModelDescriptor[];
+    pi?: ModelDescriptor[];
   }>>;
 }
 
@@ -81,7 +82,7 @@ export function registerListAvailableModelsTool(
     description: DESCRIPTION,
     inputShape: {
       agent: z
-        .enum(['codex', 'claude-code', 'cursor'])
+        .enum(['codex', 'claude-code', 'cursor', 'pi'])
         .optional()
         .describe('可选, 只查某一 agent 的 model 列表; 不传返三者'),
     },
@@ -97,6 +98,7 @@ export function registerListAvailableModelsTool(
         codex: tagTier(result.codex),
         claude_code: tagTier(result.claude_code),
         cursor: tagTier(result.cursor),
+        pi: tagTier(result.pi),
       });
     },
   });

@@ -35,7 +35,8 @@ describe('Cursor New Maker 预热契约', () => {
   });
 
   it('Cursor 自动标题在 enqueue 接受后再启动', () => {
-    const enqueue = chatStoreSource.indexOf('.input.enqueue(sessionId, queued');
+    // 合并后走 operation.api.input.enqueue(...),不是旧的 .input.enqueue 直调。
+    const enqueue = chatStoreSource.indexOf('.enqueue(sessionId, queued');
     const cursorGuard = chatStoreSource.indexOf(
       "if (current.agentKind !== 'cursor') runAutoName();",
     );

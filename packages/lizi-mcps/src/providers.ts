@@ -312,7 +312,7 @@ export function createLiziMcpProviders(
         type: 'sdk',
         name: 'cindy_scheduler',
         instance: createSchedulerMcpServer(opts.scheduler!, {
-          agentKind: ctx.agentKind === 'codex' ? 'codex' : 'claude-code',
+          agentKind: ctx.agentKind === 'codex' ? 'codex' : ctx.agentKind === 'pi' ? 'pi' : 'claude-code',
           workingDir: ctx.workingDir,
           sessionId: ctx.sessionId,
           vendorOptions: ctx.vendorOptions,
@@ -351,7 +351,7 @@ export function createLiziMcpProviders(
         type: 'sdk',
         name: 'cindy_helper',
         instance: createXdtHelperMcpServer(opts.xdtHelper!, {
-          agentKind: ctx.agentKind === 'codex' ? 'codex' : 'claude-code',
+          agentKind: ctx.agentKind === 'codex' ? 'codex' : ctx.agentKind === 'pi' ? 'pi' : 'claude-code',
           workingDir: ctx.workingDir,
           sessionId: ctx.sessionId,
           vendorOptions: ctx.vendorOptions,
@@ -378,7 +378,9 @@ export function createLiziMcpProviders(
               ? 'codex'
               : ctx.agentKind === 'cursor'
                 ? 'cursor'
-                : 'claude-code',
+                : ctx.agentKind === 'pi'
+                  ? 'pi'
+                  : 'claude-code',
           workingDir: ctx.workingDir,
           sessionId: ctx.sessionId,
           vendorOptions: ctx.vendorOptions,

@@ -11,13 +11,21 @@ beforeEach(() => {
 });
 
 interface Caps {
-  availableModels: Array<{ id: string; displayName: string; contextWindow: number }>;
+  availableModels: Array<{
+    id: string;
+    displayName: string;
+    contextWindow: number;
+    efforts: string[];
+    defaultEffort: string | null;
+  }>;
   hasFastMode: boolean;
   effortLevels: unknown[];
   permissionModes: unknown[];
 }
 const caps = (label: string, ctx = 1): Caps => ({
-  availableModels: [{ id: 'm', displayName: label, contextWindow: ctx }],
+  availableModels: [
+    { id: 'm', displayName: label, contextWindow: ctx, efforts: [], defaultEffort: null },
+  ],
   hasFastMode: false,
   effortLevels: [],
   permissionModes: [],
@@ -40,6 +48,7 @@ describe('useAgentCapabilities deviceId-aware cache', () => {
     await mod.preloadAllCapabilities();
     expect(getCapabilities).toHaveBeenCalledWith('claude-code');
     expect(getCapabilities).toHaveBeenCalledWith('codex');
+    expect(getCapabilities).toHaveBeenCalledWith('pi');
     expect(invoke).not.toHaveBeenCalled();
     expect(mod.getCachedCapabilities('claude-code')?.availableModels[0].displayName).toBe(
       'local:claude-code',
@@ -68,6 +77,7 @@ describe('useAgentCapabilities deviceId-aware cache', () => {
     await mod.prefetchDeviceCapabilities('dev-1');
     expect(invoke).toHaveBeenCalledWith('dev-1', 'maker:get-capabilities', ['claude-code']);
     expect(invoke).toHaveBeenCalledWith('dev-1', 'maker:get-capabilities', ['codex']);
+    expect(invoke).toHaveBeenCalledWith('dev-1', 'maker:get-capabilities', ['pi']);
     expect(getCapabilities).not.toHaveBeenCalled();
     expect(mod.getCachedCapabilities('claude-code', 'dev-1')?.availableModels[0].displayName).toBe(
       'dev-1:claude-code',
@@ -75,6 +85,102 @@ describe('useAgentCapabilities deviceId-aware cache', () => {
     // 本地缓存不受影响(没预热过)
     expect(mod.getCachedCapabilities('claude-code')).toBeNull();
   });
+
+  it('非法 capabilities 响应进入 error，不得发布 ready 或落缓存', async () => {
+    const invoke = vi.fn(async () => null);
+    const getCapabilities = vi.fn(async (k: string) => caps(`local:${k}`));
+    vi.stubGlobal('window', {
+      electronAPI: { maker: { getCapabilities }, deviceLink: { invoke } },
+    });
+    const mod = await import('@/hooks/useAgentCapabilities');
+    const listener = vi.fn();
+    mod.subscribeDeviceCapabilities('dev-invalid', 'codex', listener);
+
+    await mod.prefetchDeviceCapabilities('dev-invalid');
+
+    expect(listener).toHaveBeenCalledWith({
+      status: 'error',
+      error: 'Invalid agent capabilities response',
+    });
+    expect(mod.getCachedCapabilities('codex', 'dev-invalid')).toBeNull();
+  });
+
+  it('capabilities 模型数组混入非法元素时整份进入 error，不得部分发布或落缓存', async () => {
+    const invoke = vi.fn(async () => ({
+      ...caps('invalid'),
+      availableModels: [...caps('valid').availableModels, null],
+    }));
+    const getCapabilities = vi.fn(async (k: string) => caps(`local:${k}`));
+    vi.stubGlobal('window', {
+      electronAPI: { maker: { getCapabilities }, deviceLink: { invoke } },
+    });
+    const mod = await import('@/hooks/useAgentCapabilities');
+    const listener = vi.fn();
+    mod.subscribeDeviceCapabilities('dev-invalid-item', 'codex', listener);
+
+    await mod.prefetchDeviceCapabilities('dev-invalid-item');
+
+    expect(listener).toHaveBeenCalledWith({
+      status: 'error',
+      error: 'Invalid agent capabilities response',
+    });
+    expect(mod.getCachedCapabilities('codex', 'dev-invalid-item')).toBeNull();
+  });
+
+  it('模型默认 effort 不在可用列表中时不得落缓存', async () => {
+    const invoke = vi.fn(async () => ({
+      ...caps('invalid-effort'),
+      availableModels: [
+        {
+          id: 'm',
+          displayName: 'Invalid Effort',
+          contextWindow: 1,
+          efforts: ['low'],
+          defaultEffort: 'high',
+        },
+      ],
+    }));
+    const getCapabilities = vi.fn(async (k: string) => caps(`local:${k}`));
+    vi.stubGlobal('window', {
+      electronAPI: { maker: { getCapabilities }, deviceLink: { invoke } },
+    });
+    const mod = await import('@/hooks/useAgentCapabilities');
+    const listener = vi.fn();
+    mod.subscribeDeviceCapabilities('dev-invalid-effort', 'codex', listener);
+
+    await mod.prefetchDeviceCapabilities('dev-invalid-effort');
+
+    expect(listener).toHaveBeenCalledWith({
+      status: 'error',
+      error: 'Invalid agent capabilities response',
+    });
+    expect(mod.getCachedCapabilities('codex', 'dev-invalid-effort')).toBeNull();
+  });
+
+  it.each(['effortLevels', 'permissionModes'] as const)(
+    '%s 混入非法 descriptor 时不得发布 ready',
+    async (field) => {
+      const invoke = vi.fn(async () => ({
+        ...caps('invalid-descriptor'),
+        [field]: [{ id: 'invalid', displayName: null }],
+      }));
+      const getCapabilities = vi.fn(async (k: string) => caps(`local:${k}`));
+      vi.stubGlobal('window', {
+        electronAPI: { maker: { getCapabilities }, deviceLink: { invoke } },
+      });
+      const mod = await import('@/hooks/useAgentCapabilities');
+      const listener = vi.fn();
+      mod.subscribeDeviceCapabilities(`dev-invalid-${field}`, 'codex', listener);
+
+      await mod.prefetchDeviceCapabilities(`dev-invalid-${field}`);
+
+      expect(listener).toHaveBeenCalledWith({
+        status: 'error',
+        error: 'Invalid agent capabilities response',
+      });
+      expect(mod.getCachedCapabilities('codex', `dev-invalid-${field}`)).toBeNull();
+    },
+  );
 
   it('key 隔离:local / dev-1 / dev-2 各自独立不串', async () => {
     stubElectron();
@@ -98,8 +204,8 @@ describe('useAgentCapabilities deviceId-aware cache', () => {
       mod.prefetchDeviceCapabilities('dev-1'),
       mod.prefetchDeviceCapabilities('dev-1'),
     ]);
-    // cc + codex 各一次 = 2 次,而非 4 次
-    expect(invoke).toHaveBeenCalledTimes(2);
+    // cc + codex + cursor + pi 各一次 = 4 次,而非 8 次
+    expect(invoke).toHaveBeenCalledTimes(4);
   });
 
   it('驱逐:evict 只清该设备,本地与其它设备保留', async () => {
@@ -197,11 +303,17 @@ describe('useAgentCapabilities deviceId-aware cache', () => {
     const stale = mod.prefetchDeviceCapabilities('dev-1');
     mod.evictDeviceCapabilities('dev-1');
     const fresh = mod.prefetchDeviceCapabilities('dev-1');
-    resolvers[2](caps('fresh:claude'));
-    resolvers[3](caps('fresh:codex'));
+    // 每轮按 ALL_AGENT_KINDS 顺序 push 四个 resolver(cc/codex/cursor/pi):
+    // 第一轮(stale)= [0][1][2][3],第二轮(fresh)= [4][5][6][7]。
+    resolvers[4](caps('fresh:claude'));
+    resolvers[5](caps('fresh:codex'));
+    resolvers[6](caps('fresh:cursor'));
+    resolvers[7](caps('fresh:pi'));
     await fresh;
     resolvers[0](caps('stale:claude'));
     resolvers[1](caps('stale:codex'));
+    resolvers[2](caps('stale:cursor'));
+    resolvers[3](caps('stale:pi'));
     await stale;
 
     expect(claudeListener).toHaveBeenNthCalledWith(1, { status: 'loading' });

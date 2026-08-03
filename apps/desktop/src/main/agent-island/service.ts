@@ -1,7 +1,7 @@
 import { dialog, ipcMain, screen, BrowserWindow, type Display, type OpenDialogOptions } from 'electron';
 import path from 'node:path';
 import { release as getOsRelease } from 'node:os';
-import { SESSION_ACTIVITY_CHANNEL } from '@cindy/device-link';
+import { SESSION_ACTIVITY_CHANNEL, type SessionActivityPayload } from '@cindy/device-link';
 import {
   isTerminalAgentErrorEvent,
   type AgentEvent,
@@ -150,6 +150,11 @@ interface AgentIslandUserPromptDebugMeta {
   notifiedAt?: number;
 }
 
+interface AgentIslandEventOptions {
+  /** The host is automatically recovering this failure, so this transition stays silent. */
+  suppressErrorSound?: boolean;
+}
+
 export interface AgentIslandServiceDeps {
   getMainWindow: () => BrowserWindow | null;
   nativeHost?: AgentIslandNativeRenderer;
@@ -242,6 +247,7 @@ export class AgentIslandService {
   private readonly silencedRunHadAttention = new Map<string, boolean>();
   private readonly silencedRunClearTimers = new Map<string, ReturnType<typeof setTimeout>>();
   private readonly mutedCompletionSoundSessionIds = new Set<string>();
+  private readonly mutedErrorSoundSessionIds = new Set<string>();
   private readonly stoppedSessionIds = new Set<string>();
   private readonly replacementTurnPendingSessionIds = new Set<string>();
   private readonly replacementTurnDispatchingSessionIds = new Set<string>();
@@ -509,6 +515,7 @@ export class AgentIslandService {
     this.hiddenPublished = false;
     if (!wasSynced && !enabled) {
       this.mutedCompletionSoundSessionIds.clear();
+      this.mutedErrorSoundSessionIds.clear();
       this.clearPublishTimer();
       this.hiddenPublished = true;
       return;
@@ -559,6 +566,7 @@ export class AgentIslandService {
     this.metadataLoading.clear();
     this.lastSoundDisplayState = null;
     this.soundCooldownUntilByEvent.clear();
+    this.mutedErrorSoundSessionIds.clear();
     this.silencedRunSessionIds.clear();
     this.silencedSessionRunIds.clear();
     this.silencedRunHadAttention.clear();
@@ -605,7 +613,11 @@ export class AgentIslandService {
     setAgentIslandAppFocused(this.state, focused, now);
   }
 
-  handleAgentEvent(meta: AgentIslandSessionMeta, event: AgentEvent): void {
+  handleAgentEvent(
+    meta: AgentIslandSessionMeta,
+    event: AgentEvent,
+    options: AgentIslandEventOptions = {},
+  ): void {
     const hydrated = this.hydrateMeta(meta);
     const providerTurnId = providerTurnIdFromAgentEvent(event);
     const replacementPending =
@@ -719,7 +731,24 @@ export class AgentIslandService {
       return;
     }
     this.clearStreamingPreviewPublishTimer();
+    if (isTerminalAgentErrorEvent(event) && options.suppressErrorSound === true) {
+      // Keep the mute through the initial enabled-state sync. A sound-capable
+      // publish consumes it immediately; no retry or delivery lifecycle is stored.
+      this.mutedErrorSoundSessionIds.add(hydrated.sessionId);
+    }
     this.publish();
+  }
+
+  /** Automatic recovery did not start; notify only while the failure still needs attention. */
+  restoreTaskFailureSound(sessionId: string): void {
+    this.mutedErrorSoundSessionIds.delete(sessionId);
+    if (!this.enabledSynced || !this.enabled) return;
+    const now = Date.now();
+    const displayState = buildAgentIslandDisplayState(this.state, now);
+    if (!displayState.visible || displayState.smartSuppressed) return;
+    const session = displayState.sessions.find((candidate) => candidate.sessionId === sessionId);
+    if (!session?.attention || session.phase !== 'error') return;
+    this.playConfiguredSound('error', now);
   }
 
   handleScheduleEvent(event: SchedulerEvent): void {
@@ -1131,8 +1160,12 @@ export class AgentIslandService {
     this.commitMetadata(sessionId, next);
   }
 
-  replaySessionActivity(): void {
-    this.sessionActivityRelay.replay(this.buildSessionActivityPayload());
+  /**
+   * 按需重放当前会话活动快照。`emit` 由调用方(bootstrap)注入定向 sink 时,
+   * 快照只投给刚完成 sessions 订阅的那一台控制端;不传则沿默认广播通道扇出。
+   */
+  replaySessionActivity(emit?: (payload: SessionActivityPayload) => void): void {
+    this.sessionActivityRelay.replay(this.buildSessionActivityPayload(), emit);
   }
 
   /**
@@ -1255,6 +1288,7 @@ export class AgentIslandService {
       next,
       this.mutedCompletionSoundSessionIds,
       new Set(this.silencedSessionRunIds.keys()),
+      this.mutedErrorSoundSessionIds,
     );
     if (!event) return;
     this.playConfiguredSound(event, now);
@@ -1401,6 +1435,7 @@ export class AgentIslandService {
     }
     if (!this.enabled) {
       this.mutedCompletionSoundSessionIds.clear();
+      this.mutedErrorSoundSessionIds.clear();
       this.clearStreamingPreviewPublishTimer();
       this.lastSoundDisplayState = withAgentIslandConfig(
         buildAgentIslandDisplayState(this.state, now),
@@ -1433,6 +1468,7 @@ export class AgentIslandService {
     this.scheduleNextPublish(now);
     this.playSoundForDisplayTransition(this.lastSoundDisplayState, displayState, now);
     this.mutedCompletionSoundSessionIds.clear();
+    this.mutedErrorSoundSessionIds.clear();
     this.lastSoundDisplayState = displayState;
 
     if (this.nativeHost.failed) {
@@ -1623,6 +1659,7 @@ export class AgentIslandService {
   private handleNativeScreenMetrics(metrics: {
     screens: AgentIslandNativeScreenMetrics[];
     preferredDisplayId: number | null;
+    forceRefresh: boolean;
   }): void {
     const signature = metrics.screens
       .map((item) => [
@@ -1633,7 +1670,11 @@ export class AgentIslandService {
         Math.round(item.topBarHeight),
       ].join(':'))
       .join('|');
-    if (signature === this.screenMetricsSignature && metrics.preferredDisplayId === this.nativePreferredDisplayId) {
+    if (
+      !metrics.forceRefresh
+      && signature === this.screenMetricsSignature
+      && metrics.preferredDisplayId === this.nativePreferredDisplayId
+    ) {
       return;
     }
     this.screenMetricsByDisplayId.clear();
@@ -2168,6 +2209,7 @@ function getAgentIslandSoundEventForTransition(
   next: AgentIslandDisplayState,
   mutedCompletionSessionIds: ReadonlySet<string> = new Set(),
   mutedStartSessionIds: ReadonlySet<string> = new Set(),
+  mutedErrorSessionIds: ReadonlySet<string> = new Set(),
 ): AgentIslandSoundEvent | null {
   const previousById = new Map(previous?.sessions.map((session) => [session.sessionId, session]) ?? []);
   for (const session of next.sessions) {
@@ -2177,6 +2219,7 @@ function getAgentIslandSoundEventForTransition(
   }
   for (const session of next.sessions) {
     if (!session.attention || session.phase !== 'error') continue;
+    if (mutedErrorSessionIds.has(session.sessionId)) continue;
     const prev = previousById.get(session.sessionId);
     if (prev?.phase !== 'error') return 'error';
   }
@@ -2264,4 +2307,3 @@ function isPlaceholderSessionTitle(title: string | null): boolean {
   const normalized = title.trim().toLowerCase();
   return normalized === '' || normalized === 'new maker' || normalized === 'untitled';
 }
-

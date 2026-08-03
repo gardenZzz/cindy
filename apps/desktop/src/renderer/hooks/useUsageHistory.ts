@@ -143,7 +143,12 @@ function finiteNumber(value: unknown, fallback = 0): number {
 }
 
 function isAgentKind(value: unknown): value is UsageHistoryModel['agentKind'] {
-  return value === 'claude-code' || value === 'codex';
+  return (
+    value === 'claude-code' ||
+    value === 'codex' ||
+    value === 'cursor' ||
+    value === 'pi'
+  );
 }
 
 function readSnapshot(scopeKey: string): UsageHistoryPayload | null {

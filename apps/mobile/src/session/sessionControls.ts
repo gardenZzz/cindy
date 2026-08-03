@@ -31,7 +31,9 @@ export function buildContextUsageCreateOpts(session: RemoteSession): Record<stri
       ? 'codex'
       : session.agentKind === 'cursor'
         ? 'cursor'
-        : 'claude-code',
+        : session.agentKind === 'pi'
+          ? 'pi'
+          : 'claude-code',
     workingDir: session.workingDir ?? '',
     model: session.model,
     effort: session.effort,

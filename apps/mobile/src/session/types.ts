@@ -55,7 +55,7 @@ export interface RemoteSession {
   activeTurnStartedAt?: number | null;
   lastTurnEndedAt?: number | null;
   status: RemoteSessionStatus;
-  agentKind: 'cc' | 'codex' | 'cursor';
+  agentKind: 'cc' | 'codex' | 'cursor' | 'pi';
   /** main 进程内的下一条消息跨 Agent 切换意图；null = 已确认没有。 */
   agentSwitchIntent?: MobileSessionAgentSwitchIntent | null;
   source?: string;
@@ -88,6 +88,8 @@ export interface RemoteMessage {
   id: string;
   clientId: string;
   sessionId: string;
+  /** SQLite insertion order from the host; absent on legacy/synthetic rows. */
+  rowid?: number;
   role: RemoteMessageRole;
   content: unknown;
   toolUseId: string | null;

@@ -106,7 +106,9 @@ export function buildQueuedTextMessage(
     ? 'codex'
     : session.agentKind === 'cursor'
       ? 'cursor'
-      : 'claude-code';
+      : session.agentKind === 'pi'
+        ? 'pi'
+        : 'claude-code';
   const persistedContent = stringifyUserContent(
     trimmed,
     persistedImageRefs,

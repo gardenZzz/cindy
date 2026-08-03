@@ -35,6 +35,17 @@ export function replaceCustomProviderModelId(
   return { id: nextId, name: model.name };
 }
 
+export function setCustomProviderModelSupportsImageInput(
+  models: readonly ProviderRuntimeModelConfig[],
+  targetIndex: number,
+  supportsImageInput: boolean,
+): ProviderRuntimeModelConfig[] {
+  return models.map((model, index) => {
+    if (index !== targetIndex) return model;
+    return { ...model, supportsImageInput };
+  });
+}
+
 /**
  * 运行期 CatalogModel 已把缺省 contextWindow 物化为通用默认值；转回用户配置时不能把该
  * 默认快照写成 override，否则未来默认升级后老配置无法跟随。判据以 contextWindowExplicit
@@ -42,7 +53,15 @@ export function replaceCustomProviderModelId(
  * 推断（PR review P1）；无标记的旧视图快照回退等值判断,行为不变。
  */
 export function customProviderModelConfigFromCatalogModel(
-  model: Pick<CatalogModel, 'id' | 'name' | 'contextWindow' | 'contextWindowExplicit' | 'defaultEnabled'>,
+  model: Pick<
+    CatalogModel,
+    | 'id'
+    | 'name'
+    | 'contextWindow'
+    | 'contextWindowExplicit'
+    | 'defaultEnabled'
+    | 'supportsImageInput'
+  >,
 ): ProviderRuntimeModelConfig {
   return {
     id: model.id,
@@ -51,6 +70,7 @@ export function customProviderModelConfigFromCatalogModel(
       ? { contextWindow: model.contextWindow }
       : {}),
     ...(model.defaultEnabled === false ? { defaultEnabled: false } : {}),
+    ...(model.supportsImageInput === true ? { supportsImageInput: true } : {}),
   };
 }
 
@@ -126,6 +146,10 @@ export async function readCustomProviderKey(
     return null;
   }
 }
+
+// 鉴权请求头是 main-only 密文(isRendererAccessibleSafeStorageKey 明确拒 provider_headers_
+// 前缀,与 API key 不同),renderer 不得回读明文。编辑时不再向 renderer 暴露头值:未在
+// 表单显式改动请求头,update 由 main 侧保留旧值(planProviderHeaderMutations 'update' 分支)。
 
 /** 新建：配置与 runtime 密钥交给 main 的同一 provider mutation queue。 */
 export async function createCustomProvider(

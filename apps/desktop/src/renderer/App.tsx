@@ -31,6 +31,7 @@ import { installSystemNetworkErrorToastListener } from '@/lib/systemNetworkError
 import { installSilentInstallToastListener } from '@/lib/silentInstallToast';
 import { installProviderUpstreamErrorToastListener } from '@/lib/providerUpstreamErrorToast';
 import { installAutoPermissionFallbackToastListener } from '@/lib/autoPermissionFallbackToast';
+import { agentKindToVendor } from '@/components/sidebar/VendorIcon';
 import { installCcMgrUpgradeListener } from '@/state/ccMgrUpgradeStore';
 import { getCursorAvailability } from '@/state/cursorAvailability';
 import {
@@ -86,7 +87,7 @@ function LoginHandoffHost({ children }: { children: React.ReactNode }) {
 }
 
 function MakerBootstrap() {
-  const { isAuthenticated } = useAuth();
+  const { isAuthenticated, dataOwnerId } = useAuth();
 
   useResyncAgentIslandSettingsAfterLogin(isAuthenticated);
 
@@ -108,6 +109,12 @@ function MakerBootstrap() {
       offProviders?.();
     };
   }, []);
+
+  // Auth 广播的多个 listener 没有顺序契约；等 AuthContext 提交新 owner 后再预热一次，
+  // 保证 provider 快照与 capabilities 不会沿用或提交前一个 owner 的在途结果。
+  useEffect(() => {
+    void preloadLocalCatalogSnapshot();
+  }, [dataOwnerId]);
   return null;
 }
 
