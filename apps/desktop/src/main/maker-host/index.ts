@@ -56,6 +56,11 @@ import { getReadyBinaryPath, getCachedBinaryStatus } from '../agent-binaries/ind
 import { discoverCursorAgentBinarySync } from './cursor-binary-discovery.js';
 import { buildCursorAcpMcpServers } from './cursor-acp-mcp.js';
 import { createDesktopCursorAuthAdapter } from './cursor-auth-adapter.js';
+import * as cindyChatAttachments from '../cindy-media/chatAttachments.js';
+import {
+  defaultCursorGeneratedImageRoots,
+  materializeCursorGeneratedImageSource,
+} from '../cindy-media/cursorGeneratedImage.js';
 import {
   desktopClaudeAuthAdapter,
   desktopCodexAuthAdapter,
@@ -1213,6 +1218,27 @@ export function getMaker(): Maker {
               getDisabledRuntimePluginIds: (workingDir) =>
                 getPluginRegistry().getDisabledRuntimePluginIds(workingDir),
             }),
+          // #50：generate_image 必须在 ACK generated 前完成主机入仓校验。
+          materializeCursorGeneratedImage: async ({ workingDir, path, url }) => {
+            try {
+              const result = await materializeCursorGeneratedImageSource(
+                { path, url },
+                {
+                  allowedRoots: defaultCursorGeneratedImageRoots(workingDir),
+                  ingestBuffer: cindyChatAttachments.ingestChatImageBuffer,
+                },
+              );
+              if (!result) {
+                return { ok: false as const, reason: 'missing filePath/imageData' };
+              }
+              return { ok: true as const, url: result.url, filename: result.filename };
+            } catch (err) {
+              return {
+                ok: false as const,
+                reason: err instanceof Error ? err.message : String(err),
+              };
+            }
+          },
           onCursorLocalModelsListed: (listing) => {
             const maker = _maker;
             if (!maker) return;
