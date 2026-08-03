@@ -53,6 +53,27 @@ export {
   loadCatalog,
   loadCatalogWithSource,
 } from './source.js';
+
+export {
+  compareModelRegistryRevisions,
+  decideModelRegistrySnapshot,
+  findModelRegistryRoute,
+  resolveModelReferencePrice,
+} from './modelRegistry.js';
+export { modelRegistryCanonicalJson } from '@cindy/model-access-protocol';
+export type {
+  ResolvedModelReferencePrice,
+  ResolveModelReferencePriceOptions,
+  ModelRegistryRevisionRelation,
+  ModelRegistrySnapshotDecision,
+} from './modelRegistry.js';
+export type {
+  ModelReferencePrice,
+  ModelReferencePriceSource,
+  ModelRegistry,
+  ModelRegistryEntry,
+  ModelRegistryRoute,
+} from '@cindy/model-access-protocol';
 export type {
   CatalogSourceConfig,
   CatalogIO,
@@ -129,6 +150,7 @@ export {
   isChatEligible,
   groupOf,
   isAgentSelectableModel,
+  isModelSelectableForNewRoute,
   groupModelsForDisplay,
   isBudgetModel,
   modelBadges,

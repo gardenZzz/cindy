@@ -112,6 +112,21 @@ export interface MakerSendTransactionDeps {
     sessionId: string,
     message: unknown,
   ): Promise<IpcUserMessage>;
+  /**
+   * Direct device-link sends may carry OSS attachment references that need to
+   * become local paths before normalization. Keep this after the transaction's
+   * session/workdir preflight so rejected sends do not materialize local copies.
+   */
+  materializeDirectSendOssAttachments?: (
+    sessionId: string,
+    message: unknown,
+    sendOpts: unknown,
+  ) => Promise<{
+    message: unknown;
+    sendOpts: unknown;
+    cleanupAfterAcceptance?: () => void;
+    cleanupBeforeAcceptance?: () => void | Promise<void>;
+  }>;
   createDbMessage(
     sessionId: string,
     message: {
@@ -123,6 +138,12 @@ export interface MakerSendTransactionDeps {
     },
     opts?: { shouldBroadcast?: () => boolean },
   ): Promise<unknown>;
+  /** 把 Pi 原生 user entry id 补到已落库的 Cindy user 行，供会话树恢复附件。 */
+  linkPiUserEntry?(
+    sessionId: string,
+    clientId: string,
+    piEntryId: string,
+  ): Promise<boolean | void>;
   beforeDispatchDirectUserTurn?: (sessionId: string) => void | Promise<void>;
   onUndispatchedDirectUserTurn?: (sessionId: string) => void;
   ackInterruptedTurnDispatched?: (sessionId: string, endedAt: number) => void | Promise<void>;
@@ -204,6 +225,30 @@ function readPersistUserMessageOption(sendOpts: MakerSendOptions): {
       ? { onPersisted: persist.onPersisted as () => void | Promise<void> }
       : {}),
   };
+}
+
+function containsManagedAttachment(value: unknown): boolean {
+  if (typeof value === 'string') {
+    const trimmed = value.trim();
+    if (!trimmed.startsWith('{') && !trimmed.startsWith('[')) return false;
+    try {
+      return containsManagedAttachment(JSON.parse(trimmed) as unknown);
+    } catch {
+      return false;
+    }
+  }
+  if (Array.isArray(value)) {
+    return value.some((item) => {
+      if (typeof item !== 'object' || item === null) return false;
+      const block = item as Record<string, unknown>;
+      return block.type === 'image' || block.type === 'file' || containsManagedAttachment(block.content);
+    });
+  }
+  if (typeof value !== 'object' || value === null) return false;
+  const record = value as Record<string, unknown>;
+  return (Array.isArray(record.images) && record.images.length > 0)
+    || (Array.isArray(record.files) && record.files.length > 0)
+    || containsManagedAttachment(record.content);
 }
 
 /**
@@ -432,7 +477,47 @@ export function createMakerSendTransaction(deps: MakerSendTransactionDeps): Make
       if (sess.isTurnRunning()) {
         throwIpcError('SESSION_RUNNING', `Session ${sessionId} is already running a turn`);
       }
-      const normalized = await deps.prepareSendUserMessage(sessionId, message);
+      const requestedSendOpts = (sendOpts ?? {}) as MakerSendOptions;
+      if (
+        requestedSendOpts.ackInterruptedTurnOnDispatch !== undefined &&
+        typeof requestedSendOpts.ackInterruptedTurnOnDispatch !== 'boolean'
+      ) {
+        throwIpcError('INVALID_PARAMS', 'ackInterruptedTurnOnDispatch must be a boolean');
+      }
+      let outgoingMessage = message;
+      let outgoingSendOpts = sendOpts;
+      let cleanupAfterAcceptance: (() => void) | undefined;
+      let cleanupBeforeAcceptance: (() => void | Promise<void>) | undefined;
+      let sendAccepted = false;
+      if (deps.materializeDirectSendOssAttachments) {
+        const materialized = await deps.materializeDirectSendOssAttachments(
+          sessionId,
+          outgoingMessage,
+          outgoingSendOpts,
+        );
+        outgoingMessage = materialized.message;
+        outgoingSendOpts = materialized.sendOpts;
+        cleanupAfterAcceptance = materialized.cleanupAfterAcceptance;
+        cleanupBeforeAcceptance = materialized.cleanupBeforeAcceptance;
+      }
+      const cleanupBeforeAcceptanceIfNeeded = async (): Promise<void> => {
+        if (!cleanupBeforeAcceptance) return;
+        try {
+          await cleanupBeforeAcceptance();
+        } catch (err) {
+          deps.log.warn('send: direct OSS materialization cleanup failed', {
+            sessionId,
+            err: err instanceof Error ? err.message : String(err),
+          });
+        }
+      };
+      let normalized: IpcUserMessage;
+      try {
+        normalized = await deps.prepareSendUserMessage(sessionId, outgoingMessage);
+      } catch (err) {
+        await cleanupBeforeAcceptanceIfNeeded();
+        throw err;
+      }
       // session-agent-switch:切换后的首条消息把交接前缀拼进 wire payload。
       // 落库/显示内容(persistUserMessage.content)不含交接段——display 与 sent 分离。
       const pendingHandoff = (await deps.peekPendingHandoff?.(sessionId)) ?? null;
@@ -440,13 +525,7 @@ export function createMakerSendTransaction(deps: MakerSendTransactionDeps): Make
         ? prependHandoffToUserMessage(normalized as HandoffWireMessage, pendingHandoff)
         : normalized;
       const meta = await deps.getSessionMeta(sessionId).catch(() => null);
-      const so = (sendOpts ?? {}) as MakerSendOptions;
-      if (
-        so.ackInterruptedTurnOnDispatch !== undefined &&
-        typeof so.ackInterruptedTurnOnDispatch !== 'boolean'
-      ) {
-        throwIpcError('INVALID_PARAMS', 'ackInterruptedTurnOnDispatch must be a boolean');
-      }
+      const so = (outgoingSendOpts ?? {}) as MakerSendOptions;
       const persistUserMessage = readPersistUserMessageOption(so);
       const directPreDispatchHook = persistUserMessage ? null : deps.beforeDispatchDirectUserTurn;
       let directPreDispatchHookStarted = false;
@@ -477,6 +556,38 @@ export function createMakerSendTransaction(deps: MakerSendTransactionDeps): Make
           // (语义见 maker-core SendOptions.planMode;undefined = 旧的消耗武装态)。
           ...(typeof (createOpts as { planMode?: unknown } | undefined)?.planMode === 'boolean'
             ? { planMode: (createOpts as { planMode: boolean }).planMode }
+            : {}),
+          ...(sess.agentKind === 'pi'
+            && persistUserMessage
+            && containsManagedAttachment(persistUserMessage.content)
+            && deps.linkPiUserEntry
+            ? {
+                onTranscriptUserEntry: async (piEntryId: string) => {
+                  try {
+                    const linked = await deps.linkPiUserEntry?.(
+                      sessionId,
+                      persistUserMessage.clientId,
+                      piEntryId,
+                    );
+                    if (linked === false) {
+                      deps.log.warn('send: Pi transcript entry target row missing', {
+                        sessionId,
+                        clientId: persistUserMessage.clientId,
+                        piEntryId,
+                      });
+                    }
+                  } catch (err) {
+                    // provider 已接受 prompt；关联补丁失败只能降级为 legacy 恢复，不能
+                    // 把发送结果翻成 rejected，避免 UI 重发同一条消息。
+                    deps.log.warn('send: Pi transcript entry link failed (non-fatal)', {
+                      sessionId,
+                      clientId: persistUserMessage.clientId,
+                      piEntryId,
+                      err: err instanceof Error ? err.message : String(err),
+                    });
+                  }
+                },
+              }
             : {}),
           onAccepted: persistUserMessage
             ? async () => {
@@ -519,6 +630,9 @@ export function createMakerSendTransaction(deps: MakerSendTransactionDeps): Make
             }
           },
         });
+        sendAccepted = sendResult.accepted;
+        if (sendAccepted) cleanupAfterAcceptance?.();
+        else await cleanupBeforeAcceptanceIfNeeded();
         if (sendResult.accepted && interruptedAckAt !== null) {
           try {
             await deps.ackInterruptedTurnDispatched?.(sessionId, interruptedAckAt);
@@ -556,6 +670,7 @@ export function createMakerSendTransaction(deps: MakerSendTransactionDeps): Make
           }),
         );
       } catch (err) {
+        if (!sendAccepted) await cleanupBeforeAcceptanceIfNeeded();
         if (userPromptPreviewSessionId && userPromptPreviewClientId) {
           deps.rollbackUserPromptPreview?.(
             userPromptPreviewSessionId,

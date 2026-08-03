@@ -24,6 +24,7 @@ import {
 } from 'react';
 import type { CSSProperties, ReactNode } from 'react';
 import { useLocation, useNavigate, useOutletContext, useParams } from 'react-router-dom';
+import { dbToMakerAgentKind, normalizeDbAgentKind } from '../../../shared/agentKindConversion';
 import { useTranslation } from 'react-i18next';
 import type { AgentInputReference } from '@cindy/maker-shared/agent-input-projection';
 import {
@@ -52,6 +53,7 @@ import { setRemoteReceiptDisplayReady } from '@/lib/sessionAttentionStore';
 import { shortSessionId } from '@/lib/sessionId';
 import { ChatInput } from '@/components/new-chat/ChatInput';
 import { GoalIndicator } from '@/components/new-chat/GoalIndicator';
+import { PinnedPlanPanel } from '@/components/new-chat/PinnedPlanPanel';
 import { sessionsStore } from '@/lib/sessionsStore';
 import { useStopOrcaCollab } from './hooks/useStopOrcaCollab';
 import { CreateWorkerPopover, type CreateWorkerForm } from './CreateWorkerPopover';
@@ -445,23 +447,6 @@ function findLatestWorkflowTask(
   return latest;
 }
 
-/** DB/session agentKind ('cc'|'codex'|'cursor') → maker-core AgentKind。 */
-function toMakerAgentKind(
-  kind: string | null | undefined,
-): 'claude-code' | 'codex' | 'cursor' {
-  if (kind === 'codex') return 'codex';
-  if (kind === 'cursor') return 'cursor';
-  return 'claude-code';
-}
-
-/** maker-core / display agentKind → UI vendorKey。 */
-function toVendorKey(
-  kind: string | null | undefined,
-): 'cc' | 'codex' | 'cursor' {
-  if (kind === 'codex') return 'codex';
-  if (kind === 'cursor') return 'cursor';
-  return 'cc';
-}
 
 export function CCAgentSessionView({
   sessionIdProp,
@@ -732,11 +717,11 @@ export function CCAgentSessionView({
     if (!remoteDeviceId || !remoteModelMemoryScopeKey) return;
     const deviceId = remoteDeviceId;
     const scopeKey = remoteModelMemoryScopeKey;
-    const agent = toMakerAgentKind(session?.agentKind);
+    const agent = dbToMakerAgentKind(session?.agentKind);
     // NEW_MAKER_DRAFT_CHANGED 现在已 fan-out cursor 槽(见 buildNewMakerDraftChangedPayload),
-    // 但远程 Cursor **会话内**的模型记忆镜像尚未接线,故仍保持空镜像降级 —— 关键是不读
+    // 但远程 Cursor **会话内**的模型记忆镜像尚未接线,故仍保持空镜像降级 -- 关键是不读
     // claudeCode 冒充。接线属独立范围,不在本 PR。
-    const vendorSlot = agent === 'codex' ? 'codex' : agent === 'claude-code' ? 'claudeCode' : null;
+    const vendorSlot = agent === 'claude-code' ? 'claudeCode' : agent;
     let cancelled = false;
 
     const applySnapshot = (snapshot: RemoteModelMemorySnapshot | undefined) => {
@@ -1130,7 +1115,11 @@ export function CCAgentSessionView({
   const isRemoteSession = !!session?.remoteHostId;
   useEffect(() => {
     let cancelled = false;
-    const agentKind = toMakerAgentKind(session?.agentKind);
+    const agent = dbToMakerAgentKind(session?.agentKind);
+    // NEW_MAKER_DRAFT_CHANGED 现在已 fan-out cursor 槽(见 buildNewMakerDraftChangedPayload),
+    // 但远程 Cursor **会话内**的模型记忆镜像尚未接线,故仍保持空镜像降级 -- 关键是不读
+    // claudeCode 冒充。接线属独立范围,不在本 PR。
+    const vendorSlot = agent === 'claude-code' ? 'claudeCode' : agent;
     // SSH remote 显式禁用控制端本机 skill 扫描；本地无 workingDir 时 Claude 仍扫全局 skills。
     const wd = session?.workingDir;
     // 先同步清空:切换会话(尤其 local→remote)时 loadAllCommands 是异步的,清空可避免
@@ -1141,7 +1130,7 @@ export function CCAgentSessionView({
     // 会把被控端 skill/builtin 影子掉的 /clear、/help 等误判成 desktop 命令、在控制端执行。
     // 本机会话 remoteDeviceId=undefined → 行为不变。desktop 命令始终本地(见 loadAllCommands)。
     loadAllCommands(
-      agentKind,
+      agent,
       wd,
       {
         skipAgentSkills: isRemoteSession,
@@ -1225,6 +1214,8 @@ export function CCAgentSessionView({
     errorRetryText,
     credentialSwitchWait,
     continuationInFlightClientId,
+    continuationTurnClientId,
+    continuationInFlightProjectionCapability,
     loadOlderMessages,
     isLoadingMore,
     hasMoreMessages,
@@ -1276,10 +1267,14 @@ export function CCAgentSessionView({
   } = useCCAgentChat(sessionId, handleTitleUpdate, { chatRealtime });
   // 展示引擎可乐观跟随 intent；真实 event reducer 仍只读 store.agentKind。
   const displayAgentKind =
-    agentSwitchIntent?.target ?? toMakerAgentKind(session?.agentKind);
+    agentSwitchIntent?.target ?? dbToMakerAgentKind(session?.agentKind);
   const isCodex = displayAgentKind === 'codex';
   const isCursor = displayAgentKind === 'cursor';
-  const displayVendorKey = toVendorKey(displayAgentKind);
+  const displayVendorKey = normalizeDbAgentKind(displayAgentKind);
+  // NEW_MAKER_DRAFT_CHANGED 现在已 fan-out cursor 槽(见 buildNewMakerDraftChangedPayload),
+  // 但远程 Cursor **会话内**的模型记忆镜像尚未接线,故仍保持空镜像降级 -- 关键是不读
+  // claudeCode 冒充。接线属独立范围,不在本 PR。
+  const vendorSlot = displayAgentKind === 'claude-code' ? 'claudeCode' : displayAgentKind;
   // live 供应商目录(含内置 + 自定义,按 agent 挂模型)—— vendor↔model 一致性校验的真源,
   // 与模型选择器同源(见下方 M35 vendor fallback effect)。本地 IPC 极快返回,有模块级缓存。
   // device-link 远程会话用被控端经隧道带来的 providers(per-provider,fast 判定与本地同口径)。
@@ -1658,11 +1653,15 @@ export function CCAgentSessionView({
   const getHelpCommandsSnapshot = useCallback(async (): Promise<UnifiedCommand[]> => {
     const cached = allCommandsRef.current;
     if (cached.length > 0) return cached;
-    const agentKind = toMakerAgentKind(session?.agentKind);
+    const agent = dbToMakerAgentKind(session?.agentKind);
+    // NEW_MAKER_DRAFT_CHANGED 现在已 fan-out cursor 槽(见 buildNewMakerDraftChangedPayload),
+    // 但远程 Cursor **会话内**的模型记忆镜像尚未接线,故仍保持空镜像降级 -- 关键是不读
+    // claudeCode 冒充。接线属独立范围,不在本 PR。
+    const vendorSlot = agent === 'claude-code' ? 'claudeCode' : agent;
     try {
       // device-link 远程会话同源:传 remoteDeviceId,fallback 快照也从被控端读(见上方 cache effect 说明)。
       return await loadAllCommands(
-        agentKind,
+        agent,
         session?.workingDir,
         {
           skipAgentSkills: isRemoteSession,
@@ -1916,12 +1915,12 @@ export function CCAgentSessionView({
   // remote-forward 直连本机 MCP bridge、worker 创建继承 remoteHostId;device-link 会话的
   // Lead / Worker / team 真身都在被控端,enableOrca 与团队读写经隧道路由过去 ——
   // 三类都已接通,不再按 agent 或远端形态限流。
-  // 注意:doc rail (isCompactRail) 也允许显示 toggle —— WorkdirBrowseRoute 已经
+  // 注意:doc rail (isCompactRail) 也允许显示协同菜单项 —— WorkdirBrowseRoute 已经
   // 针对 Lead session 接入了 OrcaSplitView toggle 布局,普通 session 必须能从
-  // ChatInput 工具行启用协同变成 Lead,否则 doc 模式下首次开启入口完全没有。
-  // 工具行同时传 denseToolbar=true,协同 pill 自动收成 icon-only,窄 rail 视觉 OK。
+  // ChatInput「+」菜单启用协同变成 Lead,否则 doc 模式下首次开启入口完全没有。
+  const collabWorkspaceKind = session?.workspaceKind;
   const collabEntry = resolveCollabEntryPolicy({
-    workspaceKind: session?.workspaceKind,
+    workspaceKind: collabWorkspaceKind,
     workingDir: session?.workingDir,
     orcaRole: session?.orcaRole,
     remoteHostId: session?.remoteHostId,
@@ -1931,6 +1930,7 @@ export function CCAgentSessionView({
   });
   const collabPolicyEligible = !orcaMode && collabEntry.eligible;
   const collabPolicy = useCollabProjectPolicy(session?.workingDir, collabPolicyEligible, {
+    workspaceKind: collabWorkspaceKind,
     // SSH 远端会话的 workingDir 是远端主机路径, 跳过项目级查询; 用户级/全局级 collab
     // 开关仍生效 (与 main 侧 remote 分支同口径)。
     skipQuery: collabEntry.skipProjectQuery,
@@ -2002,7 +2002,7 @@ export function CCAgentSessionView({
   // navigate 触发条件:仅兼容 orca route 仍在场时需要跳回单 session 路由。
   // doc 模式 (isCompactRail=true) 下 OrcaSplitView 把 Lead pane 渲染为
   // <CCAgentSessionView ... orcaMode compact />,orcaMode 这里只是表"在 split-pane 里"的语义标,
-  // 不能当 navigate 判据 —— 否则用户在 doc rail 工具行点协同 pill 关协同会跳出 doc 模式。
+  // 不能当 navigate 判据 —— 否则用户在 doc rail 的「+」菜单关闭协同会跳出 doc 模式。
   // disableOrca 后 lead.orcaRole 被清掉,WorkdirBrowseRoute 的 isOrcaLeadSession 自动 fallback
   // 到单 CCAgentSessionView,留在 doc 模式即可。
   const { requestStop: requestStopCollab } = useStopOrcaCollab({
@@ -2185,7 +2185,7 @@ export function CCAgentSessionView({
         capabilities: sessionCaps,
         providerId: session?.providerId ?? null,
         modelId: newModelId,
-        agentKind: toMakerAgentKind(session?.agentKind),
+        agentKind: dbToMakerAgentKind(session?.agentKind),
       });
       if (!supportsFast) {
         const currentFastMode = sessionId ? makerChatStore.getSnapshot(sessionId).fastMode : false;
@@ -2333,7 +2333,7 @@ export function CCAgentSessionView({
       }
       const createOpts = session?.workingDir
         ? {
-            agentKind: 'claude-code' as const,
+            agentKind: session.agentKind === 'pi' ? 'pi' as const : 'claude-code' as const,
             workingDir: session.workingDir,
             model: session.model,
             orcaRole: session.orcaRole ?? null,
@@ -2673,7 +2673,9 @@ export function CCAgentSessionView({
         kind: 'usage-limit-recovery',
         requestId,
         sessionId,
-        agentKind: session?.agentKind === 'codex' ? 'codex' : 'claude-code',
+        agentKind: session?.agentKind === 'codex' || session?.agentKind === 'pi'
+          ? session.agentKind
+          : 'claude-code',
         resetAtMs: usageLimitRecovery.resetAtMs,
       }),
     });
@@ -2732,14 +2734,25 @@ export function CCAgentSessionView({
     if (getSessionDeviceId(sessionId)) return;
     // Cursor 尚无独立模型目录(T4);不做 vendor fallback,也不冒充 cc/codex 默认模型。
     if (sessionAgentKind === 'cursor') return;
-    const agent = isCodex ? 'codex' : 'claude-code';
+    // displayAgentKind 已把 session.agentKind 三值化(含 pi);isCodex 只覆盖 codex。
+    // 必须用 displayAgentKind 映射,否则 pi 会话会被误写成 claude-code 默认模型。
+    const agent =
+      displayAgentKind === 'pi'
+        ? 'pi'
+        : displayAgentKind === 'codex'
+          ? 'codex'
+          : 'claude-code';
     if (!shouldFallbackVendorModel(providers, sessionModel, agent)) return;
-    const defaultModel = getDefaultModelForVendor(isCodex ? 'codex' : 'cc');
+    // 用三值化后的 agent 映射选默认模型:Pi 会话必须回退到 Pi 目录默认,而不是被
+    // `isCodex ? 'codex' : 'cc'` 误写成 CC 首选(可能是更贵的 Opus)(codex review)。
+    const defaultModel = getDefaultModelForVendor(
+      agent === 'pi' ? 'pi' : agent === 'codex' ? 'codex' : 'cc',
+    );
     sessionService
       .update(sessionId, { model: defaultModel.id })
       .then(() => refreshServerSession())
       .catch((err) => log.warn('vendor fallback patch failed:', err));
-  }, [isCodex, providers, refreshServerSession, sessionAgentKind, sessionId, sessionModel]);
+  }, [displayAgentKind, providers, refreshServerSession, sessionAgentKind, sessionId, sessionModel]);
 
   // 远程协同交接被 app 关闭打断时的兜底:把上次没能发出去的正文回填到输入框。
   // 只回填、不自动补发(理由见 pendingFirstMessage 的「可恢复副本」注释)。
@@ -3056,6 +3069,8 @@ export function CCAgentSessionView({
       messages={messages}
       taskUpdates={taskUpdates}
       isSessionStreaming={isStreaming}
+      continuationTurnClientId={continuationTurnClientId}
+      continuationInFlightProjectionCapability={continuationInFlightProjectionCapability}
       onLoadMore={loadOlderMessages}
       isLoadingMore={isLoadingMore}
       hasMoreMessages={hasMoreMessages}
@@ -3547,6 +3562,26 @@ export function CCAgentSessionView({
               </InteractionPromptHost>
               {/* 会话内 /goal 进行中状态条(composer 上方);无 goal 时返回 null 不占位。 */}
               <GoalIndicator sessionId={sessionId} />
+              {/* Codex IDE 扩展式常驻计划面板 —— 计划在流内不再渲染,这里是唯一
+                 呈现处:钉在输入框上方原地更新。任意 pending interaction(计划
+                 审核 / 权限 / 提问 / 插件配置 / 各类确认卡)接管底部区时隐藏:
+                 胶囊的悬停浮层向上展开,会盖住交互卡内容(条件集与下方 ternary
+                 的静默判定保持一致)。 */}
+              <PinnedPlanPanel
+                sessionId={sessionId ?? null}
+                messages={messages}
+                animated={isStreaming}
+                width={inputWidth}
+                visible={!(
+                  pendingPlanReview ||
+                  pendingPermission ||
+                  pendingAskUser ||
+                  pendingPluginSetup ||
+                  pendingIssueConfirm ||
+                  pendingRenameSessionsConfirm ||
+                  pendingGhostGrantConfirm
+                )}
+              />
               {/* 互斥:有任意 pending interaction 时,下方 takeover/overlay/ChatInput
                  全部静默 — 跟改造前 ternary 链 (Plan ? : Perm ? : Ask ? :
                  Takeover ? : ChatInput) 的语义一致。
@@ -3579,7 +3614,10 @@ export function CCAgentSessionView({
                   sessionId={sessionId}
                   // session=null 是冷启动 / 直链 GET 尚未回流的合法首帧；显式传 null，
                   // 让 ChatInput 暂不显示 Agent 身份，不能跟随 displayAgentKind 的 cc 回退。
-                  runtimeAgentKind={session ? toMakerAgentKind(session.agentKind) : null}
+                  runtimeAgentKind={session ? dbToMakerAgentKind(session.agentKind) : null}
+                  // 协同会话不参与跨引擎切换；session 未加载时保留 undefined 未知态，
+                  // 仅在完整元数据确认非 Orca 后传 null 开放入口。
+                  sessionOrcaRole={session ? (session.orcaRole ?? null) : undefined}
                   initialWorkingDir={session?.workingDir}
                   remoteHostId={session?.remoteHostId ?? null}
                   deviceLinkDeviceId={remoteDeviceId}
@@ -3624,21 +3662,18 @@ export function CCAgentSessionView({
                   extraDirs={session?.extraDirs ?? []}
                   onExtraDirsChange={handleExtraDirsChange}
                   compactToolbar={compactToolbar}
-                  // doc rail (isCompactRail) 宽度受限 + 拖宽上限,工具行需要把
-                  // 字号/控件压一档,同时让协同 toggle 只剩 logo。
+                  // doc rail (isCompactRail) 宽度受限 + 拖宽上限,工具行需要把字号/控件压一档。
                   denseToolbar={isCompactRail}
                   // doc 模式右栏:不抢焦点,避免 TipTap contenteditable 激活
                   // Windows 中文 IME 后,Ctrl+Shift+F 等组合键被 OS 层吞掉。
                   // 详见 ChatInput 的 disableAutofocus prop 注释。
                   disableAutofocus={isCompactRail}
                   focusOnStorageKeyChange={ownsRoute}
-                  // F-COLLAB: 协同模式 toggle。在以下场景渲染:
-                  // - 普通主会话视图 (含 doc rail) 的 Claude / Codex 项目会话,本地 /
-                  //   SSH 远端 / device-link 被控端三类都算(判定见 collabEntry)。
-                  // 排除 worker 子会话(worker 自己不能再开协同)与对话模式(无项目目录)。
-                  // orcaMode 路由下 toggle 也保留显示 — ON 态的 orange pill 本身就是
+                  // F-COLLAB:「+」菜单里的协同模式项。普通 Lead 的项目/对话会话都渲染,
+                  // 项目级与用户级策略范围由 collabEntry 决定;只排除 Worker 子会话
+                  // (worker 自己不能再开协同)。
+                  // orcaMode 路由下也保留显示 — ON 态菜单项本身就是
                   // 关闭按钮 (点击触发 onChange({enabled:false}),走 requestStopCollab)。
-                  // doc rail 的 denseToolbar=true 会把 pill 收成 icon-only 形态。
                   collaboration={
                     allowCollabToggle || (orcaMode && collabEnabled)
                       ? {
@@ -4292,7 +4327,7 @@ function formatTokenCount(n: number): string {
  */
 function getModelContextWindow(
   model: string,
-  vendorKey: 'cc' | 'codex' | 'cursor',
+  vendorKey: 'cc' | 'codex' | 'cursor' | 'pi',
   deviceId?: string,
 ): number | undefined {
   // Cursor 模型表暂无独立 contextWindow 目录;圆环回落 SDK / 默认。
@@ -4311,7 +4346,7 @@ function ContextCapacityRing({
 }: {
   contextTokens: number;
   model: string;
-  vendorKey: 'cc' | 'codex' | 'cursor';
+  vendorKey: 'cc' | 'codex' | 'cursor' | 'pi',
   /** SDK-reported context window; 0 = not yet known → use hardcoded fallback. */
   sdkContextWindow: number;
   /** device-link 远程会话所属被控端 id;按被控端能力查 contextWindow(本机会话 undefined,行为不变)。 */

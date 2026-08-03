@@ -4,6 +4,7 @@ let memorySettings = {
   maker: true,
   claudeCode: false,
   codex: false,
+  pi: false,
 };
 
 vi.mock('electron', () => ({
@@ -45,6 +46,7 @@ describe('runtime-configs', () => {
       maker: true,
       claudeCode: false,
       codex: false,
+      pi: false,
     };
   });
 
@@ -69,6 +71,7 @@ describe('runtime-configs', () => {
       maker: false,
       claudeCode: true,
       codex: true,
+      pi: true,
     };
 
     expect(claudeConfig.memoryEnabled).toBe(true);

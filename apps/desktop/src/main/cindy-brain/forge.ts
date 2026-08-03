@@ -24,6 +24,10 @@ import {
   validateGhostManifest,
   type GhostManifest,
 } from '../../shared/ghost.js';
+import {
+  GHOST_MANIFEST_MAX_BYTES,
+  readBoundedFileNoFollow,
+} from '../utils/readBoundedFile.js';
 import { validateGhostLocaleResourcesInDirectory } from './ghostLocaleFiles.js';
 import { checkSkillMdConsistency } from './skillSlot.js';
 
@@ -38,7 +42,7 @@ const MAX_NODE_CINDY_BYTES = 128 * 1024 * 1024;
 /** 打包时跳过的目录/文件(源码目录里的开发残留,不属于意识本体)。 */
 function shouldSkip(name: string): boolean {
   if (name.startsWith('.')) return true; // .git / .DS_Store / .disabled 等
-  if (name === 'node_modules') return true;
+  if (name.toLowerCase() === 'node_modules') return true;
   if (name.toLowerCase().endsWith('.cindy')) return true; // 上次打包产物,防套娃
   return false;
 }
@@ -537,11 +541,27 @@ export async function scaffoldGhostDir(
 }
 
 /**
- * 校验 + 打包一个意识源码目录。产物写到源码目录自身(<id>-<version>.cindy,
- * 同名覆盖——同 id 同版本重打包语义上就是同一个包),用户在自己的意识目录里
- * 就能拿到成品;出错返回结构化分类,agent 按 message 修源码即可,不抛异常。
+ * 打包核心:校验 + 收集 + 生成 zip buffer,不写盘。packGhostDir(产物进源码目录)
+ * 与 packGhostDirToFile(产物去调用方指定路径,自定义市场安装管道用)共用,
+ * 保证两条路径的校验与打包规则永远一致。
  */
-export async function packGhostDir(dir: string): Promise<ForgePackResult> {
+async function buildGhostPackage(
+  dir: string,
+  /**
+   * 调用方**已经校验过**的规范根(realpath 产物)。传入时,这里会核对自己解析出的
+   * realpath 仍等于它,不等即拒。
+   *
+   * 为什么必须由调用方给:光靠"我自己 realpath 一次、再拿它当 containWithin 的锚点"
+   * 是**自我参照**——插件目录或其父目录在调用方校验之后、这里解析之前被换成指向
+   * 目录外的符号链接时,解析结果就是那个外部目录,以它为锚点的一切包含性判定自然
+   * 全部通过,外部 payload 会被打包进去(外部目录只要留着同样的 ghost.json,清单
+   * 对账也发现不了)。锚点必须来自上游的既有结论,不能在下游重新发明。
+   */
+  expectedRealDir?: string,
+): Promise<
+  | { ok: true; buf: Buffer; manifest: GhostManifest }
+  | Exclude<ForgePackResult, { ok: true }>
+> {
   try {
     let stat: fs.Stats;
     try {
@@ -552,13 +572,42 @@ export async function packGhostDir(dir: string): Promise<ForgePackResult> {
     if (!stat.isDirectory()) {
       return { ok: false, errorCode: 'DIR_NOT_FOUND', message: `不是目录:${dir}` };
     }
+    // 后续所有读取都以 realpath 根做 containWithin 复核:O_NOFOLLOW 只管最后
+    // 一个路径分量,校验后中间目录被换成根外链接的窗口靠它堵。
+    const realDir = await fs.promises.realpath(dir);
+    if (expectedRealDir !== undefined && realDir !== expectedRealDir) {
+      return {
+        ok: false,
+        errorCode: 'MANIFEST_INVALID',
+        message: '插件目录在打包前被替换(实际规范路径与调用方校验过的不一致)',
+      };
+    }
 
     // 1) 清单先行:与装入侧同一套校验,错在打包期就报清楚。
+    // 读到的**原始字节**要留作不可变快照:后面生成 zip 时逐文件重新读盘,若
+    // ghost.json 在"这里校验"与"写入 zip"之间被并发改写(保 id/version、加权限
+    // 声明),返回的 manifest 与包里那份就会分叉——安装侧拿返回值做审阅比对,
+    // 装进去的却是改过的包。快照写入让"校验的 = 返回的 = 包里的"三者恒等。
+    // 与市场发现/安装层同一把闸(单句柄限量读,拒符号链接):打包输入目录是
+    // 用户可写的活目录,按路径无界 readFile 会跟随链接读到目录外、或被超大
+    // 文件耗尽内存。快照字节也必须出自这把闸,不能再按路径重读。
     let manifestRaw: unknown;
+    let manifestBytes: Buffer;
     try {
-      manifestRaw = JSON.parse(
-        await fs.promises.readFile(path.join(dir, GHOST_MANIFEST_FILE), 'utf-8'),
+      const bytes = await readBoundedFileNoFollow(
+        path.join(realDir, GHOST_MANIFEST_FILE),
+        GHOST_MANIFEST_MAX_BYTES,
+        { containWithin: realDir },
       );
+      if (bytes === null) {
+        return {
+          ok: false,
+          errorCode: 'MANIFEST_INVALID',
+          message: `${GHOST_MANIFEST_FILE} 不是普通文件或超过 ${GHOST_MANIFEST_MAX_BYTES} 字节上限`,
+        };
+      }
+      manifestBytes = bytes;
+      manifestRaw = JSON.parse(manifestBytes.toString('utf-8'));
     } catch (err) {
       return {
         ok: false,
@@ -592,7 +641,9 @@ export async function packGhostDir(dir: string): Promise<ForgePackResult> {
     for (const item of manifest.skill?.items ?? []) mustExist.push(`${item.dir}/SKILL.md`);
     for (const rel of mustExist) {
       try {
-        const st = await fs.promises.stat(path.join(dir, rel));
+        // lstat 与收集侧(walk 的 Dirent)同一语义:声明的入口若是符号链接,
+        // stat 会判"在场"而 walk 不收集它,装出的包缺入口、运行期才 404。
+        const st = await fs.promises.lstat(path.join(dir, rel));
         if (!st.isFile()) throw new Error('not a file');
       } catch {
         return { ok: false, errorCode: 'ENTRY_MISSING', message: `清单声明的文件不存在:${rel}` };
@@ -605,19 +656,23 @@ export async function packGhostDir(dir: string): Promise<ForgePackResult> {
       const skillMdPath = path.join(dir, ...item.dir.split('/'), 'SKILL.md');
       let content: string;
       try {
-        content = await fs.promises.readFile(skillMdPath, 'utf-8');
+        // 同一把单句柄限量闸:超限在读之前拒,符号链接不放行。
+        const bytes = await readBoundedFileNoFollow(skillMdPath, GHOST_SKILL_MD_MAX_BYTES, {
+          containWithin: realDir,
+        });
+        if (bytes === null) {
+          return {
+            ok: false,
+            errorCode: 'MANIFEST_INVALID',
+            message: `${item.dir}/SKILL.md 不是普通文件或超过 ${GHOST_SKILL_MD_MAX_BYTES} 字节上限`,
+          };
+        }
+        content = bytes.toString('utf-8');
       } catch (err) {
         return {
           ok: false,
           errorCode: 'ENTRY_MISSING',
           message: `读取 ${item.dir}/SKILL.md 失败:${err instanceof Error ? err.message : String(err)}`,
-        };
-      }
-      if (Buffer.byteLength(content, 'utf8') > GHOST_SKILL_MD_MAX_BYTES) {
-        return {
-          ok: false,
-          errorCode: 'MANIFEST_INVALID',
-          message: `${item.dir}/SKILL.md 过大(上限 ${GHOST_SKILL_MD_MAX_BYTES} 字节)`,
         };
       }
       const consistencyError = checkSkillMdConsistency(content, item);
@@ -636,7 +691,7 @@ export async function packGhostDir(dir: string): Promise<ForgePackResult> {
     const maxFiles = manifest.node ? MAX_NODE_FILES : MAX_BASIC_FILES;
     const maxTotalBytes = manifest.node ? MAX_NODE_TOTAL_BYTES : MAX_BASIC_TOTAL_BYTES;
     const seenPackPaths = new Set<string>();
-    const walk = async (cur: string, relBase: string): Promise<ForgePackResult | null> => {
+    const walk = async (cur: string, relBase: string): Promise<Exclude<ForgePackResult, { ok: true }> | null> => {
       const entries = await fs.promises.readdir(cur, { withFileTypes: true });
       for (const e of entries) {
         if (shouldSkip(e.name)) continue;
@@ -654,6 +709,15 @@ export async function packGhostDir(dir: string): Promise<ForgePackResult> {
         if (e.isDirectory()) {
           const bad = await walk(abs, rel);
           if (bad) return bad;
+        } else if (e.isSymbolicLink()) {
+          // 符号链接一律不穿透。此前是静默跳过——OneDrive 未水合占位文件、
+          // 仓库里提交的链接都会被悄悄丢出包外,校验说"在场"、包里却没有,
+          // 运行期才 404。改为结构化拒绝,错误可见。
+          return {
+            ok: false,
+            errorCode: 'MANIFEST_INVALID',
+            message: `源码目录含符号链接条目,不允许打包:${rel}`,
+          };
         } else if (e.isFile()) {
           files.push({ rel, abs });
           totalBytes += (await fs.promises.stat(abs)).size;
@@ -674,12 +738,39 @@ export async function packGhostDir(dir: string): Promise<ForgePackResult> {
     const tooLarge = await walk(dir, '');
     if (tooLarge) return tooLarge;
 
-    // 5) 打包到源码目录自身(2026-07 Lizi 定案:产物跟源码住一起,拿取直观)。
-    // 文件收集在写盘之前完成 + shouldSkip 跳过 *.cindy,自身产物不会进包;
-    // 同名覆盖:同 id 同版本重打包语义上就是同一个包。
+    // 5) 生成 zip buffer。文件收集在此之前完成 + shouldSkip 跳过 *.cindy,
+    // 产物自身不会进包;写盘位置由调用方决定(packGhostDir 进源码目录,
+    // packGhostDirToFile 进调用方指定路径)。
     const zip = new JSZip();
+    // 身份卡用第 1 步的不可变快照,其余文件走同一把单句柄限量闸现读:walk 里
+    // 的 stat 只是预算预估,文件可在 walk 与此处之间被换成超大文件或符号链接
+    // (网络共享/并发写)。真正的边界在读取时按**剩余总预算**强制执行,任何
+    // 文件被并发改动(换链接/删除/膨胀)都结构化拒绝,不把无界字节交给 JSZip。
+    let packedBytes = 0;
     for (const f of files) {
-      zip.file(f.rel, await fs.promises.readFile(f.abs));
+      let content: Buffer;
+      if (f.rel === GHOST_MANIFEST_FILE) {
+        content = manifestBytes;
+      } else {
+        let bytes: Buffer | null;
+        try {
+          bytes = await readBoundedFileNoFollow(f.abs, maxTotalBytes - packedBytes, {
+            containWithin: realDir,
+          });
+        } catch {
+          bytes = null;
+        }
+        if (bytes === null) {
+          return {
+            ok: false,
+            errorCode: 'TOO_LARGE',
+            message: `文件在打包期间被并发改动或超出剩余体积预算:${f.rel}`,
+          };
+        }
+        content = bytes;
+      }
+      packedBytes += content.byteLength;
+      zip.file(f.rel, content);
     }
     const buf = await zip.generateAsync({ type: 'nodebuffer', compression: 'DEFLATE' });
     const maxCindyBytes = manifest.node ? MAX_NODE_CINDY_BYTES : MAX_BASIC_CINDY_BYTES;
@@ -690,9 +781,7 @@ export async function packGhostDir(dir: string): Promise<ForgePackResult> {
         message: `压缩包体积超上限(${maxCindyBytes} 字节)`,
       };
     }
-    const cindyPath = path.join(dir, `${manifest.id}-${manifest.version}.cindy`);
-    await fs.promises.writeFile(cindyPath, buf);
-    return { ok: true, cindyPath, manifest };
+    return { ok: true, buf, manifest };
   } catch (err) {
     return {
       ok: false,
@@ -700,6 +789,57 @@ export async function packGhostDir(dir: string): Promise<ForgePackResult> {
       message: err instanceof Error ? err.message : String(err),
     };
   }
+}
+
+/**
+ * 校验 + 打包一个意识源码目录。产物写到源码目录自身(<id>-<version>.cindy,
+ * 同名覆盖——同 id 同版本重打包语义上就是同一个包),用户在自己的意识目录里
+ * 就能拿到成品;出错返回结构化分类,agent 按 message 修源码即可,不抛异常。
+ */
+export async function packGhostDir(dir: string): Promise<ForgePackResult> {
+  const built = await buildGhostPackage(dir);
+  if (!built.ok) return built;
+  // 产物跟源码住一起(2026-07 Lizi 定案:拿取直观);文件收集在写盘之前完成
+  // + shouldSkip 跳过 *.cindy,自身产物不会进包;同名覆盖。
+  const cindyPath = path.join(dir, `${built.manifest.id}-${built.manifest.version}.cindy`);
+  try {
+    await fs.promises.writeFile(cindyPath, built.buf);
+  } catch (err) {
+    return {
+      ok: false,
+      errorCode: 'INTERNAL',
+      message: `写入打包产物失败:${err instanceof Error ? err.message : String(err)}`,
+    };
+  }
+  return { ok: true, cindyPath, manifest: built.manifest };
+}
+
+/**
+ * 打包到调用方指定的绝对路径。自定义市场安装管道用:市场克隆缓存是只读事实,
+ * 产物落到临时目录,装完即删。校验与打包规则与 packGhostDir 完全一致。
+ *
+ * `expectedRealDir` **必填**:这条路径的输入来自用户可写的市场目录,打包器不能
+ * 自己 realpath 一次就当锚点(自我参照,见 buildGhostPackage 的说明)。做成必填
+ * 而不是可选,是为了让新调用方无法跳过——签名逼着它交出上游已经校验过的规范根。
+ */
+export async function packGhostDirToFile(
+  dir: string,
+  destPath: string,
+  expectedRealDir: string,
+): Promise<ForgePackResult> {
+  const built = await buildGhostPackage(dir, expectedRealDir);
+  if (!built.ok) return built;
+  try {
+    // 0o600:临时包可能落在共享 /tmp,不给同机其它用户读权限。
+    await fs.promises.writeFile(destPath, built.buf, { flag: 'wx', mode: 0o600 });
+  } catch (err) {
+    return {
+      ok: false,
+      errorCode: 'INTERNAL',
+      message: `写入打包产物失败:${err instanceof Error ? err.message : String(err)}`,
+    };
+  }
+  return { ok: true, cindyPath: destPath, manifest: built.manifest };
 }
 
 /**
@@ -732,7 +872,7 @@ ghost_forge_pack 打包 → 用户在弹窗上确认装入。**
 值得主动摆出来让用户选的"隐藏"设计选项(详见对应章节):
 
 - **界面形态**:无界面(纯工具)/ 聊天卡片(card 槽,§4.5)/ 停靠面板(panel.position
-  left,§5)/ 右侧栏页签(position "tab",§5)。
+  left,§5)/ 插件页内独占面板(position "tab",从插件页「使用」打开、离开即关,§5)。
 - **唤起方式**:只靠 AI 按 whenToUse 自动想起,还是同时声明 \`command\` 点名词让用户
   显式点名(推荐,§2)。
 - **启动模式**:on-demand 按需拉起(缺省,推荐)/ resident 常驻(仅订阅型、要秒响应
@@ -805,8 +945,8 @@ my-ghost/
              "minWidth": 240, "defaultFraction": 0.24,
              "systemButtons": { "maximize": false } },
   // panel.position:面板显示形态。left(缺省)= 停靠主聊天窗左侧;
-  // "tab" = 右侧栏页签(与文件/审查/终端同一容器,每会话至多一个,用户从
-  // 空态列表或「+」菜单打开;此形态没有拖缝宽度,声明 minWidth /
+  // "tab" = 插件页内的独占面板(用户在插件页点插件卡的「使用」打开,离开
+  // 插件页即关闭;同一时刻至多一个;此形态没有拖缝宽度,声明 minWidth /
   // defaultFraction 会被拒装,请移除)。right 已退役(右侧是右侧边栏的地盘;
   // 旧包声明 right 自动并入 left,用户想放右边可自己拖拽换位)。
   // top/bottom 暂未支持(排期中)
@@ -1224,9 +1364,23 @@ const r = await cindy.send({ type: 'cindy-request', kind: 'gen_image', prompt: '
 //   例:{ kind: 'gen_video', prompt: '猫在奔跑', ratio: '9:16', resolution: '1080p' }
 //   ⚠️ 高分辨率 + 长时长明显更贵也更慢:用户没提要求时不要自作主张调高,
 //      不传让型号自己定。
-//   成功返回多带一个 videoParams: { durationSeconds, resolution, ratio, fps }
-//   = 本单**实际生效**的参数(主机权威)。老宿主会静默忽略这四项,拿 videoParams
+// 要不要出声 audio(可选布尔,**三态,不传与传 false 不是一回事**):
+//   不传(缺省,**推荐**):随该型号自己的默认。有的型号原生音画同生,不传
+//     出来就是有声的;有的型号压根不出声。不传永远不会因这项被拒。
+//   true:显式要音轨。**台词/音效/配乐的内容写在 prompt 里**——台词用双引号
+//     括起来(如 男人说:"你好"),音效和配乐直接描述(如 脚步踩在雪地上咯吱作响、
+//     背景音乐是轻快的吉他)。主机不替你改写提示词,你不写就只能靠模型自由发挥。
+//   false:显式要静音。
+//   型号没有音频开关时,**显式传**这项会被明拒(不会静默忽略),拒绝话术会
+//     告诉你不传即按该型号默认出片;不传就不会撞这条。
+//   例:{ kind: 'gen_video', prompt: '雪地里有人走过,脚步声咯吱作响', audio: true }
+//   ⚠️ 用户没提声音需求时就别传:传 true 不会凭空变好,传 false 反而可能把
+//      本来有声的型号弄成默片。
+//   成功返回多带一个 videoParams: { durationSeconds, resolution, ratio, fps, audio? }
+//   = 本单**实际生效**的参数(主机权威)。老宿主会静默忽略这几项,拿 videoParams
 //   跟你传的值对一下就知道兑现没有;要在交卷 note 里报参数,以它为准别报你传的。
+//   \`audio\` 缺席 = 主机说不上来(型号没这个旋钮,或老宿主不认识这个字段),
+//   **别把缺席读成"无声"**;要跟用户说有没有声音,只有它明确是 true/false 时才说。
 // 视频异步模式(可能超过 30 分钟续命天花板,或不想吊着 tool-call 等时):
 //   加 mode:'submit' → 受理后立即返回 { ok:true, jobId, status:'running',
 //   expectedSeconds }(资格审/源图归属仍同步校验,拒绝立即可见),生成在
@@ -1552,7 +1706,7 @@ cindy.onHostMessage(async function (msg) {
 \`\`\`json
 "slots": [..., "subscribe"],
 "subscribe": {
-  "topics": ["turn", "session"],                        // did- 旁听(元数据,不含消息内容)
+  "topics": ["turn", "session", "activity"],           // did- 旁听(元数据,不含消息内容)
   "hooks": ["will-user-message", "will-assistant-message"]  // will- 拦截(声明任一必须 launch:"resident")
 },
 "launch": "resident"               // 拦截要求常驻在场(否则每条消息都等你冷启动)
@@ -1567,9 +1721,32 @@ cindy.onHostMessage(function (msg) {
     // usage 各字段可选(cc/codex 上报详尽度不同,别假设字段必在):
     //   { inputTokens?, outputTokens?, cacheReadTokens?, cacheCreationTokens? }
     // msg.seq 每意识单调递增;msg.dropped(可选)= 你熄灯期溢出丢弃的事件数。
+    // 生命周期:会话被关掉或引擎被替换时,主机会给还在场的那一轮补发
+    // endReason: 'interrupted',让 start/end 成对。但这不是投递保证——熄灯期
+    // 缓冲溢出照样会丢(见 msg.dropped),状态机别只靠 end 归位。
     return;
   }
   // did-turn-start / did-session-created / did-session-archived 同理(见 topics)。
+  // activity topic 只提供内层活动边界元数据:
+  // did-thinking-{start,end}: { sessionId, blockId }(不含 reasoning 正文);
+  // did-approval-{start,end}: { sessionId, requestId };
+  // did-user-input-{start,end}: { sessionId, requestId }。
+  // approval = permission / plan_review; user-input = ask_user_question。
+  // **blockId / requestId 都是主机生成的不透明配对键**,不是 agent 或 provider 侧的
+  // 原始 id:只保证同一段思考 / 同一个请求的 start 与 end 拿到同一个值,同一个上游
+  // 请求在不同会话里也是不同值。它们不承载任何语义(看不出是哪个工具、哪个 MCP
+  // 服务、是不是计划审批),也**关联不到**主机或 provider 的任何其他标识 —— 别拿它
+  // 去和你从别处拿到的 id 对齐,只用来配对。
+  // **按 requestId 配对,不是全局开关**:一轮里并行工具调用可能同时挂着多个审批,
+  // 每个 requestId 各发自己的 start / end。要判断"是否仍在等审批",用 requestId
+  // 集合(收到 start 加入、end 移除),集合非空即仍在等;别用单个布尔位,否则先结束
+  // 的那个请求会把还在等的抹掉。
+  // **审批可能跨过 did-turn-end**:codex 计划模式的 plan_review 就是在计划轮次
+  // 收尾之后才发起的,你会先收到 did-turn-end、再收到 did-approval-start。所以
+  // 别拿 did-turn-end 去清空审批状态——只认对应 requestId 的 did-approval-end。
+  // thinking 不同:它只在轮次内,did-turn-end 前主机必定先补发未收口的
+  // did-thinking-end。审批 / 等待输入则由主机在真实决策落地(批准、拒绝、回答、
+  // 超时、取消)时收口,会话被关闭 / 重建时也会给所有在场 requestId 各补一条 end。
   if (msg.name === 'did-session-switched') {
     // 用户把某个会话切到台前(切换会话 / 从非会话页切回都算)。
     // msg.data = { sessionId, workdir? }。连续停留同一会话不重发。
@@ -1601,12 +1778,26 @@ cindy.onHostMessage(function (msg) {
 硬规则(主机代码强制):
 - **旁听 topic**:\`turn\`(轮次开始/结束,带 agent / 模型 / 耗时 / token 用量)、
   \`session\`(会话创建 / 归档 / 切换——切换 = 用户把哪个会话切到台前,连续停留
-  同一会话不重发)。**只有元数据,永远不含消息内容**(v1 不开正文旁听)。
-  没声明的 topic 主机不投;
-- **只覆盖你自己的主会话**:orca worker、后台自动化会话不投(与你无关的噪音);
+  同一会话不重发)、\`activity\`(思考 / 审批 / 等待用户输入的开始结束边界)。
+  activity 只带 \`sessionId\` + \`blockId\` 或 \`requestId\`;**不会给 reasoning、工具
+  input、命令、文件内容、计划正文、问题内容或答案**。旧插件不声明 activity 时行为
+  完全不变;没声明的 topic 主机不投;
+- **只覆盖你自己的主会话**:orca worker、后台自动化会话不投(与你无关的噪音)。
+  粒度到**轮次**:主会话里由 \`/goal\` 自动续跑、定时任务、hook 渠道发起的轮次不投,
+  **连它们触发的审批与提问也不投**。
+  已知例外:飞书 / Slack 等渠道**接管**(attached)现有主会话代发的轮次,其
+  \`did-turn-*\` 与 thinking 边界仍会投给你(该轮次在主机侧没打来源标记,这是
+  \`turn\` topic 的既有行为,不是 activity 引入的);它触发的审批与提问**不会**投
+  (走渠道卡的确认面,主机按面拦掉)。所以:\`did-approval-*\` /
+  \`did-user-input-*\` 一定是用户本人在 Desktop 上被问到,不会出现没有对应轮次的
+  孤儿审批;但 \`did-turn-*\` / \`did-thinking-*\` 偶尔可能来自渠道代发的轮次,别把
+  "有 thinking"直接等同于"用户本人正在用 Desktop";
 - **旁听是 fire-and-forget**:主机投完即走,你崩了/慢了不影响任何会话;熄灯期事件
   进队列(上限 100,溢出丢最旧,下一条带 \`dropped\` 计数),事件到达会把你按需
-  拉起补投——但订阅型意识**建议 \`launch:"resident"\`**(要秒收就得在场);
+  拉起补投——但订阅型意识**建议 \`launch:"resident"\`**(要秒收就得在场)。
+  **\`dropped\` 非零就必须重置你本地派生的状态**:被丢的可能正是某条
+  \`did-turn-end\` 或 \`did-*-end\`,你要是继续拿旧状态往下推,就会永久停在
+  "在忙 / 在等审批"。收到 \`dropped\` 时把状态清空、以此后到达的事件为准;
 - **钩子超时 = 放行**:\`will-\` 裁决必须 3 秒内回,超时主机按 allow 放行(聊天绝不
   因你卡死);连续 3 次超时/崩溃,主机**熔断**你的钩子能力(降级为只旁听 + 提示
   用户),旁听不受影响。要过外部合规接口就在窗口内 \`await cindy.fetch\`(network
@@ -2569,6 +2760,26 @@ SKILL.md 硬规则(打包与装入双侧强制,任一不满足直接拒):
 - \`name\`:小写字母/数字加单连字符分段(禁首尾/连续连字符),≤64 字符;
 - SKILL.md 单文件 ≤64KB;items 最多 4 条。
 
+正文开头建议写一段**环境守卫**(非强制,但强烈建议):技能挂进的是**共享**技能根,
+用户在 Cindy 之外直接跑 Claude Code / Codex 时同样会看到你的技能,而那里没有插件
+通道。Agent 读完正文自然会发现调不动 \`ghost_call\`,但很容易转头用 shell 自己实现
+一个"看起来像"的替代品——这段守卫拦的就是这个。放在 H1 标题之后的第一段
+(Agent 从头读正文):
+
+\`\`\`markdown
+> **本技能属于 Cindy 插件 \`<插件 id>\`:动手前先看工具列表,没有名字含 \`ghost_call\`
+> 的工具就说明不在 Cindy 中,本技能不可用。** 此时不要执行任何步骤,也不要用 shell
+> 或别的工具自己实现一遍——能力在插件的运行时里,替代品做不出等价产出。直接告诉
+> 用户「这个技能需要在 Cindy 客户端里使用」,然后停下。
+\`\`\`
+
+- 判据只写"名字含 \`ghost_call\`",**不要写某个引擎的工具名全称**:Claude Code 与
+  Codex 的 MCP 工具名前缀不同,写死一边会让另一边误判成"不在 Cindy";
+- 写在正文里,**不要塞进 frontmatter \`description\`**:description 每个会话都常驻
+  上下文,正文只在技能被激活后才读,守卫写正文不花常驻预算;
+- 一个插件多条 item 时每份 SKILL.md 各写各的(技能之间互相看不见);
+- 技能正文是英文时照译一份,别中英混排。
+
 信任与作用域(如实告知用户,也请作者自重):
 
 - 技能指令由**主 Agent 以用户全部权限执行**,对所有项目、所有会话生效,
@@ -2674,13 +2885,16 @@ if (r.ok && r.confirmed) {
 
 - 显示形态由 \`panel.position\` 决定:\`left\`(缺省)= 停靠主聊天窗左侧的常驻
   面板(\`right\` 已退役:右侧是右侧边栏的地盘,旧包声明 right 自动并入 left,
-  用户想放右边可自己拖拽换位);\`"tab"\` = 右侧栏页签——与文件/审查/终端同一
-  容器,每会话至多一个页签,由用户从右侧栏空态列表或「+」菜单打开。当用户在会话视图内装入
-  tab 型插件并勾选「立即开启」时,装入完成后会自动展开右侧栏并打开/聚焦该
-  页签;从插件页(无会话路由)装入或未勾选时,仍由用户手动从空态/「+」菜单
-  打开。页签形态没有拖缝宽度语义,声明 \`minWidth\` / \`defaultFraction\` 会被
-  拒装。两种形态的面板代码完全一样(同一 panel.html,供片/主题/媒体规则不变),
-  只是宿主容器不同;页签形态请把界面做成自适应宽度;
+  用户想放右边可自己拖拽换位);\`"tab"\` = **插件页内的独占面板**——由插件页
+  自己承载(不进右侧栏页签容器):用户在插件页点你这张卡的「使用」按钮打开,
+  同一时刻至多一个,**用户离开插件页即关闭卸载**(面板收束,2026-08-02 定案:
+  插件面板不再常驻右侧栏干扰其它会话)。装入时勾选「立即开启并打开面板」会
+  在装完后进入插件页并打开你的面板;不勾选则由用户之后自己从插件页点「使用」。
+  停用/卸载插件同样立即关闭面板。页签形态没有拖缝宽度语义,声明 \`minWidth\` /
+  \`defaultFraction\` 会被拒装。两种形态的面板代码完全一样(同一 panel.html,
+  供片/主题/媒体规则不变),只是宿主容器不同;此形态请把界面做成自适应宽度,
+  并且**不要假设自己会在后台长期存活**——每次打开都可能是全新加载,状态要
+  自己持久化(见 §4.6 的偏好存储);
 - 停靠形态的**标题条(标准头)由主机绘制**:标题(\`panel.title\`)+ 一批系统
   按钮(当前:「撑满内容区」、「在独立窗口中打开」——用户可把你的面板抽进
   自己的 OS 窗口,关窗/合并即回停靠原位——以及「最小化为浮动气泡」——用户
@@ -2689,8 +2903,8 @@ if (r.ok && r.confirmed) {
   也长在这里)。你的 panel.html 只画标题条以下的部分,**不要自己再画一条
   标题栏**。不想要某颗系统按钮时在身份卡声明
   \`"systemButtons": { "maximize": false, "detach": false, "minimize": false }\`
-  逐个关闭(缺省全开;标题条本体关不掉;未知键拒装;\`position:"tab"\` 没有
-  标准头,声明本字段拒装);
+  逐个关闭(缺省全开;标题条本体关不掉;未知键拒装;\`position:"tab"\` 由插件页
+  自绘头,没有这套标准头,声明本字段拒装);
 - 与电子脑同源,用 \`BroadcastChannel('<自定名>')\` 通信(电子脑发,面板收);
 - 取自己的媒体:\`cindy-ghost://<id>/media/<指纹><后缀>\`(主机查账验归属,别人的图 404);
 - 重启回放:\`fetch('cindy-ghost://<id>/gallery')\` 返回本意识作品清单 \`[{src, caption}]\`;
@@ -2804,7 +3018,7 @@ if (r.ok && r.confirmed) {
     或用 $command 点名;AI 工具调用不受影响(见 §2 说明)
 - 声明了 tool 槽但缺 tools(或反之)· panel.html 声明了但 slots 没有 "panel"
 - settingsHtml 路径不合法/文件不在包里 · settingsHeight 越界(160–800)或没配 settingsHtml 单独声明
-- panel.systemButtons 格式错(不是对象、未知键、值非布尔,或 position:"tab" 时声明——页签形态没有标准头)
+- panel.systemButtons 格式错(不是对象、未知键、值非布尔,或 position:"tab" 时声明——插件页内面板没有标准头)
 - keywords(已废弃字段,旧包兼容保留,新意识别写)有单字词 · kind 写了但不是 "chip"(可省略) · schemaVersion 不是 2
 - cindy 详单格式错(未知类目/动作、空数组、有详单但 slots 没有 "cindy")
 - agent 详单格式错(有详单但 slots 没有 "agent"，或 background / errand 都不是 true；只需点击触发时应省略 agent 字段)

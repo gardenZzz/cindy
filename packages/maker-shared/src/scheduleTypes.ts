@@ -1,6 +1,6 @@
 export type RemoteScheduleStatus = 'active' | 'paused' | 'expired';
 /** Agent runtime kind — kept in sync with maker-core / model-providers / maker-scheduler. */
-export type AgentKind = 'claude-code' | 'codex' | 'cursor';
+export type AgentKind = 'claude-code' | 'codex' | 'cursor' | 'pi';
 export type RemoteScheduleAgentKind = AgentKind;
 export type RemoteScheduleWorkspaceKind = 'project' | 'dialogue';
 export type RemoteScheduleRunStatus = 'running' | 'success' | 'failed' | 'aborted' | 'interrupted' | 'skipped';
@@ -11,6 +11,7 @@ export type RemoteTimestamp = number | string | null | undefined;
 export interface RemoteScheduleNotifyConfig {
   desktop?: boolean;
   feishu?: boolean;
+  wecomGroup?: boolean;
 }
 
 export interface RemoteScheduleWriteInput {
@@ -24,6 +25,7 @@ export interface RemoteScheduleWriteInput {
   intervalMs?: number;
   agentKind: RemoteScheduleAgentKind;
   model?: string;
+  providerId?: string;
   effort?: string;
   fastMode?: boolean;
   workspaceKind?: RemoteScheduleWorkspaceKind;
@@ -58,6 +60,7 @@ export interface RemoteScheduleTemplate {
   recurring?: boolean;
   agentKind?: RemoteScheduleAgentKind;
   model?: string;
+  providerId?: string;
   effort?: string;
   fastMode?: boolean;
   useWorktree?: boolean;
@@ -92,6 +95,7 @@ export interface RemoteSchedule {
   intervalMs?: number;
   agentKind?: RemoteScheduleAgentKind;
   model?: string;
+  providerId?: string;
   effort?: string;
   fastMode?: boolean;
   workspaceKind?: RemoteScheduleWorkspaceKind;
@@ -133,7 +137,7 @@ export interface RemoteScheduleRunMoney {
   approximate: boolean;
   kind: 'actual-cost' | 'value-estimate';
   estimateReasons?: Array<
-    'fixed-fx' | 'legacy-usd' | 'subscription-value' | 'reference-price'
+    'fixed-fx' | 'legacy-usd' | 'subscription-value' | 'reference-price' | 'inferred-currency'
   >;
 }
 

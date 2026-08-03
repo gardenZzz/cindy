@@ -6,9 +6,31 @@ import type { RemoteSession } from './types';
 import type { AgentKind } from '@cindy/maker-shared';
 import { mobileAgentShortLabel, toDbAgentKind, toMakerAgentKind } from './sessionAgentSwitch';
 
-/** 新建会话选择面覆盖已注册 runtime（含 Cursor）。 */
+/** 新建会话选择面覆盖已注册 runtime（含 Cursor / Pi）。 */
 export type NewSessionAgentKind = AgentKind;
 export type NewSessionWorkspaceKind = 'project' | 'dialogue';
+
+export const NEW_SESSION_AGENT_OPTIONS: readonly { kind: NewSessionAgentKind; label: string }[] = [
+  { kind: 'claude-code', label: 'Claude' },
+  { kind: 'codex', label: 'Codex' },
+  { kind: 'cursor', label: 'Cursor' },
+  { kind: 'pi', label: 'Pi' },
+];
+
+/**
+ * 按被控端 runtime 已注册的 agent 集合过滤新建入口(maker:list-available-agents)。
+ * `available === null` = 尚未拉到 → fail-open 返回全部(避免异步期间误隐藏合法 agent);
+ * 拉到后只保留已注册的 kind —— Pi 二进制缺失时被控端无 pi,过滤掉可防用户建出最终
+ * requireAgent 报 not-registered 的会话(codex review P2)。
+ */
+export function availableNewSessionAgentOptions(
+  available: ReadonlySet<NewSessionAgentKind> | null,
+): readonly { kind: NewSessionAgentKind; label: string }[] {
+  if (!available) return NEW_SESSION_AGENT_OPTIONS;
+  const filtered = NEW_SESSION_AGENT_OPTIONS.filter((option) => available.has(option.kind));
+  // 防御:被控端异常返回空集时不至于把入口清空到无法创建(至少保留 Claude)。
+  return filtered.length > 0 ? filtered : NEW_SESSION_AGENT_OPTIONS.filter((o) => o.kind === 'claude-code');
+}
 
 export interface NewSessionDraft {
   agentKind: NewSessionAgentKind;
@@ -93,7 +115,7 @@ export function parseNewSessionDeviceOptions(
 }
 
 export function normalizeNewSessionAgentKind(value: unknown): NewSessionAgentKind | null {
-  return value === 'claude-code' || value === 'codex' || value === 'cursor' ? value : null;
+  return value === 'claude-code' || value === 'codex' || value === 'cursor' || value === 'pi' ? value : null;
 }
 
 export function pickNewSessionDefaultDevice(input: {
@@ -129,9 +151,10 @@ const DEFAULT_MODELS: Record<NewSessionAgentKind, string> = {
   codex: 'gpt-5.4',
   // 与桌面 New Maker cursor 默认对齐（ACP Auto）。
   cursor: 'auto',
+  pi: 'gpt-5.4',
 };
 
-/** 新建交互式会话的权限种子默认；两种 agent 都保留 Auto-review。 */
+/** 新建交互式会话的权限种子默认；三个 agent 都保留 Auto-review。 */
 export function defaultPermissionModeForNewSessionAgent(_agentKind: NewSessionAgentKind): string {
   return 'auto';
 }
@@ -148,7 +171,7 @@ export function withAgentDefaults(
     permissionMode: defaultPermissionModeForNewSessionAgent(agentKind),
     // 换 agent → 来源选择作废(各 agent 的供应商集不同),回到默认路由由被控端定。
     providerId: null,
-    fastMode: agentKind === 'codex' ? draft.fastMode : false,
+    fastMode: agentKind === 'claude-code' ? false : draft.fastMode,
   };
 }
 

@@ -212,7 +212,9 @@ function coerceCachedSession(item: unknown): RemoteSession | null {
       ? 'codex'
       : item.agentKind === 'cursor'
         ? 'cursor'
-        : 'cc',
+        : item.agentKind === 'pi'
+          ? 'pi'
+          : 'cc',
     userSendAt: typeof item.userSendAt === 'string' ? item.userSendAt : null,
     createdAt,
     updatedAt: typeof item.updatedAt === 'string' ? item.updatedAt : createdAt,

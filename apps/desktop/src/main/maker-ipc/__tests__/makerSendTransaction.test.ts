@@ -1,4 +1,4 @@
-import type { AgentKind, SessionSendResult, UserMessage } from '@cindy/maker-core';
+import type { AgentKind, SessionSendOptions, SessionSendResult, UserMessage } from '@cindy/maker-core';
 import { describe, expect, it, vi } from 'vitest';
 import {
   createMakerSendTransaction,
@@ -17,9 +17,10 @@ function createSession(overrides: Partial<MakerSendTransactionSession> = {}): Ma
     isTurnRunning: vi.fn(() => false),
     send: vi.fn(async (
       _message: UserMessage | string,
-      opts?: { onAccepted?: () => Promise<void>; onDispatching?: () => void },
+      opts?: SessionSendOptions,
     ) => {
       await opts?.onAccepted?.();
+      await opts?.onTranscriptUserEntry?.('pi-user-entry');
       opts?.onDispatching?.();
       return { accepted: true } satisfies SessionSendResult;
     }),
@@ -55,6 +56,7 @@ function createDeps(overrides: Partial<MakerSendTransactionDeps> = {}) {
     broadcastSessionCreated: vi.fn(),
     prepareSendUserMessage: vi.fn(async (_sessionId, message) => message as UserMessage | string),
     createDbMessage: vi.fn(async () => {}),
+    linkPiUserEntry: vi.fn(async () => true),
     previewUserPrompt: vi.fn(),
     dispatchUserPromptPreview: vi.fn(),
     commitUserPromptPreview: vi.fn(),
@@ -151,6 +153,48 @@ describe('maker SEND transaction', () => {
     expect(deps.dispatchUserPromptPreview).toHaveBeenCalledWith('session-1');
     expect(deps.commitUserPromptPreview).toHaveBeenCalledWith('session-1', 'client-1');
     expect(deps.rollbackUserPromptPreview).not.toHaveBeenCalled();
+  });
+
+  it('links attachment messages to the accepted Pi transcript entry only for Pi attachments', async () => {
+    const { deps, session } = createDeps();
+    session.agentKind = 'pi';
+    const transaction = createMakerSendTransaction(deps);
+
+    await transaction.sendToAgentAccepted(
+      'session-1',
+      { type: 'user', content: 'Review the image' },
+      undefined,
+      {
+        messageUuid: 'host-message',
+        persistUserMessage: {
+          clientId: 'attachment-client',
+          content: JSON.stringify({
+            text: 'Review the image',
+            images: [{ url: 'cindy-media://blobs/image.webp' }],
+          }),
+        },
+      },
+    );
+
+    expect(deps.linkPiUserEntry).toHaveBeenCalledWith(
+      'session-1',
+      'attachment-client',
+      'pi-user-entry',
+    );
+
+    await transaction.sendToAgentAccepted(
+      'session-1',
+      { type: 'user', content: 'Plain text' },
+      undefined,
+      {
+        messageUuid: 'plain-message',
+        persistUserMessage: {
+          clientId: 'plain-client',
+          content: JSON.stringify({ text: 'Plain text', images: [], files: [] }),
+        },
+      },
+    );
+    expect(deps.linkPiUserEntry).toHaveBeenCalledTimes(1);
   });
 
   it('threads scheduler origin into session.send opts and persisted agentMeta', async () => {
@@ -264,6 +308,148 @@ describe('maker SEND transaction', () => {
 
     expect(events).toEqual(['baseline', 'send']);
     expect(beforeDispatchDirectUserTurn).toHaveBeenCalledWith('session-1');
+  });
+
+  it('materializes direct OSS attachments after session/workdir preflight', async () => {
+    const events: string[] = [];
+    const materializeDirectSendOssAttachments = vi.fn(async (
+      _sessionId: string,
+      message: unknown,
+      sendOpts: unknown,
+    ) => {
+      events.push('materialize');
+      return {
+        message: { ...(message as object), materialized: true },
+        sendOpts: { ...(sendOpts as object), materialized: true },
+      };
+    });
+    const session = createSession({
+      send: vi.fn(async (message) => {
+        events.push('send');
+        expect(message).toMatchObject({ materialized: true });
+        return { accepted: true } satisfies SessionSendResult;
+      }),
+    });
+    const { deps } = createDeps({
+      getSession: vi.fn(() => session),
+      materializeDirectSendOssAttachments,
+    });
+    deps.prepareSendUserMessage = vi.fn(async (_sessionId, message) => {
+      events.push('normalize');
+      return message as UserMessage;
+    });
+    const transaction = createMakerSendTransaction(deps);
+
+    await expect(
+      transaction.sendToAgentAccepted('session-1', { type: 'user', content: 'hello' }, undefined, { marker: true }),
+    ).resolves.toMatchObject({ accepted: true });
+
+    expect(events).toEqual(['materialize', 'normalize', 'send']);
+    expect(materializeDirectSendOssAttachments).toHaveBeenCalledWith(
+      'session-1',
+      { type: 'user', content: 'hello' },
+      { marker: true },
+    );
+  });
+
+  it('cleans direct OSS materializations when normalization rejects before acceptance', async () => {
+    const cleanupBeforeAcceptance = vi.fn(async () => {});
+    const materializeDirectSendOssAttachments = vi.fn(async () => ({
+      message: { type: 'user', content: 'materialized' },
+      sendOpts: undefined,
+      cleanupBeforeAcceptance,
+    }));
+    const { deps } = createDeps({ materializeDirectSendOssAttachments });
+    deps.prepareSendUserMessage = vi.fn(async () => {
+      throw new Error('normalize failed');
+    });
+    const transaction = createMakerSendTransaction(deps);
+
+    await expect(transaction.sendToAgentAccepted('session-1', 'hello')).rejects.toThrow('normalize failed');
+    expect(cleanupBeforeAcceptance).toHaveBeenCalledTimes(1);
+  });
+
+  it('cleans direct OSS materializations when vendor send is rejected before dispatch', async () => {
+    const cleanupBeforeAcceptance = vi.fn(async () => {});
+    const materializeDirectSendOssAttachments = vi.fn(async () => ({
+      message: { type: 'user', content: 'materialized' },
+      sendOpts: undefined,
+      cleanupBeforeAcceptance,
+    }));
+    const session = createSession({
+      send: vi.fn(async () => ({
+        accepted: false,
+        reason: 'cancelled-before-dispatch',
+      } satisfies SessionSendResult)),
+    });
+    const { deps } = createDeps({
+      getSession: vi.fn(() => session),
+      materializeDirectSendOssAttachments,
+    });
+    const transaction = createMakerSendTransaction(deps);
+
+    await expect(transaction.sendToAgentAccepted('session-1', 'hello')).resolves.toMatchObject({
+      accepted: false,
+    });
+    expect(cleanupBeforeAcceptance).toHaveBeenCalledTimes(1);
+  });
+
+  it('cleans direct OSS materializations when vendor send throws before dispatch', async () => {
+    const cleanupBeforeAcceptance = vi.fn(async () => {});
+    const materializeDirectSendOssAttachments = vi.fn(async () => ({
+      message: { type: 'user', content: 'materialized' },
+      sendOpts: undefined,
+      cleanupBeforeAcceptance,
+    }));
+    const session = createSession({
+      send: vi.fn(async () => {
+        throw new Error('vendor send failed');
+      }),
+    });
+    const { deps } = createDeps({
+      getSession: vi.fn(() => session),
+      materializeDirectSendOssAttachments,
+    });
+    const transaction = createMakerSendTransaction(deps);
+
+    await expect(transaction.sendToAgentAccepted('session-1', 'hello')).rejects.toThrow(
+      'vendor send failed',
+    );
+    expect(cleanupBeforeAcceptance).toHaveBeenCalledTimes(1);
+  });
+
+  it('keeps local OSS materializations after accepted vendor dispatch', async () => {
+    const cleanupAfterAcceptance = vi.fn();
+    const cleanupBeforeAcceptance = vi.fn(async () => {});
+    const materializeDirectSendOssAttachments = vi.fn(async () => ({
+      message: { type: 'user', content: 'materialized' },
+      sendOpts: undefined,
+      cleanupAfterAcceptance,
+      cleanupBeforeAcceptance,
+    }));
+    const { deps } = createDeps({ materializeDirectSendOssAttachments });
+    const transaction = createMakerSendTransaction(deps);
+
+    await expect(transaction.sendToAgentAccepted('session-1', 'hello')).resolves.toMatchObject({
+      accepted: true,
+    });
+    expect(cleanupAfterAcceptance).toHaveBeenCalledTimes(1);
+    expect(cleanupBeforeAcceptance).not.toHaveBeenCalled();
+  });
+
+  it('does not materialize direct OSS attachments when workdir preflight rejects', async () => {
+    const materializeDirectSendOssAttachments = vi.fn();
+    const { deps } = createDeps({
+      checkWorkDirExists: vi.fn(async () => false),
+      materializeDirectSendOssAttachments,
+    });
+    const transaction = createMakerSendTransaction(deps);
+
+    await expect(
+      transaction.sendToAgentAccepted('session-1', { type: 'user', content: 'hello' }),
+    ).resolves.toMatchObject({ accepted: false });
+
+    expect(materializeDirectSendOssAttachments).not.toHaveBeenCalled();
   });
 
   it('consumes the direct-send baseline when vendor dispatch is not accepted', async () => {
@@ -388,7 +574,8 @@ describe('maker SEND transaction', () => {
   });
 
   it('rejects a non-boolean interrupted-turn dispatch ack option before vendor dispatch', async () => {
-    const { deps, session } = createDeps();
+    const materializeDirectSendOssAttachments = vi.fn();
+    const { deps, session } = createDeps({ materializeDirectSendOssAttachments });
     const transaction = createMakerSendTransaction(deps);
 
     await expect(
@@ -398,6 +585,7 @@ describe('maker SEND transaction', () => {
     ).rejects.toMatchObject({ code: 'INVALID_PARAMS' });
 
     expect(session.send).not.toHaveBeenCalled();
+    expect(materializeDirectSendOssAttachments).not.toHaveBeenCalled();
   });
 
   it('rolls back the prompt preview if accepted persistence fails before dispatch', async () => {

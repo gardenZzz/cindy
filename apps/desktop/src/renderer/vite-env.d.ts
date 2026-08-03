@@ -26,6 +26,7 @@ type VoiceInputConnectionTestResult =
 type DesktopLoginAction = import('../shared/authIpc').DesktopLoginAction;
 type DesktopLoginActionResult = import('../shared/authIpc').DesktopLoginActionResult;
 type UtilityTextFailure = import('../shared/utilityTextResult').UtilityTextFailure;
+type MakerSessionTreeSnapshot = import('@cindy/maker-core').SessionTreeSnapshot;
 type DesktopAccountDeletionConfirmInput =
   import('../shared/authIpc').DesktopAccountDeletionConfirmInput;
 type DesktopAccountDeletionAvailabilityResult =
@@ -48,6 +49,8 @@ type RemotePrecreatedWorktreeLedgerSnapshot =
 interface EnvCheckResult {
   claudeCode: { status: 'passed' | 'failed'; path?: string; error?: string };
   codex: { status: 'passed' | 'failed' | 'skipped'; path?: string; error?: string };
+  /** pi 可选实验 agent:failed 不影响 allPassed；本次启动会禁用 pi。 */
+  pi?: { status: 'passed' | 'failed' | 'skipped'; path?: string; error?: string };
   allPassed: boolean;
   platform: 'darwin' | 'win32' | 'linux';
 }
@@ -114,7 +117,7 @@ interface DeviceLinkPresenceSnapshot {
 /** .cshare 导入向导的预览数据(main 侧 SharePreview 的镜像)。 */
 interface SessionSharePreview {
   title: string;
-  agentKind: 'cc' | 'codex';
+  agentKind: 'cc' | 'codex' | 'pi';
   workspaceKind: 'project' | 'dialogue';
   originalWorkingDir: string | null;
   exportedAt: string;
@@ -349,14 +352,14 @@ interface BinaryDownloadProgressPayload {
   failed?: boolean;
   /** DownloadError code (e.g. 'NETWORK', 'CHECKSUM', 'HTTP_4XX', 'manifest_failed'). */
   error?: string;
-  /** D 场景（两个都需要下载）: 当前阶段 1 或 2；B/C 场景缺省。 */
-  step?: 1 | 2;
-  /** D 场景下固定为 2；B/C 场景缺省。 */
-  totalSteps?: 2;
+  /** D 场景（两个及以上需要下载）: 当前阶段 1 / 2 / 3；B/C 场景缺省。 */
+  step?: 1 | 2 | 3;
+  /** D 场景 = 本次需要下载的二进制段数(2 或 3)；B/C 场景缺省。 */
+  totalSteps?: 2 | 3;
   /** step 切换瞬间的同步信号——splash 收到立即 set 进度=0，禁用 transition 动画。 */
   reset?: boolean;
   /** 失败/调试文案使用，标识当前推进度的 vendor。 */
-  vendor?: 'claude' | 'codex';
+  vendor?: 'claude' | 'codex' | 'pi';
 }
 
 /* ── App Update Progress ── */
@@ -418,9 +421,20 @@ type TelegramBotTransportStatus =
   | { kind: 'connecting' }
   | { kind: 'connected'; appId: string }
   | { kind: 'conflict'; appId: string }
-  | { kind: 'error'; reason: string };
+  /** 凭证保留、用户主动下线(不轮询); 与 idle=未配置 严格区分。 */
+  | { kind: 'offline'; appId: string }
+  | { kind: 'error'; reason: string; code?: TelegramBotErrorCode };
+
+/** 稳定错误分类;renderer 据此取 i18n 文案,不直接展示 main 层 reason。 */
+type TelegramBotErrorCode = 'invalid-token' | 'provider-api' | 'network' | 'secret-unavailable';
 
 type DingTalkBotTransportStatus = DiscordBotTransportStatus;
+type WecomBotTransportStatus =
+  | { kind: 'idle' }
+  | { kind: 'connecting' }
+  | { kind: 'connected'; appId: string }
+  | { kind: 'conflict'; appId: string }
+  | { kind: 'error'; reason: string };
 
 type WechatBotPhase =
   | 'disconnected'
@@ -564,6 +578,8 @@ interface CodexAuthState {
   expiresAt?: number;
   errorReason?: string;
   authSource?: 'oauth' | 'api-key';
+  credentialScope?: 'system-shared' | 'instance-isolated' | 'unknown';
+  recoveryRequiredReason?: string;
 }
 
 /** Codex progress event payload (binary download + login phases) */
@@ -863,6 +879,7 @@ interface PluginEnableState {
   projectOverride?: { enabled: boolean; workingDir: string } | null;
   userOverride?: { enabled: boolean } | null;
   globalOverride?: { enabled: boolean } | null;
+  collabWorkspaceKind?: 'project' | 'dialogue';
 }
 
 interface PluginEnableUpdateResult {
@@ -1353,9 +1370,30 @@ interface ElectronAPI {
     ) => Promise<import('../shared/pluginMarket').PluginMarketDetail>;
     install: (
       pluginId: string,
-      options: { expectedReleaseId: string; allowPermissionExpansion?: boolean },
+      options: {
+        expectedReleaseId: string;
+        expectedManifest?: import('../shared/ghost').GhostManifest;
+        allowPermissionExpansion?: boolean;
+      },
     ) => Promise<{ ghost: import('../shared/ghost').InstalledGhost }>;
     uninstall: (pluginId: string) => Promise<{ ok: true }>;
+    listSources: () => Promise<import('../shared/pluginMarket').MarketSourceSummary[]>;
+    pickLocalSource: (
+      defaultPath?: string,
+    ) => Promise<
+      | { canceled: true }
+      | { canceled: false; summary: import('../shared/pluginMarket').MarketSourceSummary }
+    >;
+    addSource: (input: {
+      source: string;
+      ref?: string;
+      sparsePaths?: string[];
+    }) => Promise<import('../shared/pluginMarket').MarketSourceSummary>;
+    removeSource: (name: string) => Promise<{ ok: true }>;
+    refreshSource: (
+      name: string,
+    ) => Promise<import('../shared/pluginMarket').MarketSourceSummary>;
+    gitPreflight: () => Promise<{ ok: boolean; version: string | null }>;
   };
   voiceInput: {
     prewarm: (payload?: { sourceLanguage?: string; refinementEnabled?: boolean }) => Promise<{ ok: true }>;
@@ -1782,6 +1820,10 @@ interface ElectronAPI {
     disconnect: () => Promise<{
       status: TelegramBotTransportStatus;
     }>;
+    /** 上线/下线(保留 token 与绑定信息, 只切轮询)。 */
+    setOnline: (payload: { online: boolean }) => Promise<{
+      status: TelegramBotTransportStatus;
+    }>;
     checkSessionAuth: () => Promise<DiscordBotSessionAuthCheckResult>;
     getBehavior: () => Promise<TelegramBotBehavior>;
     setBehavior: (patch: Partial<TelegramBotBehavior>) => Promise<TelegramBotBehavior>;
@@ -1830,6 +1872,37 @@ interface ElectronAPI {
     onOwnerChange: (callback: (update: { ownerUserId: string }) => void) => () => void;
   };
 
+  wecomBot: {
+    getStatus: () => Promise<{
+      status: WecomBotTransportStatus;
+      botId: string | null;
+      ownerUserId: string | null;
+    }>;
+    setConfig: (payload: { botId: string; secret: string }) => Promise<{
+      status: WecomBotTransportStatus;
+      saveErrorStatus?: WecomBotTransportStatus;
+      botId: string | null;
+      ownerUserId: string | null;
+    }>;
+    reconnect: () => Promise<{
+      status: WecomBotTransportStatus;
+      botId: string | null;
+      ownerUserId: string | null;
+    }>;
+    disconnect: () => Promise<{
+      status: WecomBotTransportStatus;
+      botId: string | null;
+      ownerUserId: string | null;
+    }>;
+    onStatusChange: (
+      callback: (update: {
+        status: WecomBotTransportStatus;
+        botId: string | null;
+        ownerUserId: string | null;
+      }) => void,
+    ) => () => void;
+  };
+
   // ── Personal WeChat (Settings → IM Bot → Personal) ──
   wechatBot: {
     getState: () => Promise<WechatBotState>;
@@ -1862,7 +1935,7 @@ interface ElectronAPI {
   syncNewMakerDraft: (snapshot: {
     lastByVendor: Partial<
       Record<
-        'cc' | 'codex' | 'cursor',
+        'cc' | 'codex' | 'cursor' | 'pi',
         { model?: string; effort?: string; permissionMode?: string; providerId?: string | null }
       >
     >;
@@ -2110,6 +2183,7 @@ interface ElectronAPI {
   };
   showOpenDirectoryDialog: () => Promise<{ canceled: boolean; path?: string }>;
   openExternal: (url: string) => Promise<{ success: boolean }>;
+  openChatGPTApp: () => Promise<{ success: boolean }>;
 
   // file-chip 右键菜单 "在浏览器中查看": 把本地文件用 file:// 喂给系统
   // 默认浏览器(或 .html/.pdf/.svg 等扩展名的默认 handler)。
@@ -2138,6 +2212,18 @@ interface ElectronAPI {
   }) => Promise<void>;
   /** Sync the renderer-owned global desktop-notification preference to main. */
   notificationSetDesktopEnabled?: (enabled: boolean) => Promise<{ ok: true }>;
+  wecomGroupNotification: {
+    getState: () => Promise<{ configured: boolean; enabled: boolean; maskedKey?: string }>;
+    saveAndTest: (
+      webhookUrl: string,
+      testMessage: string,
+    ) => Promise<{ configured: boolean; enabled: boolean; maskedKey?: string }>;
+    test: (testMessage: string) => Promise<{ ok: true }>;
+    setEnabled: (
+      enabled: boolean,
+    ) => Promise<{ configured: boolean; enabled: boolean; maskedKey?: string }>;
+    clear: () => Promise<{ configured: boolean; enabled: boolean }>;
+  };
   /** 将对应 session 标记为需要关注，显示 Dock/taskbar app badge。 */
   notificationMarkSessionAttention: (sessionId: string) => Promise<void>;
   /** 用户查看对应 session 后，清除系统级 Dock/taskbar attention badge。 */
@@ -2243,6 +2329,27 @@ interface ElectronAPI {
    * TextLightbox toolbar Open-in-System button and the Oversize main button.
    */
   openPath: (filePath: string) => Promise<{ success: boolean; error?: string }>;
+
+  /** Copy a dangerous local attachment into the controlled inert cache. */
+  stageChatAttachment: (params: {
+    sourcePath: string;
+    suggestedName: string;
+  }) => Promise<
+    | { success: true; path: string }
+    | {
+        success: false;
+        code:
+          | 'invalid_source'
+          | 'forbidden'
+          | 'not_found'
+          | 'not_file'
+          | 'unsupported_type'
+          | 'copy_failed';
+      }
+  >;
+
+  /** Remove staged dangerous attachment copies from the controlled cache. */
+  cleanupStagedChatAttachments: (filePaths: readonly string[]) => Promise<void>;
 
   /**
    * Save a safely materialized chat attachment under its sanitized original
@@ -3216,6 +3323,10 @@ interface ElectronAPI {
     setWorkspaces: (
       workspaces: Record<string, string>,
     ) => Promise<{ hook: import('../shared/hookControlIpc').SlackHookView }>;
+    /** X 派发任务的默认工作目录别名(null = 内置「对话」伪目录)。 */
+    setXDefaultWorkspace: (
+      alias: string | null,
+    ) => Promise<{ hook: import('../shared/hookControlIpc').SlackHookView }>;
     bindStart: () => Promise<{ ok: true }>;
     bindRevoke: () => Promise<{ ok: true }>;
     // (multi-team)多 workspace 绑定动作
@@ -3256,6 +3367,25 @@ interface ElectronAPI {
       workspace: string,
       patch: import('../shared/hookControlIpc').HookPrefsPatch,
     ) => Promise<{ prefs: import('../shared/hookControlIpc').ProviderPrefsView }>;
+    getTelegramBehavior: (bindingId: string) => Promise<{
+      behavior: import('../shared/hookControlIpc').TelegramHookBehaviorState;
+    }>;
+    setTelegramBehavior: (
+      bindingId: string,
+      patch: import('../shared/hookControlIpc').TelegramHookBehaviorPatch,
+    ) => Promise<{
+      behavior: import('../shared/hookControlIpc').TelegramHookBehaviorState;
+    }>;
+    listTelegramGroups: (bindingId: string) => Promise<{
+      groups: import('../shared/hookControlIpc').TelegramHookKnownGroup[];
+    }>;
+    setTelegramGroupActivation: (
+      bindingId: string,
+      chatId: string,
+      mode: import('../shared/hookControlIpc').TelegramHookGroupActivationMode,
+    ) => Promise<{
+      behavior: import('../shared/hookControlIpc').TelegramHookBehaviorState;
+    }>;
     getWorkspaceProviderSources: () => Promise<{
       entries: import('../shared/hookControlIpc').HookWorkspaceProviderSourceEntry[];
     }>;
@@ -3277,6 +3407,9 @@ interface ElectronAPI {
     ) => () => void;
     onProviderPrefsChanged: (
       cb: (view: import('../shared/hookControlIpc').ProviderPrefsView) => void,
+    ) => () => void;
+    onTelegramBehaviorChanged: (
+      cb: (view: import('../shared/hookControlIpc').TelegramHookBehaviorState) => void,
     ) => () => void;
     onStatusChanged: (
       cb: (view: import('../shared/hookControlIpc').SlackHookView) => void,
@@ -3361,18 +3494,13 @@ interface ElectronAPI {
   ) => () => void;
 
   // per-message 维度: turn 结束后 main 推该轮费用(挂在最后一条 assistant 上)。
+  // 直接复用 main 侧的 payload 正本 —— 金额字段整组可选(无报价轮只带
+  // turnUsageDetails),两侧各写一份必然漂移:曾出现 main 已放宽为可选、这里仍声明
+  // 必填,消费方在 typecheck 通过的情况下解引用 undefined。
   onUsageMessageTurnCost: (
-    cb: (data: {
-      sessionId: string;
-      clientId: string;
-      turnMoney: import('../shared/regionalMoney').RegionalMoney;
-      turnCostUsd?: number;
-      turnCostIsEstimate: boolean;
-      userTurnMoney: import('../shared/regionalMoney').RegionalMoney;
-      userTurnCostUsd?: number;
-      userTurnCostIsEstimate: boolean;
-      turnUsageDetails?: import('../shared/turnUsageDetails').TurnUsageDetails;
-    }) => void,
+    cb: (
+      data: import('../shared/turnCostPayload').MessageTurnCostPayload,
+    ) => void,
   ) => () => void;
 
   // per-message 维度: turn 结束检测到模型被上游降级 / 替换时 main 推标记
@@ -3426,7 +3554,7 @@ interface ElectronAPI {
         permissionMode?: string;
         fastMode?: boolean;
         planModeEnabled?: boolean;
-        agentKind?: 'cc' | 'codex' | 'cursor';
+        agentKind?: 'cc' | 'codex' | 'cursor' | 'pi';
         orcaRole?: import('@/lib/ccAgent.types').OrcaRole | null;
         /** 附加只读引用目录列表 (绝对路径); main 端 mapper 会 JSON.stringify 后写库。 */
         extraDirs?: string[];
@@ -3824,7 +3952,12 @@ interface ElectronAPI {
     ) => Promise<import('../shared/workflow-progress').WorkflowProgress | null>;
 
     // 模型供应商目录（只读）—— 内置目录元数据 + 各供应商实时连接状态。
-    listProviders: () => Promise<{ providers: import('@cindy/model-providers').ProviderView[] }>;
+    listProviders: () => Promise<{
+      dataOwnerId: string | null;
+      ownerGeneration: number;
+      providers: import('@cindy/model-providers').ProviderView[];
+      providerOrder: string[];
+    }>;
     /** 复用各内置供应商既有真源刷新模型清单。 */
     refreshBuiltinProviderModels: (
       providerId: import('../shared/providerModelRefresh').BuiltinRefreshableProviderId,
@@ -3879,6 +4012,8 @@ interface ElectronAPI {
       modelsUrl?: string | null;
       apiKey?: string | null;
       headers?: Record<string, string>;
+      /** 已保存供应商 id:main 侧据此并入 main-only 鉴权请求头(renderer 不回读明文头)。 */
+      savedProviderId?: string;
     }) => Promise<{
       ok: boolean;
       models?: { id: string; name: string; contextWindow?: number }[];
@@ -3993,6 +4128,22 @@ interface ElectronAPI {
         // reset = 恢复默认:删除该供应商整组停用 override(含指向已下架模型的陈旧条目)。
         | { kind: 'reset'; providerId: string },
     ) => Promise<{ ok: true }>;
+    /** Persist the visible provider order only if the active owner still matches. */
+    setProviderOrder: (
+      dataOwnerId: string | null,
+      ownerGeneration: number,
+      providerIds: string[],
+    ) => Promise<{ ok: true }>;
+    getModelPriceOverride: (
+      target: import('../shared/modelPriceOverride').ModelPriceOverrideTarget,
+    ) => Promise<import('../shared/modelPriceOverride').ModelPriceOverrideView>;
+    setModelPriceOverride: (
+      target: import('../shared/modelPriceOverride').ModelPriceOverrideTarget,
+      desired: import('../shared/modelPriceOverride').ModelPriceOverrideDesiredQuote,
+    ) => Promise<import('../shared/modelPriceOverride').ModelPriceOverrideView>;
+    resetModelPriceOverride: (
+      target: import('../shared/modelPriceOverride').ModelPriceOverrideTarget,
+    ) => Promise<import('../shared/modelPriceOverride').ModelPriceOverrideView>;
 
     // 「在新窗口打开」会话多开
     openSessionInNewWindow: (sessionId: string) => Promise<void>;
@@ -4344,7 +4495,9 @@ interface ElectronAPI {
       sessionId: string,
       model: string,
       providerId?: string | null,
-    ) => Promise<{ deferred: boolean } | undefined>;
+      expectedAgentSwitchRevision?: number,
+      selection?: { effort: string; fastMode: boolean },
+    ) => Promise<{ deferred: boolean; superseded?: boolean } | undefined>;
     /**
      * session-agent-switch:同一会话切换 agent 引擎(claude-code ↔ codex)。
      * 同引擎换模型走 setModel;跨引擎必须走本方法。意图制:本调用只登记切换
@@ -4359,13 +4512,45 @@ interface ElectronAPI {
       providerId?: string | null,
       effort?: string,
       fastMode?: boolean,
-    ) => Promise<{ switched: boolean; agentKind: AgentKind; model: string; engineReady: boolean; deferred?: boolean }>;
+    ) => Promise<{ switched: boolean; agentKind: AgentKind; model: string; engineReady: boolean; deferred?: boolean; sameEngineRevision?: number; sameEngineSuperseded?: boolean }>;
+    /**
+     * 读 main 权威的 pending 切换意图(内存态,不落库;无意图 → null)。
+     * 重开视图 / device-link 远程会话重连后恢复乐观显示用。
+     */
+    getSessionAgentSwitchIntent: (
+      sessionId: string,
+    ) => Promise<{
+      targetAgentKind: AgentKind;
+      model: string;
+      providerId: string | null;
+      effort?: string;
+      fastMode?: boolean;
+    } | null>;
     // effort/mode 透传 string —— 合法值由 maker capabilities 决定, vite-env 不重复枚举
     setEffort: (sessionId: string, effort: string) => Promise<void>;
     setPermissionMode: (sessionId: string, mode: string) => Promise<void>;
     setFastMode: (sessionId: string, enabled: boolean) => Promise<void>;
     /** 计划模式一级开关(与 permissionMode 正交); DB 持久化由调用方另调 sessionService.update({ planModeEnabled }) */
     setPlanMode: (sessionId: string, enabled: boolean) => Promise<void>;
+    /** 会话导出 HTML(pi 原生); 主进程弹保存对话框 + 导出 + 在文件管理器显示; 返回路径或 null(取消/不支持) */
+    exportSessionHtml: (sessionId: string) => Promise<string | null>;
+    /** 手动压缩会话上下文(pi 原生, 可带聚焦指令); 返回压缩前后 token 数 / {noop} / null(会话不在/不支持) */
+    compactSession: (
+      sessionId: string,
+      instructions?: string,
+    ) => Promise<{ tokensBefore?: number; estimatedTokensAfter?: number; noop?: boolean } | null>;
+    /** 同会话原生分支树；旧 Pi 会话会在 main 侧按持久化元数据懒恢复。 */
+    getSessionTree: (sessionId: string) => Promise<MakerSessionTreeSnapshot | null>;
+    /** 切换原生分支并同步 Cindy 可见时间线。 */
+    navigateSessionTree: (
+      sessionId: string,
+      entryId: string,
+      options?: { summarize?: boolean; customInstructions?: string },
+    ) => Promise<{
+      tree: MakerSessionTreeSnapshot;
+      draftText?: string;
+      cancelled?: boolean;
+    } | null>;
     /**
      * 附加只读引用目录的 closure 推送; DB 持久化要 renderer 同步调
      * sessionService.update({ extraDirs }) (跟 setModel + sessionService.update 双 IPC 协调先例一致)。
@@ -4386,7 +4571,7 @@ interface ElectronAPI {
       effective: 'immediate' | 'next-session';
       isCustomized: boolean;
       customizedKeys: string[];
-      defaults: { maker: boolean; claudeCode: boolean; codex: boolean };
+      defaults: { maker: boolean; claudeCode: boolean; codex: boolean; pi: boolean };
     }>;
     memoryReset: (agentKind: AgentKind) => Promise<{
       removedEntries?: number;
@@ -4401,7 +4586,7 @@ interface ElectronAPI {
       effective: 'next-session';
       isCustomized: boolean;
       customizedKeys: string[];
-      defaults: { maker: boolean; claudeCode: boolean; codex: boolean };
+      defaults: { maker: boolean; claudeCode: boolean; codex: boolean; pi: boolean };
       /** true = Codex 正忙, 存活会话的软重启在任务结束后自动补做 (设置已生效) */
       codexRestartDeferred: boolean;
     }>;
@@ -4410,28 +4595,31 @@ interface ElectronAPI {
     makerMemoryReset: () => Promise<{ removedCount: number }>;
 
     /** 启动期拉 main 持久化的三个 memory 开关 — 见 preload memoryGetSettings 注释 */
-    memoryGetSettings: () => Promise<{ maker: boolean; claudeCode: boolean; codex: boolean }>;
+    memoryGetSettings: () => Promise<{ maker: boolean; claudeCode: boolean; codex: boolean; pi: boolean }>;
     memoryGetSettingsState: () => Promise<{
       maker: boolean;
       claudeCode: boolean;
       codex: boolean;
+      pi: boolean;
       isCustomized: boolean;
       customizedKeys: string[];
-      defaults: { maker: boolean; claudeCode: boolean; codex: boolean };
+      defaults: { maker: boolean; claudeCode: boolean; codex: boolean; pi: boolean };
     }>;
     /** 启动期迁移旧版 renderer/native memory opt-out；null 表示 renderer marker 缺失。 */
     memoryPreserveLegacyMakerDisabled: (legacyRendererValue: boolean | null) => Promise<{
       maker: boolean;
       claudeCode: boolean;
       codex: boolean;
+      pi: boolean;
     }>;
     memoryResetSettings: () => Promise<{
       maker: boolean;
       claudeCode: boolean;
       codex: boolean;
+      pi: boolean;
       isCustomized: boolean;
       customizedKeys: string[];
-      defaults: { maker: boolean; claudeCode: boolean; codex: boolean };
+      defaults: { maker: boolean; claudeCode: boolean; codex: boolean; pi: boolean };
       /** true = Codex 正忙, 存活会话的软重启在任务结束后自动补做 (设置已生效) */
       codexRestartDeferred: boolean;
     }>;
@@ -4919,7 +5107,11 @@ interface ElectronAPI {
 
     plugins: {
       list: (workingDir?: string) => Promise<PluginListItem[]>;
-      getState: (id: string, workingDir?: string) => Promise<PluginEnableState>;
+      getState: (
+        id: string,
+        workingDir?: string,
+        workspaceKind?: string | null,
+      ) => Promise<PluginEnableState>;
       setEnabled: (id: string, enabled: boolean) => Promise<PluginEnableUpdateResult>;
       clearEnabled: (id: string) => Promise<PluginEnableUpdateResult>;
       setProjectEnabled: (workingDir: string, id: string, enabled: boolean) => Promise<void>;

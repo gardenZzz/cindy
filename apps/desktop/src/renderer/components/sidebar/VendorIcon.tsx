@@ -18,8 +18,25 @@ import { ClaudeMark } from '@/components/icons/ClaudeMark';
 import { CodexMark } from '@/components/icons/CodexMark';
 import { CursorMark } from '@/components/icons/CursorMark';
 
+export type VendorIconKind = 'cc' | 'codex' | 'cursor' | 'pi';
+
+/**
+ * agentKind → VendorIcon vendor 的唯一映射。所有渲染 agent 身份图标的调用点
+ * 必须走这里,禁止各自写 `=== 'codex' ? 'codex' : 'cc'` 二元三元(那会把 pi
+ * 吞成 Claude 脸,2026-07-30 实测 bug)。兼容 'claude-code' 别名与 null。
+ */
+export function agentKindToVendor(kind: string | null | undefined): VendorIconKind {
+  return kind === 'codex'
+    ? 'codex'
+    : kind === 'cursor'
+      ? 'cursor'
+      : kind === 'pi'
+        ? 'pi'
+        : 'cc';
+}
+
 interface VendorIconProps {
-  vendor: 'cc' | 'codex' | 'cursor';
+  vendor: VendorIconKind;
   size?: number;
   /** true → 切 Thinking Orange + 呼吸动画,复用 .session-status-breathing */
   running?: boolean;
@@ -45,14 +62,23 @@ export function VendorIcon({
     className,
   );
 
-  const mark =
-    vendor === 'codex' ? (
-      <CodexMark size={size} />
-    ) : vendor === 'cursor' ? (
-      <CursorMark size={size} />
-    ) : (
-      <ClaudeMark size={size} />
-    );
-
-  return <span className={wrapperClassName}>{mark}</span>;
+  return (
+    <span className={wrapperClassName}>
+      {vendor === 'codex' ? (
+        <CodexMark size={size} />
+      ) : vendor === 'cursor' ? (
+        <CursorMark size={size} />
+      ) : vendor === 'pi' ? (
+        <span
+          aria-hidden
+          style={{ fontSize: size * 0.86, lineHeight: `${size}px`, width: size, height: size }}
+          className="inline-flex items-center justify-center font-semibold"
+        >
+          π
+        </span>
+      ) : (
+        <ClaudeMark size={size} />
+      )}
+    </span>
+  );
 }

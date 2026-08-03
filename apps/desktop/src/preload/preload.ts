@@ -239,6 +239,17 @@ type DiscordBotSessionAuthCheckWire = {
   providerId: string | null;
   providerLabel: string | null;
 };
+/**
+ * 个人 Telegram bot 的传输状态(与 @cindy/im 的 IMStatus 同形; preload 不引包,
+ * 就地声明)。offline = 凭证保留但用户主动下线, 与 idle(未配置)严格区分。
+ */
+type TelegramBotStatusWire =
+  | { kind: 'idle' }
+  | { kind: 'connecting' }
+  | { kind: 'connected'; appId: string }
+  | { kind: 'conflict'; appId: string }
+  | { kind: 'offline'; appId: string }
+  | { kind: 'error'; reason: string; code?: 'invalid-token' | 'provider-api' | 'network' | 'secret-unavailable' };
 
 /**
  * Factory for lazy, ref-counted IPC fan-out subscriptions.
@@ -395,6 +406,7 @@ const fanOutDiscordBotStatusChange = createIpcFanOut('discordBot:status-change')
 const fanOutTelegramBotStatusChange = createIpcFanOut('telegramBot:status-change');
 const fanOutDingTalkBotStatusChange = createIpcFanOut('dingtalkBot:status-change');
 const fanOutDingTalkBotOwnerChange = createIpcFanOut('dingtalkBot:owner-change');
+const fanOutWecomBotStatusChange = createIpcFanOut('wecomBot:status-changed');
 // Personal WeChat: main owns auth/polling and broadcasts a credential-free state snapshot.
 const fanOutWechatBotStateChange = createIpcFanOut('wechatBot:state-changed');
 const fanOutVoiceInputEvent = createIpcFanOut('voice-input:event');
@@ -463,6 +475,9 @@ const fanOutHookControlStatus = createIpcFanOut('maker:hook-control:status-chang
 const fanOutHookControlPrefs = createIpcFanOut('maker:hook-control:prefs-changed');
 const fanOutHookControlProviderPrefs = createIpcFanOut(
   'maker:hook-control:provider-prefs-changed',
+);
+const fanOutHookControlTelegramBehavior = createIpcFanOut(
+  'maker:hook-control:telegram-behavior-changed',
 );
 // 目录模型来源偏好全量推送(本地写入后广播, 多窗口设置页同步)。
 const fanOutHookControlWorkspaceProviderSource = createIpcFanOut(
@@ -557,6 +572,7 @@ interface PluginEnableState {
   projectOverride?: { enabled: boolean; workingDir: string } | null;
   userOverride?: { enabled: boolean } | null;
   globalOverride?: { enabled: boolean } | null;
+  collabWorkspaceKind?: 'project' | 'dialogue';
 }
 
 interface PluginEnableUpdateResult {
@@ -1010,11 +1026,39 @@ contextBridge.exposeInMainWorld('electronAPI', {
       ipcRenderer.invoke('plugin-market:detail', pluginId),
     install: (
       pluginId: string,
-      options: { expectedReleaseId: string; allowPermissionExpansion?: boolean },
+      options: {
+        expectedReleaseId: string;
+        expectedManifest?: import('../shared/ghost').GhostManifest;
+        allowPermissionExpansion?: boolean;
+        /** 扩权批准所依据的已装权限指纹;Main 在安装锁内复核后才放行扩权。 */
+        reviewedBaseline?: string;
+      },
     ): Promise<{ ghost: import('../shared/ghost').InstalledGhost }> =>
       ipcRenderer.invoke('plugin-market:install', pluginId, options),
     uninstall: (pluginId: string): Promise<{ ok: true }> =>
       ipcRenderer.invoke('plugin-market:uninstall', pluginId),
+    listSources: (): Promise<import('../shared/pluginMarket').MarketSourceSummary[]> =>
+      ipcRenderer.invoke('plugin-market:list-sources'),
+    pickLocalSource: (
+      defaultPath?: string,
+    ): Promise<
+      | { canceled: true }
+      | { canceled: false; summary: import('../shared/pluginMarket').MarketSourceSummary }
+    > => ipcRenderer.invoke('plugin-market:pick-local-source', defaultPath),
+    addSource: (input: {
+      source: string;
+      ref?: string;
+      sparsePaths?: string[];
+    }): Promise<import('../shared/pluginMarket').MarketSourceSummary> =>
+      ipcRenderer.invoke('plugin-market:add-source', input),
+    removeSource: (name: string): Promise<{ ok: true }> =>
+      ipcRenderer.invoke('plugin-market:remove-source', name),
+    refreshSource: (
+      name: string,
+    ): Promise<import('../shared/pluginMarket').MarketSourceSummary> =>
+      ipcRenderer.invoke('plugin-market:refresh-source', name),
+    gitPreflight: (): Promise<{ ok: boolean; version: string | null }> =>
+      ipcRenderer.invoke('plugin-market:git-preflight'),
   },
   voiceInput: {
     prewarm: (payload?: { sourceLanguage?: string; refinementEnabled?: boolean }): Promise<{ ok: true }> =>
@@ -1545,39 +1589,26 @@ contextBridge.exposeInMainWorld('electronAPI', {
   // 桌面端直连 Telegram Bot API 长轮询, 不经 Cindy 服务器。
   telegramBot: {
     getStatus: (): Promise<{
-      status:
-        | { kind: 'idle' }
-        | { kind: 'connecting' }
-        | { kind: 'connected'; appId: string }
-        | { kind: 'conflict'; appId: string }
-        | { kind: 'error'; reason: string };
+      status: TelegramBotStatusWire;
       ownerUserId: string | null;
       botUsername: string | null;
     }> => ipcRenderer.invoke('telegramBot:get-status'),
     setConfig: (payload: { token: string; ownerUserId: string }): Promise<{
-      status:
-        | { kind: 'idle' }
-        | { kind: 'connecting' }
-        | { kind: 'connected'; appId: string }
-        | { kind: 'conflict'; appId: string }
-        | { kind: 'error'; reason: string };
-      saveErrorStatus?:
-        | { kind: 'idle' }
-        | { kind: 'connecting' }
-        | { kind: 'connected'; appId: string }
-        | { kind: 'conflict'; appId: string }
-        | { kind: 'error'; reason: string };
+      status: TelegramBotStatusWire;
+      saveErrorStatus?: TelegramBotStatusWire;
       ownerUserId: string | null;
       botUsername: string | null;
     }> => ipcRenderer.invoke('telegramBot:set-config', payload),
     disconnect: (): Promise<{
-      status:
-        | { kind: 'idle' }
-        | { kind: 'connecting' }
-        | { kind: 'connected'; appId: string }
-        | { kind: 'conflict'; appId: string }
-        | { kind: 'error'; reason: string };
+      status: TelegramBotStatusWire;
     }> => ipcRenderer.invoke('telegramBot:disconnect'),
+    /**
+     * 上线/下线: 只切轮询, 保留 token 与绑定信息(与 disconnect 清凭证相对)。
+     * 换机器时把这一端让出来, 之后随时可再上线。
+     */
+    setOnline: (payload: { online: boolean }): Promise<{
+      status: TelegramBotStatusWire;
+    }> => ipcRenderer.invoke('telegramBot:set-online', payload),
     checkSessionAuth: (): Promise<DiscordBotSessionAuthCheckWire> =>
       ipcRenderer.invoke('telegramBot:check-session-auth'),
     // 行为配置(emoji 回应等级 / 回复引用) — 设置卡可视化操作面, 改动即生效。
@@ -1657,6 +1688,57 @@ contextBridge.exposeInMainWorld('electronAPI', {
     clear: (): Promise<{ ok: true }> => ipcRenderer.invoke('dingtalkBot:clear'),
     onStatusChange: fanOutDingTalkBotStatusChange,
     onOwnerChange: fanOutDingTalkBotOwnerChange,
+  },
+
+  // ── WeCom intelligent bot (Settings → IM Bot → Personal) ──
+  wecomBot: {
+    getStatus: (): Promise<{
+      status:
+        | { kind: 'idle' }
+        | { kind: 'connecting' }
+        | { kind: 'connected'; appId: string }
+        | { kind: 'conflict'; appId: string }
+        | { kind: 'error'; reason: string };
+      botId: string | null;
+      ownerUserId: string | null;
+    }> => ipcRenderer.invoke('wecomBot:get-status'),
+    setConfig: (payload: { botId: string; secret: string }): Promise<{
+      status:
+        | { kind: 'idle' }
+        | { kind: 'connecting' }
+        | { kind: 'connected'; appId: string }
+        | { kind: 'conflict'; appId: string }
+        | { kind: 'error'; reason: string };
+      saveErrorStatus?:
+        | { kind: 'idle' }
+        | { kind: 'connecting' }
+        | { kind: 'connected'; appId: string }
+        | { kind: 'conflict'; appId: string }
+        | { kind: 'error'; reason: string };
+      botId: string | null;
+      ownerUserId: string | null;
+    }> => ipcRenderer.invoke('wecomBot:set-config', payload),
+    reconnect: (): Promise<{
+      status:
+        | { kind: 'idle' }
+        | { kind: 'connecting' }
+        | { kind: 'connected'; appId: string }
+        | { kind: 'conflict'; appId: string }
+        | { kind: 'error'; reason: string };
+      botId: string | null;
+      ownerUserId: string | null;
+    }> => ipcRenderer.invoke('wecomBot:reconnect'),
+    disconnect: (): Promise<{
+      status:
+        | { kind: 'idle' }
+        | { kind: 'connecting' }
+        | { kind: 'connected'; appId: string }
+        | { kind: 'conflict'; appId: string }
+        | { kind: 'error'; reason: string };
+      botId: string | null;
+      ownerUserId: string | null;
+    }> => ipcRenderer.invoke('wecomBot:disconnect'),
+    onStatusChange: fanOutWecomBotStatusChange,
   },
 
   // ── Personal WeChat (Settings → IM Bot → Personal) ──
@@ -2552,6 +2634,9 @@ contextBridge.exposeInMainWorld('electronAPI', {
   // Open URL in system default browser
   openExternal: (url: string): Promise<{ success: boolean }> =>
     ipcRenderer.invoke('shell:open-external', url),
+  /** 打开本机 ChatGPT Desktop；main 端固定使用受限的 codex: 协议，不接收 URL。 */
+  openChatGPTApp: (): Promise<{ success: boolean }> =>
+    ipcRenderer.invoke('shell:open-chatgpt-app'),
 
   // file-chip 右键菜单 "在浏览器中查看": 把本地文件用 file:// 喂给系统
   // 默认浏览器(或 .html/.pdf/.svg 等扩展名的默认 handler)。main 端会再做
@@ -2572,6 +2657,23 @@ contextBridge.exposeInMainWorld('electronAPI', {
     ipcRenderer.invoke('notification:show-session-event', payload),
   notificationSetDesktopEnabled: (enabled: boolean): Promise<{ ok: true }> =>
     ipcRenderer.invoke('notification:set-desktop-enabled', enabled),
+  wecomGroupNotification: {
+    getState: (): Promise<{ configured: boolean; enabled: boolean; maskedKey?: string }> =>
+      ipcRenderer.invoke('wecomGroupNotification:get-state'),
+    saveAndTest: (
+      webhookUrl: string,
+      testMessage: string,
+    ): Promise<{ configured: boolean; enabled: boolean; maskedKey?: string }> =>
+      ipcRenderer.invoke('wecomGroupNotification:save-and-test', webhookUrl, testMessage),
+    test: (testMessage: string): Promise<{ ok: true }> =>
+      ipcRenderer.invoke('wecomGroupNotification:test', testMessage),
+    setEnabled: (
+      enabled: boolean,
+    ): Promise<{ configured: boolean; enabled: boolean; maskedKey?: string }> =>
+      ipcRenderer.invoke('wecomGroupNotification:set-enabled', enabled),
+    clear: (): Promise<{ configured: boolean; enabled: boolean }> =>
+      ipcRenderer.invoke('wecomGroupNotification:clear'),
+  },
   notificationMarkSessionAttention: (sessionId: string): Promise<void> =>
     ipcRenderer.invoke('notification:mark-session-attention', sessionId),
   // intent:'explicit' = 用户真实看到了内容(报错 banner 聚焦驻留 / 全部标为已读等);
@@ -2730,6 +2832,29 @@ contextBridge.exposeInMainWorld('electronAPI', {
   // the OS default application (the renderer never receives the blob path).
   openPath: (filePathOrUrl: string): Promise<{ success: boolean; error?: string }> =>
     ipcRenderer.invoke('shell:open-path', filePathOrUrl),
+
+  // 危险本地附件入托盘前先复制成受控缓存里的 `.bin` 副本。显示名仍由
+  // renderer 单独保留，后续只能经“另存为”恢复原始扩展名。
+  stageChatAttachment: (params: {
+    sourcePath: string;
+    suggestedName: string;
+  }): Promise<
+    | { success: true; path: string }
+    | {
+        success: false;
+        code:
+          | 'invalid_source'
+          | 'forbidden'
+          | 'not_found'
+          | 'not_file'
+          | 'unsupported_type'
+          | 'copy_failed';
+      }
+  > => ipcRenderer.invoke('chat-attachment:stage', params),
+
+  /** Remove staged dangerous attachment copies from the controlled cache. */
+  cleanupStagedChatAttachments: (filePaths: readonly string[]): Promise<void> =>
+    ipcRenderer.invoke('chat-attachment:cleanup', filePaths),
 
   // 安全降级聊天附件另存为。main 校验源路径并清洗 suggestedName；保存后
   // 只返回结果，不自动打开或执行目标文件。
@@ -3515,6 +3640,8 @@ contextBridge.exposeInMainWorld('electronAPI', {
       ipcRenderer.invoke('maker:hook-control:set-provider-enabled', { provider, enabled }),
     setWorkspaces: (workspaces: Record<string, string>): Promise<{ hook: unknown }> =>
       ipcRenderer.invoke('maker:hook-control:set-workspaces', { workspaces }),
+    setXDefaultWorkspace: (alias: string | null): Promise<{ hook: unknown }> =>
+      ipcRenderer.invoke('maker:hook-control:set-x-default-workspace', { alias }),
     // SIWS OIDC 绑定: 无参数; main 发 bind.start, server 回 pending + 授权链接
     bindStart: (): Promise<{ ok: true }> =>
       ipcRenderer.invoke('maker:hook-control:bind-start', {}),
@@ -3563,6 +3690,25 @@ contextBridge.exposeInMainWorld('electronAPI', {
       patch: Record<string, string | null>,
     ): Promise<{ prefs: unknown }> =>
       ipcRenderer.invoke('maker:hook-control:provider-prefs-set', { provider, workspace, patch }),
+    getTelegramBehavior: (bindingId: string): Promise<{ behavior: unknown }> =>
+      ipcRenderer.invoke('maker:hook-control:telegram-behavior-get', { bindingId }),
+    setTelegramBehavior: (
+      bindingId: string,
+      patch: Record<string, string>,
+    ): Promise<{ behavior: unknown }> =>
+      ipcRenderer.invoke('maker:hook-control:telegram-behavior-set', { bindingId, patch }),
+    listTelegramGroups: (bindingId: string): Promise<{ groups: unknown }> =>
+      ipcRenderer.invoke('maker:hook-control:telegram-groups-list', { bindingId }),
+    setTelegramGroupActivation: (
+      bindingId: string,
+      chatId: string,
+      mode: 'mention' | 'always',
+    ): Promise<{ behavior: unknown }> =>
+      ipcRenderer.invoke('maker:hook-control:telegram-group-activation-set', {
+        bindingId,
+        chatId,
+        mode,
+      }),
     // 工作目录模型来源偏好(纯本地, 不经 WS; providerId=null 清除条目)
     getWorkspaceProviderSources: (): Promise<{ entries: unknown }> =>
       ipcRenderer.invoke('maker:hook-control:workspace-provider-source-get'),
@@ -3575,6 +3721,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
       ipcRenderer.invoke('maker:hook-control:workspace-provider-source-set', payload),
     onPrefsChanged: fanOutHookControlPrefs,
     onProviderPrefsChanged: fanOutHookControlProviderPrefs,
+    onTelegramBehaviorChanged: fanOutHookControlTelegramBehavior,
     onWorkspaceProviderSourcesChanged: fanOutHookControlWorkspaceProviderSource,
     onStatusChanged: fanOutHookControlStatus,
   },
@@ -4027,7 +4174,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
   // 详见下方 maker 块的 auth / agent / usage 三个子对象。
 
   // ─── Maker Core IPC ─────────────────────────────────────────────────────
-  // renderer 通过统一 maker API 按 agentKind 调用 Claude Code / Codex。
+  // renderer 通过统一 maker API 按 agentKind 调用 Claude Code / Codex / Pi。
   maker: {
     listAvailableAgents: (): Promise<Array<AgentKind>> =>
       ipcRenderer.invoke('maker:list-available-agents'),
@@ -4043,7 +4190,12 @@ contextBridge.exposeInMainWorld('electronAPI', {
       ipcRenderer.invoke('maker:get-workflow-progress', sessionId, taskId),
 
     // 模型供应商目录（只读）—— 内置目录元数据 + 各供应商实时连接状态。
-    listProviders: (): Promise<{ providers: import('@cindy/model-providers').ProviderView[] }> =>
+    listProviders: (): Promise<{
+      dataOwnerId: string | null;
+      ownerGeneration: number;
+      providers: import('@cindy/model-providers').ProviderView[];
+      providerOrder: string[];
+    }> =>
       ipcRenderer.invoke('maker:provider:list'),
     /** Refresh one built-in provider through its existing main-process discovery source. */
     refreshBuiltinProviderModels: (
@@ -4110,6 +4262,11 @@ contextBridge.exposeInMainWorld('electronAPI', {
       modelsUrl?: string | null;
       apiKey?: string | null;
       headers?: Record<string, string>;
+      /**
+       * 编辑已存供应商且端点未改动时传入:main 侧按 (id, agent) 并入 main-only 密文鉴权头
+       * (renderer 不回读明文头);renderer 显式头优先。端点一改就不传,避免凭证外泄给新主机。
+       */
+      savedProviderId?: string;
     }): Promise<{
       ok: boolean;
       models?: { id: string; name: string; contextWindow?: number }[];
@@ -4212,6 +4369,30 @@ contextBridge.exposeInMainWorld('electronAPI', {
         // configuration-and-overrides.md §4 的「删 override 跟随默认」语义。
         | { kind: 'reset'; providerId: string },
     ): Promise<{ ok: true }> => ipcRenderer.invoke('maker:model-disable:set', input),
+    /** Persist the visible provider order only if the active owner still matches. */
+    setProviderOrder: (
+      dataOwnerId: string | null,
+      ownerGeneration: number,
+      providerIds: string[],
+    ): Promise<{ ok: true }> =>
+      ipcRenderer.invoke('maker:provider:order:set', {
+        dataOwnerId,
+        ownerGeneration,
+        providerIds,
+      }),
+    getModelPriceOverride: (
+      target: import('../shared/modelPriceOverride').ModelPriceOverrideTarget,
+    ): Promise<import('../shared/modelPriceOverride').ModelPriceOverrideView> =>
+      ipcRenderer.invoke('maker:model-price-override:get', target),
+    setModelPriceOverride: (
+      target: import('../shared/modelPriceOverride').ModelPriceOverrideTarget,
+      desired: import('../shared/modelPriceOverride').ModelPriceOverrideDesiredQuote,
+    ): Promise<import('../shared/modelPriceOverride').ModelPriceOverrideView> =>
+      ipcRenderer.invoke('maker:model-price-override:set', target, desired),
+    resetModelPriceOverride: (
+      target: import('../shared/modelPriceOverride').ModelPriceOverrideTarget,
+    ): Promise<import('../shared/modelPriceOverride').ModelPriceOverrideView> =>
+      ipcRenderer.invoke('maker:model-price-override:reset', target),
 
     // 「在新窗口打开」会话多开 —— 新建一个完整窗口定位到该 session。
     openSessionInNewWindow: (sessionId: string): Promise<void> =>
@@ -4568,8 +4749,17 @@ contextBridge.exposeInMainWorld('electronAPI', {
       sessionId: string,
       model: string,
       providerId?: string | null,
-    ): Promise<{ deferred: boolean } | undefined> =>
-      ipcRenderer.invoke('maker:set-model', sessionId, model, providerId),
+      expectedAgentSwitchRevision?: number,
+      selection?: { effort: string; fastMode: boolean },
+    ): Promise<{ deferred: boolean; superseded?: boolean } | undefined> =>
+      ipcRenderer.invoke(
+        'maker:set-model',
+        sessionId,
+        model,
+        providerId,
+        expectedAgentSwitchRevision,
+        selection,
+      ),
     // session-agent-switch:同一会话切换 agent 引擎(claude-code ↔ codex)。
     // 与 setModel 的边界:同引擎换模型走 setModel,跨引擎必须走本方法。
     // 意图制:本调用只登记切换意图(deferred=true 为常态返回),真正的交接与
@@ -4583,8 +4773,19 @@ contextBridge.exposeInMainWorld('electronAPI', {
       providerId?: string | null,
       effort?: string,
       fastMode?: boolean,
-    ): Promise<{ switched: boolean; agentKind: AgentKind; model: string; engineReady: boolean; deferred?: boolean }> =>
+    ): Promise<{ switched: boolean; agentKind: AgentKind; model: string; engineReady: boolean; deferred?: boolean; sameEngineRevision?: number; sameEngineSuperseded?: boolean }> =>
       ipcRenderer.invoke('maker:switch-session-agent', sessionId, targetAgentKind, model, providerId, effort, fastMode),
+    // 读 main 权威的 pending 切换意图(内存态,不落库)。重开视图 / 远程会话重连后
+    // 用它恢复乐观显示——否则用户登记的意图在 UI 上凭空消失,下一条消息却按意图切换。
+    getSessionAgentSwitchIntent: (
+      sessionId: string,
+    ): Promise<{
+      targetAgentKind: 'claude-code' | 'codex' | 'pi';
+      model: string;
+      providerId: string | null;
+      effort?: string;
+      fastMode?: boolean;
+    } | null> => ipcRenderer.invoke('maker:get-session-agent-switch-intent', sessionId),
     // effort/mode 透传 string —— 合法值由 maker capabilities 在运行时校验,
     // preload 不重复枚举 (避免 capabilities 加新值时这里也要改)。
     setEffort: (sessionId: string, effort: string): Promise<void> =>
@@ -4597,6 +4798,24 @@ contextBridge.exposeInMainWorld('electronAPI', {
     // 同步调 sessionService.update({ planModeEnabled })(与 setModel 双 IPC 协调先例一致)。
     setPlanMode: (sessionId: string, enabled: boolean): Promise<void> =>
       ipcRenderer.invoke('maker:set-plan-mode', sessionId, enabled),
+    // 会话导出 HTML(pi 原生)。主进程弹保存对话框 + 导出 + 在文件管理器中显示。
+    // 返回写入的绝对路径;用户取消对话框或 agent 不支持时返回 null。
+    exportSessionHtml: (sessionId: string): Promise<string | null> =>
+      ipcRenderer.invoke('maker:export-session-html', sessionId),
+    // 手动压缩会话上下文(pi 原生 compact,可带聚焦指令)。压缩边界经事件流自动进聊天。
+    // 返回 {tokensBefore?, estimatedTokensAfter?};会话不在 / agent 不支持时返回 null。
+    compactSession: (
+      sessionId: string,
+      instructions?: string,
+    ): Promise<{ tokensBefore?: number; estimatedTokensAfter?: number; noop?: boolean } | null> =>
+      ipcRenderer.invoke('maker:compact-session', sessionId, instructions),
+    getSessionTree: (sessionId: string) =>
+      ipcRenderer.invoke('maker:get-session-tree', sessionId),
+    navigateSessionTree: (
+      sessionId: string,
+      entryId: string,
+      options?: { summarize?: boolean; customInstructions?: string },
+    ) => ipcRenderer.invoke('maker:navigate-session-tree', sessionId, entryId, options),
     // 附加只读引用目录的 closure 推送; DB 持久化由 renderer 同步调
     // sessionService.update({ extraDirs }) (跟 setModel + sessionService.update 双 IPC 协调先例一致)。
     // session 不在 / agent capability=false 都 no-op, 不会抛错。
@@ -4617,7 +4836,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
       effective: 'immediate' | 'next-session';
       isCustomized: boolean;
       customizedKeys: string[];
-      defaults: { maker: boolean; claudeCode: boolean; codex: boolean };
+      defaults: { maker: boolean; claudeCode: boolean; codex: boolean; pi: boolean };
     }> =>
       ipcRenderer.invoke('maker:memory:set', agentKind, enabled),
     memoryReset: (agentKind: AgentKind): Promise<{
@@ -4636,7 +4855,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
       effective: 'next-session';
       isCustomized: boolean;
       customizedKeys: string[];
-      defaults: { maker: boolean; claudeCode: boolean; codex: boolean };
+      defaults: { maker: boolean; claudeCode: boolean; codex: boolean; pi: boolean };
       codexRestartDeferred: boolean;
     }> =>
       ipcRenderer.invoke('maker:maker-memory:set-enabled', enabled),
@@ -4649,15 +4868,16 @@ contextBridge.exposeInMainWorld('electronAPI', {
      * 启动期同步三个 memory 开关的真实持久化值 (main <userData>/memory-settings.json)。
      * renderer localStorage 只是 UI 即时态镜像 — 启动时调一次, main 是 source of truth。
      */
-    memoryGetSettings: (): Promise<{ maker: boolean; claudeCode: boolean; codex: boolean }> =>
+    memoryGetSettings: (): Promise<{ maker: boolean; claudeCode: boolean; codex: boolean; pi: boolean }> =>
       ipcRenderer.invoke('maker:memory:get-settings'),
     memoryGetSettingsState: (): Promise<{
       maker: boolean;
       claudeCode: boolean;
       codex: boolean;
+      pi: boolean;
       isCustomized: boolean;
       customizedKeys: string[];
-      defaults: { maker: boolean; claudeCode: boolean; codex: boolean };
+      defaults: { maker: boolean; claudeCode: boolean; codex: boolean; pi: boolean };
     }> =>
       ipcRenderer.invoke('maker:memory:get-settings-state'),
     /** 启动期迁移旧版 renderer/native memory opt-out；null 表示 renderer marker 缺失。 */
@@ -4665,15 +4885,17 @@ contextBridge.exposeInMainWorld('electronAPI', {
       maker: boolean;
       claudeCode: boolean;
       codex: boolean;
+      pi: boolean;
     }> =>
       ipcRenderer.invoke('maker:memory:preserve-legacy-maker-disabled', legacyRendererValue),
     memoryResetSettings: (): Promise<{
       maker: boolean;
       claudeCode: boolean;
       codex: boolean;
+      pi: boolean;
       isCustomized: boolean;
       customizedKeys: string[];
-      defaults: { maker: boolean; claudeCode: boolean; codex: boolean };
+      defaults: { maker: boolean; claudeCode: boolean; codex: boolean; pi: boolean };
       codexRestartDeferred: boolean;
     }> =>
       ipcRenderer.invoke('maker:memory:reset-settings'),
@@ -5269,8 +5491,12 @@ contextBridge.exposeInMainWorld('electronAPI', {
     plugins: {
       list: (workingDir?: string): Promise<PluginListItem[]> =>
         ipcRenderer.invoke('maker:plugins:list', workingDir),
-      getState: (id: string, workingDir?: string): Promise<PluginEnableState> =>
-        ipcRenderer.invoke('maker:plugins:get-state', id, workingDir),
+      getState: (
+        id: string,
+        workingDir?: string,
+        workspaceKind?: string | null,
+      ): Promise<PluginEnableState> =>
+        ipcRenderer.invoke('maker:plugins:get-state', id, workingDir, workspaceKind),
       setEnabled: (id: string, enabled: boolean): Promise<PluginEnableUpdateResult> =>
         ipcRenderer.invoke('maker:plugins:set-enabled', id, enabled),
       clearEnabled: (id: string): Promise<PluginEnableUpdateResult> =>

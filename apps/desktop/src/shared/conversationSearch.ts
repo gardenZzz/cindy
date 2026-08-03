@@ -2,7 +2,7 @@ import { projectDraftSessionTitle } from '@cindy/maker-shared/session-title';
 
 import type { SessionSource } from './sessionSource';
 
-export type ConversationSearchAgentKind = 'cc' | 'codex' | 'cursor';
+export type ConversationSearchAgentKind = 'cc' | 'codex' | 'cursor' | 'pi';
 export type ConversationSearchWorkspaceKind = 'project' | 'dialogue';
 export type ConversationSearchSessionStatus = 'active' | 'archived' | 'deleted';
 export type ConversationSearchOrcaRole = 'lead' | 'worker';

@@ -124,10 +124,12 @@ describe('mobile home desktop-first surface', () => {
     expect(desktopVendorIconSource).toContain('ClaudeMark');
     expect(desktopVendorIconSource).toContain('CodexMark');
     expect(desktopVendorIconSource).toContain('CursorMark');
-    expect(desktopVendorIconSource).toContain("vendor: 'cc' | 'codex' | 'cursor'");
-    expect(desktopVendorIconSource).toContain(
-      "vendor === 'codex' ? (\n      <CodexMark size={size} />\n    ) : vendor === 'cursor' ? (\n      <CursorMark size={size} />\n    ) : (\n      <ClaudeMark size={size} />\n    )",
-    );
+    expect(desktopVendorIconSource).toContain("vendor === 'codex' ? (");
+    expect(desktopVendorIconSource).toContain('<CodexMark size={size} />');
+    expect(desktopVendorIconSource).toContain('<ClaudeMark size={size} />');
+    // union of cursor (feat) + pi (main) after desktop VendorIcon merge
+    expect(desktopVendorIconSource).toContain("export type VendorIconKind = 'cc' | 'codex' | 'cursor' | 'pi'");
+    expect(desktopVendorIconSource).toContain('vendor: VendorIconKind;');
     expect(desktopVendorIconSource).toContain('session-status-breathing');
     expect(vendorIconSource).not.toContain('XD_SYMBOL_PATHS');
     expect(vendorIconSource).not.toContain('XD_INC_MARK_ASPECT_RATIO');
@@ -146,11 +148,13 @@ describe('mobile home desktop-first surface', () => {
     expect(providerMarkSource).not.toContain('CLAUDE_AGENT_PATH');
     expect(providerMarkSource).not.toContain('CODEX_AGENT_FLOWER_PATH');
     expect(vendorIconSource).toContain("import { MobileAgentMark } from './MobileAgentMark';");
-    // T9 (#13): mobile 身份槽与 desktop VendorIcon 同步为三路（含 cursor）。
-    expect(vendorIconSource).toContain("vendor: 'cc' | 'codex' | 'cursor' | string");
+    // T9 (#13): mobile 身份槽与 desktop VendorIcon 同步为四路（cursor + pi）。
+    expect(vendorIconSource).toContain("vendor: 'cc' | 'codex' | 'cursor' | 'pi' | string");
     expect(agentMarkSource).toContain("agentKind === 'codex' ? (");
     expect(agentMarkSource).toContain("agentKind === 'cursor' ? (");
     expect(agentMarkSource).toContain('CURSOR_AGENT_PATH');
+    // resolved MobileVendorIcon uses vendorToAgentKind helper (toMakerAgentKind)
+    expect(vendorIconSource).toContain('vendorToAgentKind(vendor)');
     expect(vendorIconSource).not.toContain('viewBox="136 137 282 158"');
     expect(vendorIconSource).not.toContain('transform="translate(');
     expect(vendorIconSource).toContain('Easing.inOut(Easing.ease)');
@@ -175,6 +179,8 @@ describe('mobile home desktop-first surface', () => {
     const scheduleIndexSource = readSource('src/session/scheduleIndex.ts');
 
     expect(source).toContain('const [scheduleIndex, setScheduleIndex]');
+    expect(source).toContain('useRemoteScheduleMirrorInvalidations()');
+    expect(source).toContain('invalidateRunningSessionScheduleEntries(current, sessionIds)');
     expect(source).toContain('const [deviceIdentityCacheReady, setDeviceIdentityCacheReady]');
     expect(source).toContain('loadDeviceIdentityCache()');
     expect(source).toContain('reconcileDeviceIdentities(');
