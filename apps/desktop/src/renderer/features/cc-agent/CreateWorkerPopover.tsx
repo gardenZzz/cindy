@@ -11,10 +11,11 @@ import {
   providerOffersModel,
 } from '@cindy/model-providers';
 
+import { AgentSelect } from '@/components/new-chat/AgentSelect';
 import { FastModeToggle } from '@/components/new-chat/FastModeToggle';
 import { ModelSelector } from '@/components/new-chat/ModelSelector';
-import { VendorSegmentedSwitcher } from '@/components/new-chat/VendorSegmentedSwitcher';
 import { agentKindToVendor } from '@/components/sidebar/VendorIcon';
+import type { MakerVendor } from '@/lib/ccAgent.types';
 import { useAgentCapabilities } from '@/hooks/useAgentCapabilities';
 import { useCursorAvailable } from '@/hooks/useCursorAvailable';
 import { useDeviceProviders } from '@/hooks/useDeviceProviders';
@@ -734,19 +735,19 @@ export function CreateWorkerPopover({
           )}
         </div>
 
-        <div className="mb-4 grid grid-cols-[220px_minmax(0,1fr)] gap-4">
+        <div className="mb-4 grid grid-cols-[auto_minmax(0,1fr)] gap-4">
           <div className="min-w-0">
             <div className="mb-2 text-12 font-medium uppercase tracking-[0.5px] text-[var(--text-tertiary)]">
               {t('orca.createWorker.agentLabel')}
             </div>
-            {/* 应用标准 Agent 分段控件(替换此前手写的按钮组;与 New Maker / IM 目录偏好同款,
-                「不自建选择 UI」的组件复用原则)。Cursor 本机未装 / device-link 远程时用
-                hiddenVendors 藏段,不走 includeCursor(AGENT_OPTIONS 已含 cursor)。 */}
-            <VendorSegmentedSwitcher
+            {/* 与「新建」页同款 AgentSelect 下拉(取代定宽分段器;引擎数量不再挤布局)。
+                Cursor 本机未装 / device-link 远程时用 hiddenVendors 藏项。 */}
+            <AgentSelect
               value={vendorKey}
-              width={cursorAvailable ? 300 : 220}
-              ariaLabel={t('orca.createWorker.agentLabel')}
-              hiddenVendors={cursorAvailable ? undefined : (['cursor'] as const)}
+              side="bottom"
+              hiddenVendors={
+                cursorAvailable ? undefined : (['cursor'] as const satisfies readonly MakerVendor[])
+              }
               onChange={(next) =>
                 updateAgent(
                   next === 'codex'

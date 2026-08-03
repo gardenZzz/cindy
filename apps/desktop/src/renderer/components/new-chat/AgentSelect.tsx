@@ -58,6 +58,11 @@ interface AgentSelectProps {
    * 否则触发器会显示一个列表里不存在的引擎。
    */
   hiddenVendors?: readonly MakerVendor[];
+  /**
+   * 面板停靠方向。默认 top(composer / 新建工具条在底部,向上展开);
+   * 居中弹窗(如「开启协同」)传 bottom,避免顶到视口上沿。
+   */
+  side?: 'top' | 'bottom';
 }
 
 export function AgentSelect({
@@ -69,6 +74,7 @@ export function AgentSelect({
   iconOnly = false,
   visualVariant = 'default',
   hiddenVendors,
+  side = 'top',
 }: AgentSelectProps) {
   const { t } = useTranslation();
   const [open, setOpen] = useState(false);
@@ -187,7 +193,7 @@ export function AgentSelect({
     <MorphPopover
       open={open && !disabled}
       onOpenChange={(next) => setOpen(disabled ? false : next)}
-      side="top"
+      side={side}
       align="start"
       panelWidth={196}
       panelClassName="p-2"
