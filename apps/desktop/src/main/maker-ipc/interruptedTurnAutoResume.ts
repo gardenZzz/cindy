@@ -104,10 +104,16 @@ function isStreamTruncationError(signals: InterruptedTurnErrorSignals): boolean 
  */
 export function isInterruptedTurnError(signals: InterruptedTurnErrorSignals): boolean {
   const reason = typeof signals.reason === 'string' ? signals.reason : '';
-  // 例外先行：`upstream-overload` / `cursor-stream-disconnect` 是**已归类为可重试**的 reason，
-  // 它们本身就是比文案更可靠的权威判据（结构化优先于文案），直接放行、不再看文案。
-  if (reason === UPSTREAM_OVERLOAD_REASON) return true;
-  if (reason === CURSOR_STREAM_DISCONNECT_REASON) return true;
+  // 例外先行：`upstream-overload` / `cursor-stream-disconnect` / `codex_reconnect_stalled`
+  // 是**已归类为可重试**的 reason，它们本身就是比文案更可靠的权威判据（结构化优先于文案），
+  // 直接放行、不再看文案。
+  if (
+    reason === UPSTREAM_OVERLOAD_REASON ||
+    reason === CURSOR_STREAM_DISCONNECT_REASON ||
+    reason === 'codex_reconnect_stalled'
+  ) {
+    return true;
+  }
   if (reason.length > 0) return false;
   if (isStreamTruncationError(signals)) return true;
   const message = signals.message;

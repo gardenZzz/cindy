@@ -494,13 +494,26 @@ export function beginLocalCapabilitiesRefresh(): number {
   return localGen;
 }
 
-/** 读取 agent 的完整能力快照；失败向上抛，不触碰现有缓存。 */
+/**
+ * 读取本地 agent 能力快照；核心 agent 失败向上抛，可选 Pi 的能力读取失败不阻断 provider 目录。
+ * cursor 可能未注册(二进制未装)—— getCapabilities 回空壳，仍一并拉取以便选择器有 Auto 兜底。
+ */
 export async function loadLocalCapabilitiesSnapshot(): Promise<LocalCapabilitiesSnapshot> {
   const api = getMakerApi();
   if (!api) throw new Error('maker IPC not available');
-  // cursor 可能未注册(二进制未装)—— getCapabilities 回空壳，仍一并拉取以便选择器有 Auto 兜底。
-  return Promise.all(
-    ALL_AGENT_KINDS.map(async (agent) => [agent, await api.getCapabilities(agent)] as const),
+  const entries = await Promise.all(
+    ALL_AGENT_KINDS.map(async (agent): Promise<readonly [AgentKind, AgentCapabilities] | null> => {
+      try {
+        return [agent, await api.getCapabilities(agent)] as const;
+      } catch (error) {
+        if (agent !== 'pi') throw error;
+        log.warn('optional Pi capabilities unavailable; continuing with core agents:', error);
+        return null;
+      }
+    }),
+  );
+  return entries.filter(
+    (entry): entry is readonly [AgentKind, AgentCapabilities] => entry !== null,
   );
 }
 
@@ -508,7 +521,7 @@ export function isLocalCapabilitiesRefreshCurrent(generation: number): boolean {
   return localGen === generation;
 }
 
-/** 仅提交当前代际的完整能力快照，并在提交后统一通知 mounted hooks。 */
+/** 仅提交当前代际的可用能力快照，并在提交后统一通知 mounted hooks。 */
 export function commitLocalCapabilitiesSnapshot(
   generation: number,
   entries: LocalCapabilitiesSnapshot,
@@ -522,8 +535,8 @@ export function commitLocalCapabilitiesSnapshot(
 }
 
 /**
- * Codex auth/discovery 广播后的本地热刷新。旧 cache 在两个 IPC 都成功前继续可读；完成后同时
- * 替换 cache 并通知 mounted hooks，避免 provider:list 已更新而 scheduler/selector 仍用旧能力。
+ * Codex auth/discovery 广播后的本地热刷新。旧 cache 在核心 IPC 都成功前继续可读；完成后
+ * 同时替换 cache 并通知 mounted hooks，避免 provider:list 已更新而 scheduler/selector 仍用旧能力。
  */
 export async function refreshLocalCapabilities(): Promise<void> {
   const generation = beginLocalCapabilitiesRefresh();

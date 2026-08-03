@@ -34,6 +34,7 @@ import { createHash, randomUUID } from 'node:crypto';
 import path from 'node:path';
 
 import { eq } from 'drizzle-orm';
+import { stripInternalWebCitations } from '@cindy/maker-shared/internal-citation';
 import { getMaker } from '../../maker-host';
 import { getDesktopProviderService } from '../../maker-host/createDesktopProviderService';
 import { isCredentialModeSwitchBusyError } from '../../maker-host/codex-credential-switch';
@@ -105,11 +106,10 @@ import {
   markActivityWriting,
   pushToolStep,
   renderActivity,
-  renderActivityLine,
   setActivityNotice,
   type TurnActivityState,
 } from './turnActivity';
-import { overloadRetryNotice, terminalErrorText } from './turnRetryNotice';
+import { terminalErrorText, turnRetryNotice } from './turnRetryNotice';
 import {
   toCoreAgentKind,
   readPermissionMode,
@@ -1735,16 +1735,11 @@ export function createTurnRunner(
    * 纯文本快答没有 tool_use, renderActivity 返回空串, 视图与旧行为逐字一致。
    */
   function composeStreamingView(turn: TurnState): string {
-    const body = turn.outputCardPrefix ? turn.outputCardPrefix + turn.buffer : turn.buffer;
+    const rawBody = turn.outputCardPrefix ? turn.outputCardPrefix + turn.buffer : turn.buffer;
+    // External-channel safeguard: maker-core normally strips these tokens,
+    // while this boundary also protects old continuations and future adapters.
+    const body = stripInternalWebCitations(rawBody);
     if (turn.done) return body;
-    if (adapter.answerOnlyProgress?.(turn.userId)) {
-      // Telegram 私聊: 多行过程时间线会打断客户端的草稿动画渲染 → 中间态
-      // 只发正文; 正文出来之前用单行紧凑状态(当前工具/思考 · N 项 · 时长)
-      // 顶住草稿占位 —— 工具期停在纯 "Thinking…" 是哑巴(桌面端有时间线,
-      // 渠道零信息, Chris 2026-07-30 实测点名)。notice(过载重试)含在内。
-      if (body) return body;
-      return renderActivityLine(turn.activity, Date.now());
-    }
     const act = renderActivity(turn.activity, Date.now());
     if (!act) return body;
     return body ? `${act}\n\n${body}` : act;
@@ -1771,8 +1766,8 @@ export function createTurnRunner(
   /**
    * 非终止 error → 过程区状态行 + 卡片刷新。turn 不收口。
    *
-   * 只对"正在自动重试的过载"出提示(见 turnRetryNotice.ts): 其它非终止 error 的
-   * message 是内部英文串, 没有对应中文表达, 保持既有静默。
+   * 只对已有本地化契约的自动重试出提示(见 turnRetryNotice.ts): 其它非终止
+   * error 的 message 是内部英文串, 没有对应中文表达, 保持既有静默。
    *
    * **要惰性建卡**(与 ensureActivityTicker「ticker 不该是创建卡片的理由」相反):
    * 过载重投只在本 turn 零产出时发生(maker-core 的 currentTurnProducedOutput
@@ -1781,7 +1776,7 @@ export function createTurnRunner(
    * 同一张卡上, 重试耗尽时 handleTurnErrorAsync 会把它 finalize 成失败说明。
    */
   function handleRetryNoticeEvent(turn: TurnState, event: AgentEvent): void {
-    const notice = overloadRetryNotice(event.data);
+    const notice = turnRetryNotice(event.data);
     if (notice === null) return;
     if (!setActivityNotice(turn.activity, notice)) return;
     ensureActivityTicker(turn);
@@ -1924,7 +1919,7 @@ export function createTurnRunner(
         // 取舍不同 —— 转播是自动任务的旁路展示, 没有人在等它; 为一条重试提示开卡,
         // 万一那轮重试成功后 agent 零输出收口, thread 里就多出一张只有标题的卡。
         {
-          const notice = overloadRetryNotice(event.data);
+          const notice = turnRetryNotice(event.data);
           if (notice !== null && setActivityNotice(t.activity, notice)) {
             t.streamingHandle?.replace(composeTranspondView(t, false));
           }
