@@ -88,6 +88,57 @@ describe('maker:event hot path ordering', () => {
     );
   });
 
+  it('keeps auto-resume-owned terminal errors out of Agent Island until they are final', () => {
+    const handler = source.match(
+      /function handleAgentIslandEventAfterBroadcast\([\s\S]*?\n}\n\nfunction surfaceSuppressedAutoResumeErrorInAgentIsland/,
+    )?.[0];
+    expect(handler).toBeTruthy();
+    if (!handler) return;
+
+    expectOrder(handler, 'service.deferRemoteAuthRetryError(meta, event);', 'const terminalError =');
+    expect(handler).toContain('agentInputCoordinatorHolder?.isAutoResumePending(session.id) === true');
+    expect(handler).toContain('agentInputCoordinatorHolder?.isAutoResumeDeferred(session.id) === true');
+    expect(handler).toContain(
+      'autoResumeBookkeeping.shouldSuppressAgentIslandError(session.id)',
+    );
+    expect(handler).toContain(
+      'autoResumeBookkeeping.shouldSuppressAgentIslandCompletionTail(session.id)',
+    );
+    expect(handler).toContain('(terminalError && autoResumeOwnsError)');
+    expect(handler).toContain(
+      '(isAgentIslandCompletionTail(event) && autoResumeOwnsCompletionTail)',
+    );
+    expectOrder(handler, 'const autoResumeOwnsError =', 'service.handleAgentEvent(meta, event);');
+    expect(handler).not.toContain('suppressErrorSound');
+
+    expect(source).toContain('surfaceSuppressedAutoResumeErrorInAgentIsland(sessionId, detail)');
+    expect(source).toContain("data: { ...detail, isTerminal: true }");
+    expect(source).toContain(
+      'autoResumeBookkeeping.claimSuppressedErrorForRetry(sessionId, clientId, source);',
+    );
+    expect(source).toContain('if (!attempt.isCurrent()) {');
+    expect(source).toContain(
+      'autoResumeBookkeeping.supersedeUnclaimedErrorForUserIntervention(sessionId);',
+    );
+    expect(source).toContain(
+      'autoResumeBookkeeping.markReplacementDispatching(sessionId, clientId);',
+    );
+    expect(source).toContain(
+      'autoResumeBookkeeping.surfaceSuppressedErrorForRetry(sessionId, item.clientId);',
+    );
+    expect(source).toContain('onRejectedUserTurn: (sessionId, item) => {');
+    expect(source).toContain('commitUserPromptPreview: (sessionId, clientId) => {');
+    expect(source).toContain(
+      'autoResumeBookkeeping.discardSuppressedErrorForRetry(sessionId, clientId);',
+    );
+    expect(source).toContain(
+      'autoResumeBookkeeping.discardReplacementProvenByProviderEvent(session.id);',
+    );
+    expect(source).not.toContain(
+      'autoResumeBookkeeping.discardSuppressedError(sessionId);',
+    );
+  });
+
   it('only status/done/error paths request idle restore', () => {
     const wireSessionSource = extractWireSessionSource();
     const statusIdleAssignments = [...wireSessionSource.matchAll(/shouldMarkTurnStatusIdleAfterBroadcast = true;/g)]
@@ -509,8 +560,8 @@ describe('maker:event hot path ordering', () => {
     );
     expect(codexDoneSource).toContain('const pricing = isSubscriptionValue');
     expect(codexDoneSource).not.toContain('isSubscriptionValue && !isCodexXaiProviderRoute');
-    expect(codexDoneSource).toContain('? await getModelPricing()');
-    expect(codexDoneSource).toContain("? await getModelPricingForModel('xd', pricingModel)");
+    expect(codexDoneSource).toContain('? getReferenceModelPricing()');
+    expect(codexDoneSource).toContain('? await getGatewayModelPricingForModel()');
     expect(codexDoneSource).toContain('price ?? undefined');
     expect(codexDoneSource).toContain(
       "if (!isSubscriptionValue && money && price?.source === 'gateway')",
@@ -554,10 +605,8 @@ describe('maker:event hot path ordering', () => {
     // 主路径:按真实 provider / billing route 取价，所有 sink 共用区域金额结果。
     expect(claudeDoneSource).toContain('const billingRoute: BillingRoute = session.remoteHostId');
     expect(claudeDoneSource).toContain("billingRoute === 'xd-gateway'");
-    expect(claudeDoneSource).toContain("await getModelPricingForModel(");
-    expect(claudeDoneSource).toContain("'xd',");
-    expect(claudeDoneSource).toContain('normalizeModelIdForPricing(deltas[0]?.model)');
-    expect(claudeDoneSource).toContain(': await getModelPricing();');
+    expect(claudeDoneSource).toContain('await getGatewayModelPricingForModel()');
+    expect(claudeDoneSource).toContain(': getReferenceModelPricing();');
     expect(claudeDoneSource).toContain(
       'const { turnMoney, estimatedTurnMoney, perModel } = resolveClaudeTurnCostSinks(',
     );
@@ -578,6 +627,9 @@ describe('maker:event hot path ordering', () => {
     );
     expect(claudeDoneSource).toContain(
       "m.source === 'subscription' && isSubscriptionDirectModel(m.model)",
+    );
+    expect(claudeDoneSource).toMatch(
+      /estimateClaudeSubscriptionTurnValue\(\s*perModel,\s*currentLedgerCurrency\(\),\s*pricing,\s*\)/,
     );
     // 订阅判定对齐 proxy 路由: 显式选 Anthropic, 或默认路由优先按 observed route, 未观察再回落无网关 key 启发式
     expect(claudeDoneSource).toContain("sessionProviderForBilling === 'anthropic'");

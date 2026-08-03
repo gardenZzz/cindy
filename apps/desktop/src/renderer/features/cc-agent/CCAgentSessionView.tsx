@@ -103,8 +103,11 @@ import { SessionContentHeaderRegistration } from './SessionContentHeader';
 import { useSessionBinding } from '@/hooks/useSessionBinding';
 import { useVendorAuthGate } from '@/hooks/useVendorAuthGate';
 import { useProviders } from '@/hooks/useProviders';
+import { useAuth } from '@/contexts/AuthContext';
+import { canAccessBillingSettings } from '@/components/settings/billingVisibility';
 import { useDeviceProviders } from '@/hooks/useDeviceProviders';
 import { useAgentCapabilities } from '@/hooks/useAgentCapabilities';
+import { useLiveErrorSourceProvider } from '@/hooks/useLiveErrorSourceProvider';
 import { resolveFastSupported } from '@/lib/providerModels';
 import { useRemoteSessionSync } from '@/features/cc-agent/hooks/useRemoteSessionSync';
 import {
@@ -408,17 +411,24 @@ function RightSidebarSessionIdRegistration({
 function RightSidebarWorkdirRegistration({
   workdir,
   remoteHostId,
+  deviceLinkDeviceId,
   declare,
 }: {
   workdir: string;
   /** 非空 = SSH remote 会话(workdir 为远端路径);plugin 据此走远端 file-service。 */
   remoteHostId: string | null;
-  declare: (workdir: string, remoteHostId?: string | null) => void;
+  /** device-link 会话归属：null = 已确认本机，undefined = 尚未解析。 */
+  deviceLinkDeviceId?: string | null;
+  declare: (
+    workdir: string,
+    remoteHostId?: string | null,
+    deviceLinkDeviceId?: string | null,
+  ) => void;
 }) {
   useLayoutEffect(() => {
-    declare(workdir, remoteHostId);
-    return () => declare('');
-  }, [workdir, remoteHostId, declare]);
+    declare(workdir, remoteHostId, deviceLinkDeviceId);
+    return () => declare('', null, undefined);
+  }, [workdir, remoteHostId, deviceLinkDeviceId, declare]);
   return null;
 }
 
@@ -498,7 +508,11 @@ export function CCAgentSessionView({
       sessionId: string | null,
       opts?: { initialCollapsed?: boolean; writeInitialCollapsedRecord?: boolean },
     ) => void;
-    setRightSidebarWorkdir?: (workdir: string) => void;
+    setRightSidebarWorkdir?: (
+      workdir: string,
+      remoteHostId?: string | null,
+      deviceLinkDeviceId?: string | null,
+    ) => void;
   } | null>();
   const rightSidebarCollapsed = outletContext?.rightSidebarCollapsed ?? true;
   const onToggleRightSidebar = outletContext?.onToggleRightSidebar;
@@ -693,6 +707,10 @@ export function CCAgentSessionView({
     () => (sessionId ? getStickySessionDeviceId(sessionId) : undefined),
     [sessionId, remoteProjectSessions],
   );
+  // 右栏本地-only 能力需要区分三态：字符串=远端、null=已确认本机、undefined=归属尚未解析。
+  // 冷启动 / bootstrap 竞态期间宁可暂时禁用系统文件打开，也不能把被控端 file:// 交给控制端。
+  const rightSidebarDeviceLinkDeviceId =
+    remoteDeviceId ?? session?.deviceLinkDeviceId ?? (session ? null : undefined);
   // device-link 远程会话:重 topic 订阅(含 WS 重连 / 被控端回在线时重建)+ 消息对账触发
   // (重连 / presence / turn 结束 / 窗口聚焦 / 手动)。修「控制端丢消息」—— 以被控端为准重新同步。
   // 本机会话(remoteDeviceId 为 undefined)整体 no-op。resync 供连接 banner 的「重新同步」按钮用。
@@ -1219,6 +1237,7 @@ export function CCAgentSessionView({
     loadOlderMessages,
     isLoadingMore,
     hasMoreMessages,
+    historyWindowHasIsland,
     pendingPermission,
     respondToPermission,
     pendingAskUser,
@@ -1279,6 +1298,7 @@ export function CCAgentSessionView({
   // 与模型选择器同源(见下方 M35 vendor fallback effect)。本地 IPC 极快返回,有模块级缓存。
   // device-link 远程会话用被控端经隧道带来的 providers(per-provider,fast 判定与本地同口径)。
   const { providers: localProviders } = useProviders();
+  const { mode: authMode, user: authUser } = useAuth();
   const { providers: deviceProviders } = useDeviceProviders(remoteDeviceId);
   const providers = remoteDeviceId ? deviceProviders : localProviders;
   const canSwitchToClaudeSubscription = useMemo(() => {
@@ -1302,6 +1322,25 @@ export function CCAgentSessionView({
     session?.model,
     session?.remoteHostId,
   ]);
+  /**
+   * 余额不足横幅的「查看余额」出口 —— 只在计费面对当前账号可见时提供（cloud +
+   * personal，与设置页「用量和计费」同一判据）。org / local / 未登录账号在 Cindy 里
+   * 没有余额页可跳，此时不传回调，ErrorBanner 会保持原样文案、不加按钮。
+   */
+  const canAccessBilling = canAccessBillingSettings({
+    mode: authMode,
+    membershipKind: authUser?.membershipKind ?? null,
+  });
+  const handleViewBalance = useCallback(() => {
+    navigate('/settings?tab=billing');
+  }, [navigate]);
+  // live 错误的来源 provider 快照:错误出现时取值、任务切换时重置、错误存续期间
+  // 切 provider 不跟随。语义与边界条件见 useLiveErrorSourceProvider 头注释。
+  const liveErrorSourceProviderId = useLiveErrorSourceProvider(
+    error,
+    sessionId,
+    session?.providerId ?? null,
+  );
   // 该会话 agent 的能力(agent 级 hasFastMode + 旧被控端拍平回退用 availableModels);按 remoteDeviceId 作用域。
   const { capabilities: sessionCaps } = useAgentCapabilities(displayAgentKind, remoteDeviceId);
   // 这里曾有 useErrorReadAck:ErrorBanner 在视图内聚焦驻留 1.5s 即 explicit 清红点。
@@ -3120,6 +3159,7 @@ export function CCAgentSessionView({
         <RightSidebarWorkdirRegistration
           workdir={session?.workingDir ?? ''}
           remoteHostId={session?.remoteHostId ?? null}
+          deviceLinkDeviceId={rightSidebarDeviceLinkDeviceId}
           declare={setRightSidebarWorkdir}
         />
       )}
@@ -3203,16 +3243,19 @@ export function CCAgentSessionView({
           </div>
         )}
 
-        {/* device-link 远程会话状态 banner:断链重连 / 被控离线时提示 + 重新同步(以被控端为准重拉对账)。
-          suspect-stall(链路在线但本轮久未更新且核实不到被控端)优先 —— 它可能在 connected 时触发,
-          额外给「结束本轮」手动收尾。connected / local 且无 stall 时不渲染。 */}
+        {/* device-link 远程会话状态 banner:断链重连 / 被控离线 / 通路不稳定(degraded,弱网熔断)
+          时提示 + 重新同步(以被控端为准重拉对账)。suspect-stall(链路在线但本轮久未更新且核实
+          不到被控端)优先 —— 它可能在 connected 时触发,额外给「结束本轮」手动收尾。
+          connected / local 且无 stall 时不渲染。 */}
         {remoteSync.suspectStall ? (
           <RemoteSessionBanner
             status="suspect-stall"
             onResync={remoteSync.resync}
             onFinalize={remoteSync.forceFinalize}
           />
-        ) : remoteConn === 'reconnecting' || remoteConn === 'host-offline' ? (
+        ) : remoteConn === 'reconnecting' ||
+          remoteConn === 'host-offline' ||
+          remoteConn === 'degraded' ? (
           <RemoteSessionBanner
             status={remoteConn}
             issue={remoteLinkIssue}
@@ -3370,6 +3413,8 @@ export function CCAgentSessionView({
                   deviceLinkDeviceId={remoteDeviceId}
                   modelId={session?.model}
                   providerId={session?.providerId}
+                  onViewBalance={canAccessBilling ? handleViewBalance : undefined}
+                  errorSourceProviderId={errorTailMsg?.errorProviderId ?? null}
                   onSwitchToClaudeSubscription={
                     canSwitchToClaudeSubscription
                       ? handleSwitchToClaudeSubscription
@@ -3423,6 +3468,8 @@ export function CCAgentSessionView({
                 onSwitchToClaudeSubscription={
                   canSwitchToClaudeSubscription ? handleSwitchToClaudeSubscription : undefined
                 }
+                onViewBalance={canAccessBilling ? handleViewBalance : undefined}
+                errorSourceProviderId={liveErrorSourceProviderId}
                 silentEncryptedRetryEnabled={silentEncryptedRetryEnabled}
                 onForkStripEncrypted={ownsWindowRoute ? handleForkStripEncrypted : undefined}
                 forkStripEncryptedRunning={forkStripEncryptedRunning}
@@ -3572,6 +3619,9 @@ export function CCAgentSessionView({
                 messages={messages}
                 animated={isStreaming}
                 width={inputWidth}
+                taskHistoryMayBeIncomplete={
+                  !historyLoaded || hasMoreMessages || historyWindowHasIsland
+                }
                 visible={!(
                   pendingPlanReview ||
                   pendingPermission ||

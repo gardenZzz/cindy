@@ -42,7 +42,7 @@ import {
 } from '@/hooks/useAgentCapabilities';
 import { useApiKey } from '@/hooks/useApiKey';
 import { useConnectedSource } from '@/hooks/useConnectedSource';
-import { useModelPricing } from '@/hooks/useModelPricing';
+import { useGatewayModelPricing, useReferenceModelPricing } from '@/hooks/useModelPricing';
 import { useProviders } from '@/hooks/useProviders';
 import {
   evictDeviceProviders,
@@ -646,8 +646,15 @@ export function resolveRemoteModelListStatus({
 }
 
 export function ModelSelectorContent(props: ModelSelectorContentProps) {
-  const pricing = useModelPricing();
-  return <ModelSelectorContentView {...props} pricing={pricing} />;
+  const gatewayPricing = useGatewayModelPricing();
+  const referencePricing = useReferenceModelPricing();
+  return (
+    <ModelSelectorContentView
+      {...props}
+      gatewayPricing={gatewayPricing}
+      referencePricing={referencePricing}
+    />
+  );
 }
 
 function ModelSelectorContentView({
@@ -677,8 +684,12 @@ function ModelSelectorContentView({
   agentSwitch,
   discoveringModels = false,
   interactionDisabled = false,
-  pricing,
-}: ModelSelectorContentProps & { pricing: ModelPricingCatalog | null }) {
+  gatewayPricing,
+  referencePricing,
+}: ModelSelectorContentProps & {
+  gatewayPricing: ModelPricingCatalog | null;
+  referencePricing: ModelPricingCatalog | null;
+}) {
   // 当前来源解析器:已建会话 = 实际路由口径(含停用拷贝),其余 = 准入口径。
   const resolveCurrentSourceId = actualRoute ? actualSourceIdForModel : effectiveSourceIdForModel;
   const { t } = useTranslation();
@@ -977,9 +988,8 @@ function ModelSelectorContentView({
   // Thinking 已去掉可选 UI（spec #14）：Cursor 有 thinking option 时由 runtime 强制开。
 
   // ── 模型单价 ─────────────────────────────────────────────────────────────
-  // providerId 是价格索引的一部分。同模型经 XD / OpenAI / Anthropic 等来源出现时，
-  // 必须按实际行来源查价，不能退化为 pricing[modelId]。只有 XD Gateway 目录价会
-  // 叠加 CatalogModel.cost 作为折后展示价；其它来源保持价格源自带的币种。
+  // XD 实际报价与非 XD Catalog 参考价是两份独立快照。这里只按行来源选择快照，
+  // 相同 modelId 不跨 Provider 复用或兜底。
   const pricePresentationOf = (providerId: string | null, id: string) => {
     // device-link 只同步被控端 provider 目录，不同步价格快照；不能把控制端价格与
     // 被控端 CatalogModel.cost 拼成一个展示结果。在协议补齐前远程选择器不展示价格。
@@ -989,6 +999,7 @@ function ModelSelectorContentView({
       (currentAgentKind
         ? resolveCurrentSourceId(providers, currentProviderId, id, currentAgentKind)
         : null);
+    const pricing = effectiveProviderId === 'xd' ? gatewayPricing : referencePricing;
     const quote = getModelPriceQuote(
       pricing,
       effectiveProviderId,
@@ -996,7 +1007,7 @@ function ModelSelectorContentView({
       currentAgentKind ?? undefined,
     );
     if (effectiveProviderId === 'xd' && (!quote || quote.source === 'gateway')) {
-      if (!quote && pricing == null) return null;
+      if (!quote && gatewayPricing == null) return null;
       const effectiveProvider = providers.find((provider) => provider.id === effectiveProviderId);
       const effectiveCost =
         effectiveProvider && currentAgentKind
@@ -1565,7 +1576,6 @@ function ModelSelectorContentView({
   const renderModelItem = (provider: ProviderView | null, model: RowModel) => {
     const providerId = provider?.id ?? null;
     const isSelected = isSelectedRow(providerId, model.id);
-    const isBudgetModel = model.id.startsWith('codex/');
     const isSubscriptionModel = provider?.access?.kind === 'subscription';
     const disabled = interactionDisabled || modelDisabledOf(model.id);
     const disabledReason = subscriptionDirectDisabledReason(model.id);
@@ -1702,16 +1712,11 @@ function ModelSelectorContentView({
                     />
                   )}
                 </span>
-                {(isSubscriptionModel || isBudgetModel || rowPromotionLabel) && (
+                {(isSubscriptionModel || rowPromotionLabel) && (
                   <span data-model-tags className="ml-auto flex shrink-0 items-center gap-1.5">
                     {isSubscriptionModel && (
                       <span className="inline-flex shrink-0 items-center rounded-full bg-[var(--surface-chip)] px-2 py-[1px] text-[11px] font-medium text-[var(--text-secondary)]">
                         {t('settings.providers.models.subscription')}
-                      </span>
-                    )}
-                    {isBudgetModel && (
-                      <span className="inline-flex shrink-0 items-center rounded-full bg-[var(--model-budget-badge-bg)] px-2 py-[1px] text-[11px] font-medium text-[var(--model-budget-badge-text)]">
-                        {t('newChat.modelSelector.meta.budgetDiscount')}
                       </span>
                     )}
                     {rowPromotionLabel && (
@@ -2129,7 +2134,8 @@ export function ModelSelector({
   const codex = useAgentCapabilities('codex', deviceId);
   const cursor = useAgentCapabilities('cursor', deviceId);
   const pi = useAgentCapabilities('pi', deviceId);
-  const pricing = useModelPricing();
+  const gatewayPricing = useGatewayModelPricing();
+  const referencePricing = useReferenceModelPricing();
   // trigger 的来源 icon / 当前模型也按来源取:device-link 用被控端供应商目录(否则控制端本地
   // 查不到被控端独有模型 → currentModel undefined → label 退成 "Select model")。
   const localProviders = useProviders();
@@ -2629,7 +2635,8 @@ export function ModelSelector({
       agentSwitch={contentAgentSwitch}
       discoveringModels={showDiscoveryPending && discovery.pending}
       interactionDisabled={switching || disabled}
-      pricing={pricing}
+      gatewayPricing={gatewayPricing}
+      referencePricing={referencePricing}
       followSession={
         fallbackOption
           ? {

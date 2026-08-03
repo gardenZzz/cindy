@@ -27,6 +27,9 @@ type DesktopLoginAction = import('../shared/authIpc').DesktopLoginAction;
 type DesktopLoginActionResult = import('../shared/authIpc').DesktopLoginActionResult;
 type UtilityTextFailure = import('../shared/utilityTextResult').UtilityTextFailure;
 type MakerSessionTreeSnapshot = import('@cindy/maker-core').SessionTreeSnapshot;
+type BrowserBackendHealth = import('../shared/browserBackend').BrowserBackendHealth;
+type BrowserBackendRecoveryResult =
+  import('../shared/browserBackend').BrowserBackendRecoveryResult;
 type DesktopAccountDeletionConfirmInput =
   import('../shared/authIpc').DesktopAccountDeletionConfirmInput;
 type DesktopAccountDeletionAvailabilityResult =
@@ -1322,6 +1325,28 @@ interface ElectronAPI {
         tone: 'info' | 'success' | 'warning' | 'error';
       }) => void,
     ) => () => void;
+    /** badge 槽:意识未读角标变化(插件入口与插件卡上的绿点)。
+     *  与 onNotify 的分工是持久状态对一次性 toast——用户没去看就一直亮着。
+     *  summary/at 只在 unread:true 时给。 */
+    onBadge: (
+      callback: (payload: {
+        ghostId: string;
+        unread: boolean;
+        summary?: string;
+        at?: number;
+      }) => void,
+    ) => () => void;
+    /** badge 槽:未读全量快照(换账号后整表替换;逐条 onBadge 只表达增量)。 */
+    onUnreadSnapshot: (
+      callback: (payload: {
+        entries: Array<{ ghostId: string; summary?: string; at: number }>;
+      }) => void,
+    ) => () => void;
+    /** badge 槽:未读角标首帧快照(同步读,避免绿点晚一帧跳出来)。 */
+    unreadSync: () => { entries: Array<{ ghostId: string; summary?: string; at: number }> };
+    /** badge 槽:用户侧熄灭未读(打开面板 = 明确已读)。seenAt = 当时看到的那条
+     *  的点亮时刻,main 据此条件删除,避免陈旧清除抹掉更新的未读。 */
+    clearUnread: (id: string, seenAt?: number) => Promise<{ ok: boolean }>;
     /** confirm 槽:插件请求弹主机同款确认框(main 已资格审+净化+限速+单飞)。
      *  main 只投单个窗口,所以收到即本窗口负责弹;答案用 resolveConfirm 回包。
      *  confirmText/cancelText 为 null 时用 renderer 自己的缺省文案(跟语言走)。 */
@@ -1591,6 +1616,7 @@ interface ElectronAPI {
       sessionId: string | null;
       workdir: string | null;
       remoteHostId: string | null;
+      deviceLinkDeviceId?: string | null;
       available: boolean;
     } | null>;
     /** 子窗口根组件挂载握手。 */
@@ -1605,6 +1631,7 @@ interface ElectronAPI {
       sessionId: string | null;
       workdir: string | null;
       remoteHostId: string | null;
+      deviceLinkDeviceId?: string | null;
       available: boolean;
     }) => void;
     onStateChanged: (cb: (state: { detached: boolean; open: boolean }) => void) => () => void;
@@ -1613,6 +1640,7 @@ interface ElectronAPI {
         sessionId: string | null;
         workdir: string | null;
         remoteHostId: string | null;
+        deviceLinkDeviceId?: string | null;
         available: boolean;
       }) => void,
     ) => () => void;
@@ -2185,9 +2213,8 @@ interface ElectronAPI {
   openExternal: (url: string) => Promise<{ success: boolean }>;
   openChatGPTApp: () => Promise<{ success: boolean }>;
 
-  // file-chip 右键菜单 "在浏览器中查看": 把本地文件用 file:// 喂给系统
-  // 默认浏览器(或 .html/.pdf/.svg 等扩展名的默认 handler)。
-  openFileInBrowser: (filePath: string) => Promise<{ success: boolean; error?: string }>;
+  // 绝对路径或完整本地 file:// URL;URL 形态用于保留 query/hash 页面状态。
+  openFileInBrowser: (filePathOrUrl: string) => Promise<{ success: true }>;
 
   // ── 系统级通知（CC Agent session 状态变更）──
   /**
@@ -3064,6 +3091,7 @@ interface ElectronAPI {
       controlledBy: Array<{ deviceId: string; name: string }>;
       revokedControllers: string[];
       disabledControlDeviceIds: string[];
+      unresponsiveDeviceIds: string[];
     }>;
     setEnabled: (enabled: boolean) => Promise<{ remoteControlEnabled: boolean }>;
     setKeepAwake: (enabled: boolean) => Promise<{ keepAwake: boolean }>;
@@ -3119,6 +3147,10 @@ interface ElectronAPI {
     ) => () => void;
     /** 「保持电脑唤醒」在其它共享 userData 实例被翻转后推送 */
     onKeepAwakeChanged: (cb: (payload: { keepAwake: boolean }) => void) => () => void;
+    /** 控制端:目标设备「无响应」熔断状态翻转(弱网 / 对端卡死;presence 可能仍在线) */
+    onResponsivenessChanged: (
+      cb: (payload: { deviceId: string; unresponsive: boolean }) => void,
+    ) => () => void;
     /**
      * 控制端:远程会话镜像的本地冷缓存(main 落 userData,见
      * main/device-link/mirrorCacheStore.ts)。只做首屏加速、非权威 —— 缓存里没有 live 态,
@@ -3469,6 +3501,11 @@ interface ElectronAPI {
   sidebarSettingsLoadPinnedOrderSync: () => string[];
   sidebarSettingsSavePinnedOrder: (order: readonly string[]) => Promise<void>;
   sidebarSettingsOnPinnedOrderChanged: (cb: (order: string[]) => void) => () => void;
+  sidebarSettings: {
+    loadHiddenProjectKeys: () => string[];
+    setProjectHidden: (projectKey: string, hidden: boolean) => Promise<boolean>;
+    onHiddenProjectKeysChanged: (cb: (projectKeys: string[]) => void) => () => void;
+  };
 
   remotePrecreatedWorktreeLedger: {
     list: () => Promise<RemotePrecreatedWorktreeLedgerSnapshot>;
@@ -3872,7 +3909,7 @@ interface ElectronAPI {
     onUnpin: (cb: (payload: { tabId: string }) => void) => () => void;
     /**
      * main → renderer:Phase 3 backend 让 renderer 代调 store 的 tab-op
-     * 请求(open / focus / close)。payload 是带 reqId 的 union;renderer 处理
+     * 请求(probe / open / focus / close)。payload 是带 reqId 的 union;renderer 处理
      * 完后通过 `tabOpResult` 回报。
      */
     onTabOpRequest: (
@@ -3916,6 +3953,8 @@ interface ElectronAPI {
       active: 'external' | 'rsb-webview';
     }>;
     reset: () => Promise<{ ok: true; active: 'external' | 'rsb-webview' }>;
+    getHealth: () => Promise<BrowserBackendHealth>;
+    recover: () => Promise<BrowserBackendRecoveryResult>;
   };
 
   // ── Dialog（v0.6 新增） ────────────────────────────────────────────────────
@@ -4909,7 +4948,7 @@ interface ElectronAPI {
       getCodexRateLimits: () => Promise<
         import('@cindy/maker-shared/device-link-contract').MobileCodexRateLimitsResult
       >;
-      /** provider-scoped 模型单价表；XD 价格与 model-access /models 同快照更新。 */
+      /** Cindy AI /models 下发的 XD 原生报价。 */
       getModelPricing: () => Promise<
         import('../shared/regionalMoney').ModelPricingCatalog | null
       >;
@@ -4917,6 +4956,13 @@ interface ElectronAPI {
         cb: (
           pricing: import('../shared/regionalMoney').ModelPricingCatalog | null,
         ) => void,
+      ) => () => void;
+      /** 非 XD Provider 的 Catalog 参考价与用户覆盖。 */
+      getReferenceModelPricing: () => Promise<
+        import('../shared/regionalMoney').ModelPricingCatalog
+      >;
+      onReferenceModelPricingChanged: (
+        cb: (pricing: import('../shared/regionalMoney').ModelPricingCatalog) => void,
       ) => () => void;
       /** 用量历史聚合 (首页仪表盘)。wire 形态与 main/usage/usageHistory.ts 的 UsageHistoryPayload 同形。 */
       getHistory: (
