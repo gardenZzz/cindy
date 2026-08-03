@@ -35,6 +35,13 @@ describe('streamDisconnect', () => {
       expect(isCursorStreamDisconnectError(err)).toBe(true);
     });
 
+    it('matches socket disconnected before TLS established', () => {
+      const err = new Error(
+        'RetriableError: [aborted] Client network socket disconnected before secure TLS connection was established',
+      );
+      expect(isCursorStreamDisconnectError(err)).toBe(true);
+    });
+
     it('rejects ACP connection closed / transport failure', () => {
       expect(isCursorStreamDisconnectError(new Error('acp closed'))).toBe(false);
       expect(isCursorStreamDisconnectError(new Error('acp client closed'))).toBe(false);
