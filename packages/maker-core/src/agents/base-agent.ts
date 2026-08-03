@@ -270,6 +270,28 @@ export interface AgentDeps {
   }) => Promise<{ servers: unknown[]; cleanup?: () => void }>;
 
   /**
+   * Cursor 专用：`cursor/generate_image` 入仓钩子（#50）。
+   *
+   * host 负责 realpath / 受控根 / regular file / magic MIME / 字节上限，并把
+   * 通过校验的字节写入 cindy-media。maker-core 在 ACK `generated` **之前**
+   * await 本钩子——失败则返回 `rejected` 并向会话推 isError tool_result，
+   * 绝不在持久化结果未知时宣称成功。
+   *
+   * 缺省 / undefined → 仅做路径前缀与 imageData 限长预检后推 image 事件
+   * （单测 FakeTransport）；生产 desktop 必须注入。
+   */
+  materializeCursorGeneratedImage?: (args: {
+    sessionId: string;
+    workingDir: string;
+    path?: string;
+    /** data: URL 或已带 data: 前缀的 imageData。 */
+    url?: string;
+  }) => Promise<
+    | { ok: true; url: string; filename: string }
+    | { ok: false; reason: string }
+  >;
+
+  /**
    * Codex 本地 shared app-server 凭证形态要切换前的宿主协调点。
    *
    * maker-core 不知道 desktop 的 active session / worktree / attachment 生命周期；

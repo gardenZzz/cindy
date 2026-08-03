@@ -94,7 +94,11 @@ function authStub(): AuthAdapter {
   };
 }
 
-async function boot(transport: FakeTransport, startOpts: Record<string, unknown> = {}) {
+async function boot(
+  transport: FakeTransport,
+  startOpts: Record<string, unknown> = {},
+  agentDeps: Record<string, unknown> = {},
+) {
   const userDataPath = mkdtempSync(join(tmpdir(), 'cindy-cursor-ext-'));
   const agent = new CursorAgent({
     auth: authStub(),
@@ -102,6 +106,7 @@ async function boot(transport: FakeTransport, startOpts: Record<string, unknown>
     binaryPath: '/dev/null/cursor-agent',
     logger: createConsoleLogger('cursor-ext-session'),
     networkConfigReader: () => undefined,
+    ...agentDeps,
   });
 
   const origWrite = transport.writeLine.bind(transport);
@@ -560,6 +565,89 @@ describe('CursorAgent planMode + extensions (FakeTransport)', () => {
       outcome: { outcome: 'generated', filePath: okPath },
     });
     expect(events.filter((e) => e.type === 'image')).toHaveLength(1);
+
+    await handle.close();
+    await consume;
+  });
+
+  it('cursor/generate_image waits for host materialize before ACK generated', async () => {
+    const transport = new FakeTransport();
+    let calls = 0;
+    const { handle } = await boot(transport, {}, {
+      materializeCursorGeneratedImage: async () => {
+        calls += 1;
+        if (calls === 1) {
+          return { ok: false as const, reason: 'not a regular file' };
+        }
+        return {
+          ok: true as const,
+          url: 'cindy-media://blobs/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa.png',
+          filename: 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa.png',
+        };
+      },
+    });
+    const events: AgentEvent[] = [];
+    const consume = (async () => {
+      for await (const ev of handle.events()) events.push(ev);
+    })();
+
+    const okPath = join(tmpdir(), 'cindy-cursor-img-mat.png');
+    transport.emit({
+      jsonrpc: JSONRPC_VERSION,
+      id: 9301,
+      method: CursorMethod.GenerateImage,
+      params: {
+        toolCallId: 'call_mat_fail',
+        description: 'icon',
+        filePath: okPath,
+      },
+    });
+    const d1 = Date.now() + 2000;
+    while (Date.now() < d1 && !transport.findResponse(9301)) {
+      await new Promise((r) => setTimeout(r, 10));
+    }
+    expect(transport.findResponse(9301)).toMatchObject({
+      outcome: { outcome: 'rejected', reason: 'not a regular file' },
+    });
+    expect(events.some((e) => e.type === 'image')).toBe(false);
+    expect(
+      events.some(
+        (e) =>
+          e.type === 'tool_result_full' &&
+          (e.data as { isError?: boolean }).isError === true,
+      ),
+    ).toBe(true);
+
+    transport.emit({
+      jsonrpc: JSONRPC_VERSION,
+      id: 9302,
+      method: CursorMethod.GenerateImage,
+      params: {
+        toolCallId: 'call_mat_ok',
+        description: 'icon',
+        filePath: okPath,
+      },
+    });
+    const d2 = Date.now() + 2000;
+    while (Date.now() < d2 && !transport.findResponse(9302)) {
+      await new Promise((r) => setTimeout(r, 10));
+    }
+    expect(transport.findResponse(9302)).toMatchObject({
+      outcome: {
+        outcome: 'generated',
+        filePath:
+          'cindy-media://blobs/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa.png',
+      },
+    });
+    expect(events.find((e) => e.type === 'image')).toMatchObject({
+      data: {
+        kind: 'generation',
+        blockId: 'call_mat_ok',
+        url: 'cindy-media://blobs/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa.png',
+      },
+    });
+    // 不得把本机 path 再推给下游。
+    expect((events.find((e) => e.type === 'image')?.data as { path?: string }).path).toBeUndefined();
 
     await handle.close();
     await consume;

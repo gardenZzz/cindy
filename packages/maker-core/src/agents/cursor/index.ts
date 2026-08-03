@@ -794,8 +794,10 @@ export class CursorAgent extends BaseAgent {
     const runningCursorTasks = new Map<string, { toolCallId: string; title?: string }>();
     /** toolCallId → 已达终态；忽略晚到 running / 重复终态（#49）。 */
     const terminalCursorTasks = new Map<string, AgentTaskStatus>();
-    /** cursor/generate_image：已处理的 toolCallId（幂等）。 */
+    /** cursor/generate_image：已成功物化/推送的 toolCallId（幂等；仅成功后写入）。 */
     const emittedCursorGenerateImageIds = new Set<string>();
+    /** 进行中的 generate_image（同 toolCallId 合并到同一 Promise）。 */
+    const inflightCursorGenerateImages = new Map<string, Promise<unknown>>();
     let extensionSeq = 0;
     let pendingPrompt: {
       token: number;
@@ -1483,7 +1485,31 @@ export class CursorAgent extends BaseAgent {
       return cursorTaskAcceptedResponse(parsed);
     };
 
-    const applyCursorGenerateImage = (params: unknown): unknown => {
+    const pushCursorGenerateImageFailure = (toolCallId: string, reason: string): void => {
+      pushAll([
+        {
+          type: 'tool_use',
+          source: 'cursor',
+          data: { toolUseId: toolCallId, toolName: 'imagegen', input: {} },
+        },
+        {
+          type: 'tool_result_full',
+          source: 'cursor',
+          data: {
+            toolUseId: toolCallId,
+            fullText: JSON.stringify({ ok: false, kind: 'generation', error: reason }),
+            isError: true,
+          },
+        },
+        {
+          type: 'tool_result',
+          source: 'cursor',
+          data: { summary: reason, toolUseIds: [toolCallId] },
+        },
+      ]);
+    };
+
+    const applyCursorGenerateImage = async (params: unknown): Promise<unknown> => {
       toolIdle.noteActivity();
       const parsed = parseCursorGenerateImageParams(params);
       if (!parsed) {
@@ -1494,30 +1520,103 @@ export class CursorAgent extends BaseAgent {
         log.warn('cursor/generate_image duplicate toolCallId ignored', {
           toolCallId: parsed.toolCallId,
         });
-        // 幂等：不重复推 image 事件；对 Cursor 仍 ACK generated（若仍有媒体字段）。
+        // 幂等：已成功物化过则不再推事件；对 Cursor 仍 ACK generated。
         return cursorGenerateImageAcceptedResponse(parsed);
       }
-      const allowedRoots = [opts.workingDir, tmpdir()].filter(
-        (r): r is string => typeof r === 'string' && r.trim().length > 0,
-      );
-      const rejectReason = preflightCursorGenerateImage(parsed, { allowedRoots });
-      if (rejectReason) {
-        log.warn('cursor/generate_image rejected by preflight', {
-          toolCallId: parsed.toolCallId,
-          reason: rejectReason,
-        });
-        return { outcome: { outcome: 'rejected', reason: rejectReason } };
+      const inflight = inflightCursorGenerateImages.get(parsed.toolCallId);
+      if (inflight) return inflight;
+
+      const work = (async (): Promise<unknown> => {
+        const allowedRoots = [opts.workingDir, tmpdir()].filter(
+          (r): r is string => typeof r === 'string' && r.trim().length > 0,
+        );
+        const rejectReason = preflightCursorGenerateImage(parsed, { allowedRoots });
+        if (rejectReason) {
+          log.warn('cursor/generate_image rejected by preflight', {
+            toolCallId: parsed.toolCallId,
+            reason: rejectReason,
+          });
+          return { outcome: { outcome: 'rejected', reason: rejectReason } };
+        }
+
+        const materialize = this.deps.materializeCursorGeneratedImage;
+        if (materialize) {
+          const sourceUrl = parsed.filePath?.startsWith('data:')
+            ? parsed.filePath
+            : parsed.imageData
+              ? parsed.imageData.startsWith('data:')
+                ? parsed.imageData
+                : `data:image/png;base64,${parsed.imageData}`
+              : undefined;
+          const sourcePath =
+            parsed.filePath && !parsed.filePath.startsWith('data:') && !/^https?:/i.test(parsed.filePath)
+              ? parsed.filePath
+              : undefined;
+          let mat: Awaited<ReturnType<NonNullable<typeof materialize>>>;
+          try {
+            mat = await materialize({
+              sessionId,
+              workingDir: opts.workingDir,
+              ...(sourcePath ? { path: sourcePath } : {}),
+              ...(sourceUrl ? { url: sourceUrl } : {}),
+            });
+          } catch (err) {
+            const reason = err instanceof Error ? err.message : String(err);
+            log.warn('cursor/generate_image materialize threw', {
+              toolCallId: parsed.toolCallId,
+              reason,
+            });
+            pushCursorGenerateImageFailure(parsed.toolCallId, reason);
+            return { outcome: { outcome: 'rejected', reason } };
+          }
+          if (!mat.ok) {
+            log.warn('cursor/generate_image materialize rejected', {
+              toolCallId: parsed.toolCallId,
+              reason: mat.reason,
+            });
+            pushCursorGenerateImageFailure(parsed.toolCallId, mat.reason);
+            return { outcome: { outcome: 'rejected', reason: mat.reason } };
+          }
+          // 成功后才 latch + 推已入仓地址（不再把任意本机 path 交给下游）。
+          emittedCursorGenerateImageIds.add(parsed.toolCallId);
+          pushAll([
+            {
+              type: 'image',
+              source: 'cursor',
+              data: {
+                kind: 'generation',
+                blockId: parsed.toolCallId,
+                status: 'completed',
+                url: mat.url,
+                ...(parsed.description ? { revisedPrompt: parsed.description } : {}),
+              },
+            },
+          ]);
+          return {
+            outcome: {
+              outcome: 'generated' as const,
+              filePath: mat.url,
+            },
+          };
+        }
+
+        // 无 host 钩子（单测）：预检通过后推 image 事件；生产 desktop 必须注入钩子。
+        const events = cursorGenerateImageToEvents(parsed, { source: 'cursor' });
+        if (events.length === 0) {
+          log.warn('cursor/generate_image missing media', { toolCallId: parsed.toolCallId });
+          return { outcome: { outcome: 'rejected', reason: 'missing filePath/imageData' } };
+        }
+        emittedCursorGenerateImageIds.add(parsed.toolCallId);
+        pushAll(events);
+        return cursorGenerateImageAcceptedResponse(parsed);
+      })();
+
+      inflightCursorGenerateImages.set(parsed.toolCallId, work);
+      try {
+        return await work;
+      } finally {
+        inflightCursorGenerateImages.delete(parsed.toolCallId);
       }
-      const events = cursorGenerateImageToEvents(parsed, { source: 'cursor' });
-      if (events.length === 0) {
-        log.warn('cursor/generate_image missing media', { toolCallId: parsed.toolCallId });
-        return { outcome: { outcome: 'rejected', reason: 'missing filePath/imageData' } };
-      }
-      // 仅在预检通过后标记；主机物化失败由 main 合成 isError tool_result（#50）。
-      // ACP ACK 仍用 generated（Cursor 协议），但不在预检失败时宣称成功。
-      emittedCursorGenerateImageIds.add(parsed.toolCallId);
-      pushAll(events);
-      return cursorGenerateImageAcceptedResponse(parsed);
     };
 
     client.setRequestHandler(CursorMethod.AskQuestion, handleAskQuestion);
@@ -1531,7 +1630,7 @@ export class CursorAgent extends BaseAgent {
       applyCursorTaskNotification(params);
     });
     client.onNotification(CursorMethod.GenerateImage, (params) => {
-      applyCursorGenerateImage(params);
+      void applyCursorGenerateImage(params);
     });
 
     const pushCancelledIdle = (statusText: string) => {
