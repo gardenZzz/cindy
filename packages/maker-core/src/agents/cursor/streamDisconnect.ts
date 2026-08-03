@@ -34,6 +34,7 @@ const WHITELIST_PATTERNS = [
   /stream (?:closed|ended|interrupted) (?:unexpectedly|mid-response)/i,
   /stream (?:closed|ended|interrupted) with error/i,
   /http\/2 stream error/i,
+  /socket disconnected before secure TLS/i,
 ];
 
 /**
