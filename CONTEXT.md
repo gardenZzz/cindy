@@ -25,3 +25,11 @@ _Avoid_: Cursor Agent、Cursor CLI(通道/二进制是实现细节,不作产品�
 **oneShot**:
 maker-core 里不开会话、不进事件流的一次性 LLM 调用(起标题、生成摘要等辅助任务)。
 _Avoid_: 单轮对话(那是会话内的一个 turn)
+
+**session bootstrap（后台化）**:
+Agent 子进程从 spawn 到可接收首条 turn 的就绪过程(spawn + initialize + session/new
++ 初始配置)。对齐 Claude Code `sdkQuery` 形态:`startSession` 立即返回 handle,
+bootstrap 在后台进行;首条消息经 accept 语义立刻接收,bootstrap 未就绪时进
+`pendingPrompt` 排队,就绪后自动 flush。UI 用「正在启动…」状态覆盖,用户不空等。
+见 ADR 0003;与「预热(pre-warm)」相对--后者在草稿期提前完成 bootstrap,本仓不采用
+(ADR 0001 排除进程预热/复用)。
