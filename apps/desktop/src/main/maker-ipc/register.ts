@@ -5578,47 +5578,6 @@ export function registerMakerIpc(maker: Maker, options: RegisterMakerIpcOptions)
     },
   );
 
-  makerSessionRegistry.handle(MAKER_INVOKE.PREWARM_SESSION, async (event, opts: unknown) => {
-    assertTrustedAppRendererEvent(
-      event as Parameters<typeof assertTrustedAppRendererEvent>[0],
-    );
-    const o = withCreateSessionStderr(
-      readCreateSessionOpts(opts, {
-        allocateDialogueWorkspace: ensureDialogueWorkspaceDir,
-        createSessionId: createId,
-        now: Date.now,
-      }),
-      (agentKind, line) => log.warn(`[${agentKind}/stderr] ${line}`),
-    );
-    if (o.agentKind !== 'cursor' || !o.id || o.remoteHostId || o.resumeSessionId) {
-      throwIpcError('INVALID_PARAMS', 'Cursor prewarm requires a new local session with an explicit id');
-    }
-    const reroute = await assertModelRouteUsable('cursor', o.model, o.providerId ?? null);
-    if (reroute && !o.providerId) o.providerId = reroute;
-    await maker.prewarmSession(o);
-    return { ready: true as const, workDir: o.workingDir };
-  });
-
-  makerSessionRegistry.handle(MAKER_INVOKE.CLAIM_PREWARM_SESSION, async (event, sessionId: unknown) => {
-    assertTrustedAppRendererEvent(
-      event as Parameters<typeof assertTrustedAppRendererEvent>[0],
-    );
-    if (typeof sessionId !== 'string' || !sessionId || sessionId.length > 256) {
-      throwIpcError('INVALID_PARAMS', 'sessionId must be a non-empty string');
-    }
-    return { claimed: await maker.claimPrewarmedSession(sessionId) };
-  });
-
-  makerSessionRegistry.handle(MAKER_INVOKE.CANCEL_PREWARM_SESSION, async (event, sessionId: unknown) => {
-    assertTrustedAppRendererEvent(
-      event as Parameters<typeof assertTrustedAppRendererEvent>[0],
-    );
-    if (typeof sessionId !== 'string' || !sessionId || sessionId.length > 256) {
-      throwIpcError('INVALID_PARAMS', 'sessionId must be a non-empty string');
-    }
-    await maker.cancelPrewarmedSession(sessionId);
-  });
-
   registerPrecreatedWorktreeDiscardHandler(makerSessionRegistry, {
     assertCaller: (event) => {
       // device-link 的真实调用身份由 invoke async context + allowlist 证明；本机直调仍

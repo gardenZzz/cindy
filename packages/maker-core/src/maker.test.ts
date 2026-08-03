@@ -196,22 +196,21 @@ describe('Maker session creation singleflight', () => {
   });
 });
 
-describe('Maker Cursor session prewarm', () => {
-  it('completes bootstrap without persistence and hands the same handle to createSession', async () => {
-    const storage = createStorage();
-    let resolveReady!: () => void;
+describe('Maker Cursor session startup', () => {
+  it('createSession returns without awaiting bootstrap; startSession is fire-and-forget', async () => {
+    // 回退 ACP 预热后，createSession 不再 await prewarm.ready。
+    // startSession 立即返回 handle，bootstrapReady 仍 pending（后台进行）。
+    let resolveBootstrap!: () => void;
     const bootstrapReady = new Promise<void>((resolve) => {
-      resolveReady = resolve;
+      resolveBootstrap = resolve;
     });
     const startSession = vi.fn(async () =>
       createHandle({ id: 'cursor-sdk', agentKind: 'cursor', model: 'auto', bootstrapReady }),
     );
-    const onBeforeStart = vi.fn();
     const maker = new Maker({
       agents: { cursor: createAgent(startSession, 'cursor') },
-      storage,
+      storage: createStorage(),
       logger: createLogger(),
-      lifecycleHooks: { onBeforeStart },
     });
     const options: CreateSessionOptions = {
       id: 'cursor-business',
@@ -220,77 +219,17 @@ describe('Maker Cursor session prewarm', () => {
       model: 'auto',
     };
 
-    const warming = maker.prewarmSession(options);
-    await vi.waitFor(() => expect(startSession).toHaveBeenCalledTimes(1));
-    expect(await storage.get(options.id!)).toBeNull();
-    resolveReady();
-    await warming;
-    expect(onBeforeStart).not.toHaveBeenCalled();
-    await expect(maker.claimPrewarmedSession(options.id!)).resolves.toBe(true);
+    const session = await maker.createSession(options);
 
-    await maker.createSession(options);
     expect(startSession).toHaveBeenCalledTimes(1);
-    expect(onBeforeStart).toHaveBeenCalledTimes(1);
-    expect(await storage.get(options.id!)).not.toBeNull();
-  });
-
-  it('replaces an unclaimed in-flight prewarm without leaking its handle', async () => {
-    let resolveFirst!: () => void;
-    const firstReady = new Promise<void>((resolve) => {
-      resolveFirst = resolve;
-    });
-    const firstClose = vi.fn();
-    const startSession = vi.fn()
-      .mockResolvedValueOnce(
-        createHandle({ id: 'cursor-old', agentKind: 'cursor', bootstrapReady: firstReady, close: firstClose }),
-      )
-      .mockResolvedValueOnce(createHandle({ id: 'cursor-new', agentKind: 'cursor' }));
-    const maker = new Maker({
-      agents: { cursor: createAgent(startSession, 'cursor') },
-      storage: createStorage(),
-      logger: createLogger(),
-    });
-    const options: CreateSessionOptions = {
-      id: 'cursor-business',
-      agentKind: 'cursor',
-      workingDir: '/repo',
-      model: 'auto',
-    };
-
-    const first = maker.prewarmSession(options);
-    await vi.waitFor(() => expect(startSession).toHaveBeenCalledTimes(1));
-    await maker.prewarmSession({ ...options, model: 'gpt-5.5' });
-    resolveFirst();
-    await first.catch(() => undefined);
-
-    await vi.waitFor(() => expect(firstClose).toHaveBeenCalledTimes(1));
-    expect(startSession).toHaveBeenCalledTimes(2);
-  });
-
-  it('closes an unclaimed prewarm when cancelled', async () => {
-    const close = vi.fn();
-    const maker = new Maker({
-      agents: {
-        cursor: createAgent(
-          async () => createHandle({ id: 'cursor-sdk', agentKind: 'cursor', close }),
-          'cursor',
-        ),
-      },
-      storage: createStorage(),
-      logger: createLogger(),
-    });
-    const options: CreateSessionOptions = {
-      id: 'cursor-business',
-      agentKind: 'cursor',
-      workingDir: '/repo',
-      model: 'auto',
-    };
-
-    await maker.prewarmSession(options);
-    await maker.cancelPrewarmedSession(options.id!);
-
-    expect(close).toHaveBeenCalledTimes(1);
-    expect(await maker.waitForSessionBootstrap(options.id!)).toBe(false);
+    // createSession 已 resolve（不阻塞 bootstrap），但 bootstrapReady 仍 pending。
+    const settled = await Promise.race([
+      bootstrapReady.then(() => true).catch(() => true),
+      Promise.resolve(false),
+    ]);
+    expect(settled).toBe(false);
+    expect(session).toBeInstanceOf(Session);
+    resolveBootstrap();
   });
 });
 
