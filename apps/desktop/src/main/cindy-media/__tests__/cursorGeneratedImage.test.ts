@@ -47,9 +47,9 @@ describe('resolveCursorGeneratedImagePath', () => {
   it('allows regular files under workdir', async () => {
     const file = path.join(workDir, 'ok.png');
     fs.writeFileSync(file, PNG_BYTES);
-    // Windows 上 os.tmpdir() 可能是短路径(RUNNER~1),realpath 返回长路径(runneradmin);
-    // 两侧都 realpath 一次再比,避免 8.3 vs 长路径假失败。
-    const expected = fs.realpathSync(file);
+    // Windows 上同步与异步 realpath 可能分别返回 8.3 短路径和长路径；使用与被测函数相同的
+    // 异步 API 取期望值，避免路径表示形式不同造成假失败。
+    const expected = await fs.promises.realpath(file);
     await expect(resolveCursorGeneratedImagePath(file, [workDir])).resolves.toBe(expected);
   });
 
