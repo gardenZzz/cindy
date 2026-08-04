@@ -26,7 +26,10 @@ import type { CSSProperties, ReactNode } from 'react';
 import { useLocation, useNavigate, useOutletContext, useParams } from 'react-router-dom';
 import { dbToMakerAgentKind, normalizeDbAgentKind } from '../../../shared/agentKindConversion';
 import { useTranslation } from 'react-i18next';
-import type { AgentInputReference } from '@cindy/maker-shared/agent-input-projection';
+import {
+  isCodexResumeNotReadyProjectionError,
+  type AgentInputReference,
+} from '@cindy/maker-shared/agent-input-projection';
 import {
   connectedProvidersForAgent,
   providerOffersModel,
@@ -56,6 +59,10 @@ import { GoalIndicator } from '@/components/new-chat/GoalIndicator';
 import { PinnedPlanPanel } from '@/components/new-chat/PinnedPlanPanel';
 import { sessionsStore } from '@/lib/sessionsStore';
 import { useStopOrcaCollab } from './hooks/useStopOrcaCollab';
+import {
+  useWorkerProjection,
+  useWorkerProjectionOwner,
+} from './hooks/workerProjectionStore';
 import { CreateWorkerPopover, type CreateWorkerForm } from './CreateWorkerPopover';
 import { createWorkerLabel } from './workerLabel';
 import { TakeoverMask } from '@/components/new-chat/TakeoverMask';
@@ -83,6 +90,7 @@ import {
   CONTINUE_AFTER_APP_EXIT_PROMPT,
   CONTINUE_AFTER_ERROR_PROMPT,
 } from '../../../shared/interruptedTurn';
+import { CLAUDE_SUBSCRIPTION_OPUS_PLAN_MISMATCH_REASON } from '../../../shared/claudeGatewayError';
 import { refreshPendingAlerts } from '@/hooks/usePendingAlertAttention';
 import { CredentialSwitchWaitBanner } from '@/components/chat/CredentialSwitchWaitBanner';
 import { UpgradeBanner } from '@/components/chat/UpgradeBanner';
@@ -1412,6 +1420,26 @@ export function CCAgentSessionView({
   const [errorTailBannerHiddenFor, setErrorTailBannerHiddenFor] = useState<string | null>(null);
   const errorTailBannerHidden =
     errorTailBannerHiddenFor !== null && errorTailBannerHiddenFor === errorTailMsg?.clientId;
+  /**
+   * Claude Code captures the subscription token and plan metadata when its process is spawned.
+   * Settings auth changes only affect future sessions, so a subscription-plan retry must first
+   * use the existing soft-close path; the next dispatch then lazy-creates Claude with fresh auth.
+   * preserveWorkspace keeps this recovery from triggering worktree cleanup, and makerApiFor
+   * keeps the same behavior for device-link sessions.
+   */
+  const rebuildClaudeSubscriptionSessionBeforeRetry = useCallback(
+    async (reason: string | null | undefined): Promise<void> => {
+      if (
+        !sessionId ||
+        session?.agentKind !== 'cc' ||
+        reason !== CLAUDE_SUBSCRIPTION_OPUS_PLAN_MISMATCH_REASON
+      ) {
+        return;
+      }
+      await makerApiFor(sessionId).closeSession(sessionId, { preserveWorkspace: true });
+    },
+    [session?.agentKind, sessionId],
+  );
   // 抑制交棒(review P2):本地 hidden 态只服务「点击 → enqueue 被接受」的短窗口;
   // 合成续跑项进入队列或 coordinator dispatch 边界后就释放 hidden 态，由
   // main projection 接管抑制。排队项被取消 / dispatch 前被 Ghost block 时，
@@ -1429,6 +1457,9 @@ export function CCAgentSessionView({
       // 隐藏的英文续跑指令([UI_ACTION_TRIGGER] 前缀,消息流不渲染)——用户视角
       // 就是任务继续跑了。transcript 里已有原任务与(可能的)部分进展,模型自查
       // 进度接着做。send 失败恢复红条让用户能重试。
+      await rebuildClaudeSubscriptionSessionBeforeRetry(
+        errorTailKind === 'error' ? errorTailMsg.errorReason : null,
+      );
       await makerChatStore.sendUiTrigger(
         sessionId,
         errorTailKind === 'interrupted'
@@ -1447,7 +1478,7 @@ export function CCAgentSessionView({
       setErrorTailBannerHiddenFor(null);
       toast.error(err instanceof Error ? err.message : String(err));
     }
-  }, [errorTailKind, errorTailMsg, sessionId]);
+  }, [errorTailKind, errorTailMsg, rebuildClaudeSubscriptionSessionBeforeRetry, sessionId]);
   const handleErrorTailDismiss = useCallback(() => {
     if (!sessionId || !errorTailMsg) return;
     // store 乐观置 errorDismissed(banner 即刻熄灭、切会话回来不复现)+ 持久化
@@ -1981,21 +2012,17 @@ export function CCAgentSessionView({
   const allowCollabToggle = !orcaMode && collabPolicyEligible;
   // 把 sessionId 抽出来给 useEffect 用 (linter 偏好稳定的标量依赖)
   const collabSessionId = sessionId;
+  const collabProjectionLeadId = collabEnabled ? collabSessionId : undefined;
+  useWorkerProjectionOwner(collabProjectionLeadId);
+  const collabWorkerProjection = useWorkerProjection(collabProjectionLeadId);
   useEffect(() => {
-    if (!collabSessionId || !collabEnabled) return;
-    let cancelled = false;
-    void orcaWorkflowsFor(collabSessionId)
-      .listWorkersByLead(collabSessionId)
-      .then((workers) => {
-        if (cancelled || workers.length === 0) return;
-        const activeWorker = workers[0]; // MVP: 假设最多 1 个 active Worker
-        setCollabWorker(orcaVendorForAgentKind(normalizeOrcaDisplayAgentKind(activeWorker.session?.agentKind)));
-      })
-      .catch(() => undefined);
-    return () => {
-      cancelled = true;
-    };
-  }, [collabSessionId, collabEnabled]);
+    if (!collabProjectionLeadId) return;
+    const activeWorker = collabWorkerProjection.workers[0]; // MVP: 假设最多 1 个 active Worker
+    if (!activeWorker) return;
+    // activeWorker.agent 是 maker 形态(maker-core 归一, 含 cursor/pi), 走 orcaVendorForAgentKind
+    // 出四家 vendor -- cursor/pi worker 也要正确投射, 不能硬收敛成 codex。
+    setCollabWorker(orcaVendorForAgentKind(activeWorker.agent));
+  }, [collabProjectionLeadId, collabWorkerProjection.workers]);
 
   // F-COLLAB: "外部触发" 协同状态变化时自动打开协同 tab (典型场景: MCP team
   // 工具, 未来也覆盖飞书等其它入口)。
@@ -2660,10 +2687,12 @@ export function CCAgentSessionView({
   // useSessionRunningStatus 在 running 上升沿把 orphan 的 error 角标 explicit 清掉。
   // 失败路径则天然保留红点,与仍在展示的横幅一致。
   const handleRetry = useCallback(() => {
-    void retryLastError().catch((error) => {
-      log.warn('retryLastError failed', error);
-    });
-  }, [retryLastError]);
+    void rebuildClaudeSubscriptionSessionBeforeRetry(errorReason)
+      .then(() => retryLastError())
+      .catch((error) => {
+        log.warn('retryLastError failed', error);
+      });
+  }, [errorReason, rebuildClaudeSubscriptionSessionBeforeRetry, retryLastError]);
 
   const handleSwitchToClaudeSubscription = useCallback(async (): Promise<void> => {
     if (!sessionId || !session || !canSwitchToClaudeSubscription) return;
@@ -2742,10 +2771,13 @@ export function CCAgentSessionView({
       navigate(`/cc-agent/${newSession.id}`);
     } catch (err) {
       const ipcError = extractIpcError(err);
+      const detail = ipcError?.message || (err instanceof Error ? err.message : String(err));
       toast.error(
-        ipcError?.code === 'FORK_UNSUPPORTED_HISTORY'
+        isCodexResumeNotReadyProjectionError(detail)
+          ? t('chat.errorBanner.codexResumeNotReady')
+          : ipcError?.code === 'FORK_UNSUPPORTED_HISTORY'
           ? t('chat.userMessage.forkErrors.unsupportedHistory')
-          : ipcError?.message || (err instanceof Error ? err.message : String(err)),
+          : detail,
       );
     } finally {
       setForkStripEncryptedRunning(false);
@@ -3246,7 +3278,7 @@ export function CCAgentSessionView({
         {/* device-link 远程会话状态 banner:断链重连 / 被控离线 / 通路不稳定(degraded,弱网熔断)
           时提示 + 重新同步(以被控端为准重拉对账)。suspect-stall(链路在线但本轮久未更新且核实
           不到被控端)优先 —— 它可能在 connected 时触发,额外给「结束本轮」手动收尾。
-          connected / local 且无 stall 时不渲染。 */}
+          unstable 描述跨连接抖动,即使此刻 online 也要展示。connected / local 且无 stall 时不渲染。 */}
         {remoteSync.suspectStall ? (
           <RemoteSessionBanner
             status="suspect-stall"
@@ -3255,9 +3287,18 @@ export function CCAgentSessionView({
           />
         ) : remoteConn === 'reconnecting' ||
           remoteConn === 'host-offline' ||
-          remoteConn === 'degraded' ? (
+          remoteConn === 'degraded' ||
+          remoteLinkIssue?.kind === 'unstable' ? (
           <RemoteSessionBanner
-            status={remoteConn}
+            status={
+              remoteLinkIssue?.kind === 'unstable'
+                ? 'reconnecting'
+                : remoteConn === 'host-offline'
+                  ? 'host-offline'
+                  : remoteConn === 'degraded'
+                    ? 'degraded'
+                    : 'reconnecting'
+            }
             issue={remoteLinkIssue}
             onResync={remoteSync.resync}
           />

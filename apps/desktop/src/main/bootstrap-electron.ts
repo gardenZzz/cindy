@@ -187,6 +187,11 @@ import {
   registerRsbBrowserBridgeIpc,
   registerTabOpResultHandler,
 } from './rsb-browser-bridge';
+import {
+  getRsbNativePopupOwnerWebContents,
+  hasActiveRsbNativePopupSurfaces,
+  registerRsbNativePopupSurfaceIpc,
+} from './rsb-browser-bridge/native-popup-surfaces.js';
 import { disposeAndroidAdb } from './mcp-integrations/android.js';
 import { shutdownCodexEnvironment } from './mcp-integrations/codexEnvironment.js';
 import { shutdownPiEnvironment } from './mcp-integrations/piEnvironment.js';
@@ -293,6 +298,7 @@ import {
   markAppContentWindow,
 } from './windowFocusClassifier.js';
 import { assertTrustedAppRendererEvent } from './security/trustedAppRenderer.js';
+import { isIpcError } from '../shared/ipc-errors';
 import { readFileBytesForPreview } from './fileReadBytes.js';
 import { initHeartbeatService } from './heartbeatService';
 import { initAnalyticsSettingsService, noteAuthColdStartState } from './analyticsSettingsService';
@@ -324,6 +330,8 @@ import {
   WorktreePool,
   reconcileWorktreesForDeletedSessions,
 } from './worktree';
+// shadow savepoint 链的启动期对账(孤儿 refs/cindy/savepoints/* 清理)
+import { reconcileSavepointRefsForDeletedSessions } from './git-snapshot/savepointCleanup';
 // session-git-pr-context: 会话分支感知 + PR 关联状态 IPC
 import { registerGitContextIpc, disposeGitContext } from './git-context';
 import { registerGitReviewIpc } from './git-review';
@@ -666,7 +674,8 @@ import { findCindyFileInArgv } from './cindy-brain/argv.js';
 import { handleIncomingCindyFile } from './cindy-brain/openFileInstall.js';
 import { registerCindyFileAssociation } from './cindy-brain/fileAssociation.js';
 import { setMainLocale, t } from './i18n.js';
-import { throwIpcError } from './utils/ipcValidate.js';
+import { requireObject, throwIpcError } from './utils/ipcValidate.js';
+import { pickNativeAtResource } from './nativeAtResourcePicker.js';
 // Scheduler (Phase 3) — 启动单例需要 maker / localDb / mainWindow 都 ready，但
 // splash check-environment / user login (触发 ensureReady) 谁先到不固定。
 // 通过 attemptStartScheduler 在两个就绪事件源各调一次幂等 startScheduler，最后到的
@@ -909,6 +918,7 @@ const dbClientLog = createLogger('DbClient');
 const authBoundaryLog = createLogger('auth-boundary');
 // 主窗 renderer 加载失败可观测性 + dev 启动看门狗(见 renderer-boot-guard.ts 顶部注释)。
 const rendererGuardLog = createLogger('renderer-guard');
+const safeStorageReadLog = createLogger('safe-storage:read');
 const updatePresentationLog = createLogger('update-presentation');
 const voicePowerBroadcastLog = createLogger('voice-input-power');
 let rendererBootGuard: RendererBootGuard | null = null;
@@ -1168,6 +1178,7 @@ const rsbWindowController = new RsbWindowController({
   contextChannel: MAKER_PUSH.RSB_WINDOW_CONTEXT_CHANGED,
   commandChannel: MAKER_PUSH.RSB_WINDOW_COMMAND,
   isQuitting: () => isQuitting,
+  canCloseWindow: () => !hasActiveRsbNativePopupSurfaces(),
   log: createLogger('right-sidebar-window-controller'),
 });
 registerRsbWindowIpc({
@@ -1221,9 +1232,12 @@ const ghostPanelWindowsController = new GhostPanelWindowsController({
 registerGhostPanelWindowIpc(ghostPanelWindowsController);
 setGhostsChangedObserver((ghosts) => ghostPanelWindowsController.reconcile(ghosts));
 
+const rsbBrowserRegistry = getRsbBrowserBridge();
+registerRsbNativePopupSurfaceIpc(rsbBrowserRegistry);
 registerRsbBrowserBridgeIpc({
-  registry: getRsbBrowserBridge(),
+  registry: rsbBrowserRegistry,
   getHostWebContents: () => rsbWindowController.getHostWebContents(),
+  getNativePopupOwnerWebContents: getRsbNativePopupOwnerWebContents,
   logger: createLogger('rsb-browser-bridge-bootstrap'),
 });
 // popup opener 反查:webview-security 的 popup 路由据此把 window.open 的目标
@@ -3585,7 +3599,16 @@ const registerIpcHandlers = () => {
         const buffer = Buffer.from(content, 'base64');
         return safeStorage.decryptString(buffer);
       } catch (err) {
-        console.error('[safe-storage-read]', err);
+        // 非可信 auxiliary/WebView renderer 触发的拒绝是预期安全结果,降为 debug；
+        // guard、allowlist、路径和明文返回边界保持不变。其它异常仍可见,但只记录
+        // 安全的类型/code,绝不落原始 message、路径、sender 或密文。
+        if (isIpcError(err) && err.code === 'PERMISSION_DENIED') {
+          safeStorageReadLog.debug('read denied for untrusted renderer');
+        } else {
+          safeStorageReadLog.error('read failed', {
+            error: isIpcError(err) ? err.code : err instanceof Error ? err.name : 'unknown',
+          });
+        }
         return null;
       }
     },
@@ -4077,6 +4100,11 @@ const registerIpcHandlers = () => {
     // (崩溃窗口/回收失败)的孤儿,启动期补一次回收。fire-and-forget,不阻塞启动。
     void reconcileWorktreesForDeletedSessions().catch((err) => {
       console.error('[bootstrap-electron] worktree reconcile failed (non-fatal):', err);
+    });
+    // 同窗口的 shadow savepoint 对账:owning session 已删除的孤儿保存点链
+    // (refs/cindy/savepoints/<sid>)启动期补删。fire-and-forget,不阻塞启动。
+    void reconcileSavepointRefsForDeletedSessions().catch((err) => {
+      console.error('[bootstrap-electron] savepoint reconcile failed (non-fatal):', err);
     });
 
     // Scheduler / Goal / Learn 统一由 localDb onReady 在 provider readiness settle 后启动。
@@ -4637,6 +4665,45 @@ const registerIpcHandlers = () => {
         return { success: true, path: null };
       }
       return { success: true, path: result.filePaths[0] };
+    },
+  );
+
+  // ── Dialog: @ 资源入口的系统选择器 ──
+  ipcMain.handle(
+    'dialog:show-open-resource',
+    async (
+      event: Electron.IpcMainInvokeEvent,
+      payload: unknown = {},
+    ): Promise<{
+      success: true;
+      path: string | null;
+      kind: 'file' | 'directory' | null;
+    }> => {
+      assertTrustedAppRendererEvent(event);
+      const params = requireObject(payload);
+      const defaultPathValue = params.defaultPath;
+      if (
+        defaultPathValue !== undefined
+        && (
+          typeof defaultPathValue !== 'string'
+          || defaultPathValue.length > 4096
+          || !path.isAbsolute(defaultPathValue)
+        )
+      ) {
+        throwIpcError('INVALID_PARAMS', 'defaultPath must be an absolute path');
+      }
+      const owner = BrowserWindow.fromWebContents(event.sender);
+      if (!owner) return { success: true, path: null, kind: null };
+      try {
+        const picked = await pickNativeAtResource({
+          platform: process.platform,
+          showOpenDialog: (options) => dialog.showOpenDialog(owner, options),
+          isDirectory: (selectedPath) => fs.statSync(selectedPath).isDirectory(),
+        }, defaultPathValue);
+        return { success: true, ...picked };
+      } catch {
+        throwIpcError('INTERNAL', 'unable to open resource picker');
+      }
     },
   );
 

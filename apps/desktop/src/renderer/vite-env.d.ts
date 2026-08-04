@@ -97,7 +97,7 @@ interface DeviceLinkDeviceView {
 
 /** 设备互联:relay 连接问题(镜像 @cindy/device-link 的 DeviceLinkConnectionIssue) */
 interface DeviceLinkConnectionIssuePayload {
-  kind: 'auth-failed' | 'replaced' | 'too-many-connections' | 'version-mismatch';
+  kind: 'auth-failed' | 'replaced' | 'too-many-connections' | 'version-mismatch' | 'unstable';
   closeCode?: number;
   detail?: string;
   at: number;
@@ -1123,6 +1123,8 @@ interface ElectronAPI {
      * 引导去配置。未装 NOT_FOUND。
      */
     setupStatus: (id: string) => Promise<import('../shared/ghost').GhostSetupStatus>;
+    /** 只列入口元数据，不运行插件工具；远程/device-link 不暴露。 */
+    /** 用户选定一个入口后，按固定只读摘要契约搜索该插件。 */
     /** 最近使用顺序变化（发送 /卸载），多窗口同步。 */
     onRecentUsageChanged: (
       callback: (payload: { ids: string[] }) => void,
@@ -1385,6 +1387,12 @@ interface ElectronAPI {
       action: 'status' | 'spawn' | 'stop' | 'crash',
       id?: string,
     ) => Promise<{ states?: Record<string, string>; state?: string }>;
+    /** dev-only：经正式插件派发/权限链调用一个已声明工具。 */
+    devCall: (
+      id: string,
+      tool: string,
+      args: Record<string, unknown>,
+    ) => Promise<unknown>;
   };
 
   /** Plugin Protocol v2 市场；网络、下载与安装全部在 main 进程完成。 */
@@ -1395,12 +1403,8 @@ interface ElectronAPI {
     ) => Promise<import('../shared/pluginMarket').PluginMarketDetail>;
     install: (
       pluginId: string,
-      options: {
-        expectedReleaseId: string;
-        expectedManifest?: import('../shared/ghost').GhostManifest;
-        allowPermissionExpansion?: boolean;
-      },
-    ) => Promise<{ ghost: import('../shared/ghost').InstalledGhost }>;
+      options: import('../shared/pluginMarket').PluginMarketInstallOptions,
+    ) => Promise<import('../shared/pluginMarket').PluginMarketInstallResult>;
     uninstall: (pluginId: string) => Promise<{ ok: true }>;
     listSources: () => Promise<import('../shared/pluginMarket').MarketSourceSummary[]>;
     pickLocalSource: (
@@ -2278,8 +2282,28 @@ interface ElectronAPI {
       disposition: string;
       openerTabId?: string;
       openerSessionId?: string;
+      nativePopupSurfaceId?: string;
     }) => void,
   ) => () => void;
+
+  /** Main-owned WebContentsView used only for Chromium-created popup contexts. */
+  rsbNativePopup: {
+    claim: (
+      input: import('../shared/rsbNativePopup').RsbNativePopupClaimInput,
+    ) => Promise<import('../shared/rsbNativePopup').RsbNativePopupClaimResult>;
+    setBounds: (input: {
+      surfaceId: string;
+      bounds: import('../shared/rsbNativePopup').RsbNativePopupBounds;
+      visible: boolean;
+    }) => Promise<{ ok: true }>;
+    command: (
+      input: { surfaceId: string } & import('../shared/rsbNativePopup').RsbNativePopupCommand,
+    ) => Promise<{ ok: true }>;
+    close: (input: { surfaceId: string }) => Promise<{ ok: true }>;
+    onEvent: (
+      callback: (event: import('../shared/rsbNativePopup').RsbNativePopupEvent) => void,
+    ) => () => void;
+  };
 
   /**
    * RSB web-browser plugin:guest webview 内按下 Cmd/Ctrl+L 时,main 端
@@ -3088,6 +3112,7 @@ interface ElectronAPI {
       keepAwake: boolean;
       linkStatus: 'stopped' | 'connecting' | 'online';
       connectionIssue: DeviceLinkConnectionIssuePayload | null;
+      standby: boolean;
       controlledBy: Array<{ deviceId: string; name: string }>;
       revokedControllers: string[];
       disabledControlDeviceIds: string[];
@@ -3127,6 +3152,8 @@ interface ElectronAPI {
     onConnectionIssue: (
       cb: (payload: { issue: DeviceLinkConnectionIssuePayload | null }) => void,
     ) => () => void;
+    /** 同机单持有者仲裁角色变化。 */
+    onOwnershipChanged: (cb: (payload: { standby: boolean }) => void) => () => void;
     /** 控制端:被控端转发回来的 renderer 广播事件 */
     onRemotePush: (
       cb: (payload: { deviceId: string; channel: string; payload: unknown }) => void,
@@ -3355,8 +3382,9 @@ interface ElectronAPI {
     setWorkspaces: (
       workspaces: Record<string, string>,
     ) => Promise<{ hook: import('../shared/hookControlIpc').SlackHookView }>;
-    /** X 派发任务的默认工作目录别名(null = 内置「对话」伪目录)。 */
-    setXDefaultWorkspace: (
+    /** 该 provider 派发任务的默认工作目录别名(null = 内置「对话」伪目录)。 */
+    setProviderDefaultWorkspace: (
+      provider: 'telegram' | 'x',
       alias: string | null,
     ) => Promise<{ hook: import('../shared/hookControlIpc').SlackHookView }>;
     bindStart: () => Promise<{ ok: true }>;
@@ -3775,6 +3803,7 @@ interface ElectronAPI {
       getByLeadSession: (leadSessionId: string) => Promise<OrcaTeamRecord | null>;
       getByWorkerSession: (workerSessionId: string) => Promise<OrcaTeamRecord | null>;
       listWorkersByLead: (leadSessionId: string) => Promise<OrcaWorkerRecord[]>;
+      listWorkersByLeads?: (leadSessionIds: string[]) => Promise<Record<string, OrcaWorkerRecord[]>>;
       updateWorkerStatus: (
         workerId: string,
         status: 'idle' | 'running' | 'done' | 'error',
@@ -3971,6 +4000,12 @@ interface ElectronAPI {
     }) => Promise<{
       success: boolean;
       path: string | null;
+    }>;
+    /** 打开 @ 资源系统选择器；macOS 可选文件或目录，Windows/Linux 选择文件。 */
+    showOpenResource: (params?: { defaultPath?: string }) => Promise<{
+      success: true;
+      path: string | null;
+      kind: 'file' | 'directory' | null;
     }>;
   };
 
@@ -4280,6 +4315,22 @@ interface ElectronAPI {
         | { type: 'agent'; name: string; relPath: string; description?: string }
       >;
       truncated?: boolean;
+    }>;
+    listAtContext: (params: {
+      sessionId?: string;
+      workingDir?: string;
+      query?: string;
+      limit?: number;
+    }) => Promise<{
+      success: true;
+      browserTabs: Array<{ tabId: string; title: string; url: string }>;
+      desktopWindows: Array<{
+        windowId: number;
+        pid: number;
+        appName: string;
+        title: string;
+      }>;
+      unavailable: Array<'browser-tabs' | 'desktop-windows'>;
     }>;
 
     createSession: (opts: {

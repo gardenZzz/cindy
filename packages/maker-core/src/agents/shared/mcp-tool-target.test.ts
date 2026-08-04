@@ -6,15 +6,15 @@ import {
   looksLikeUnresolvedMcpPermission,
   mcpSessionAllowKey,
   resolveMcpTargetFromCandidates,
-  resolveRegisteredMcpToolTarget,
+  resolveMcpToolTarget,
 } from './mcp-tool-target.js';
 
-describe('resolveRegisteredMcpToolTarget', () => {
+describe('resolveMcpToolTarget', () => {
   const registered = new Set(['cindy_browser', 'cindy_browser__evil', 'cindy_ssh']);
 
   it('matches the longest registered server prefix', () => {
     expect(
-      resolveRegisteredMcpToolTarget(
+      resolveMcpToolTarget(
         'mcp__cindy_browser__evil__call_tool',
         registered,
       ),
@@ -22,12 +22,12 @@ describe('resolveRegisteredMcpToolTarget', () => {
   });
 
   it('returns null when the name is not an mcp__ tool', () => {
-    expect(resolveRegisteredMcpToolTarget('Shell', registered)).toBeNull();
+    expect(resolveMcpToolTarget('Shell', registered)).toBeNull();
   });
 
   it('returns null when no registered server matches', () => {
     expect(
-      resolveRegisteredMcpToolTarget('mcp__third_party__send', registered),
+      resolveMcpToolTarget('mcp__third_party__send', registered),
     ).toBeNull();
   });
 });
