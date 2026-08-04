@@ -27,6 +27,14 @@ describe('ModelSelector - Cursor 可见性过滤 (spec #21 / S2)', () => {
     expect(selectorSource).toMatch(/m\.id === modelId \|\| isModelEnabled\('cursor', 'cursor', m\)/);
   });
 
+  it('浏览切到 Cursor 时不按 sourcesForModel 滤空(无 Cindy provider 目录)', () => {
+    // 其它引擎浏览态仍要求已连接来源;Cursor 必须显式豁免,否则 capabilities
+    // 列表被 sourcesForModel 滤成空 → 「没有匹配的模型」。
+    expect(selectorSource).toMatch(
+      /browsing && agentKind && agentKind !== 'cursor'/,
+    );
+  });
+
   it('Claude Code / Codex 分段过滤逻辑未被本次改动触及(沿用 isModelEnabled(agent, providerId, model))', () => {
     // 既有口径仍在(非 cursor 分支)。
     expect(selectorSource).toContain('isModelEnabled(currentAgentKind, pid,');

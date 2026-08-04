@@ -1149,8 +1149,11 @@ function ModelSelectorContentView({
     // 浏览目标引擎态的 flat 兜底(目标引擎 0 已连接来源时 sections 为 null)同样
     // 只列已连接来源提供的模型,与分段口径一致——未连接来源的模型切过去后来源
     // 解析不到(trigger 无 icon)、发送必失败。非浏览态保持历史行为不变。
+    // Cursor 无 Cindy provider 目录:sourcesForModel 恒空,若仍按来源过滤会把
+    // capabilities 列表滤成「没有匹配的模型」(切到 Cursor tab 空态)。跳过该过滤,
+    // 下面 cursor 分支按 isModelEnabled 收口可见集。
     const base =
-      browsing && agentKind
+      browsing && agentKind && agentKind !== 'cursor'
         ? visibleModels.filter((m) => sourcesForModel(providers, m.id, agentKind).length > 0)
         : visibleModels;
     // Cursor 无 Cindy provider 目录；capabilities 列表即最终可见集。

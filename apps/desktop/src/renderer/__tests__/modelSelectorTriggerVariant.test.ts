@@ -2362,6 +2362,59 @@ describe('ModelSelector trigger variants', () => {
     expect(screen.queryByText('newChat.modelSelector.agentSwitch.hint')).toBeNull();
   });
 
+  it('lists Cursor capabilities while browsing from another Agent (no Cindy providers)', async () => {
+    // Cursor 无 provider 目录:浏览态若仍按 sourcesForModel 过滤会空列表。
+    const cursorModels = [
+      {
+        id: 'gpt-5.5',
+        displayName: 'GPT-5.5',
+        contextWindow: 272000,
+        efforts: ['low', 'medium', 'high'] as string[],
+        defaultEffort: 'medium' as string | null,
+        supportsFastMode: true,
+      },
+      {
+        id: 'auto',
+        displayName: 'Auto',
+        contextWindow: 272000,
+        efforts: [] as string[],
+        defaultEffort: null as string | null,
+      },
+    ];
+    const originalModels = visibleModelsRef.models;
+    const originalCapabilities = agentCapabilitiesRef.capabilities;
+    visibleModelsRef.models = cursorModels;
+    agentCapabilitiesRef.capabilities = {
+      ...agentCapabilitiesRef.DEFAULT_CAPABILITIES,
+      availableModels: cursorModels,
+      hasFastMode: true,
+    };
+    const confirmBrowseSwitch = vi.fn(async () => true);
+    try {
+      render(
+        React.createElement(ModelSelectorContent, {
+          modelId: 'claude-opus-4-8',
+          effort: 'high',
+          onModelChange: vi.fn(),
+          onEffortChange: vi.fn(),
+          vendorKey: 'cc',
+          currentProviderId: 'anthropic',
+          onProviderChange: vi.fn(),
+          agentSwitch: { currentVendor: 'cc', confirmBrowseSwitch, onSwitch: vi.fn() },
+        }),
+      );
+
+      fireEvent.click(screen.getByRole('tab', { name: /Cursor/ }));
+      expect(await screen.findByRole('option', { name: /GPT-5\.5/ })).toBeTruthy();
+      expect(screen.getByRole('option', { name: /Auto/ })).toBeTruthy();
+      expect(screen.queryByText('没有匹配的模型')).toBeNull();
+      expect(confirmBrowseSwitch).toHaveBeenCalledTimes(1);
+    } finally {
+      visibleModelsRef.models = originalModels;
+      agentCapabilitiesRef.capabilities = originalCapabilities;
+    }
+  });
+
   it('keeps the expanded model panel open while Agent browse confirmation is shown', async () => {
     let resolveConfirmation!: (confirmed: boolean) => void;
     const confirmBrowseSwitch = vi.fn(
