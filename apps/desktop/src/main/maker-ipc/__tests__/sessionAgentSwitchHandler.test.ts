@@ -198,6 +198,7 @@ describe('performSessionAgentSwitch', () => {
       sessionId: 's1',
       targetAgentKind: 'codex',
       model: 'gpt-5.5',
+      providerId: null,
     });
     expect(result).toEqual({ switched: true, agentKind: 'codex', model: 'gpt-5.5', engineReady: true });
     expect(calls).toEqual(['close', 'db', 'provider', 'boundary', 'pending', 'bootstrap']);
@@ -224,6 +225,7 @@ describe('performSessionAgentSwitch', () => {
         sessionId: 's1',
         targetAgentKind: 'codex',
         model: 'gpt-5.5',
+        providerId: null,
       }),
     ).resolves.toMatchObject({ switched: true });
   });
@@ -241,6 +243,7 @@ describe('performSessionAgentSwitch', () => {
       sessionId: 's1',
       targetAgentKind: 'cursor',
       model: 'auto',
+      providerId: null,
     });
     expect(result).toEqual({ switched: true, agentKind: 'cursor', model: 'auto', engineReady: true });
     // resume 模式:DB 落停泊 id,边界行 resumed=true。
@@ -281,6 +284,7 @@ describe('performSessionAgentSwitch', () => {
       sessionId: 's1',
       targetAgentKind: 'cursor',
       model: 'auto',
+      providerId: null,
     });
     expect(result).toMatchObject({ switched: true, agentKind: 'cursor', engineReady: true });
     // 原子事务清停泊 id 并把边界行改回全量交接(resumed=false)。
