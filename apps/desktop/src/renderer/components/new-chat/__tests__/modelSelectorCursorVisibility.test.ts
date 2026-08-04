@@ -27,6 +27,16 @@ describe('ModelSelector - Cursor 可见性过滤 (spec #21 / S2)', () => {
     expect(selectorSource).toMatch(/m\.id === modelId \|\| isModelEnabled\('cursor', 'cursor', m\)/);
   });
 
+  it('浏览态选中 Cursor 模型时登记 cursor 而非 claude-code', () => {
+    // handleRowSelect 必须用 vendorKeyToAgentKind(browseVendor),不能二元回落 cc。
+    expect(selectorSource).toMatch(
+      /enqueueAgentSwitch\(\s*vendorKeyToAgentKind\(browseVendor\)/,
+    );
+    expect(selectorSource).not.toMatch(
+      /browseVendor === 'codex' \? 'codex' : browseVendor === 'pi' \? 'pi' : 'claude-code'/,
+    );
+  });
+
   it('浏览切到 Cursor 时不按 sourcesForModel 滤空(无 Cindy provider 目录)', () => {
     // 其它引擎浏览态仍要求已连接来源;Cursor 必须显式豁免,否则 capabilities
     // 列表被 sourcesForModel 滤成空 → 「没有匹配的模型」。
