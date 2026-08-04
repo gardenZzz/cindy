@@ -4,7 +4,7 @@ Date: 2026-08-03
 
 ## Status
 
-Accepted — 纠正 [`736d392fc`](回退对象) 对 ADR 0001 / spec #40 设计意图的偏离。
+Accepted — 纠正 [`736d392fc`]（回退对象） 对 ADR 0001 / spec #40 设计意图的偏离。
 
 ## Context
 
