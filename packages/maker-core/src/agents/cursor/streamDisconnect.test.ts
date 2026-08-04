@@ -42,6 +42,27 @@ describe('streamDisconnect', () => {
       expect(isCursorStreamDisconnectError(err)).toBe(true);
     });
 
+    it('matches any RetriableError marker, including PING timed out', () => {
+      expect(
+        isCursorStreamDisconnectError(
+          new Error('RetriableError: [unavailable] PING timed out'),
+        ),
+      ).toBe(true);
+      expect(
+        isCursorStreamDisconnectError(
+          new Error(
+            'Error: RetriableError: [canceled] http/2 stream closed with error code CANCEL (0x8)',
+          ),
+        ),
+      ).toBe(true);
+      expect(
+        isCursorStreamDisconnectError({
+          message: 'acp session/prompt error',
+          data: { message: 'RetriableError: [unavailable] PING timed out' },
+        }),
+      ).toBe(true);
+    });
+
     it('rejects ACP connection closed / transport failure', () => {
       expect(isCursorStreamDisconnectError(new Error('acp closed'))).toBe(false);
       expect(isCursorStreamDisconnectError(new Error('acp client closed'))).toBe(false);
