@@ -1324,6 +1324,9 @@
           "modelContextWindowTitle": "Context window in tokens. Leave empty for the conservative 200K default; affects the window display and compaction threshold.",
           "modelSupportsImageInput": "Supports image input",
           "modelSupportsImageInputHelp": "Enable only when the model actually accepts visual input. Start a new Pi task after saving.",
+          "modelSupportsReasoning": "Supports reasoning",
+          "modelSupportsReasoningHelp": "Enable only when the model accepts reasoning effort, then select every supported level. Changes take effect in the next Pi Agent session.",
+          "modelReasoningEfforts": "Supported reasoning effort levels",
           "addModel": "Add model",
           "headers": "Headers (optional)",
           "headerNamePlaceholder": "Header-Name",
@@ -1707,7 +1710,7 @@
     "gitSafety": {
       "title": "Git Safety",
       "autoSnapshotTitle": "Git safety snapshots",
-      "description": "Create automatic savepoint commits after agent edits. Codex rewind is shown only when this is enabled.",
+      "description": "Automatically record hidden savepoints in the project's Git repository after agent edits — no commits are added to your branch. Codex rewind is shown only when this is enabled.",
       "toggleAria": "Toggle Git safety snapshots",
       "saveFailed": "Failed to save Git safety setting"
     },
@@ -2761,7 +2764,23 @@
           "removeWorkspace": "Remove this working directory",
           "changeDir": "Click to change directory (alias and preferences kept)",
           "defaultWorkspaceChip": "Default: {{name}}",
-          "defaultWorkspaceAria": "Choose the default working directory for tasks dispatched from X"
+          "defaultWorkspaceAria": "Choose the default working directory for dispatched tasks",
+          "defaultWorkspaceRadioAria": "Set \"{{name}}\" as the default working directory",
+          "defaultWorkspaceRowHint": "The selected directory is the default working directory: any Telegram DM, group or topic conversation that has not picked a project of its own runs its tasks there (conversations that chose one with /workspace keep theirs). Mind the permission mode on the selected directory’s row — set to Full access, an @mention from any group runs with full access inside that repository.",
+          "legacyDefaultsTitle": "Legacy “new conversation” defaults are still in effect",
+          "legacyDefaultsDescription": "This device saved older official-bot defaults that still act as the fallback for directories without their own settings (official Telegram and X share one copy). These values are now set per directory. Restoring defaults clears all of the following:",
+          "legacyDefaultsRow": {
+            "agentKind": "Default agent: {{current}} → {{fallback}}",
+            "permissionMode": "Permission mode: {{current}} → {{fallback}}"
+          },
+          "legacyDefaultsRowAgent": "{{agent}}: {{fields}}",
+          "legacyDefaultsField": {
+            "model": "model {{current}} → {{fallback}}",
+            "effort": "reasoning effort {{current}} → {{fallback}}",
+            "source": "model source {{current}} → {{fallback}}"
+          },
+          "legacyDefaultsFieldSeparator": ", ",
+          "legacyDefaultsSourceFollowsGlobal": "follows global settings"
         },
         "binding": {
           "copyLink": "Copy link",
@@ -2985,7 +3004,8 @@
         "auth-failed": "Sign-in expired — please sign in again",
         "replaced": "Connection replaced by another instance of this device",
         "too-many-connections": "Connection limit reached for this account",
-        "version-mismatch": "Protocol version mismatch — please update the app"
+        "version-mismatch": "Protocol version mismatch — please update the app",
+        "unstable": "Connection keeps dropping and reconnecting — check the network, or restart Cindy if it persists"
       },
       "refresh": "Refresh",
       "empty": "No other devices yet. Sign in to {{appName}} with the same account on another computer and it will show up here.",
@@ -3026,7 +3046,8 @@
         "disconnectFailed": "Failed to disconnect remote connection",
         "remoteSessionEnded": "The remote device ended this session"
       },
-      "control": "Control"
+      "control": "Control",
+      "standbyHint": "Another Cindy instance on this computer is using the remote connection. Close it and this instance takes over automatically."
     },
     "imBot": {
       "beta": "Beta",
@@ -3047,8 +3068,7 @@
           "wechat": "New WeChat conversations use this Agent, model, and permission mode. Send /new in an existing chat to apply them.",
           "telegram": "New Telegram conversations use this Agent and model. Send /new in an existing conversation to apply it.",
           "dingtalk": "New DingTalk conversations use this Agent and model. Send /new in an existing conversation to apply it.",
-          "wecom": "New WeCom conversations use this Agent, model, and permission mode. Send /new in an existing chat to apply them.",
-          "officialHook": "New conversations from the official bot use this Agent and model. Telegram and X share this one; Slack keeps its own (configured on the Slack card). Permission mode is set per directory under Workspace mapping above. Send /new in an existing conversation to apply it."
+          "wecom": "New WeCom conversations use this Agent, model, and permission mode. Send /new in an existing chat to apply them."
         },
         "agentLabel": "Agent",
         "modelLabel": "Model Configuration",
@@ -3471,6 +3491,8 @@
         "networkSecretGhostInputDetail": "Collected by this plugin's own settings UI — the plugin page sees the value at entry time. It is then handed to the host in one step for encrypted storage; once stored, the plugin can never read it back, and the host injects it only for the domains it declares.",
         "networkSecretIdentity": "Will use your login email as the credential \"{{name}}\"",
         "networkSecretIdentityDetail": "The value comes from your signed-in account's email, derived and injected by the host at request time; nothing to fill in. The plugin can read this email to show the current identity in its settings UI.",
+        "networkSecretOrganizationIdentity": "Will use your Cindy organization identity as the credential \"{{name}}\"",
+        "networkSecretOrganizationIdentityDetail": "Cindy issues a short-lived identity assertion when needed, and the host sends it only to the explicitly listed service hosts. The plugin code cannot read or store the token.",
         "networkSecretOauth": "Will guide you through OAuth authorization at {{host}} ({{name}})",
         "networkSecretOauthDetail": "The authorization flow and all tokens are managed by the host and can never be read by the plugin code; you provide the client credentials on the plugin detail page. The requested permission scopes are listed verbatim below — review them before approving.",
         "networkConnections": "Can connect to {{label}} addresses you add",
@@ -5355,10 +5377,20 @@
       }
     },
     "atMention": {
-      "scanFailed": "Failed to scan working directory",
+      "add": "Add",
+      "plugins": "Plugins",
+      "filesAndFolders": "Files and folders",
+      "browserTab": "Browser tab",
+      "desktopWindow": "App window",
+      "task": "Task",
+      "pluginResources": "Plugin resources",
+      "pluginResource": "Plugin resource",
+      "backToAll": "Back to all @ resources",
+      "scanFailed": "Failed to load @ resources",
       "retry": "Retry",
       "searching": "Searching…",
-      "noMatch": "No matching files",
+      "noMatch": "No matching items",
+      "typeToSearchFiles": "Type a keyword to search files and sessions",
       "keepTyping": "Keep typing to narrow down…"
     },
     "planReview": {
@@ -5544,6 +5576,7 @@
         "claude": "Claude Code",
         "codex": "Codex",
         "cursor": "Cursor",
+        "pi": "Pi",
         "workflow": "Workflow",
         "shell": "Background command"
       },
@@ -5623,7 +5656,9 @@
       "viewBalanceTitle": "Open Usage & Billing to check your balance and add funds",
       "credentialSwitchBusy": "Another Codex task is still running, so the provider for this session can't be applied yet (the shared Codex process needs a restart). Retry after those tasks finish.",
       "codexThreadStale": "Codex auth mode changed — this session can't continue. Start a new session to apply it.",
+      "codexResumeNotReady": "Codex can't resume this task right now. Try again in a little while.",
       "claudeGatewayOpusPlanMismatch": "This Opus request went through XD Gateway, not your Claude.ai subscription. That gateway route rejected the model. Switch to your Claude.ai subscription and retry, or choose another model.",
+      "claudeSubscriptionOpusPlanMismatch": "Opus isn't available on the connected Claude Pro plan. Switch to a model included in your plan. If you recently upgraded, reconnect Anthropic in Settings, then retry.",
       "switchClaudeSubscription": "Switch to Claude.ai & Retry",
       "switchClaudeSubscriptionTitle": "Switch this session to the Claude.ai subscription and retry",
       "switchingClaudeSubscription": "Switching to Claude.ai…",
@@ -6124,6 +6159,7 @@
     "remoteError": {
       "REMOTE_DAEMON_CLOSED": "Remote connection interrupted (the daemon may be upgrading or restarting). The turn has ended — please resend.",
       "REMOTE_LOCAL_ATTACHMENT_UNSUPPORTED": "Local file/image attachments aren't accessible in remote sessions. Paste the content directly instead.",
+      "AUTO_REVIEW_UNAVAILABLE": "Auto-review is temporarily unavailable, so actions that need review are being denied. Switch this task to Default permissions if you want to approve them yourself.",
       "REMOTE_COMPAT_MODE_UNSUPPORTED": "Remote Claude Code sessions can't route through the local compat proxy (internal error).",
       "REMOTE_GATEWAY_ENDPOINT_UNAVAILABLE": "Cindy AI credentials are not ready yet (issued automatically after sign-in). Please retry shortly; if this persists, check the Cindy AI status in Settings → Model Providers.",
       "DEVICE_LINK_CONTROL_DISABLED": "Control for this device is off; the message was not sent.",
@@ -6242,7 +6278,8 @@
         "auth-failed": "Sign-in has expired — sign in again to restore the remote connection",
         "replaced": "This connection was replaced by another instance of the same device — reconnecting…",
         "too-many-connections": "Too many devices online for this account — the server refused the connection",
-        "version-mismatch": "Protocol version doesn't match the server — update the app and retry"
+        "version-mismatch": "Protocol version doesn't match the server — update the app and retry",
+        "unstable": "This computer keeps losing and re-establishing its connection, so remote actions may keep timing out — check the network, or restart Cindy and retry"
       }
     },
     "common": {
@@ -8769,7 +8806,7 @@
     },
     "catalog": {
       "errorTitle": "Plans are temporarily unavailable",
-      "errorDescription": "Check your connection and retry. Local fallback plans will not be used.",
+      "errorDescription": "Check your connection and try again.",
       "emptyTitle": "Coming soon. Stay tuned.",
       "currentPlan": "Current Plan",
       "unavailableReasons": {
@@ -8833,7 +8870,7 @@
       "openPayment": "Open payment page",
       "refreshingAction": "Loading payment instructions…",
       "paymentCompleted": "Your payment was completed.",
-      "requestFailed": "The request failed. Retry safely; an uncertain create result keeps the original idempotency key.",
+      "requestFailed": "The request failed. Try again later.",
       "expiredBody": "This payment link expired. Create a new payment to continue.",
       "actionExpiredBody": "This code expired. Close this window and choose again to generate a new one.",
       "canceledBody": "This payment was canceled.",
@@ -8841,16 +8878,17 @@
     },
     "planChange": {
       "targetTitle": "Change subscription plan",
+      "back": "Back",
       "upgradeBadge": "Upgrade",
       "sameLevelBadge": "Same tier",
       "downgradeBadge": "Downgrade",
       "emptyTitle": "No plans available to switch to",
-      "emptyDescription": "The server has not configured another plan for your current payment method.",
+      "emptyDescription": "There are no other plans available to switch to.",
       "quotingTitle": "Preparing plan change",
-      "quotingBody": "Fetching the price and effective time from the server…",
+      "quotingBody": "Confirming the price and effective time…",
       "quoteTitle": "Confirm plan change",
       "confirmingTitle": "Submitting plan change",
-      "confirmingBody": "Submitting your plan change to the server…",
+      "confirmingBody": "Submitting your plan change…",
       "pendingProviderTitle": "Processing plan change",
       "pendingProviderBody": "The payment provider is processing this change. Cindy will keep checking the result…",
       "awaitingTitle": "Pay the difference",
@@ -8867,7 +8905,7 @@
       "requestFailed": "The plan change request couldn’t be completed. Refresh your subscription status and try again.",
       "quoteRejected": "This plan isn’t available for your current subscription. Choose another plan.",
       "chooseAnotherPlan": "Choose Another Plan",
-      "resyncHint": "The confirmation result could not be verified. Syncing the latest status from the server…",
+      "resyncHint": "The result could not be confirmed yet. Checking the latest status again…",
       "upgradeDueNow": "Pay {{amount}} now for the remainder of this period",
       "upgradeNoAmount": "The upgrade takes effect immediately after confirmation.",
       "upgradeHint": "The upgrade takes effect immediately after payment. The renewal price becomes the new plan price.",
