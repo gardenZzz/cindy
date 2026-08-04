@@ -4450,8 +4450,9 @@ export function registerMakerIpc(maker: Maker, options: RegisterMakerIpcOptions)
     return {
       ...maker.getCapabilities(kind),
       // host 级 optional 能力；旧 desktop 缺省为 false。两个 agent 查询都带回，
-      // 手机读取当前 agent 快照即可决定是否展示切换入口。
-      supportsSessionAgentSwitch: kind !== 'cursor',
+      // 手机读取当前 agent 快照即可决定是否展示切换入口。四家(Claude Code / Codex /
+      // Pi / Cursor)一视同仁--「能不能从这个 Agent 切走」只此一个真相源。
+      supportsSessionAgentSwitch: true,
       // v2 因果能力：同引擎 no-op 返回 revision，后续 SET_MODEL 在 session 锁内 CAS。
       // 新 desktop 控制端据此与只有基础切换能力的旧 host 做安全兼容门控。
       supportsSessionAgentSwitchCas: true,

@@ -84,7 +84,7 @@ describe('mobile session Agent switch contract', () => {
     })).toEqual({ targetAgentKind: 'pi', model: 'gpt-5.5', providerId: 'openai' });
   });
 
-  it('requires host capability and excludes SSH / Orca / Cursor-source sessions', () => {
+  it('requires host capability and excludes SSH / Orca sessions', () => {
     const supported: MobileAgentCapabilities = {
       availableModels: [],
       effortLevels: [],
@@ -101,10 +101,15 @@ describe('mobile session Agent switch contract', () => {
       { ...supported, supportsSessionAgentSwitch: false },
     )).toBe(false);
     expect(supportsMobileSessionAgentSwitch({ remoteHostId: null, orcaRole: null, agentKind: 'cc' }, null)).toBe(false);
-    // 从 Cursor 会话切走仍不支持；切「到」Cursor 由新 desktop handler 承接。
+    // 四家同口径:Cursor 源会话纯粹依赖被控端能力位--新被控端报 true 即显示,
+    // 老被控端报 false 即隐藏(优雅降级,升级后自然获得)。不再在客户端写死排除。
     expect(supportsMobileSessionAgentSwitch(
       { remoteHostId: null, orcaRole: null, agentKind: 'cursor' },
       supported,
+    )).toBe(true);
+    expect(supportsMobileSessionAgentSwitch(
+      { remoteHostId: null, orcaRole: null, agentKind: 'cursor' },
+      { ...supported, supportsSessionAgentSwitch: false },
     )).toBe(false);
   });
 });

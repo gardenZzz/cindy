@@ -188,7 +188,34 @@ describe('performSessionAgentSwitch', () => {
     await expect(performSessionAgentSwitch(orca.deps, validParams)).rejects.toThrow(/UNSUPPORTED_CAPABILITY/);
   });
 
-  it('从 Cursor 会话切走抛可读 UNSUPPORTED_CAPABILITY', async () => {
+  it('从 Cursor 会话切走成功,边界行带上 Cursor 的 departure snapshot', async () => {
+    const { deps, calls } = makeDeps({
+      getSessionRow: vi.fn(async () =>
+        makeRow({ agentKind: 'cursor', model: 'auto', sdkSessionId: 'cursor-acp-session' }),
+      ),
+    });
+    const result = await performSessionAgentSwitch(deps, {
+      sessionId: 's1',
+      targetAgentKind: 'codex',
+      model: 'gpt-5.5',
+    });
+    expect(result).toEqual({ switched: true, agentKind: 'codex', model: 'gpt-5.5', engineReady: true });
+    expect(calls).toEqual(['close', 'db', 'provider', 'boundary', 'pending', 'bootstrap']);
+    expect(deps.applyAgentSwitchToDb).toHaveBeenCalledWith('s1', {
+      agentKind: 'codex',
+      model: 'gpt-5.5',
+      providerId: null,
+      sdkSessionId: null,
+    });
+    const boundary = vi.mocked(deps.insertBoundaryMessage).mock.calls[0][1];
+    expect(boundary.fromAgentKind).toBe('cursor');
+    expect(boundary.toAgentKind).toBe('codex');
+    // Cursor 的 ACP session id 被快照进边界行(切回 Cursor 时 resume 续接)。
+    expect(boundary.fromSdkSessionId).toBe('cursor-acp-session');
+    expect(boundary.resumed).toBe(false);
+  });
+
+  it('从 Cursor 切走不抛 UNSUPPORTED_CAPABILITY(解除来源限制回归保护)', async () => {
     const { deps } = makeDeps({
       getSessionRow: vi.fn(async () => makeRow({ agentKind: 'cursor', model: 'auto' })),
     });
@@ -198,14 +225,70 @@ describe('performSessionAgentSwitch', () => {
         targetAgentKind: 'codex',
         model: 'gpt-5.5',
       }),
-    ).rejects.toThrow(/UNSUPPORTED_CAPABILITY/);
-    await expect(
-      performSessionAgentSwitch(deps, {
-        sessionId: 's1',
-        targetAgentKind: 'codex',
-        model: 'gpt-5.5',
+    ).resolves.toMatchObject({ switched: true });
+  });
+
+  it('切回 Cursor 时按停泊 ACP session id resume + 增量交接', async () => {
+    const { deps, calls } = makeDeps({
+      getSessionRow: vi.fn(async () => makeRow({ agentKind: 'codex', model: 'gpt-5.5' })),
+      findParkedEngineSession: vi.fn(async () => ({
+        sdkSessionId: 'cursor-acp-session',
+        watermarkCreatedAt: 100,
+        watermarkRowid: 5,
+      })),
+    });
+    const result = await performSessionAgentSwitch(deps, {
+      sessionId: 's1',
+      targetAgentKind: 'cursor',
+      model: 'auto',
+    });
+    expect(result).toEqual({ switched: true, agentKind: 'cursor', model: 'auto', engineReady: true });
+    // resume 模式:DB 落停泊 id,边界行 resumed=true。
+    expect(deps.applyAgentSwitchToDb).toHaveBeenCalledWith('s1', {
+      agentKind: 'cursor',
+      model: 'auto',
+      providerId: null,
+      sdkSessionId: 'cursor-acp-session',
+    });
+    expect(deps.findParkedEngineSession).toHaveBeenCalledWith('s1', 'cursor');
+    const boundary = vi.mocked(deps.insertBoundaryMessage).mock.calls[0][1];
+    expect(boundary.resumed).toBe(true);
+    // 增量交接:listMessagesForHandoff 第二次调用带水位线(只取离开期间的消息)。
+    expect(deps.listMessagesForHandoff).toHaveBeenCalledTimes(2);
+    expect(vi.mocked(deps.listMessagesForHandoff).mock.calls[1][1]).toEqual({
+      createdAt: 100,
+      rowid: 5,
+    });
+    // 仍 eager bootstrap(resume 失败需确定性回落,不能交给 lazy-create)。
+    expect(calls).toContain('bootstrap');
+  });
+
+  it('切回 Cursor resume 失败时确定性回落:清停泊 id + 全量交接 + 全新会话', async () => {
+    let bootstrapCalls = 0;
+    const { deps } = makeDeps({
+      getSessionRow: vi.fn(async () => makeRow({ agentKind: 'codex', model: 'gpt-5.5' })),
+      findParkedEngineSession: vi.fn(async () => ({
+        sdkSessionId: 'cursor-acp-session',
+        watermarkCreatedAt: 100,
+        watermarkRowid: 5,
+      })),
+      bootstrapSwitchedSession: vi.fn(async () => {
+        bootstrapCalls++;
+        if (bootstrapCalls === 1) throw new Error('cursor session/load failed');
       }),
-    ).rejects.toThrow(/switching away from Cursor/);
+    });
+    const result = await performSessionAgentSwitch(deps, {
+      sessionId: 's1',
+      targetAgentKind: 'cursor',
+      model: 'auto',
+    });
+    expect(result).toMatchObject({ switched: true, agentKind: 'cursor', engineReady: true });
+    // 原子事务清停泊 id 并把边界行改回全量交接(resumed=false)。
+    expect(deps.applyResumeFallbackAtomically).toHaveBeenCalledTimes(1);
+    const fallbackArg = vi.mocked(deps.applyResumeFallbackAtomically).mock.calls[0];
+    expect(fallbackArg[2].resumed).toBe(false);
+    // fallback 后重试 bootstrap(全新会话),不再带停泊 id。
+    expect(bootstrapCalls).toBe(2);
   });
 
   it('新 desktop：cc → cursor 切换成功（DB cursor 映射 + bootstrap）', async () => {
