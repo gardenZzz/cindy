@@ -180,10 +180,11 @@ describe('UserMessage pasted-text chip wiring', () => {
     // 测量镜像(独立 JSX 表达式)。
     expect(source.match(/\{collapseMeasureBody\}/g)?.length).toBe(1);
     // 收起态正文使用同一套静态 chip renderer,不再把投影纯文本直接塞进正文。
+    // \r?\n: Windows checkout 是 CRLF,裸 \n 在 toMatch 里匹配不到(与 PR #1680 同源缺陷)。
     expect(source).toMatch(
-      /longMessageCollapsed\s*\n\s*\? renderContent\(\n\s*displayBubbleBody,/,
+      /longMessageCollapsed\s*\r?\n\s*\? renderContent\(\r?\n\s*displayBubbleBody,/,
     );
-    expect(source).toContain('bubbleAgentReferences,\n                              false,');
+    expect(source).toMatch(/bubbleAgentReferences,\r?\n\s*false,/);
     // 偏移只在 bubbleBody 与 ghostBody 同源时才折叠(引用交错的消息保持原文测量)。
     expect(source).toContain('bubbleBody === ghostBody');
   });
