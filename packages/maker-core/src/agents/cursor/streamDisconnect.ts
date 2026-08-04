@@ -2,9 +2,10 @@
  * Cursor agent 上游断流错误 reason key。
  *
  * 当 Cursor ACP 在 prompt 期间遇到上游 HTTP/2 / SSE 流被打断（如
- * `RetriableError: [canceled] http/2 stream closed with error code CANCEL (0x8)`）
- * 时，由 maker-core 分类并在 AgentEvent.error 的 data.reason 中盖上此 key。
- * desktop 侧的中断自愈判据（isInterruptedTurnError）以此 key 识别可续跑的断流。
+ * `RetriableError: [canceled] http/2 stream closed with error code CANCEL (0x8)`、
+ * `RetriableError: [unavailable] PING timed out`）时，由 maker-core 分类并在
+ * AgentEvent.error 的 data.reason 中盖上此 key。凡文案含 `RetriableError` 一律
+ * 视为可续跑；desktop 侧的中断自愈判据（isInterruptedTurnError）以此 key 识别。
  */
 export const CURSOR_STREAM_DISCONNECT_REASON = 'cursor-stream-disconnect';
 
@@ -24,9 +25,17 @@ const EXCLUSION_PATTERNS = [
 ];
 
 /**
+ * Cursor 上游显式打上的可重试标记。命中时优先于排除项：
+ * 例如 `RetriableError: [unavailable] PING timed out` 含 timeout 字样，
+ * 但仍应按上游意图进入断流自愈。
+ */
+const RETRIABLE_ERROR_MARKER = /RetriableError/i;
+
+/**
  * 白名单项：可确定为 Cursor ACP 上游断流的形态。
  */
 const WHITELIST_PATTERNS = [
+  RETRIABLE_ERROR_MARKER,
   /http\/2 stream closed/i,
   /stream closed with error code/i,
   /CANCEL \(0x[0-9a-f]+\)/i,
@@ -47,6 +56,10 @@ export function isCursorStreamDisconnectError(value: unknown): boolean {
   if (texts.length === 0) return false;
 
   for (const text of texts) {
+    // 上游已标明可重试时直接放行，不被 timeout / transport 等排除项误杀。
+    if (RETRIABLE_ERROR_MARKER.test(text)) {
+      return true;
+    }
     if (EXCLUSION_PATTERNS.some((pattern) => pattern.test(text))) {
       return false;
     }
