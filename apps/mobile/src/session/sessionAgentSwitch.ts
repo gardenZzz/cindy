@@ -68,14 +68,16 @@ export function sessionAgentKind(session: Pick<RemoteSession, 'agentKind'>): Mob
   return toMakerAgentKind(session.agentKind);
 }
 
-/** 手机是否应展示 Agent 分段；远程 SSH / Orca / Cursor 源会话继续保持单 Agent。
- * 切「到」Cursor 由 desktop handler 支持；从 Cursor 会话切走仍不支持。 */
+/**
+ * 手机是否应展示 Agent 分段。四家(Claude Code / Codex / Pi / Cursor)同口径:
+ * 纯粹依赖被控端按当前任务真实 Agent 上报的 `supportsSessionAgentSwitch` 能力位,
+ * 不在控制端写死第二份「源是某 Agent 就隐藏」的判断;远程 SSH / Orca 任务继续排除。
+ * 老被控端对 Cursor 仍报 false -> 入口正确隐藏(优雅降级,升级后自然获得)。
+ */
 export function supportsMobileSessionAgentSwitch(
   session: Pick<RemoteSession, 'remoteHostId' | 'orcaRole' | 'agentKind'>,
   capabilities: MobileAgentCapabilities | null,
 ): boolean {
-  // 从 Cursor 会话切走一期仍不支持（与 desktop switch handler 对齐）。
-  if (session.agentKind === 'cursor') return false;
   return capabilities?.supportsSessionAgentSwitch === true
     && !session.remoteHostId
     && !session.orcaRole;

@@ -23,8 +23,9 @@
  *    上述回落再降级)。
  *
  * 边界:远程会话(remoteHostId)与 Orca 协同会话不支持切换(UNSUPPORTED_CAPABILITY);
- * 可切「到」Cursor；从 Cursor 会话切走一期仍 UNSUPPORTED_CAPABILITY（上游会话
- * 数据迁移做不到）；turn 进行中登记 pending 推迟到下一条消息发送时刻执行。
+ * 四家引擎(Claude Code / Codex / Pi / Cursor)可在任务内两两互换--从 Cursor 切走
+ * 与从其它引擎切走语义完全一致(departure snapshot 快照 Cursor 的 ACP session id,
+ * 切回时 resume 续接);turn 进行中登记 pending 推迟到下一条消息发送时刻执行。
  */
 
 import type { AgentKind } from '@cindy/maker-core';
@@ -404,13 +405,6 @@ export async function performSessionAgentSwitch(
   if (row.orcaRole) {
     // Orca lead/worker:协同运行时对 agent 形态有独立契约(docs/dev-rules/orca-team-architecture.md),不掺和。
     throwIpcError('UNSUPPORTED_CAPABILITY', 'agent switch is not supported for Orca sessions');
-  }
-  if (row.agentKind === 'cursor') {
-    // 可切「到」Cursor；从 Cursor 会话切走涉及上游会话数据迁移，一期仍不支持。
-    throwIpcError(
-      'UNSUPPORTED_CAPABILITY',
-      'switching away from Cursor sessions is not supported yet',
-    );
   }
 
   const fromDbKind: DbAgentKind = normalizeDbAgentKind(row.agentKind);

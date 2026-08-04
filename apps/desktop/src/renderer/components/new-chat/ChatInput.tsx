@@ -111,6 +111,7 @@ import {
   confirmAgentSwitchRisk,
   isAgentSwitchResponseFresh,
   resolveAgentSwitchAckAction,
+  resolveSessionAgentSwitchEntry,
 } from './agentSwitchConfirmation';
 import {
   beginAgentSwitchOperation,
@@ -1283,21 +1284,28 @@ export function ChatInput({
   // SSH 远程(remoteHostId)是另一套引擎生命周期,继续不支持,由调用点单独排除。
   // Orca 会话(lead / worker)同样排除:被控端 handler 对带 orcaRole 的会话一律拒
   // UNSUPPORTED_CAPABILITY。角色未加载(undefined)也 fail-closed,避免冷启动短暂露出入口。
-  const ccSupportsSessionAgentSwitch =
-    ccCaps.capabilities?.supportsSessionAgentSwitch === true &&
-    ccCaps.capabilities.supportsSessionAgentSwitchCas === true;
-  const codexSupportsSessionAgentSwitch =
-    codexCaps.capabilities?.supportsSessionAgentSwitch === true &&
-    codexCaps.capabilities.supportsSessionAgentSwitchCas === true;
   // 此能力与原子 model-selection payload 同版发布。旧被控端会忽略 SET_MODEL 第 5 参，
   // 因此缺能力位时保留原来的 SET_MODEL → SET_EFFORT → SET_FAST 兼容链；同引擎
   // reselect 入口本就要求 CAS=true，不会退回这条非原子路径。
   const remoteAtomicModelSelectionSupported =
     ccCaps.capabilities?.supportsSessionAgentSwitchCas === true ||
     codexCaps.capabilities?.supportsSessionAgentSwitchCas === true;
+  // 四家(Claude Code / Codex / Pi / Cursor)同构:入口显示与否只取决于任务真实 Agent
+  // (agentKind)在被控端上报的能力位,不在组件里写死第二份「某 Agent 能/不能切」。本机
+  // 会话恒可用;device-link 远程读被控端真实 Agent 位(老被控端对 Cursor 报 false ->
+  // 入口正确隐藏)。判定收在纯函数 resolveSessionAgentSwitchEntry,由行为测试覆盖。
   const sessionAgentSwitchSupported =
     sessionOrcaRole === null &&
-    (!deviceLinkDeviceId || ccSupportsSessionAgentSwitch || codexSupportsSessionAgentSwitch);
+    resolveSessionAgentSwitchEntry({
+      agentKind,
+      isLocalSession: !deviceLinkDeviceId,
+      capabilities: {
+        'claude-code': ccCaps.capabilities,
+        codex: codexCaps.capabilities,
+        cursor: cursorCaps.capabilities,
+        pi: piCaps.capabilities,
+      },
+    });
 
   // 切换写入的串行链与写序号都按 session 存在**模块级**协调层(agentSwitchCoordinator),
   // 不放组件 ref:用户切走再切回时旧组件已卸载但 invoke 仍在飞,新组件若另起空队列 /
@@ -5818,10 +5826,10 @@ export function ChatInput({
                     // 支持(隧道到被控端执行,与手机端同一套 channel),入口按被控端能力位
                     // 门控。草稿(无 sessionId)与 SSH 远程会话仍不传。
                     agentSwitch={
-                      // Cursor 一期不做会话内引擎切换(仅 New Maker 可选)。
+                      // 四家同构:已有会话(非草稿)、非 SSH 远程、且能力位门控通过即放行。
+                      // Cursor 与其它引擎一样按真实 Agent 能力位判定,不再单独排除。
                       sessionId &&
                       vendorKey &&
-                      vendorKey !== 'cursor' &&
                       !remoteHostId &&
                       sessionAgentSwitchSupported
                         ? {
