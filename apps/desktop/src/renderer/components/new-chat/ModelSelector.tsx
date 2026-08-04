@@ -1279,7 +1279,7 @@ function ModelSelectorContentView({
     // trigger 来源 icon / 路由立即正确(null = flat 退化行,交给默认路由)。
     if (browsing && agentSwitch) {
       enqueueAgentSwitch(
-        browseVendor === 'codex' ? 'codex' : browseVendor === 'pi' ? 'pi' : 'claude-code',
+        vendorKeyToAgentKind(browseVendor) ?? 'claude-code',
         id,
         providerId,
       );

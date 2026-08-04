@@ -2390,6 +2390,7 @@ describe('ModelSelector trigger variants', () => {
       hasFastMode: true,
     };
     const confirmBrowseSwitch = vi.fn(async () => true);
+    const onSwitch = vi.fn();
     try {
       render(
         React.createElement(ModelSelectorContent, {
@@ -2400,15 +2401,17 @@ describe('ModelSelector trigger variants', () => {
           vendorKey: 'cc',
           currentProviderId: 'anthropic',
           onProviderChange: vi.fn(),
-          agentSwitch: { currentVendor: 'cc', confirmBrowseSwitch, onSwitch: vi.fn() },
+          agentSwitch: { currentVendor: 'cc', confirmBrowseSwitch, onSwitch },
         }),
       );
 
       fireEvent.click(screen.getByRole('tab', { name: /Cursor/ }));
-      expect(await screen.findByRole('option', { name: /GPT-5\.5/ })).toBeTruthy();
+      const row = await screen.findByRole('option', { name: /GPT-5\.5/ });
       expect(screen.getByRole('option', { name: /Auto/ })).toBeTruthy();
       expect(screen.queryByText('没有匹配的模型')).toBeNull();
       expect(confirmBrowseSwitch).toHaveBeenCalledTimes(1);
+      fireEvent.click(row);
+      await waitFor(() => expect(onSwitch).toHaveBeenCalledWith('cursor', 'gpt-5.5', null));
     } finally {
       visibleModelsRef.models = originalModels;
       agentCapabilitiesRef.capabilities = originalCapabilities;
