@@ -1199,15 +1199,20 @@ export class Session {
         this.armTerminalErrorDrain(this.turnGeneration);
       }
     } else if (
-      this.agentKind === 'codex' &&
+      (this.agentKind === 'codex' || this.agentKind === 'cursor') &&
       isCurrentGeneration &&
       event.type === 'status' &&
       (event.data as { isRunning?: unknown } | null | undefined)?.isRunning === false &&
       this.terminalErrorDrainGeneration === this.turnGeneration
     ) {
-      // Codex closes a terminal error with an idle status rather than a done
-      // event. That status drains the provider tail, but it is not itself a
-      // generation boundary for ordinary status events.
+      // Codex and Cursor (ACP) close a terminal error with an idle status rather
+      // than a done event — `translateAcpError` pushes error + status(idle) and
+      // nothing else. Without this the drain always times out and kills a healthy
+      // ACP session 250ms after any terminal error, which in turn supersedes the
+      // interrupted-turn auto-resume that was just scheduled for it. That status
+      // drains the provider tail, but it is not itself a generation boundary for
+      // ordinary status events. Claude keeps queueing a done after the idle
+      // status, so it stays out (see session.origin.test.ts).
       this.clearTerminalErrorDrain();
     }
     const listenerEvent = redactEventForListeners(event);
