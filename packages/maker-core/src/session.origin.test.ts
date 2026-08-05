@@ -407,6 +407,29 @@ describe('Session per-turn origin 打标', () => {
     expect(closeCalls()).toBe(0);
   });
 
+  it('terminal error 后的 Cursor idle status 会清 drain，不会误关健康 session', async () => {
+    // Cursor(ACP) 的终态收尾是 error + status(idle)，永远没有 done。drain 若不在这条
+    // idle status 上清，250ms 后会关掉一个健康会话，把刚排期的中断自愈判成 superseded。
+    const { handle, emit, closeCalls } = createControllableHandle({ agentKind: 'cursor' });
+    const session = makeSession(handle, 'cursor');
+
+    await session.send('first');
+    await emit({
+      type: 'error',
+      data: {
+        message: '\n\nError: RetriableError: [canceled] http/2 stream closed with error code CANCEL (0x8)',
+        isTerminal: true,
+        reason: 'cursor-stream-disconnect',
+      },
+      source: 'cursor',
+    });
+    await emit({ type: 'status', data: { isRunning: false, status: 'Error' }, source: 'cursor' });
+
+    await expect(session.send('second', { turnAttemptToken: 2 })).resolves.toEqual({ accepted: true });
+    await new Promise((resolve) => setTimeout(resolve, 300));
+    expect(closeCalls()).toBe(0);
+  });
+
   it('Claude terminal error 后的 idle status 不能越过 queued done 提前解锁', async () => {
     const { handle, emit } = createControllableHandle({ agentKind: 'claude-code' });
     const session = makeSession(handle, 'claude-code');
