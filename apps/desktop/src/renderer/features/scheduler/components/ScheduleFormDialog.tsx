@@ -35,6 +35,7 @@ import {
   isExplicitScheduleModelUnavailable,
   parsePreRunHookTimeoutMs,
   resolveScheduleGenerationProviderId,
+  resolveScheduleModelEfforts,
   shouldFollowBoundSessionGenerationRoute,
 } from '../lib/scheduleFormLogic';
 import type { RunMode, ScheduleFormState } from '../hooks/useScheduleForm';
@@ -430,11 +431,28 @@ export function ScheduleFormDialog({
     if (!form.model) setField('model', getScheduleDefaultModel(form.agentKind));
   }, [form.model, form.agentKind, form.targetSessionId, setField]);
 
+  // 档位失配自动清除必须按 (生效来源, 模型) 判定。扁平 capabilities 在 Pi + 自定义 API
+  // 同 id 时给的是跨来源交集(可能为空),据它清理会把 CLIProxyAPI 这类来源上明明支持的
+  // 档位一律清成「默认」—— 面板里挑得动、chip 却永远显示默认(见 resolveScheduleModelEfforts)。
+  const currentModelEfforts = useMemo(
+    () =>
+      resolveScheduleModelEfforts({
+        providers,
+        providerId: form.providerId,
+        model: form.model || currentModel?.id || '',
+        agentKind: form.agentKind,
+        fallback: currentModel
+          ? { efforts: currentModel.efforts, defaultEffort: currentModel.defaultEffort }
+          : undefined,
+      }),
+    [providers, form.providerId, form.model, form.agentKind, currentModel],
+  );
+
   useEffect(() => {
-    if (!currentModel || !form.effort) return;
-    const allowed = currentModel.efforts as readonly string[];
+    if (!currentModelEfforts.known || !form.effort) return;
+    const allowed = currentModelEfforts.efforts as readonly string[];
     if (!allowed.includes(form.effort)) setField('effort', '');
-  }, [currentModel, form.effort, setField]);
+  }, [currentModelEfforts, form.effort, setField]);
 
   // Fast 模式门控：agent 级 hasFastMode × 该 (生效来源, 模型) 的 supportsFastMode（per-provider，
   // 唯一真相）。生效来源按 form.providerId 解析（空则该模型的默认来源）。Claude 当前 hasFastMode

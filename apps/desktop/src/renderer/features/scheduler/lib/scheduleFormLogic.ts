@@ -17,6 +17,7 @@
 import type { CreateScheduleInput, ScheduleTemplate, ScheduleWorkspaceKind, ScriptCapability } from '@cindy/maker-scheduler';
 import {
   effectiveSourceIdForModel,
+  getModel,
   type AgentKind,
   type ProviderView,
 } from '@cindy/model-providers';
@@ -68,6 +69,83 @@ export function resolveScheduleGenerationProviderId(input: {
     model,
     input.agentKind,
   );
+}
+
+/** 某 (来源, 模型) 拷贝的档位能力;`known=false` = 没有权威条目,调用方不得据此清空表单值。 */
+export interface ScheduleModelEfforts {
+  efforts: readonly EffortValue[];
+  defaultEffort: EffortValue | null;
+  known: boolean;
+}
+
+function toEffortValues(efforts: readonly string[]): EffortValue[] {
+  return efforts.filter(isEffortValue);
+}
+
+/**
+ * 自动化面板读档位能力的唯一口径 —— 按**当前生效来源**的目录条目算,不读
+ * `capabilities.availableModels`。
+ *
+ * 后者是按 model id 跨来源去重的扁平表:Pi 碰到 BYOM(自定义 API)提供同一个 id 时,
+ * 公布的是各条路由的**交集**(main/maker-host/catalog-to-descriptors.ts 的
+ * `intersectPiEffortCapabilities`)。CLIProxyAPI 这类自定义来源只声明部分档位、或没
+ * 勾「支持推理」时交集会塌成空,于是模型面板的行按目录照常给出档位,chip 和表单却
+ * 判定「这个模型没有档位」,把用户挑好的档清掉 —— 用户看到的就是「选了 Pi 之后自定义
+ * API 没有档位可选」(2026-08 实测)。聊天侧一直按 (来源, 模型) 解析,自动化这里补齐。
+ *
+ * Pi 的 minimal 补档与 main 侧投影同规则:非用户来源(内置/网关)只要声明了档位就补上
+ * runtime 原生支持的 minimal;BYOM 的档位是用户逐模型显式声明的协议能力,原样保留 ——
+ * 多宣称一个档,Pi 启动时的档位断言会直接拒绝这次运行。
+ *
+ * 取不到目录条目(Cursor 没有 Cindy provider、来源未连接、模型已下架、providers 还在加载)
+ * 时回落调用方给的扁平 descriptor,与历史行为一致;但 Pi 的扁平表按契约就是有损的,
+ * 这时只标 `known=false`,让调用方**别**拿它去清用户存好的档位。
+ */
+export function resolveScheduleModelEfforts(input: {
+  providers: ProviderView[];
+  /** 表单里显式选定的来源;'' = 跟随该模型的生效来源。 */
+  providerId: string;
+  model: string;
+  agentKind: AgentKind;
+  /** 扁平 capabilities 里的同 id 条目,仅作兜底。 */
+  fallback?: { efforts: readonly string[]; defaultEffort: string | null } | undefined;
+}): ScheduleModelEfforts {
+  const fallback = (): ScheduleModelEfforts =>
+    input.fallback
+      ? {
+          efforts: toEffortValues(input.fallback.efforts),
+          defaultEffort:
+            input.fallback.defaultEffort && isEffortValue(input.fallback.defaultEffort)
+              ? input.fallback.defaultEffort
+              : null,
+          known: input.agentKind !== 'pi',
+        }
+      : { efforts: [], defaultEffort: null, known: false };
+
+  const model = input.model.trim();
+  if (!model) return fallback();
+  const sourceId = effectiveSourceIdForModel(
+    input.providers,
+    input.providerId.trim() || null,
+    model,
+    input.agentKind,
+  );
+  const provider = sourceId ? input.providers.find((p) => p.id === sourceId) : undefined;
+  const entry = provider ? getModel(provider, model, input.agentKind) : undefined;
+  if (!provider || !entry) return fallback();
+  const efforts =
+    input.agentKind === 'pi' &&
+    provider.source !== 'user' &&
+    entry.efforts.length > 0 &&
+    !entry.efforts.includes('minimal')
+      ? ['minimal', ...entry.efforts]
+      : entry.efforts;
+  return {
+    efforts: toEffortValues(efforts),
+    defaultEffort:
+      entry.defaultEffort && isEffortValue(entry.defaultEffort) ? entry.defaultEffort : null,
+    known: true,
+  };
 }
 
 export interface ScheduleFormState {

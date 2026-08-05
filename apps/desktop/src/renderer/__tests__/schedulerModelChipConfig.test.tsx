@@ -1,12 +1,14 @@
 // @vitest-environment jsdom
 
 /**
- * 自动化(定时任务)模型 chip 的两条与聊天面板对齐的口径:
+ * 自动化(定时任务)模型 chip 与聊天面板对齐的几条口径:
  *  1. 注入模型级全局预设读写器 → 面板里**非选中行**也能挑推理档位(缺了它 canConfigure
  *     只对当前选中行成立,用户看到「只有已选中的模型能选档位」);
  *  2. 选中另一个模型时把该模型的预设(档位 / Fast)落进任务表单,避免行徽标显示一个档、
  *     chip 与实际 fire 用另一个档;
- *  3. Cursor 没有 Cindy provider,trigger 图标必须由 CursorMark 兜底。
+ *  3. Cursor 没有 Cindy provider,trigger 图标必须由 CursorMark 兜底;
+ *  4. 档位能力按 (来源, 模型) 读:Pi + 自定义 API(CLIProxyAPI)在扁平 capabilities 里
+ *     的档位已被跨来源交集抹平,读扁平表会让这些模型永远显示「默认档」、挑不了档位。
  */
 
 import { render } from '@testing-library/react';
@@ -40,25 +42,34 @@ vi.mock('@/components/new-chat/ModelSelector', () => ({
   ModelIconMark: () => <span data-testid="source-icon" />,
 }));
 
+const CURSOR_MODELS = [
+  { id: 'composer-2.5', displayName: 'Composer 2.5', efforts: [], defaultEffort: null },
+  {
+    id: 'grok-4.5',
+    displayName: 'Cursor Grok 4.5',
+    efforts: ['low', 'high'],
+    defaultEffort: 'high',
+  },
+];
+
+/**
+ * Pi 的扁平 availableModels:同一个 id 也由内置来源提供时只公布跨来源交集,
+ * 自定义 API 声明的档位在这里已经塌成空(main 侧 intersectPiEffortCapabilities)。
+ */
+const PI_FLAT_MODELS = [
+  { id: 'gpt-5.5', displayName: 'GPT-5.5', efforts: [], defaultEffort: null },
+];
+
+let availableModels: unknown[] = CURSOR_MODELS;
+let providers: unknown[] = [];
+
 vi.mock('@/hooks/useAgentCapabilities', () => ({
   getCachedCapabilities: () => null,
-  useAgentCapabilities: () => ({
-    capabilities: {
-      availableModels: [
-        { id: 'composer-2.5', displayName: 'Composer 2.5', efforts: [], defaultEffort: null },
-        {
-          id: 'grok-4.5',
-          displayName: 'Cursor Grok 4.5',
-          efforts: ['low', 'high'],
-          defaultEffort: 'high',
-        },
-      ],
-    },
-  }),
+  useAgentCapabilities: () => ({ capabilities: { availableModels } }),
 }));
 
 vi.mock('@/hooks/useProviders', () => ({
-  useProviders: () => ({ providers: [] }),
+  useProviders: () => ({ providers }),
 }));
 
 import { ModelEffortChip, resolveModelChipIconKind } from '@/features/scheduler/components/ScheduleChips';
@@ -70,6 +81,8 @@ import {
 
 beforeEach(() => {
   capturedContentProps = null;
+  availableModels = CURSOR_MODELS;
+  providers = [];
   resetModelMemory();
   (window as unknown as { electronAPI: unknown }).electronAPI = {
     maker: { requestProviderModelsAutoRefresh: vi.fn(async () => ({ ok: true as const })) },
@@ -126,6 +139,46 @@ describe('scheduler model chip 与聊天面板对齐', () => {
     capturedContentProps?.onModelChange('grok-4.5');
 
     expect(onChangeEffort).toHaveBeenCalledWith('');
+  });
+
+  it('Pi + 自定义 API:档位读该来源的目录条目,chip 显示真实档位而不是「默认档」', () => {
+    availableModels = PI_FLAT_MODELS;
+    providers = [
+      {
+        id: 'cliproxyapi',
+        name: 'CLIProxyAPI',
+        source: 'user',
+        connected: true,
+        agents: ['pi'],
+        auth: { method: 'apiKey' },
+        routing: { pi: { upstream: 'http://127.0.0.1:8317/v1', authStrategy: 'api-key-header' } },
+        models: {
+          pi: [
+            {
+              id: 'gpt-5.5',
+              name: 'GPT-5.5 via proxy',
+              contextWindow: 200_000,
+              efforts: ['low', 'high'],
+              defaultEffort: 'high',
+            },
+          ],
+        },
+      },
+    ];
+
+    const view = render(
+      <ModelEffortChip
+        agentKind="pi"
+        modelValue="gpt-5.5"
+        onChangeModel={vi.fn()}
+        effortValue="low"
+        onChangeEffort={vi.fn()}
+        providerId="cliproxyapi"
+        onChangeProviderId={vi.fn()}
+      />,
+    );
+
+    expect(view.getByText('GPT-5.5 · effortLevels.low')).toBeTruthy();
   });
 
   it('trigger 图标:Cursor 无来源时用 CursorMark 兜底,其它 agent 保持无图标', () => {
