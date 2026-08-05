@@ -245,6 +245,17 @@ describe('isSelectedSourceDisconnected', () => {
       error: null,
     })).toBe(true);
   });
+
+  it('never reports disconnected for cursor (no Cindy provider catalog; scheduler-seeded providerId lingers)', () => {
+    expect(isSelectedSourceDisconnected({
+      providers,
+      providerId: 'cliproxyapi',
+      modelId: 'grok-4.5',
+      agentKind: 'cursor',
+      loading: false,
+      error: null,
+    })).toBe(false);
+  });
 });
 
 describe('resolveRowSelection —— 选行落点(effort 优先级与桌面共享实现同源)', () => {
