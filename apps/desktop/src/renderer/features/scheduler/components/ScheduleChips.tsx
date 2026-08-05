@@ -13,8 +13,21 @@ import {
 import { useDetectCwd } from '@/hooks/useWorktreeQueries';
 import { useAgentCapabilities, type ModelDescriptor } from '@/hooks/useAgentCapabilities';
 import { useProviders } from '@/hooks/useProviders';
-import { ModelIconMark, ModelSelectorContent } from '@/components/new-chat/ModelSelector';
+import { CursorMark } from '@/components/icons/CursorMark';
+import {
+  ModelIconMark,
+  ModelSelectorContent,
+  type ModelMemoryAccessors,
+} from '@/components/new-chat/ModelSelector';
 import { useModelDiscoveryPending } from '@/components/new-chat/useModelDiscoveryPending';
+import {
+  getProviderModelEffort,
+  getProviderModelFast,
+  modelMemorySourceId,
+  setProviderModelChoice,
+  setProviderModelEffort,
+  setProviderModelFast,
+} from '@/state/providerModelMemory';
 import {
   connectedProvidersForAgent,
   effectiveSourceIdForModel,
@@ -1058,6 +1071,27 @@ function previewConfigFor(mode: EditableScheduleMenuMode, current: CodexSchedule
   return { ...current, mode };
 }
 
+/**
+ * 模型 chip 的 trigger 图标口径:
+ *  - 跟随会话(未显式选模型)不显示身份图标;
+ *  - 解析出生效来源 → 来源 / 模型条目标(ModelIconMark);
+ *  - Cursor 是独立 Agent,没有 Cindy provider(ADR 0001),来源恒空 → 用 CursorMark 兜底,
+ *    否则 trigger 会空着一格(与聊天 trigger 同口径)。
+ */
+export function resolveModelChipIconKind({
+  followingSession,
+  activeSourceId,
+  agentKind,
+}: {
+  followingSession: boolean;
+  activeSourceId: string | null;
+  agentKind: AgentKind;
+}): 'none' | 'source' | 'cursor' {
+  if (followingSession) return 'none';
+  if (activeSourceId) return 'source';
+  return agentKind === 'cursor' ? 'cursor' : 'none';
+}
+
 export function ModelEffortChip({
   agentKind,
   modelValue,
@@ -1173,13 +1207,50 @@ export function ModelEffortChip({
     [providers, providerId, effectiveId, agentKind],
   );
   const activeProvider = providers.find((p) => p.id === activeSourceId);
+  const iconKind = resolveModelChipIconKind({
+    followingSession: isFollowingSession,
+    activeSourceId,
+    agentKind,
+  });
+
+  // 非选中模型行的档位 / Fast 走与聊天、Worker 创建同一份模型级全局预设
+  // (providerModelMemory)。不注入时 ModelSelectorContent 的 canConfigure 只对当前
+  // 选中行成立,自动化面板就只有已选中的那一行能挑档位,与新建任务面板不一致
+  // (2026-08 用户实测)。定时任务没有被控端形态,恒用本机预设。
+  const modelMemory = useMemo<ModelMemoryAccessors>(
+    () => ({
+      getEffort: getProviderModelEffort,
+      setEffort: setProviderModelEffort,
+      setChoice: setProviderModelChoice,
+      getFast: getProviderModelFast,
+      setFast: setProviderModelFast,
+    }),
+    [],
+  );
+
+  // 换模型时把目标模型的全局预设(档位 / Fast)一并落进任务表单。
+  // 少了这一步就会「显示≠运行」:列表行徽标读的是全局预设,选中后 chip 与实际 fire
+  // 用的却是上一个模型残留的档位;非选中行改档位也会因随后的选中回调丢失
+  // (ModelSelector 先写预设、再回调选中,故这里读回来的就是刚改的值)。
+  // 预设缺失 / 不被目标模型支持时落空值 = 跟随该模型默认档,与行徽标的回落口径一致。
+  const applyRememberedModelConfig = (nextModelId: string, nextProviderId: string | null) => {
+    const memoryId = modelMemorySourceId(agentKind, nextProviderId);
+    if (!memoryId || !nextModelId) return;
+    const target = models.find((m) => m.id === nextModelId);
+    const allowed = (target?.efforts ?? []) as readonly string[];
+    const remembered = getProviderModelEffort(agentKind, memoryId, nextModelId);
+    onChangeEffort(
+      remembered && allowed.includes(remembered) ? (remembered as EffortValue) : '',
+    );
+    onChangeFast?.(getProviderModelFast(agentKind, memoryId, nextModelId) ?? false);
+  };
 
   return (
     <Popover open={open} onOpenChange={handleOpenChange}>
       <PopoverTrigger asChild>
         <ChipButton
           icon={
-            !isFollowingSession && activeSourceId ? (
+            iconKind === 'source' && activeSourceId ? (
               // 图标统一规则(与聊天 trigger 同口径):模型条目 icon(AI Gateway / 目录设定)
               // 优先,缺省回落来源供应商标。
               <ModelIconMark
@@ -1190,6 +1261,8 @@ export function ModelEffortChip({
                 colorClass=""
                 withMargin={false}
               />
+            ) : iconKind === 'cursor' ? (
+              <CursorMark size={13} className="shrink-0" />
             ) : undefined
           }
           label={display}
@@ -1218,16 +1291,21 @@ export function ModelEffortChip({
           vendorKey={vendorKey}
           modelId={effectiveId}
           effort={effectiveEffort}
-          onModelChange={onChangeModel}
+          onModelChange={(v) => {
+            onChangeModel(v);
+            applyRememberedModelConfig(v, null);
+          }}
           onEffortChange={(e) => onChangeEffort(e as EffortValue)}
           fastMode={fastMode}
           onFastModeChange={onChangeFast}
+          modelMemory={modelMemory}
           onDismiss={() => setOpenWithoutAutoRefresh(false)}
           currentProviderId={providerId || null}
           onProviderChange={(pid, reconciledModelId, reconciledEffort) => {
             onChangeProviderId(pid && pid !== nativeDefault ? pid : '');
             if (reconciledModelId) onChangeModel(reconciledModelId);
             if (reconciledEffort) onChangeEffort(reconciledEffort as EffortValue);
+            else if (reconciledModelId) applyRememberedModelConfig(reconciledModelId, pid);
           }}
           onNavigateToProviders={onNavigateToProviders}
           overlayContentClassName="z-[10020]"
