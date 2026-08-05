@@ -54,7 +54,7 @@ import {
   type CodexScheduleConfig,
 } from '../lib/cronCodexPreset';
 import { getScheduleDefaultModel, type EffortValue } from '../hooks/useScheduleForm';
-import { PENDING_SESSION_ID } from '../lib/scheduleFormLogic';
+import { PENDING_SESSION_ID, resolveScheduleModelEfforts } from '../lib/scheduleFormLogic';
 import type { SessionReference } from '../../../../shared/sessionReference';
 import type { AgentKind } from '@cindy/maker-core';
 
@@ -1173,8 +1173,24 @@ export function ModelEffortChip({
   const isFollowingSession = !!followSession && !modelValue;
   const effectiveId = isFollowingSession ? '' : modelValue || getScheduleDefaultModel(agentKind);
   const current = models.find((m) => m.id === effectiveId);
-  const allowedEfforts = (current?.efforts ?? []) as readonly EffortValue[];
-  const fallbackEffort = (current?.defaultEffort ?? 'high') as EffortValue;
+  // 档位能力按 (生效来源, 模型) 解析,不用扁平 capabilities:Pi + 自定义 API 同 id 时
+  // 扁平表给的是跨来源交集,会塌成空,chip 于是显示「默认档」且吃掉用户挑的档位
+  // (见 resolveScheduleModelEfforts)。
+  const modelEfforts = useMemo(
+    () =>
+      resolveScheduleModelEfforts({
+        providers,
+        providerId,
+        model: effectiveId,
+        agentKind,
+        fallback: current
+          ? { efforts: current.efforts, defaultEffort: current.defaultEffort }
+          : undefined,
+      }),
+    [providers, providerId, effectiveId, agentKind, current],
+  );
+  const allowedEfforts = modelEfforts.efforts;
+  const fallbackEffort = (modelEfforts.defaultEffort ?? 'high') as EffortValue;
   const effectiveEffort: EffortValue = effortValue && allowedEfforts.includes(effortValue) ? effortValue : fallbackEffort;
   const effortLabel = (e: EffortValue) => t(`effortLevels.${e}`);
   const display = isFollowingSession
@@ -1234,10 +1250,21 @@ export function ModelEffortChip({
   // (ModelSelector 先写预设、再回调选中,故这里读回来的就是刚改的值)。
   // 预设缺失 / 不被目标模型支持时落空值 = 跟随该模型默认档,与行徽标的回落口径一致。
   const applyRememberedModelConfig = (nextModelId: string, nextProviderId: string | null) => {
-    const memoryId = modelMemorySourceId(agentKind, nextProviderId);
-    if (!memoryId || !nextModelId) return;
+    if (!nextModelId) return;
+    // 行选中不带来源时(flat 列表)按模型解析生效来源,与聊天恢复预设同口径 ——
+    // 否则除 Cursor 合成槽以外的 agent 全都读不到记忆槽。
+    const nextSourceId =
+      nextProviderId ?? effectiveSourceIdForModel(providers, null, nextModelId, agentKind);
+    const memoryId = modelMemorySourceId(agentKind, nextSourceId);
+    if (!memoryId) return;
     const target = models.find((m) => m.id === nextModelId);
-    const allowed = (target?.efforts ?? []) as readonly string[];
+    const allowed = resolveScheduleModelEfforts({
+      providers,
+      providerId: nextSourceId ?? '',
+      model: nextModelId,
+      agentKind,
+      fallback: target ? { efforts: target.efforts, defaultEffort: target.defaultEffort } : undefined,
+    }).efforts as readonly string[];
     const remembered = getProviderModelEffort(agentKind, memoryId, nextModelId);
     onChangeEffort(
       remembered && allowed.includes(remembered) ? (remembered as EffortValue) : '',
