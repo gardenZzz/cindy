@@ -416,6 +416,34 @@ describe('create_workers tool', () => {
     expect(data.user_report).toContain('名额不足');
   });
 
+  it('keeps host-not-ready in the report even when the batch stops on the earlier capacity boundary', async () => {
+    // 前缀 2 项：index 0 撞名额、index 1 撞主进程未就绪。批次级 stop_reason 取更早的
+    // 名额边界，但 index 1 是**真实失败**——判据只看 skip 的话，主进程未就绪会整条从
+    // user_report 与 suggestions 里消失，Lead 逐字转告时就不会告诉用户服务还没起来。
+    const createWorker = vi.fn<CreateWorkerDeps['createWorker']>(async ({ label }) => (
+      label === 'worker_1' ? hardLimitFailure(8) : hostNotReadyFailure()
+    ));
+    const getWorkerLimitSnapshot = vi.fn<NonNullable<CreateWorkerDeps['getWorkerLimitSnapshot']>>(
+      async () => ({ workerHardLimit: 8, occupiedSlots: 6, remainingSlots: 2 }),
+    );
+    const registry = setup(createWorker, getWorkerLimitSnapshot);
+
+    const result = parse(await registry.call('create_workers', {
+      workers: [worker(1), worker(2), worker(3), worker(4)],
+    }));
+
+    expect(createWorker).toHaveBeenCalledTimes(2);
+    expect(result.stop_reason).toBe('WORKER_LIMIT_HARD_EXCEEDED');
+    expect(result.results.map((entry: { error_code?: string }) => entry.error_code)).toEqual([
+      'WORKER_LIMIT_HARD_EXCEEDED',
+      'HOST_NOT_READY',
+      'WORKER_LIMIT_HARD_EXCEEDED',
+      'WORKER_LIMIT_HARD_EXCEEDED',
+    ]);
+    expect(result.suggestions.some((s: string) => s.includes('hard limit'))).toBe(true);
+    expect(result.suggestions.some((s: string) => s.includes('就绪'))).toBe(true);
+  });
+
   it('keeps real per-item outcomes when a non-limit failure occurs between successes', async () => {
     const outcomes = [
       created(1, 8),

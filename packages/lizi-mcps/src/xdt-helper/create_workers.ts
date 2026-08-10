@@ -366,13 +366,20 @@ export function registerCreateWorkersTool(
       // 等主进程恢复后重试这些项，仍会因为名额不够再失败一次，而且拿不到提限/归档建议。
       const skipReasonAt = (index: number): BatchStopReason | undefined => {
         if (index >= eligibleEnd) return 'WORKER_LIMIT_HARD_EXCEEDED';
-        if (hostNotReadyIndex !== undefined && index > hostNotReadyIndex) return 'HOST_NOT_READY';
-        if (hardLimitIndex !== undefined && index > hardLimitIndex) {
-          return 'WORKER_LIMIT_HARD_EXCEEDED';
+        // 前缀内两个边界都可能命中；取请求顺序里更早的那个，不能给某个原因固定优先级，
+        // 否则「index=1 撞名额、index=3 撞主进程」时 index>=4 会被标成主进程未就绪，
+        // 与批次级 stop_reason 自相矛盾，还会引导用户去等服务而不是释放名额。
+        const hostHit = hostNotReadyIndex !== undefined && index > hostNotReadyIndex;
+        const limitHit = hardLimitIndex !== undefined && index > hardLimitIndex;
+        if (hostHit && limitHit) {
+          return hostNotReadyIndex! < hardLimitIndex!
+            ? 'HOST_NOT_READY'
+            : 'WORKER_LIMIT_HARD_EXCEEDED';
         }
+        if (hostHit) return 'HOST_NOT_READY';
+        if (limitHit) return 'WORKER_LIMIT_HARD_EXCEEDED';
         return undefined;
       };
-      const usedSkipReasons = new Set<BatchStopReason>();
       for (let index = 0; index < workers.length; index += 1) {
         if (indexedResults[index]) continue;
         const worker = workers[index]!;
@@ -386,7 +393,6 @@ export function registerCreateWorkersTool(
           );
           continue;
         }
-        usedSkipReasons.add(skipReason);
         indexedResults[index] = {
           ...baseResult(worker),
           status: 'skipped',
@@ -396,9 +402,15 @@ export function registerCreateWorkersTool(
             : `${BRAND_NAME} 主进程协同服务尚未就绪，未再调用 host 创建。`,
         };
       }
-      const capacityLimited = usedSkipReasons.has('WORKER_LIMIT_HARD_EXCEEDED')
+      // 判据取自**全部逐项终态**，不只是 skip：并发下较晚的在途项可能真失败在
+      // HOST_NOT_READY 上，而批次级 stop_reason 取的是更早的名额边界；只看 skip 会
+      // 把「主进程未就绪」整条从 user_report 与 suggestions 里漏掉。
+      const hasErrorCode = (code: BatchStopReason) => indexedResults.some((result) => (
+        result !== undefined && 'error_code' in result && result.error_code === code
+      ));
+      const capacityLimited = hasErrorCode('WORKER_LIMIT_HARD_EXCEEDED')
         || stopReason === 'WORKER_LIMIT_HARD_EXCEEDED';
-      const hostNotReady = usedSkipReasons.has('HOST_NOT_READY')
+      const hostNotReady = hasErrorCode('HOST_NOT_READY')
         || stopReason === 'HOST_NOT_READY';
 
       results.push(...indexedResults as BatchWorkerResult[]);
