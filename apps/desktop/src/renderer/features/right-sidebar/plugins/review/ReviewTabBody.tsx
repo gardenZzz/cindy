@@ -58,6 +58,7 @@ import type {
 } from '@/lib/gitReview.types';
 import { formatSidebarTime } from '@/features/cc-agent/lib/formatSidebarTime';
 import { makerChatStore } from '@/lib/makerChatStore';
+import type { TurnChangeSetDetail } from '../../../../../shared/turnChangeSet';
 import { extractIpcError } from '@/utils/ipcError';
 import { useConfirmDialog } from '@/components/ui/confirm-dialog-provider';
 import { Spinner } from '@/components/ui/spinner';
@@ -103,6 +104,23 @@ import { useReviewBranchDiff, useReviewCommitDiff, useReviewCommits, useReviewFi
 interface ReviewTabBodyProps {
   state: ReviewState;
   ctx: TabKindHostContext;
+}
+
+/**
+ * source / selectedCommitOid 由外层 ReviewTabBody 持有并下发:轮次视图与
+ * Git 视图共用同一个来源状态机,从轮次视图的来源下拉切走时目标 source
+ * 要在 Git 视图挂载前就位(对齐 Codex 的单 source + turnSelection 模型)。
+ */
+interface GitReviewBodyProps extends ReviewTabBodyProps {
+  source: ReviewSource;
+  setSource: (source: ReviewSource) => void;
+  selectedCommitOid: string | null;
+  setSelectedCommitOid: (oid: string | null) => void;
+}
+
+interface TurnReviewBodyProps extends ReviewTabBodyProps {
+  setSource: (source: ReviewSource) => void;
+  setSelectedCommitOid: (oid: string | null) => void;
 }
 
 type ReviewToggleAction = Extract<ReviewStageAction, 'stage' | 'unstage'>;
@@ -366,7 +384,194 @@ export function useClearReviewOperationNoticeOnSourceChange(
   }, [clearOperationNotice, source]);
 }
 
-export function ReviewTabBody({ state, ctx }: ReviewTabBodyProps) {
+export function ReviewTabBody(props: ReviewTabBodyProps) {
+  const [source, setSource] = useState<ReviewSource>('unstaged');
+  const [selectedCommitOid, setSelectedCommitOid] = useState<string | null>(null);
+  if (props.state.turnTarget) {
+    return (
+      <TurnChangeSetReviewBody
+        {...props}
+        setSource={setSource}
+        setSelectedCommitOid={setSelectedCommitOid}
+      />
+    );
+  }
+  return (
+    <GitReviewTabBody
+      {...props}
+      source={source}
+      setSource={setSource}
+      selectedCommitOid={selectedCommitOid}
+      setSelectedCommitOid={setSelectedCommitOid}
+    />
+  );
+}
+
+function TurnChangeSetReviewBody({ state, ctx, setSource, setSelectedCommitOid }: TurnReviewBodyProps) {
+  const { t } = useTranslation();
+  const target = state.turnTarget;
+  // 变更集所属会话。协同面板里审查 worker 的轮次时,tab 桶在 lead 会话
+  // (worker 自己的桶在协同视图下不可见),数据按 targetSessionId 取。
+  const reviewSessionId = target?.targetSessionId ?? ctx.sessionId;
+  const crossSession = Boolean(target?.targetSessionId && target.targetSessionId !== ctx.sessionId);
+  // 供来源下拉的「提交」子菜单用;与 Git 视图同一 IPC,子菜单展开时刷新。
+  // 跨会话时不挂来源下拉(git 视图跟随桶会话 workdir,对 worker 语义错误),
+  // 传 null 跳过取数。
+  const commitsState = useReviewCommits(crossSession ? null : ctx.sessionId || null, state.branchBaseRef ?? null);
+  const switchToGitSource = useCallback((next: ReviewSource) => {
+    // 对齐 Codex EP 语义:切到其它来源即退出轮次审查(清 turnTarget),
+    // 轮次选择不保留;要再看本条消息需从聊天流卡片重新进入。
+    setSelectedCommitOid(null);
+    setSource(next);
+    ctx.patchState({ turnTarget: null });
+  }, [ctx, setSelectedCommitOid, setSource]);
+  const switchToCommitSource = useCallback((oid: string) => {
+    setSelectedCommitOid(oid);
+    setSource('commit');
+    ctx.patchState({ turnTarget: null });
+  }, [ctx, setSelectedCommitOid, setSource]);
+  const [changeSets, setChangeSets] = useState<TurnChangeSetDetail[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+  const [reloadToken, setReloadToken] = useState(0);
+  const targetIdsKey = target?.changeSetIds.join('\0') ?? '';
+  const diffs = useMemo(() => changeSets.flatMap((set) => set.diffs), [changeSets]);
+  const isPartial = changeSets.some((set) => set.state === 'partial');
+  const collapsedSet = useMemo(() => new Set(state.collapsedPaths ?? []), [state.collapsedPaths]);
+  const visibleDiffs = useMemo(
+    () => filterWhitespaceHiddenDiffs(diffs, state.hideWhitespace ?? false),
+    [diffs, state.hideWhitespace],
+  );
+  const expandedSet = useMemo(
+    () => getExpandedDiffSet(visibleDiffs, collapsedSet),
+    [collapsedSet, visibleDiffs],
+  );
+
+  useEffect(() => {
+    if (!targetIdsKey) return;
+    let cancelled = false;
+    setLoading(true);
+    setError(null);
+    if (ctx.remoteHostId !== null || ctx.deviceLinkDeviceId !== null) {
+      setChangeSets([]);
+      setError(t('rightSidebar.review.turn.localOnly'));
+      setLoading(false);
+      return;
+    }
+    void window.electronAPI.maker.getTurnChangeSets(reviewSessionId, targetIdsKey.split('\0'))
+      .then((sets) => {
+        if (cancelled) return;
+        setChangeSets(sets);
+      })
+      .catch((reason: unknown) => {
+        if (cancelled) return;
+        setError(extractIpcError(reason)?.message ?? (reason instanceof Error ? reason.message : String(reason)));
+      })
+      .finally(() => {
+        if (!cancelled) setLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [ctx.deviceLinkDeviceId, ctx.remoteHostId, reloadToken, reviewSessionId, t, targetIdsKey]);
+
+  const selectedDiff = target?.selectedDiffId
+    ? visibleDiffs.find((diff) => diff.id === target.selectedDiffId)
+    : target?.selectedPath
+      ? visibleDiffs.find((diff) => diff.path === target.selectedPath || diff.oldPath === target.selectedPath)
+      : null;
+  const jumpRequest = selectedDiff && target
+    ? { id: selectedDiff.id, nonce: target.requestNonce }
+    : null;
+  const togglePath = useCallback((id: string) => {
+    const next = new Set(collapsedSet);
+    if (next.has(id)) next.delete(id);
+    else next.add(id);
+    ctx.patchState({ collapsedPaths: Array.from(next) });
+  }, [collapsedSet, ctx]);
+  const totalAdd = visibleDiffs.reduce((sum, diff) => sum + diff.additions, 0);
+  const totalDel = visibleDiffs.reduce((sum, diff) => sum + diff.deletions, 0);
+  const unavailablePreview = useCallback(() => Promise.reject(new Error('Historical preview unavailable')), []);
+
+  return (
+    <div className="flex min-h-0 flex-1 flex-col overflow-hidden bg-[var(--panel-bg)]">
+      <header className="flex min-h-12 shrink-0 items-center gap-2 border-b border-[var(--border-default)] px-3 py-2">
+        {crossSession ? (
+          // 跨会话(协同 worker 的轮次):不提供 git 来源切换——git 视图跟随
+          // 桶会话的 workdir,对 worker 的 worktree 语义错误。静态标题,关 tab 退出。
+          <>
+            <FileDiffIcon size={15} className="shrink-0 text-[var(--text-secondary)]" />
+            <span className="min-w-0 truncate text-12 font-medium text-[var(--text-primary)]">
+              {t('rightSidebar.review.turn.title')}
+            </span>
+          </>
+        ) : (
+          <SourceDropdown
+            source="turn"
+            counts={{}}
+            commits={commitsState.data?.commits ?? []}
+            commitsLoading={commitsState.loading}
+            commitsError={commitsState.error}
+            commitsLoaded={commitsState.data !== null}
+            selectedCommitOid={null}
+            onChange={switchToGitSource}
+            onSelectCommit={switchToCommitSource}
+            onRefreshCommits={commitsState.refresh}
+          />
+        )}
+        <span className="min-w-0 flex-1 truncate" />
+        <span className="shrink-0 whitespace-nowrap font-mono text-11 tabular-nums">
+          <span className="text-[var(--diff-add-fg)]">+{totalAdd}</span>{' '}
+          <span className="text-[var(--diff-del-fg)]">-{totalDel}</span>
+        </span>
+      </header>
+      {!loading && !error && isPartial && (
+        <div className="flex shrink-0 items-start gap-2 border-b border-[var(--border-default)] bg-[var(--warning-bg-soft)] px-3 py-2 text-11 leading-relaxed text-[var(--text-secondary)]">
+          <AlertTriangle size={13} className="mt-0.5 shrink-0 text-[var(--warning-fg)]" />
+          <span>{t('rightSidebar.review.turn.partialNotice')}</span>
+        </div>
+      )}
+      {loading ? (
+        <CenteredState icon={<Spinner size={24} />} title={t('rightSidebar.review.loadingTitle')} desc={t('rightSidebar.review.loadingDesc')} />
+      ) : error ? (
+        <CenteredState
+          icon={<AlertTriangle size={24} />}
+          title={t('rightSidebar.review.errorTitle')}
+          desc={error}
+          actionLabel={t('rightSidebar.review.refresh')}
+          onAction={() => setReloadToken((value) => value + 1)}
+        />
+      ) : visibleDiffs.length === 0 ? (
+        <CenteredState
+          icon={<FileDiffIcon size={24} />}
+          title={t('rightSidebar.review.turn.emptyTitle')}
+          desc={t('rightSidebar.review.turn.emptyDesc')}
+        />
+      ) : (
+        <DiffList
+          diffs={visibleDiffs}
+          expandedSet={expandedSet}
+          onToggleDiff={togglePath}
+          onRefresh={() => setReloadToken((value) => value + 1)}
+          refreshPending={loading}
+          viewMode={state.diffViewMode ?? 'unified'}
+          onViewModeChange={(diffViewMode) => ctx.patchState({ diffViewMode })}
+          onRichMarkdownPreviewChange={(richMarkdownPreview) => ctx.patchState({ richMarkdownPreview })}
+          wordWrap={state.wordWrap ?? false}
+          wordDiff={state.wordDiff ?? true}
+          fileTreeVisible={state.fileTreeVisible ?? false}
+          jumpRequest={jumpRequest}
+          loadImagePreview={unavailablePreview}
+          loadMarkdownPreview={unavailablePreview}
+          richMarkdownPreview={false}
+          onOpenFile={() => undefined}
+        />
+      )}
+    </div>
+  );
+}
+
+function GitReviewTabBody({ state, ctx, source, setSource, selectedCommitOid, setSelectedCommitOid }: GitReviewBodyProps) {
   const { t } = useTranslation();
   const { confirm } = useConfirmDialog();
   const sessionId = ctx.sessionId || null;
@@ -374,8 +579,6 @@ export function ReviewTabBody({ state, ctx }: ReviewTabBodyProps) {
   const branchBaseRef = state.branchBaseRef ?? null;
   const { data, loading, error, refresh, setData: setReviewData } = useReviewGitState(sessionId, hideWhitespace);
   const commitsState = useReviewCommits(sessionId, branchBaseRef);
-  const [source, setSource] = useState<ReviewSource>('unstaged');
-  const [selectedCommitOid, setSelectedCommitOid] = useState<string | null>(null);
   const [pendingKey, setPendingKey] = useState<string | null>(null);
   const [operationError, setOperationError] = useState<string | null>(null);
   const [operationSummary, setOperationSummary] = useState<ReviewStageOperationSummary | null>(null);
@@ -772,7 +975,7 @@ export function ReviewTabBody({ state, ctx }: ReviewTabBodyProps) {
       if (!committed) return messageText;
       return decoratePushError(messageText, err);
     }).then((completed) => ({ committed, completed }));
-  }, [branchDiffState, commitsState, decoratePushError, runPushFlow, runWrite, sessionId, source, updateReviewDataFromWrite]);
+  }, [branchDiffState, commitsState, decoratePushError, runPushFlow, runWrite, sessionId, setSelectedCommitOid, source, updateReviewDataFromWrite]);
 
   const pushCurrentBranch = useCallback(() => {
     if (!sessionId) return;
@@ -790,7 +993,7 @@ export function ReviewTabBody({ state, ctx }: ReviewTabBodyProps) {
       setSelectedCommitOid(null);
       setSource('branch');
     }
-  }, [commits, commitsState.data, commitsState.loading, selectedCommitOid, source]);
+  }, [commits, commitsState.data, commitsState.loading, selectedCommitOid, setSelectedCommitOid, setSource, source]);
 
   const togglePath = useCallback(
     (id: string) => {
@@ -825,7 +1028,7 @@ export function ReviewTabBody({ state, ctx }: ReviewTabBodyProps) {
   const selectCommitSource = useCallback((oid: string) => {
     setSelectedCommitOid(oid);
     setSource('commit');
-  }, []);
+  }, [setSelectedCommitOid, setSource]);
   const requestFileJump = useCallback((diff: FileDiff) => {
     setJumpRequest((prev) => ({ id: diff.id, nonce: (prev?.nonce ?? 0) + 1 }));
   }, []);
@@ -965,14 +1168,14 @@ export function ReviewTabBody({ state, ctx }: ReviewTabBodyProps) {
             onSelectCommit={selectCommitSource}
             onRefreshCommits={commitsState.refresh}
           />
-          <span className="shrink-0 whitespace-nowrap font-mono text-[11px] tabular-nums">
+          <span className="shrink-0 whitespace-nowrap font-mono text-11 tabular-nums">
             <span className="text-[var(--diff-add-fg)]">+{totalAdd}</span>{' '}
             <span className="text-[var(--diff-del-fg)]">-{totalDel}</span>
           </span>
           {toolbarShowBranch && (
             <>
               <div className="mx-0.5 h-4 w-px shrink-0 bg-[var(--border-default)]" />
-              <div className="flex min-w-0 flex-1 items-center gap-1.5 text-[12px] text-[var(--text-secondary)]">
+              <div className="flex min-w-0 flex-1 items-center gap-1.5 text-12 text-[var(--text-secondary)]">
                 <GitBranch size={13} className="shrink-0 text-[var(--text-tertiary)]" />
                 <span className="min-w-0 truncate font-medium text-[var(--text-primary)]">
                   {branchLabel}
@@ -1056,7 +1259,7 @@ export function ReviewTabBody({ state, ctx }: ReviewTabBodyProps) {
           </div>
         </div>
         {effectiveWriteDisabledReasons.length > 0 && (
-          <div className="mt-2 flex items-start gap-2 rounded-[8px] border border-[var(--border-default)] bg-[var(--warning-bg-soft)] px-2.5 py-2 text-[11px] leading-relaxed text-[var(--text-secondary)]">
+          <div className="mt-2 flex items-start gap-2 rounded-[8px] border border-[var(--border-default)] bg-[var(--warning-bg-soft)] px-2.5 py-2 text-11 leading-relaxed text-[var(--text-secondary)]">
             <AlertTriangle size={13} className="mt-0.5 shrink-0 text-[var(--warning-fg)]" />
             <span>{t('rightSidebar.review.writeDisabledNotice', {
               reasons: writeDisabledReasonText,
@@ -1298,7 +1501,7 @@ function AheadBehindPill({
   return (
     <Tip text={label}>
       <span
-        className="shrink-0 rounded-full bg-[var(--surface-chip)] px-1.5 py-0.5 font-mono text-[10px] text-[var(--text-secondary)]"
+        className="shrink-0 rounded-full bg-[var(--surface-chip)] px-1.5 py-0.5 font-mono text-10 text-[var(--text-secondary)]"
         aria-label={label}
       >
         ↑{ahead} ↓{behind}
@@ -1448,7 +1651,7 @@ function CommitOrPushDropdown({
               if (!triggerDisabled) setOpen(true);
             }}
             className={cn(
-              'inline-flex h-6 shrink-0 items-center rounded-full border border-[var(--border-default)] bg-[var(--surface-elevated)] text-[10px] font-medium text-[var(--text-primary)] hover:bg-[var(--surface-hover)]',
+              'inline-flex h-6 shrink-0 items-center rounded-full border border-[var(--border-default)] bg-[var(--surface-elevated)] text-10 font-medium text-[var(--text-primary)] hover:bg-[var(--surface-hover)]',
               iconOnly ? 'w-6 justify-center px-0' : 'gap-1 px-2.5',
               triggerDisabled && 'cursor-not-allowed opacity-50',
             )}
@@ -1465,10 +1668,10 @@ function CommitOrPushDropdown({
         onKeyDown={handleKeyDown}
         className="w-[min(22rem,calc(100vw-24px))] rounded-[10px] border border-[var(--cmd-palette-border)] bg-[var(--cmd-palette-bg)] p-2 shadow-[var(--shadow-menu)]"
       >
-        <div className="flex min-w-0 items-center gap-2 rounded-[8px] bg-[var(--surface-chip)] px-2.5 py-2 text-[12px]">
+        <div className="flex min-w-0 items-center gap-2 rounded-[8px] bg-[var(--surface-chip)] px-2.5 py-2 text-12">
           <GitBranch size={13} className="shrink-0 text-[var(--text-tertiary)]" />
           <span className="min-w-0 flex-1 truncate font-medium text-[var(--text-primary)]">{branchLabel}</span>
-          <span className="shrink-0 whitespace-nowrap font-mono text-[11px] tabular-nums">
+          <span className="shrink-0 whitespace-nowrap font-mono text-11 tabular-nums">
             <span className="text-[var(--diff-add-fg)]">+{totalAdd}</span>{' '}
             <span className="text-[var(--diff-del-fg)]">-{totalDel}</span>
           </span>
@@ -1484,7 +1687,7 @@ function CommitOrPushDropdown({
             }}
             rows={4}
             placeholder={t('rightSidebar.review.commit.placeholder')}
-            className="min-h-[92px] w-full resize-none rounded-[8px] border border-[var(--border-default)] bg-[var(--surface-elevated)] px-2.5 py-2 text-[12px] leading-relaxed text-[var(--text-primary)] placeholder:text-[var(--text-placeholder)] focus:outline-none focus:ring-2 focus:ring-[var(--focus-ring-soft)]"
+            className="min-h-[92px] w-full resize-none rounded-[8px] border border-[var(--border-default)] bg-[var(--surface-elevated)] px-2.5 py-2 text-12 leading-relaxed text-[var(--text-primary)] placeholder:text-[var(--text-placeholder)] focus:outline-none focus:ring-2 focus:ring-[var(--focus-ring-soft)]"
           />
         </div>
         <DropdownMenuItem
@@ -1492,7 +1695,7 @@ function CommitOrPushDropdown({
             event.preventDefault();
             setIncludeUnstaged((current) => !current);
           }}
-          className="mt-1 flex h-8 items-center gap-2 rounded-[6px] px-2 text-[12px] text-[var(--text-primary)] focus:bg-[var(--cmd-palette-item-hover)]"
+          className="mt-1 flex h-8 items-center gap-2 rounded-[6px] px-2 text-12 text-[var(--text-primary)] focus:bg-[var(--cmd-palette-item-hover)]"
         >
           <span className="flex h-3.5 w-3.5 shrink-0 items-center justify-center rounded-[3px] border border-[var(--border-default)] bg-[var(--surface-elevated)] text-[var(--text-primary)]">
             {includeUnstaged && <Check size={10} />}
@@ -1527,7 +1730,7 @@ function CommitOrPushDropdown({
           }}
         >
           {push.ahead > 0 && (
-            <span className="rounded-full bg-[var(--surface-chip)] px-1 font-mono text-[9px] text-[var(--text-secondary)]">
+            <span className="rounded-full bg-[var(--surface-chip)] px-1 font-mono text-10 text-[var(--text-secondary)]">
               ↑{push.ahead}
             </span>
           )}
@@ -1565,7 +1768,7 @@ function CommitDropdownAction({
         onSelect();
       }}
       className={cn(
-        'flex h-8 items-center gap-2 rounded-[6px] px-2 text-[12px] text-[var(--text-primary)] focus:bg-[var(--cmd-palette-item-hover)]',
+        'flex h-8 items-center gap-2 rounded-[6px] px-2 text-12 text-[var(--text-primary)] focus:bg-[var(--cmd-palette-item-hover)]',
         disabled && 'cursor-not-allowed opacity-50',
       )}
     >
@@ -1573,7 +1776,7 @@ function CommitDropdownAction({
       <span className="min-w-0 flex-1 truncate">{label}</span>
       {children}
       {shortcut && (
-        <span className="shrink-0 rounded bg-[var(--surface-chip)] px-1 py-0.5 font-mono text-[9px] text-[var(--text-tertiary)]">
+        <span className="shrink-0 rounded bg-[var(--surface-chip)] px-1 py-0.5 font-mono text-10 text-[var(--text-tertiary)]">
           {shortcut}
         </span>
       )}
@@ -1684,7 +1887,7 @@ function FileJumpPopover({
               onChange={(event) => setQuery(event.target.value)}
               placeholder={t('rightSidebar.review.fileJump.placeholder')}
               aria-label={t('rightSidebar.review.fileJump.placeholder')}
-              className="h-7 w-full rounded-full border border-[var(--border-default)] bg-[var(--surface-elevated)] pl-7 pr-2 text-[12px] text-[var(--text-primary)] placeholder:text-[var(--text-placeholder)] focus:outline-none focus:ring-2 focus:ring-[var(--focus-ring-soft)]"
+              className="h-7 w-full rounded-full border border-[var(--border-default)] bg-[var(--surface-elevated)] pl-7 pr-2 text-12 text-[var(--text-primary)] placeholder:text-[var(--text-placeholder)] focus:outline-none focus:ring-2 focus:ring-[var(--focus-ring-soft)]"
             />
           </label>
           <div
@@ -1693,7 +1896,7 @@ function FileJumpPopover({
             className="mt-2 max-h-[280px] overflow-y-auto"
           >
             {results.length === 0 ? (
-              <div className="px-2 py-4 text-[11px] text-[var(--text-tertiary)]">
+              <div className="px-2 py-4 text-11 text-[var(--text-tertiary)]">
                 {t('rightSidebar.review.fileJump.empty')}
               </div>
             ) : (
@@ -1710,11 +1913,11 @@ function FileJumpPopover({
                     index === selectedIndex && 'bg-[var(--cmd-palette-item-hover)]',
                   )}
                 >
-                  <span className="truncate text-[12px] font-medium text-[var(--text-primary)]">
+                  <span className="truncate text-12 font-medium text-[var(--text-primary)]">
                     {result.fileName}
                   </span>
                   {result.directory && (
-                    <span className="truncate text-[10px] text-[var(--text-tertiary)]">
+                    <span className="truncate text-10 text-[var(--text-tertiary)]">
                       {result.directory}
                     </span>
                   )}
@@ -1722,7 +1925,7 @@ function FileJumpPopover({
               ))
             )}
             {overflowCount > 0 && (
-              <div className="px-2 py-1.5 text-[10px] text-[var(--text-tertiary)]">
+              <div className="px-2 py-1.5 text-10 text-[var(--text-tertiary)]">
                 {t('rightSidebar.review.fileJump.more', { count: overflowCount })}
               </div>
             )}
@@ -1850,7 +2053,7 @@ export function ReviewMoreMenu({
         onCopyGitApply();
       }}
       className={cn(
-        'flex h-8 items-center gap-2 rounded-[6px] px-2 text-[12px] text-[var(--text-primary)] focus:bg-[var(--cmd-palette-item-hover)]',
+        'flex h-8 items-center gap-2 rounded-[6px] px-2 text-12 text-[var(--text-primary)] focus:bg-[var(--cmd-palette-item-hover)]',
         !canCopyGitApply && 'cursor-not-allowed opacity-50',
       )}
     >
@@ -1896,7 +2099,7 @@ export function ReviewMoreMenu({
         )}
         <DropdownMenuItem
           onSelect={() => onWordWrapChange(!wordWrap)}
-          className="flex h-8 items-center gap-2 rounded-[6px] px-2 text-[12px] text-[var(--text-primary)] focus:bg-[var(--cmd-palette-item-hover)]"
+          className="flex h-8 items-center gap-2 rounded-[6px] px-2 text-12 text-[var(--text-primary)] focus:bg-[var(--cmd-palette-item-hover)]"
         >
           {wordWrap
             ? <WrapText size={12} className="text-[var(--text-secondary)]" />
@@ -1905,7 +2108,7 @@ export function ReviewMoreMenu({
         </DropdownMenuItem>
         <DropdownMenuItem
           onSelect={() => onWordDiffChange(!wordDiff)}
-          className="flex h-8 items-center gap-2 rounded-[6px] px-2 text-[12px] text-[var(--text-primary)] focus:bg-[var(--cmd-palette-item-hover)]"
+          className="flex h-8 items-center gap-2 rounded-[6px] px-2 text-12 text-[var(--text-primary)] focus:bg-[var(--cmd-palette-item-hover)]"
         >
           {wordDiff
             ? <Diff size={12} className="text-[var(--text-secondary)]" />
@@ -1914,7 +2117,7 @@ export function ReviewMoreMenu({
         </DropdownMenuItem>
         <DropdownMenuItem
           onSelect={() => onHideWhitespaceChange(!hideWhitespace)}
-          className="flex h-8 items-center gap-2 rounded-[6px] px-2 text-[12px] text-[var(--text-primary)] focus:bg-[var(--cmd-palette-item-hover)]"
+          className="flex h-8 items-center gap-2 rounded-[6px] px-2 text-12 text-[var(--text-primary)] focus:bg-[var(--cmd-palette-item-hover)]"
         >
           {hideWhitespace
             ? <EyeOff size={12} className="text-[var(--text-secondary)]" />
@@ -1954,7 +2157,7 @@ function DiffExpansionMenuItem({
         onToggle();
       }}
       className={cn(
-        'flex h-8 items-center gap-2 rounded-[6px] px-2 text-[12px] text-[var(--text-primary)] focus:bg-[var(--cmd-palette-item-hover)]',
+        'flex h-8 items-center gap-2 rounded-[6px] px-2 text-12 text-[var(--text-primary)] focus:bg-[var(--cmd-palette-item-hover)]',
         disabled && 'cursor-not-allowed opacity-50',
       )}
     >
@@ -1985,7 +2188,7 @@ function FileTreeMenuItem({
   return (
     <DropdownMenuItem
       onSelect={onToggle}
-      className="flex h-8 items-center gap-2 rounded-[6px] px-2 text-[12px] text-[var(--text-primary)] focus:bg-[var(--cmd-palette-item-hover)]"
+      className="flex h-8 items-center gap-2 rounded-[6px] px-2 text-12 text-[var(--text-primary)] focus:bg-[var(--cmd-palette-item-hover)]"
     >
       {preferenceVisible
         ? <FolderOpen size={12} className="text-[var(--text-secondary)]" />
@@ -2008,8 +2211,9 @@ export function SourceDropdown({
   onSelectCommit,
   onRefreshCommits,
 }: {
-  source: ReviewSource;
-  counts: { unstaged: number; staged: number; branch: number; lastTurn: number };
+  /** `'turn'` 表示轮次审查(turnTarget)选中态:非 git 来源,仅作为当前项展示。 */
+  source: ReviewSource | 'turn';
+  counts: { unstaged?: number; staged?: number; branch?: number; lastTurn?: number };
   commits?: ReviewCommit[];
   commitsLoading?: boolean;
   commitsError?: string | null;
@@ -2021,6 +2225,11 @@ export function SourceDropdown({
   onRefreshCommits?: () => void;
 }) {
   const { t } = useTranslation();
+  // 轮次项只在轮次审查态存在(进入它的唯一入口是聊天流的变更卡片);
+  // 切走即清 turnTarget、不提供"切回轮次"的常驻项,对齐 Codex 的 EP 语义。
+  const turnOption: SourceDropdownOption | null = source === 'turn'
+    ? { source: 'turn', label: t('rightSidebar.review.turn.title') }
+    : null;
   const options: SourceDropdownOption[] = [
     { source: 'unstaged', label: t('rightSidebar.review.source.unstaged'), count: counts.unstaged },
     { source: 'staged', label: t('rightSidebar.review.source.staged'), count: counts.staged },
@@ -2029,7 +2238,7 @@ export function SourceDropdown({
     { source: 'last-turn', label: t('rightSidebar.review.source.lastTurn') },
   ];
   const directOptions = options.filter((option) => option.source !== 'commit');
-  const selected = options.find((option) => option.source === source) ?? options[0];
+  const selected = turnOption ?? options.find((option) => option.source === source) ?? options[0];
   const commitList = commits ?? [];
   const commitMenuLoaded = commitsLoaded ?? false;
   return (
@@ -2039,7 +2248,7 @@ export function SourceDropdown({
           type="button"
           aria-label={t('rightSidebar.review.sourceDropdownAria')}
           className={cn(
-            'flex h-7 shrink-0 items-center justify-between rounded-full border border-transparent bg-transparent px-1.5 text-left text-[12px] font-medium text-[var(--text-primary)] hover:bg-[var(--surface-hover)]',
+            'flex h-7 shrink-0 items-center justify-between rounded-full border border-transparent bg-transparent px-1.5 text-left text-12 font-medium text-[var(--text-primary)] hover:bg-[var(--surface-hover)]',
             layout === 'wide' ? 'max-w-[11rem]' : 'max-w-[10rem]',
           )}
         >
@@ -2053,6 +2262,13 @@ export function SourceDropdown({
         sideOffset={4}
         className="w-[var(--radix-dropdown-menu-trigger-width)] min-w-[12rem] rounded-[8px] border border-[var(--cmd-palette-border)] bg-[var(--cmd-palette-bg)] p-1 shadow-[var(--shadow-menu)]"
       >
+        {turnOption && (
+          <SourceDropdownItem
+            option={turnOption}
+            active
+            onChange={onChange}
+          />
+        )}
         {directOptions.slice(0, 2).map((option) => (
           <SourceDropdownItem
             key={option.source}
@@ -2065,7 +2281,7 @@ export function SourceDropdown({
           if (open) onRefreshCommits?.();
         }}
         >
-          <DropdownMenuSubTrigger className="flex h-8 items-center gap-2 rounded-[6px] px-2 text-[12px] text-[var(--text-primary)] focus:bg-[var(--cmd-palette-item-hover)] data-[state=open]:bg-[var(--cmd-palette-item-hover)]">
+          <DropdownMenuSubTrigger className="flex h-8 items-center gap-2 rounded-[6px] px-2 text-12 text-[var(--text-primary)] focus:bg-[var(--cmd-palette-item-hover)] data-[state=open]:bg-[var(--cmd-palette-item-hover)]">
             <span className="min-w-0 flex-1 truncate">{t('rightSidebar.review.source.commit')}</span>
             <span className="flex h-4 w-4 shrink-0 items-center justify-center text-[var(--text-secondary)]">
               {source === 'commit' && <Check size={12} />}
@@ -2081,7 +2297,7 @@ export function SourceDropdown({
               <>
                 <DropdownMenuItem
                   disabled
-                  className="flex h-8 items-center gap-2 rounded-[6px] px-2 text-[12px] text-[var(--text-secondary)]"
+                  className="flex h-8 items-center gap-2 rounded-[6px] px-2 text-12 text-[var(--text-secondary)]"
                 >
                   <AlertTriangle size={12} />
                   <span>{t('rightSidebar.review.commitMenu.error')}</span>
@@ -2091,7 +2307,7 @@ export function SourceDropdown({
                     event.preventDefault();
                     onRefreshCommits?.();
                   }}
-                  className="flex h-8 items-center gap-2 rounded-[6px] px-2 text-[12px] text-[var(--text-primary)] focus:bg-[var(--cmd-palette-item-hover)]"
+                  className="flex h-8 items-center gap-2 rounded-[6px] px-2 text-12 text-[var(--text-primary)] focus:bg-[var(--cmd-palette-item-hover)]"
                 >
                   <Spinner icon={RefreshCw} size={12} spinning={commitsLoading} className="text-[var(--text-secondary)]" />
                   <span>{t('rightSidebar.review.commitMenu.retry')}</span>
@@ -2100,7 +2316,7 @@ export function SourceDropdown({
             ) : !commitMenuLoaded || (commitsLoading && commitList.length === 0) ? (
               <DropdownMenuItem
                 disabled
-                className="flex h-8 items-center gap-2 rounded-[6px] px-2 text-[12px] text-[var(--text-secondary)]"
+                className="flex h-8 items-center gap-2 rounded-[6px] px-2 text-12 text-[var(--text-secondary)]"
               >
                 <Spinner icon={RefreshCw} size={12} />
                 <span>{t('rightSidebar.review.commitMenu.loading')}</span>
@@ -2108,7 +2324,7 @@ export function SourceDropdown({
             ) : commitList.length === 0 ? (
               <DropdownMenuItem
                 disabled
-                className="flex h-8 items-center gap-2 rounded-[6px] px-2 text-[12px] text-[var(--text-secondary)]"
+                className="flex h-8 items-center gap-2 rounded-[6px] px-2 text-12 text-[var(--text-secondary)]"
               >
                 <FileDiffIcon size={12} />
                 <span>{t('rightSidebar.review.commitMenu.empty')}</span>
@@ -2121,12 +2337,12 @@ export function SourceDropdown({
                   <DropdownMenuItem
                     onSelect={() => onSelectCommit?.(commit.oid)}
                     className={cn(
-                      'flex h-8 min-w-0 items-center gap-2 rounded-[6px] px-2 text-[12px] text-[var(--text-primary)] focus:bg-[var(--cmd-palette-item-hover)]',
+                      'flex h-8 min-w-0 items-center gap-2 rounded-[6px] px-2 text-12 text-[var(--text-primary)] focus:bg-[var(--cmd-palette-item-hover)]',
                       active && 'bg-[var(--surface-chip)]',
                     )}
                   >
                     <span className="min-w-0 flex-1 truncate">{title}</span>
-                    <span className="shrink-0 text-[10px] text-[var(--text-tertiary)]">
+                    <span className="shrink-0 text-10 text-[var(--text-tertiary)]">
                       {t('rightSidebar.review.commitMenu.relativeTime', {
                         time: formatSidebarTime(new Date(commit.authorTime * 1000).toISOString(), t),
                       })}
@@ -2154,7 +2370,7 @@ export function SourceDropdown({
 }
 
 interface SourceDropdownOption {
-  source: ReviewSource;
+  source: ReviewSource | 'turn';
   label: string;
   count?: number;
 }
@@ -2179,8 +2395,11 @@ function SourceDropdownItem({
 }) {
   return (
     <DropdownMenuItem
-      onSelect={() => onChange(option.source)}
-      className="flex h-8 items-center gap-2 rounded-[6px] px-2 text-[12px] text-[var(--text-primary)] focus:bg-[var(--cmd-palette-item-hover)]"
+      // 轮次伪选项已是选中态,点它只关菜单,不产生来源切换。
+      onSelect={() => {
+        if (option.source !== 'turn') onChange(option.source);
+      }}
+      className="flex h-8 items-center gap-2 rounded-[6px] px-2 text-12 text-[var(--text-primary)] focus:bg-[var(--cmd-palette-item-hover)]"
     >
       <span className="min-w-0 flex-1 truncate">{option.label}</span>
       <SourceCountBadge count={option.count} />
@@ -2276,18 +2495,18 @@ function OperationNotice({
   const errorDetails = errorLines.slice(1).join('\n').trim();
   if (!error && failed.length === 0) return null;
   return (
-    <div className="mt-2 rounded-[8px] border border-[var(--error-border)] bg-[var(--error-bg)] px-2.5 py-2 text-[11px] leading-relaxed text-[var(--error-fg)]">
+    <div className="mt-2 rounded-[8px] border border-[var(--error-border)] bg-[var(--error-bg)] px-2.5 py-2 text-11 leading-relaxed text-[var(--error-fg)]">
       {errorTitle ?? t('rightSidebar.review.actions.partialFailure', {
         succeeded: summary?.succeeded.length ?? 0,
         failed: failed.length,
       })}
       {errorDetails && (
-        <div className="mt-1 max-h-24 overflow-auto whitespace-pre-wrap break-words font-mono text-[10px] text-[var(--error-fg-strong)]">
+        <div className="mt-1 max-h-24 overflow-auto whitespace-pre-wrap break-words font-mono text-10 text-[var(--error-fg-strong)]">
           {errorDetails}
         </div>
       )}
       {failed.length > 0 && (
-        <div className="mt-1 max-h-24 overflow-auto whitespace-pre-wrap break-words font-mono text-[10px] text-[var(--error-fg-strong)]">
+        <div className="mt-1 max-h-24 overflow-auto whitespace-pre-wrap break-words font-mono text-10 text-[var(--error-fg-strong)]">
           {failed[0].path}: {failed[0].stderr || failed[0].error}
         </div>
       )}
@@ -2557,7 +2776,7 @@ function DiffList({
         onRichMarkdownPreviewChange={onRichMarkdownPreviewChange}
       />
       {topNotice && (
-        <div className="shrink-0 border-b border-[var(--border-default)] bg-[var(--warning-bg-soft)] px-3 py-2 text-[11px] leading-relaxed text-[var(--text-secondary)]">
+        <div className="shrink-0 border-b border-[var(--border-default)] bg-[var(--warning-bg-soft)] px-3 py-2 text-11 leading-relaxed text-[var(--text-secondary)]">
           {topNotice}
         </div>
       )}
@@ -2744,12 +2963,12 @@ export function ReviewFileTreeSidebar({
             onChange={(event) => setQuery(event.target.value)}
             placeholder={t('rightSidebar.review.fileTree.filterPlaceholder')}
             aria-label={t('rightSidebar.review.fileTree.filterPlaceholder')}
-            className="h-7 w-full rounded-full border border-[var(--border-default)] bg-[var(--surface-elevated)] pl-7 pr-2 text-[12px] text-[var(--text-primary)] placeholder:text-[var(--text-placeholder)] focus:outline-none focus:ring-2 focus:ring-[var(--focus-ring-soft)]"
+            className="h-7 w-full rounded-full border border-[var(--border-default)] bg-[var(--surface-elevated)] pl-7 pr-2 text-12 text-[var(--text-primary)] placeholder:text-[var(--text-placeholder)] focus:outline-none focus:ring-2 focus:ring-[var(--focus-ring-soft)]"
           />
         </label>
       </div>
       {flatNodes.length === 0 ? (
-        <div className="px-3 py-4 text-[11px] leading-relaxed text-[var(--text-tertiary)]">
+        <div className="px-3 py-4 text-11 leading-relaxed text-[var(--text-tertiary)]">
           {t('rightSidebar.review.fileTree.empty')}
         </div>
       ) : (
@@ -2810,7 +3029,7 @@ function ReviewFileTreeRow({
         role="treeitem"
         aria-expanded={!collapsed}
         onClick={() => onToggleDirectory(node.id)}
-        className="flex h-7 w-full min-w-0 items-center gap-1 pr-2 text-left text-[12px] text-[var(--text-secondary)] hover:bg-[var(--surface-hover)]"
+        className="flex h-7 w-full min-w-0 items-center gap-1 pr-2 text-left text-12 text-[var(--text-secondary)] hover:bg-[var(--surface-hover)]"
         style={{ paddingLeft }}
       >
         {collapsed ? <ChevronRight size={12} className="shrink-0 text-[var(--text-tertiary)]" /> : <ChevronDown size={12} className="shrink-0 text-[var(--text-tertiary)]" />}
@@ -2829,7 +3048,7 @@ function ReviewFileTreeRow({
         aria-selected={active}
         onClick={() => onSelectFile(node.diff)}
         className={cn(
-          'flex h-7 w-full min-w-0 items-center pr-2 text-left text-[12px] text-[var(--text-secondary)] hover:bg-[var(--surface-hover)]',
+          'flex h-7 w-full min-w-0 items-center pr-2 text-left text-12 text-[var(--text-secondary)] hover:bg-[var(--surface-hover)]',
           active && 'bg-[var(--surface-chip)] text-[var(--text-primary)]',
         )}
         style={{ paddingLeft: paddingLeft + 18 }}
@@ -2928,12 +3147,12 @@ export function ReviewDiffListHeader({
   }, [rowEl]);
 
   return (
-    <div ref={setRowEl} className="flex h-9 shrink-0 items-center gap-2 border-b border-[var(--border-default)] px-3 text-[12px]">
+    <div ref={setRowEl} className="flex h-9 shrink-0 items-center gap-2 border-b border-[var(--border-default)] px-3 text-12">
       <div data-testid="review-diff-list-header-left" className="flex min-w-0 flex-1 items-center gap-2">
         {branchBaseControl && (
           <>
             {showBranchBaseLabel && (
-              <span data-testid="review-branch-base-label" className="shrink-0 text-[11px] text-[var(--text-tertiary)]">
+              <span data-testid="review-branch-base-label" className="shrink-0 text-11 text-[var(--text-tertiary)]">
                 {t('rightSidebar.review.branch.baseLabel')}
               </span>
             )}
@@ -3034,7 +3253,7 @@ function DiffViewModeToggle({
           type="button"
           onClick={() => onChange(option.mode)}
           className={cn(
-            'rounded-full px-2 text-[10px] font-medium text-[var(--text-secondary)] hover:text-[var(--text-primary)]',
+            'rounded-full px-2 text-10 font-medium text-[var(--text-secondary)] hover:text-[var(--text-primary)]',
             option.mode === mode && 'bg-[var(--surface-elevated)] text-[var(--text-primary)] shadow-[var(--shadow-menu)]',
           )}
         >
@@ -3150,7 +3369,7 @@ export function CappedSourceView({
         richMarkdownPreview={richMarkdownPreview}
         onRichMarkdownPreviewChange={onRichMarkdownPreviewChange}
       />
-      <div className="shrink-0 border-b border-[var(--border-default)] bg-[var(--warning-bg-soft)] px-3 py-2 text-[11px] leading-relaxed text-[var(--text-secondary)]">
+      <div className="shrink-0 border-b border-[var(--border-default)] bg-[var(--warning-bg-soft)] px-3 py-2 text-11 leading-relaxed text-[var(--text-secondary)]">
         {notice}
       </div>
       <div ref={contentRef} className="relative min-h-0 min-w-0 flex-1 overflow-hidden">
@@ -3218,12 +3437,12 @@ function CappedFileState({
   desc: string;
 }) {
   return (
-    <div className="m-3 rounded-[8px] border border-[var(--border-default)] bg-[var(--surface)] px-3 py-3 text-[12px] leading-relaxed text-[var(--text-secondary)]">
+    <div className="m-3 rounded-[8px] border border-[var(--border-default)] bg-[var(--surface)] px-3 py-3 text-12 leading-relaxed text-[var(--text-secondary)]">
       <div className="flex items-center gap-2 font-medium text-[var(--text-primary)]">
         <span className="text-[var(--text-tertiary)]">{icon}</span>
         <span>{title}</span>
       </div>
-      <div className="mt-1 break-words text-[11px] text-[var(--text-tertiary)]">{desc}</div>
+      <div className="mt-1 break-words text-11 text-[var(--text-tertiary)]">{desc}</div>
     </div>
   );
 }
@@ -3439,7 +3658,7 @@ export function BranchBaseDropdown({
             type="button"
             disabled={candidates.length === 0}
             aria-label={tooltip}
-            className="flex h-6 min-w-0 max-w-full items-center justify-between rounded-full border border-[var(--border-default)] bg-[var(--surface-elevated)] px-2 text-left text-[12px] text-[var(--text-primary)] hover:bg-[var(--surface-hover)] disabled:cursor-not-allowed disabled:opacity-60"
+            className="flex h-6 min-w-0 max-w-full items-center justify-between rounded-full border border-[var(--border-default)] bg-[var(--surface-elevated)] px-2 text-left text-12 text-[var(--text-primary)] hover:bg-[var(--surface-hover)] disabled:cursor-not-allowed disabled:opacity-60"
           >
             <span className="min-w-0 truncate">{label}</span>
             <ChevronDown size={13} className="ml-1.5 shrink-0 text-[var(--text-tertiary)]" />
@@ -3455,7 +3674,7 @@ export function BranchBaseDropdown({
           <DropdownMenuItem
             key={candidate.refName}
             onSelect={() => onSelectBase(candidate.refName)}
-            className="flex h-8 items-center gap-2 rounded-[6px] px-2 text-[12px] text-[var(--text-primary)] focus:bg-[var(--cmd-palette-item-hover)]"
+            className="flex h-8 items-center gap-2 rounded-[6px] px-2 text-12 text-[var(--text-primary)] focus:bg-[var(--cmd-palette-item-hover)]"
           >
             <span className="flex h-4 w-4 items-center justify-center text-[var(--text-secondary)]">
               {candidate.refName === selectedBaseRef && <Check size={12} />}
@@ -3509,13 +3728,13 @@ function CenteredState({
   return (
     <div className="flex flex-1 flex-col items-center justify-center gap-3 px-6 text-center">
       <div className="text-[var(--text-tertiary)]">{icon}</div>
-      <p className="text-[13px] font-medium text-[var(--text-primary)]">{title}</p>
-      <p className="max-w-[260px] text-[11px] leading-relaxed text-[var(--text-tertiary)]">{desc}</p>
+      <p className="text-13 font-medium text-[var(--text-primary)]">{title}</p>
+      <p className="max-w-[260px] text-11 leading-relaxed text-[var(--text-tertiary)]">{desc}</p>
       {actionLabel && onAction && (
         <button
           type="button"
           onClick={onAction}
-          className="mt-1 rounded-full border border-[var(--border-default)] bg-[var(--surface-elevated)] px-3 py-1.5 text-[11px] font-medium text-[var(--text-primary)] hover:bg-[var(--surface-hover)]"
+          className="mt-1 rounded-full border border-[var(--border-default)] bg-[var(--surface-elevated)] px-3 py-1.5 text-11 font-medium text-[var(--text-primary)] hover:bg-[var(--surface-hover)]"
         >
           {actionLabel}
         </button>
@@ -3553,7 +3772,7 @@ function ActionButton({
         onClick();
       }}
       className={cn(
-        'inline-flex h-6 items-center justify-center rounded-full border border-[var(--border-default)] bg-[var(--surface-elevated)] text-[10px] font-medium text-[var(--text-primary)] hover:bg-[var(--surface-hover)] disabled:cursor-not-allowed disabled:opacity-50',
+        'inline-flex h-6 items-center justify-center rounded-full border border-[var(--border-default)] bg-[var(--surface-elevated)] text-10 font-medium text-[var(--text-primary)] hover:bg-[var(--surface-hover)] disabled:cursor-not-allowed disabled:opacity-50',
         className,
         iconOnly ? 'w-6 px-0' : 'gap-1 px-2',
       )}
@@ -3766,8 +3985,8 @@ function FileRow({
             <ChevronRight size={12} className="shrink-0 text-[var(--text-tertiary)]" />
           )}
           <span className="min-w-0 flex-1">
-            <span className="block truncate text-[13px] font-medium text-[var(--text-primary)]">{fileName}</span>
-            <span className="block truncate text-[10px] text-[var(--text-tertiary)]">
+            <span className="block truncate text-13 font-medium text-[var(--text-primary)]">{fileName}</span>
+            <span className="block truncate text-10 text-[var(--text-tertiary)]">
               {showsPathTransition ? (
                 <>
                   <span className="opacity-70">{diff.oldPath}</span>
@@ -3779,16 +3998,16 @@ function FileRow({
           </span>
         </button>
         {changeChip && (
-          <span className="shrink-0 rounded-full bg-[var(--surface-chip)] px-2 py-0.5 text-[10px] text-[var(--text-secondary)]">
+          <span className="shrink-0 rounded-full bg-[var(--surface-chip)] px-2 py-0.5 text-10 text-[var(--text-secondary)]">
             {changeChip}
           </span>
         )}
         {diff.kind !== 'text' && (
-          <span className="shrink-0 rounded-full bg-[var(--surface-chip)] px-2 py-0.5 text-[10px] text-[var(--text-secondary)]">
+          <span className="shrink-0 rounded-full bg-[var(--surface-chip)] px-2 py-0.5 text-10 text-[var(--text-secondary)]">
             {t(`rightSidebar.review.status.${diff.kind}`, { defaultValue: diff.kind })}
           </span>
         )}
-        <span className="shrink-0 font-mono text-[11px] tabular-nums">
+        <span className="shrink-0 font-mono text-11 tabular-nums">
           <span className="text-[var(--diff-add-fg)]">+{diff.additions}</span>{' '}
           <span className="text-[var(--diff-del-fg)]">-{diff.deletions}</span>
         </span>
@@ -3828,12 +4047,12 @@ function FileRow({
       {expanded && (
         <div className="min-w-0 px-3 pb-3">
           {showRenamePartialNotice && (
-            <div className="mb-2 rounded-[8px] border border-[var(--border-default)] bg-[var(--surface)] px-3 py-2 text-[12px] text-[var(--text-secondary)]">
+            <div className="mb-2 rounded-[8px] border border-[var(--border-default)] bg-[var(--surface)] px-3 py-2 text-12 text-[var(--text-secondary)]">
               {t('rightSidebar.review.renamePartialNotice')}
             </div>
           )}
           {showTypechangePartialNotice && (
-            <div className="mb-2 rounded-[8px] border border-[var(--border-default)] bg-[var(--surface)] px-3 py-2 text-[12px] text-[var(--text-secondary)]">
+            <div className="mb-2 rounded-[8px] border border-[var(--border-default)] bg-[var(--surface)] px-3 py-2 text-12 text-[var(--text-secondary)]">
               {t('rightSidebar.review.typechangePartialNotice')}
             </div>
           )}

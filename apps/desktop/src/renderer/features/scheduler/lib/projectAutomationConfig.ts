@@ -17,6 +17,8 @@ export interface ProjectScheduleConfig {
   intervalMs?: number;
   agentKind?: AgentKind;
   model?: string;
+  /** 显式来源(供应商)id;省略 = 使用该 Agent 的原生默认来源。 */
+  providerId?: string;
   effort?: string;
   /** Codex Fast 模式开关，仅 Codex 有意义。详见 Schedule.fastMode。 */
   fastMode?: boolean;
@@ -58,6 +60,7 @@ export function scheduleToProjectConfig(
     intervalMs: schedule.intervalMs,
     agentKind: schedule.agentKind,
     model: schedule.model,
+    providerId: schedule.providerId || undefined,
     effort: schedule.effort,
     fastMode: schedule.fastMode,
     useWorktree: schedule.useWorktree,
@@ -86,6 +89,7 @@ export function formToProjectConfig(
     intervalMs: form.intervalMs,
     agentKind: form.agentKind,
     model: form.model.trim() || undefined,
+    providerId: form.providerId.trim() || undefined,
     effort: form.effort || undefined,
     // Codex / Cursor / Pi 都生效;只认 codex 会丢弃 Cursor/Pi 任务的 Fast。
     fastMode: (form.agentKind === 'codex' || form.agentKind === 'cursor' || form.agentKind === 'pi') && form.fastMode ? true : undefined,

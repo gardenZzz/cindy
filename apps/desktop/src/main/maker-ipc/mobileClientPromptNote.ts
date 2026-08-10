@@ -41,6 +41,34 @@ export function buildMobileClientPromptNote(): string {
   );
 }
 
+function singleTextContent(message: unknown): string | null {
+  if (typeof message === 'string') return message;
+  if (!message || typeof message !== 'object' || Array.isArray(message)) return null;
+  const content = (message as { content?: unknown }).content;
+  if (typeof content === 'string') return content;
+  if (!Array.isArray(content) || content.length !== 1) return null;
+  const part = content[0];
+  if (!part || typeof part !== 'object' || Array.isArray(part)) return null;
+  const { type, text } = part as { type?: unknown; text?: unknown };
+  return (
+    (type === 'text' || type === 'input_text' || type === 'output_text')
+    && typeof text === 'string'
+  ) ? text : null;
+}
+
+/**
+ * Claude Code 内置命令必须位于消息开头；手机客户端说明不能抢占这个位置。
+ * 只放行已由 palette 明确暴露的 `/compact`，其它 slash 文本继续保留来源说明。
+ */
+export function shouldPrependMobileClientPromptNote(
+  message: unknown,
+  agentKind: string,
+): boolean {
+  if (agentKind !== 'claude-code') return true;
+  const text = singleTextContent(message);
+  return text === null || !/^\/compact(?:\s|$)/.test(text);
+}
+
 /**
  * 在 IPC 边界给队列项盖上手机来源(返回新对象,不原地改入参)。
  *
@@ -61,6 +89,47 @@ export function stampMobileClientOrigin<T extends { fromMobileClient?: boolean }
 }
 
 /**
+ * Main-owned input boundary captured at an IPC entry point.  The generation is
+ * intentionally carried alongside the wall-clock clear token: two clears can
+ * share the same millisecond timestamp, while the generation still proves that
+ * a request started before the later clear.
+ */
+export interface MainOwnedInputBoundaryStamp {
+  expectedClearBoundaryMs: number | null;
+  expectedInputGeneration: number;
+  /** Main-only cancellation scope; never comes from a device-link payload. */
+  inputAbortSignal?: AbortSignal;
+}
+
+/**
+ * Strip fields that are only valid when constructed by main.  The clear token
+ * itself remains a valid controller precondition: the IPC boundary validates it
+ * before `attachMainOwnedInputBoundary` replaces it with the authoritative host
+ * stamp.  Keeping it when no stamp is available also preserves old test harnesses
+ * and non-device-link callers.
+ */
+export function attachMainOwnedInputBoundary(
+  sendOpts: unknown,
+  stamp: MainOwnedInputBoundaryStamp | undefined,
+): unknown {
+  const sanitized = stripMainOnlySendOpts(sendOpts);
+  if (!stamp) return sanitized;
+  if (!sanitized || typeof sanitized !== 'object' || Array.isArray(sanitized)) {
+    return {
+      expectedClearBoundaryMs: stamp.expectedClearBoundaryMs,
+      expectedInputGeneration: stamp.expectedInputGeneration,
+      ...(stamp.inputAbortSignal ? { signal: stamp.inputAbortSignal } : {}),
+    };
+  }
+  return {
+    ...(sanitized as Record<string, unknown>),
+    expectedClearBoundaryMs: stamp.expectedClearBoundaryMs,
+    expectedInputGeneration: stamp.expectedInputGeneration,
+    ...(stamp.inputAbortSignal ? { signal: stamp.inputAbortSignal } : {}),
+  };
+}
+
+/**
  * 剥掉 sendOpts 里「只允许 main 写」的字段。
  *
  * `fromMobileClient` 是 coordinator 从队列项透传给 send 事务的内部字段;直连
@@ -71,7 +140,21 @@ export function stampMobileClientOrigin<T extends { fromMobileClient?: boolean }
  */
 export function stripMainOnlySendOpts(sendOpts: unknown): unknown {
   if (!sendOpts || typeof sendOpts !== 'object' || Array.isArray(sendOpts)) return sendOpts;
-  if (!('fromMobileClient' in sendOpts)) return sendOpts;
-  const { fromMobileClient: _ignored, ...rest } = sendOpts as Record<string, unknown>;
+  const opts = sendOpts as Record<string, unknown>;
+  if (
+    !('fromMobileClient' in opts) &&
+    !('expectedInputGeneration' in opts) &&
+    !('inputAbortSignal' in opts) &&
+    !('signal' in opts)
+  ) {
+    return sendOpts;
+  }
+  const {
+    fromMobileClient: _ignoredMobile,
+    expectedInputGeneration: _ignoredGeneration,
+    inputAbortSignal: _ignoredAbortSignal,
+    signal: _ignoredSignal,
+    ...rest
+  } = opts;
   return rest;
 }

@@ -56,9 +56,13 @@ import { getStickySessionDeviceId } from '@/features/device-link/stickySessionOr
 import { insertSessionLinkIntoComposer } from '@/lib/composerActionsBus';
 import { MarkdownRenderer } from './MarkdownRenderer';
 import { MessageActionBar } from './MessageActionBar';
+import { shareSelectionStore } from './shareSelectionStore';
 import { useForkAtMessage } from './useForkAtMessage';
 import { useDeleteMessage } from './useDeleteMessage';
-import { useSessionNavigationMode } from '@/features/cc-agent/embeddedSessionNavigation';
+import {
+  isInteractiveSessionNavigationMode,
+  useSessionNavigationMode,
+} from '@/features/cc-agent/embeddedSessionNavigation';
 
 /**
  * Streaming 渲染策略开关 (代码级 / 编译期):
@@ -182,6 +186,8 @@ interface AssistantMessageProps {
   userTurnCostIsEstimate?: boolean;
   /** Per-turn token/cache 明细。 */
   turnUsageDetails?: TurnUsageDetails;
+  /** 同一用户轮跨多个 SDK segment 聚合后的 token/cache/model 明细。 */
+  userTurnUsageDetails?: TurnUsageDetails;
   /** 本轮模型降级标记(main turn 结束检测命中时挂到收尾 assistant 上),
    *  正文下方渲染一条常显的降级提示行。 */
   modelMismatch?: { selected: string; actual: string };
@@ -211,6 +217,7 @@ export const AssistantMessage = memo(function AssistantMessage({
   userTurnCostUsd,
   userTurnCostIsEstimate,
   turnUsageDetails,
+  userTurnUsageDetails,
   modelMismatch,
   ghostReplyPending,
 }: AssistantMessageProps) {
@@ -250,7 +257,7 @@ export const AssistantMessage = memo(function AssistantMessage({
   });
   const navigationMode = useSessionNavigationMode();
   const canFork =
-    navigationMode === 'route-owner' &&
+    isInteractiveSessionNavigationMode(navigationMode) &&
     Boolean(currentSessionId && messageClientId) &&
     forkSupported;
   // 远程会话的消息深链把归属设备冻进 `?device=`(粘滞解析,relay 重连窗口不丢),
@@ -260,6 +267,14 @@ export const AssistantMessage = memo(function AssistantMessage({
         deviceId: getStickySessionDeviceId(currentSessionId),
       })
     : undefined;
+  // 分享为图片:进入选择模式并预选本条(入口那条天然该已勾选,省一次点击)。
+  const handleShareAsImage = useMemo(
+    () =>
+      currentSessionId && messageClientId
+        ? () => shareSelectionStore.enter(currentSessionId, messageClientId)
+        : undefined,
+    [currentSessionId, messageClientId],
+  );
   const handleAddToChat = useCallback(() => {
     if (!currentSessionId || !messageDeepLink) return;
     insertSessionLinkIntoComposer({
@@ -328,7 +343,7 @@ export const AssistantMessage = memo(function AssistantMessage({
           <button
             type="button"
             onClick={() => setShowOriginal((v) => !v)}
-            className="mt-1 text-[11px] underline decoration-dotted underline-offset-2"
+            className="mt-1 text-11 underline decoration-dotted underline-offset-2"
             style={{ color: 'var(--text-tertiary)' }}
           >
             {showOriginal ? t('chat.ghostHook.viewGhostCard') : t('chat.ghostHook.viewOriginal')}
@@ -337,7 +352,7 @@ export const AssistantMessage = memo(function AssistantMessage({
         {/* 出口钩子后台处理中:回复已显示、意识还在跑那段的轻指示(规则 7:
             spinner 挂 wrapper 的 compositor-only transform,仅 pending 时挂载)。 */}
         {ghostReplyPending && !ghostRenderCard && (
-          <div className="mt-1 flex items-center gap-1.5 text-[11px]" style={{ color: 'var(--text-tertiary)' }}>
+          <div className="mt-1 flex items-center gap-1.5 text-11" style={{ color: 'var(--text-tertiary)' }}>
             <span className="inline-flex animate-spin motion-reduce:animate-none">
               <Loader2 size={11} />
             </span>
@@ -349,7 +364,7 @@ export const AssistantMessage = memo(function AssistantMessage({
             下知道这轮不是自己选的模型回答的;icon 用 warning 语义色(token 豁免
             簇),文字保持 tertiary 灰阶,不喧宾夺主。 */}
         {modelMismatch && (
-          <div className="mt-1 flex items-center gap-1.5 text-[11px]" style={{ color: 'var(--text-tertiary)' }}>
+          <div className="mt-1 flex items-center gap-1.5 text-11" style={{ color: 'var(--text-tertiary)' }}>
             <TriangleAlert size={11} style={{ color: 'var(--warning-fg)' }} aria-hidden />
             {t('chat.modelMismatch.notice', {
               actual: formatModelShortLabel(modelMismatch.actual) || modelMismatch.actual,
@@ -369,6 +384,7 @@ export const AssistantMessage = memo(function AssistantMessage({
           hovered={hovered}
           onFork={canFork ? handleFork : undefined}
           onAddToChat={messageDeepLink ? handleAddToChat : undefined}
+          onShareAsImage={handleShareAsImage}
           onDelete={currentSessionId && messageClientId ? handleDelete : undefined}
           turnMoney={turnMoney}
           turnCostUsd={turnCostUsd}
@@ -376,7 +392,7 @@ export const AssistantMessage = memo(function AssistantMessage({
           userTurnMoney={userTurnMoney}
           userTurnCostUsd={userTurnCostUsd}
           userTurnCostIsEstimate={userTurnCostIsEstimate}
-          turnUsageDetails={turnUsageDetails}
+          turnUsageDetails={userTurnUsageDetails ?? turnUsageDetails}
         />
       )}
     </div>

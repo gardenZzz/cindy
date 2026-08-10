@@ -32,11 +32,15 @@ vi.mock('@/hooks/useExpandedBlockMemory', () => ({
   }),
 }));
 
-const { openBackgroundTasksTabMock } = vi.hoisted(() => ({
+const { openBackgroundTasksTabMock, openSubagentsTabMock } = vi.hoisted(() => ({
   openBackgroundTasksTabMock: vi.fn().mockResolvedValue(undefined),
+  openSubagentsTabMock: vi.fn().mockResolvedValue(undefined),
 }));
 vi.mock('@/features/right-sidebar/lib/openBackgroundTasksTab', () => ({
   openBackgroundTasksTab: openBackgroundTasksTabMock,
+}));
+vi.mock('@/features/right-sidebar/lib/openSubagentsTab', () => ({
+  openSubagentsTab: openSubagentsTabMock,
 }));
 
 const { getWorkflowProgressForMock } = vi.hoisted(() => ({
@@ -51,13 +55,17 @@ import { AgentTaskCard } from '@/components/chat/AgentTaskCard';
 import { SessionNavigationModeProvider } from '@/features/cc-agent/embeddedSessionNavigation';
 
 /**
- * 面板入口的 affordance 判据是「本会话的右栏 bucket 此刻可见」,由路由主实例经
- * SessionNavigationModeProvider 声明(见 useSidebarPanelReachable)。默认 fail
- * closed:没声明 = 打不开 = 不给假入口,所以断言面板入口的用例要显式声明宿主。
+ * 面板入口的 affordance 判据是「本会话的右栏 bucket 通过当前交互可达」，由路由
+ * 主实例或可见 split pane 经 SessionNavigationModeProvider 声明（见
+ * useSidebarPanelReachable）。默认 fail closed：没声明 = 打不开 = 不给假入口。
  */
-const withPanelHost = (hostSessionId: string, element: React.ReactElement) =>
+const withPanelHost = (
+  hostSessionId: string,
+  element: React.ReactElement,
+  mode: 'route-owner' | 'split-pane' = 'route-owner',
+) =>
   React.createElement(SessionNavigationModeProvider, {
-    mode: 'route-owner' as const,
+    mode,
     sidebarPanelHostSessionId: hostSessionId,
     children: element,
   });
@@ -166,6 +174,29 @@ describe('AgentTaskCard', () => {
     expect(modelChip(container)).toBeNull();
   });
 
+  it('does not fall back to stale history or spawn input after an explicit model clear', () => {
+    const { container } = render(
+      React.createElement(AgentTaskCard, {
+        toolCall: {
+          clientId: 'c-clear',
+          role: 'tool_use',
+          content: '',
+          toolName: 'collab:spawn',
+          toolUseId: 'toolu_CLEAR',
+          toolInput: { model: 'gpt-5.6-terra' },
+        },
+        update: {
+          provider: 'codex',
+          taskId: 'task-clear',
+          status: 'running',
+          model: null,
+        },
+        subagentModel: 'codex/gpt-5.5',
+      }),
+    );
+    expect(modelChip(container)).toBeNull();
+  });
+
   // bash-task-card + 停止按钮 ---------------------------------------------------
   const stopButton = (container: HTMLElement) =>
     container.querySelector<HTMLButtonElement>('[data-agent-task-stop="true"]');
@@ -266,6 +297,36 @@ describe('AgentTaskCard', () => {
       btn!.click();
     });
     expect(openBackgroundTasksTabMock).toHaveBeenCalledWith('session-1', { focusTaskId: 'wf-1' });
+  });
+
+  it('opens the background tasks panel on the first click from a split pane', () => {
+    openBackgroundTasksTabMock.mockClear();
+    const { container } = render(
+      withPanelHost(
+        'session-b',
+        React.createElement(AgentTaskCard, {
+          sessionId: 'session-b',
+          update: {
+            provider: 'claude-code',
+            taskId: 'wf-split',
+            status: 'running',
+            taskType: 'local_workflow',
+            workflowName: 'Split workflow',
+          },
+        }),
+        'split-pane',
+      ),
+    );
+
+    const btn = headerButton(container);
+    expect(btn).not.toBeNull();
+    expect(btn!.hasAttribute('aria-expanded')).toBe(false);
+    act(() => {
+      btn!.click();
+    });
+    expect(openBackgroundTasksTabMock).toHaveBeenCalledWith('session-b', {
+      focusTaskId: 'wf-split',
+    });
   });
 
   it('falls back to the expand toggle when sessionId or taskId is missing on a workflow card', () => {
@@ -474,8 +535,9 @@ describe('AgentTaskCard', () => {
     expect(progressLine(container)?.textContent).toBe('2/2 Agent');
   });
 
-  it('renders no progress line when workflowProgress is absent, and keeps non-workflow cards off the panel entry', () => {
+  it('renders no workflow progress line and opens ordinary Subagents in their durable panel', () => {
     openBackgroundTasksTabMock.mockClear();
+    openSubagentsTabMock.mockClear();
     const workflow = render(
       React.createElement(AgentTaskCard, {
         sessionId: 'session-1',
@@ -490,23 +552,59 @@ describe('AgentTaskCard', () => {
     expect(progressLine(workflow.container)).toBeNull();
 
     const normal = render(
-      React.createElement(AgentTaskCard, {
-        sessionId: 'session-1',
-        update: {
-          provider: 'claude-code',
-          taskId: 'task-1',
-          status: 'running',
-          title: 'Inspect files',
-        },
-      }),
+      withPanelHost(
+        'session-1',
+        React.createElement(AgentTaskCard, {
+          sessionId: 'session-1',
+          update: {
+            provider: 'claude-code',
+            taskId: 'task-1',
+            status: 'running',
+            title: 'Inspect files',
+          },
+        }),
+      ),
     );
-    // 普通卡头部仍是展开 toggle,不触发面板。
-    const toggleBtn = normal.container.querySelector<HTMLButtonElement>('button[aria-expanded]');
-    expect(toggleBtn).not.toBeNull();
+    const subagentButton = headerButton(normal.container);
+    expect(subagentButton).not.toBeNull();
     act(() => {
-      toggleBtn!.click();
+      subagentButton!.click();
     });
     expect(openBackgroundTasksTabMock).not.toHaveBeenCalled();
+    expect(openSubagentsTabMock).toHaveBeenCalledWith('session-1', {
+      focusRunId: 'task-1',
+      focusProvider: 'claude-code',
+    });
     expect(progressLine(normal.container)).toBeNull();
+  });
+
+  it('keeps Codex control cards expandable instead of opening a nonexistent Subagent run', () => {
+    openSubagentsTabMock.mockClear();
+    const { container } = render(
+      withPanelHost(
+        'session-1',
+        React.createElement(AgentTaskCard, {
+          sessionId: 'session-1',
+          toolCall: {
+            clientId: 'wait-1',
+            role: 'tool_use',
+            content: '',
+            toolName: 'collab:wait',
+            toolUseId: 'wait-1',
+          },
+          update: {
+            provider: 'codex',
+            taskId: 'wait-1',
+            status: 'completed',
+            title: 'wait',
+          },
+        }),
+      ),
+    );
+
+    const toggleButton = container.querySelector<HTMLButtonElement>('button[aria-expanded]');
+    expect(toggleButton).not.toBeNull();
+    act(() => toggleButton!.click());
+    expect(openSubagentsTabMock).not.toHaveBeenCalled();
   });
 });

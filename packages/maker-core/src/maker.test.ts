@@ -4,7 +4,11 @@ import path from 'node:path';
 import { Maker, type CreateSessionOptions } from './maker.js';
 import { Session } from './session.js';
 import { createAsyncQueue } from './agents/shared/async-queue.js';
-import type { AgentSessionHandle, BaseAgent } from './agents/base-agent.js';
+import {
+  TurnPermissionPolicyUnsupportedError,
+  type AgentSessionHandle,
+  type BaseAgent,
+} from './agents/base-agent.js';
 import type { SessionMeta, SessionStorage } from './interfaces/session-storage.js';
 import type { AgentKind, PermissionMode } from './types/common.js';
 import type { AgentEvent } from './types/events.js';
@@ -1010,6 +1014,95 @@ describe('Maker session capabilities', () => {
   });
 });
 
+describe('Maker Pi runtime skill status', () => {
+  it('marks only project skills confirmed by the matching live session as loaded', async () => {
+    const agent = createAgent(async (opts) => {
+      const handle = createHandle({ id: `pi-${opts.sessionId}`, agentKind: 'pi' });
+      handle.getRuntimeCapabilities = () => ({
+        sessionId: opts.sessionId,
+        capturedAt: '2026-08-08T00:00:00.000Z',
+        generation: 1,
+        status: 'loaded',
+        source: 'pi:get_commands',
+        commands: [
+          {
+            name: `skill:${opts.sessionId}-skill`,
+            source: 'skill',
+            sourceInfo: { source: 'auto', scope: 'project', baseDir: '/repo/.pi' },
+          },
+          {
+            name: 'skill:user-collision',
+            source: 'skill',
+            sourceInfo: { source: 'auto', scope: 'user', baseDir: '/home/.agents/skills' },
+          },
+        ],
+      });
+      return handle;
+    }, 'pi');
+    const projectSkill = (name: string, skillPath: string) => ({
+      kind: 'agent-skill' as const,
+      name,
+      source: 'skill' as const,
+      scope: 'repo' as const,
+      path: skillPath,
+      runtimeStatus: 'discovered' as const,
+    });
+    agent.listAgentSkills = vi.fn(async () => ({
+      skills: [
+        projectSkill('one-skill', '/repo/.pi/skills/one-skill'),
+        projectSkill('one-skill', '/repo/.agents/skills/one-skill'),
+        projectSkill('two-skill', '/repo/.pi/skills/two-skill'),
+        projectSkill('user-collision', '/repo/.pi/skills/user-collision'),
+      ],
+    }));
+    const maker = new Maker({
+      agents: { pi: agent },
+      storage: createStorage(),
+      logger: createLogger(),
+    });
+    await maker.createSession({
+      id: 'one',
+      agentKind: 'pi',
+      workingDir: '/repo',
+      model: 'm',
+    });
+    await maker.createSession({
+      id: 'two',
+      agentKind: 'pi',
+      workingDir: '/repo',
+      model: 'm',
+    });
+
+    const one = await maker.listAgentSkills('pi', { workingDir: '/repo', sessionId: 'one' });
+    const two = await maker.listAgentSkills('pi', { workingDir: '/repo', sessionId: 'two' });
+    const preview = await maker.listAgentSkills('pi', { workingDir: '/repo' });
+    const wrongProject = await maker.listAgentSkills('pi', {
+      workingDir: '/other-repo',
+      sessionId: 'one',
+    });
+
+    expect(one.skills.map((skill) => [skill.name, skill.runtimeStatus])).toEqual([
+      ['one-skill', 'loaded'],
+      ['one-skill', 'discovered'],
+      ['two-skill', 'discovered'],
+      ['user-collision', 'discovered'],
+    ]);
+    expect(one.skills[0]).toMatchObject({
+      name: 'one-skill',
+      runtimeStatus: 'loaded',
+      runtimeCommandName: 'skill:one-skill',
+    });
+    expect(two.skills.map((skill) => [skill.name, skill.runtimeStatus])).toEqual([
+      ['one-skill', 'discovered'],
+      ['one-skill', 'discovered'],
+      ['two-skill', 'loaded'],
+      ['user-collision', 'discovered'],
+    ]);
+    expect(preview.skills.every((skill) => skill.runtimeStatus === 'discovered')).toBe(true);
+    expect(wrongProject.skills.every((skill) => skill.runtimeStatus === 'discovered')).toBe(true);
+  });
+});
+
 describe('Session turn send guard', () => {
   it('reserves the turn synchronously while handle.send is still awaiting', async () => {
     let publishRelease!: (release: () => void) => void;
@@ -1222,13 +1315,15 @@ describe('Session turn send guard', () => {
     await expect(session.send('second')).resolves.toEqual({ accepted: true });
   });
 
-  it('runs provider option preflight before durable or accepted side effects', async () => {
-    const preflightError = new Error('unsupported policy/mode combination');
+  it('keeps the session reusable when provider option preflight rejects before dispatch', async () => {
+    vi.useFakeTimers();
+    const preflightError = new TurnPermissionPolicyUnsupportedError('pi', 'ask');
     const handle = createHandle({ id: 'thread-send-preflight' });
     handle.validateSendOptions = vi.fn(() => {
       throw preflightError;
     });
     handle.send = vi.fn(async () => undefined);
+    handle.close = vi.fn(async () => undefined);
     const session = new Session({
       id: 'send-preflight',
       agentKind: 'codex',
@@ -1239,18 +1334,28 @@ describe('Session turn send guard', () => {
     });
     const beforeProviderStart = vi.fn();
     const onAccepted = vi.fn();
+    const send = () => session.send('message', { beforeProviderStart, onAccepted });
 
-    await expect(
-      session.send('first', {
-        beforeProviderStart,
-        onAccepted,
-      }),
-    ).rejects.toBe(preflightError);
+    try {
+      await expect(send()).rejects.toBe(preflightError);
+      await expect(send()).rejects.toBe(preflightError);
+      expect(session.isTurnRunning()).toBe(false);
+      expect(session.getStatus()).toBe('active');
 
-    expect(handle.validateSendOptions).toHaveBeenCalledOnce();
-    expect(beforeProviderStart).not.toHaveBeenCalled();
-    expect(onAccepted).not.toHaveBeenCalled();
-    expect(handle.send).not.toHaveBeenCalled();
+      // A pure validateSendOptions failure happens before origin installation,
+      // so it must not arm the 250 ms terminal-drain fence or close the Session.
+      await vi.advanceTimersByTimeAsync(300);
+      await expect(send()).rejects.toBe(preflightError);
+
+      expect(handle.validateSendOptions).toHaveBeenCalledTimes(3);
+      expect(beforeProviderStart).not.toHaveBeenCalled();
+      expect(onAccepted).not.toHaveBeenCalled();
+      expect(handle.send).not.toHaveBeenCalled();
+      expect(handle.close).not.toHaveBeenCalled();
+      expect(session.getStatus()).toBe('active');
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it('runs reservation state preparation before provider option preflight', async () => {
@@ -1407,6 +1512,123 @@ describe('Session turn send guard', () => {
     releaseBarrier();
     await expect(sending).resolves.toEqual({ accepted: true });
     expect(order).toEqual(['barrier-start', 'barrier-end', 'accepted', 'provider']);
+  });
+
+  it('awaits the host turn lifecycle barrier and releases an undispatched generation', async () => {
+    const order: string[] = [];
+    const handle = createHandle({ id: 'thread-host-turn-lifecycle' });
+    handle.send = vi.fn(async () => {
+      order.push('provider');
+    });
+    const session = new Session({
+      id: 'host-turn-lifecycle',
+      agentKind: 'codex',
+      workDir: '/repo',
+      handle,
+      capabilities: createAgent(async () => handle).capabilities,
+      logger: createLogger(),
+    });
+    session.setTurnLifecycleObserver({
+      beforeProviderStart: async (turnGeneration) => {
+        order.push(`host:${turnGeneration}`);
+      },
+      onUndispatched: async (turnGeneration) => {
+        order.push(`undispatched:${turnGeneration}`);
+      },
+      onTerminal: vi.fn(),
+    });
+
+    await expect(
+      session.send('first', {
+        beforeProviderStart: () => {
+          order.push('caller');
+        },
+        onAccepted: () => {
+          order.push('accepted');
+          throw new Error('persist failed');
+        },
+      }),
+    ).rejects.toThrow('persist failed');
+
+    expect(order).toEqual(['host:1', 'caller', 'accepted', 'undispatched:1']);
+    expect(handle.send).not.toHaveBeenCalled();
+  });
+
+  it('reports the exact observed generation before terminal event listeners', async () => {
+    const events = createAsyncQueue<AgentEvent>();
+    const handle = createHandle({ id: 'thread-host-turn-terminal' });
+    handle.events = () => events;
+    handle.send = vi.fn(async () => undefined);
+    const session = new Session({
+      id: 'host-turn-terminal',
+      agentKind: 'codex',
+      workDir: '/repo',
+      handle,
+      capabilities: createAgent(async () => handle).capabilities,
+      logger: createLogger(),
+    });
+    const order: string[] = [];
+    let observerEvent: AgentEvent | null = null;
+    let listenerEvent: AgentEvent | null = null;
+    session.setTurnLifecycleObserver({
+      beforeProviderStart: vi.fn(),
+      onUndispatched: vi.fn(),
+      onTerminal: ({ turnGeneration, event, isCurrentGeneration }) => {
+        observerEvent = event;
+        order.push(`terminal:${turnGeneration}:${isCurrentGeneration}`);
+      },
+    });
+    const terminalObserved = new Promise<void>((resolve) => {
+      const unsubscribe = session.onEvent((event) => {
+        listenerEvent = event;
+        order.push('listener');
+        unsubscribe();
+        resolve();
+      });
+    });
+
+    await session.send('first');
+    events.push({ type: 'done', data: {}, source: 'codex' });
+    await terminalObserved;
+
+    expect(order).toEqual(['terminal:1:true', 'listener']);
+    expect(listenerEvent).toBe(observerEvent);
+    events.end();
+  });
+
+  it('does not end the foreground lifecycle for a background terminal event', async () => {
+    const events = createAsyncQueue<AgentEvent>();
+    const handle = createHandle({ id: 'thread-host-turn-background-terminal' });
+    handle.events = () => events;
+    handle.send = vi.fn(async () => undefined);
+    const session = new Session({
+      id: 'host-turn-background-terminal',
+      agentKind: 'codex',
+      workDir: '/repo',
+      handle,
+      capabilities: createAgent(async () => handle).capabilities,
+      logger: createLogger(),
+    });
+    const onTerminal = vi.fn();
+    session.setTurnLifecycleObserver({
+      beforeProviderStart: vi.fn(),
+      onUndispatched: vi.fn(),
+      onTerminal,
+    });
+    const backgroundObserved = new Promise<void>((resolve) => {
+      const unsubscribe = session.onEvent((event) => {
+        if (event.turnScope !== 'background') return;
+        unsubscribe();
+        resolve();
+      });
+    });
+
+    await session.send('first');
+    events.push({ type: 'done', data: {}, source: 'codex', turnScope: 'background' });
+    await backgroundObserved;
+
+    expect(onTerminal).not.toHaveBeenCalled();
+    events.end();
   });
 
   it('does not persist acceptance when cancelled during the pre-provider barrier', async () => {
@@ -1859,7 +2081,7 @@ describe('Session turn send guard', () => {
       if (event.type === 'error') terminalErrors.push(event);
     });
     const sendPromise = session.send('first');
-    await sendEntered;
+    await sendReady;
     releaseEnd();
     await closed;
 

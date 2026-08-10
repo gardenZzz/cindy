@@ -54,6 +54,7 @@ import type { AgentKind } from '@cindy/maker-core';
 export interface SchedulerMcpSessionCtx {
   agentKind: AgentKind;
   workingDir: string;
+  getSessionContext?: () => LiziMcpSessionContext | undefined;
   sessionId?: string;
   vendorOptions?: Record<string, unknown>;
 }

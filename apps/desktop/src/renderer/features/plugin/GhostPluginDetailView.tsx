@@ -11,6 +11,7 @@ import { useLayoutEffect, useRef, useState, type ReactNode } from 'react';
 import * as Dialog from '@radix-ui/react-dialog';
 import {
   AppWindow,
+  AlertTriangle,
   ArrowUp,
   Bot,
   ChevronDown,
@@ -120,6 +121,7 @@ function permissionItemIcon(item: GhostPermissionItem): LucideIcon {
   if (
     item.labelKey === 'networkSecret' ||
     item.labelKey === 'networkSecretOauth' ||
+    item.labelKey === 'networkSecretGhCli' ||
     item.labelKey === 'networkSecretIdentity'
   ) {
     return KeyRound;
@@ -129,7 +131,7 @@ function permissionItemIcon(item: GhostPermissionItem): LucideIcon {
 
 const DETAIL_SECTION_CLASS = 'mt-10';
 const DETAIL_SECTION_HEADING_CLASS =
-  'text-18 font-medium leading-[26px] text-[var(--text-primary)]';
+  'text-18 font-medium leading-[1.444] text-[var(--text-primary)]';
 const DETAIL_SECTION_CONTENT_CLASS = 'mt-5 max-w-[760px]';
 const DETAIL_SURFACE_CLASS =
   'border border-[color-mix(in_srgb,var(--border-default)_72%,transparent)] bg-[color-mix(in_srgb,var(--surface-elevated)_82%,var(--surface))]';
@@ -164,8 +166,7 @@ export function GhostPluginDetailView({
   const primaryEnabled =
     enabled && (primaryAction === 'panel' || (primaryAction === 'command' && detail.canUse));
   const cindyCapabilities = detail.cindyCapabilities;
-  const hasConfiguration =
-    detail.hasSettingsUi || cindyCapabilities.length > 0 || detail.hasErrand;
+  const hasConfiguration = detail.hasSettingsUi || cindyCapabilities.length > 0 || detail.hasErrand;
   const summary = ghostPluginSummary(detail.description, detail.id);
   /**
    * 「从 .cindy 文件更新」是否可用。官方保留前缀(cindy- / filo- / xd-)在**非 dev
@@ -179,6 +180,7 @@ export function GhostPluginDetailView({
    * 普通第三方插件不受影响。
    */
   const localUpdateAvailable = import.meta.env.DEV || !isOfficialGhostId(detail.id);
+  const hasAdditionalActions = localUpdateAvailable || onExport !== undefined;
 
   useLayoutEffect(() => {
     setDescriptionExpanded(false);
@@ -243,7 +245,7 @@ export function GhostPluginDetailView({
               onIconLoadError={onIconLoadError}
             />
             <div className="min-w-0">
-              <h1 className="truncate text-28 font-medium leading-[34px] text-[var(--text-primary)]">
+              <h1 className="truncate text-28 font-medium leading-[1.214] text-[var(--text-primary)]">
                 {detail.name}
               </h1>
               <GhostPluginMetadata author={detail.author} version={detail.version} />
@@ -367,7 +369,9 @@ export function GhostPluginDetailView({
                       {t('settings.ghosts.detail.exportPackage')}
                     </DropdownMenuItem>
                   ) : null}
-                  <DropdownMenuSeparator className="mx-2 my-1 h-px bg-[var(--border-default)]" />
+                  {hasAdditionalActions ? (
+                    <DropdownMenuSeparator className="mx-2 my-1 h-px bg-[var(--border-default)]" />
+                  ) : null}
                   <DropdownMenuItem
                     onSelect={onUninstall}
                     className="h-10 gap-2.5 rounded-lg px-3 text-13 text-[var(--error-fg)] focus:bg-[var(--error-bg)] focus:text-[var(--error-fg-strong)]"
@@ -384,7 +388,7 @@ export function GhostPluginDetailView({
             <p
               ref={descriptionRef}
               className={cn(
-                'text-14 leading-[22px] text-[var(--text-secondary)]',
+                'text-14 leading-[1.571] text-[var(--text-secondary)]',
                 !descriptionExpanded && 'line-clamp-3',
               )}
             >
@@ -416,11 +420,14 @@ export function GhostPluginDetailView({
             <div className={cn(DETAIL_SECTION_CONTENT_CLASS, 'space-y-3')}>
               {detail.hasSettingsUi ? (
                 ghost ? (
-                  <GhostSettingsWebview
-                    ghost={ghost}
-                    title={t('settings.ghosts.detail.settingsTitle', { name: detail.name })}
-                    appearance="plugin"
-                  />
+                  <>
+                    {ghost.oauthScopeStale ? <OauthScopeStaleBadge /> : null}
+                    <GhostSettingsWebview
+                      ghost={ghost}
+                      title={t('settings.ghosts.detail.settingsTitle', { name: detail.name })}
+                      appearance="plugin"
+                    />
+                  </>
                 ) : (
                   <div
                     className={cn(
@@ -434,7 +441,7 @@ export function GhostPluginDetailView({
                       aria-hidden="true"
                     />
                     <div className="min-w-0">
-                      <p className="text-14 font-medium leading-[22px] text-[var(--text-primary)]">
+                      <p className="text-14 font-medium leading-[1.571] text-[var(--text-primary)]">
                         {t('settings.ghosts.detail.settingsTitle', { name: detail.name })}
                       </p>
                       <p className="mt-0.5 text-13 leading-5 text-[var(--text-secondary)]">
@@ -465,6 +472,20 @@ export function GhostPluginDetailView({
         <DetailsSection detail={detail} panelStatus={panelStatus} />
       </article>
     </main>
+  );
+}
+
+/** 宿主侧非阻塞角标；重新连接动作继续复用插件设置区已有入口。 */
+export function OauthScopeStaleBadge() {
+  const { t } = useTranslation();
+  return (
+    <div
+      role="status"
+      className="inline-flex w-fit max-w-full items-center gap-1.5 rounded-full bg-[var(--warning-bg-soft)] px-3 py-1.5 text-12 leading-5 text-[var(--text-secondary)]"
+    >
+      <AlertTriangle size={13} className="shrink-0 text-[var(--warning-fg)]" aria-hidden="true" />
+      <span>{t('settings.ghosts.detail.oauthScopeStale')}</span>
+    </div>
   );
 }
 
@@ -591,7 +612,7 @@ export function ToolDescriptionChip({ tool }: { tool: GhostToolDecl }) {
             'inline-flex h-8 max-w-full items-center rounded-full px-3 text-[var(--text-secondary)] hover:text-[var(--text-primary)]',
           )}
         >
-          <code className="truncate font-mono text-13 leading-[18px]">{tool.name}</code>
+          <code className="truncate font-mono text-13 leading-[1.385]">{tool.name}</code>
         </button>
       </PopoverTrigger>
       <PopoverContent
@@ -672,7 +693,7 @@ export function PermissionSummary({ items }: { items: readonly GhostPermissionIt
 function PermissionDetailRow({ item }: { item: GhostPermissionItem }) {
   const { t } = useTranslation();
   const Icon = permissionItemIcon(item);
-  const hostDescription = item.detailKey ? t(`settings.ghosts.perm.${item.detailKey}`) : null;
+  const hostDescription = item.detailKey ? t(`settings.ghosts.perm.${item.detailKey}`, item.detailArgs) : null;
   return (
     <div className="flex items-start gap-3 py-4 first:pt-0 last:pb-0">
       <Icon
@@ -682,7 +703,7 @@ function PermissionDetailRow({ item }: { item: GhostPermissionItem }) {
         aria-hidden="true"
       />
       <div className="min-w-0 flex-1">
-        <p className="break-words text-14 font-medium leading-[22px] text-[var(--text-primary)]">
+        <p className="break-words text-14 font-medium leading-[1.571] text-[var(--text-primary)]">
           {t(`settings.ghosts.perm.${item.labelKey}`, item.labelArgs)}
         </p>
         {hostDescription ? (
@@ -885,7 +906,7 @@ function ExpandableDetailValue({
       <div
         ref={valueRef}
         className={cn(
-          'min-w-0 flex-1 text-14 leading-[22px] text-[var(--text-primary)]',
+          'min-w-0 flex-1 text-14 leading-[1.571] text-[var(--text-primary)]',
           expanded ? 'whitespace-pre-wrap break-words' : 'truncate whitespace-nowrap',
           monospace && 'font-mono text-13',
         )}

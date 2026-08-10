@@ -21,8 +21,10 @@ import {
   HOOK_FEATURE_PROVIDER_BEHAVIOR,
   HOOK_FEATURE_PROVIDER_PREFS,
   HOOK_FEATURE_PROVIDER_TELEGRAM,
+  HOOK_FEATURE_PROVIDER_X,
   HOOK_FEATURE_SESSION_PICKER,
   HOOK_FEATURE_SLACK_TOOLS,
+  HOOK_FEATURE_TURN_DELIVERY,
   makeBindState,
   makeBindUpdate,
   makePing,
@@ -33,6 +35,7 @@ import {
   makeProviderPrefsState,
   makeQueryRequest,
   makeTaskDispatch,
+  makeTurnDelivery,
   makeToolResponse,
   makeWelcome,
   parseHookMessage,
@@ -175,6 +178,66 @@ afterEach(() => {
 });
 
 describe('hook-control runtime capability gate', () => {
+  it('X hello 声明 delivery ACK，且只在 welcome 双向协商后把回执路由给 dispatcher', () => {
+    const transportOpts: HookTransportOpts[] = [];
+    const handleTurnDelivery = vi.fn();
+    const dispatcher = {
+      handleDispatch: vi.fn(),
+      onConnected: vi.fn(),
+      onDisconnected: vi.fn(),
+      cancel: vi.fn(),
+      handleSessionArchive: vi.fn(),
+      handleInteractionDecision: vi.fn(),
+      handleTurnDelivery,
+      onMessageOpResult: vi.fn(),
+      setEmojiReactionsMode: vi.fn(),
+      settleAckReactions: vi.fn(),
+      activateAccount: vi.fn(),
+      deactivateAccount: vi.fn(async () => undefined),
+      dispose: vi.fn(),
+    } as NonNullable<HookControlManagerDeps['dispatcher']>;
+    const manager = makeManager(
+      memoryStore({ url: 'wss://unused.example', enabled: false, xEnabled: true }),
+      {
+        dispatcher,
+        getXUrl: () => 'wss://x-hook.example',
+        createTransport: (opts) => {
+          transportOpts.push(opts);
+          return { send: () => true, dispose: () => {} };
+        },
+      },
+    );
+    manager.sync();
+    const opts = transportOpts[0];
+    if (opts === undefined) throw new Error('X transport was not created');
+    expect(opts.buildHello().features).toContain(HOOK_FEATURE_TURN_DELIVERY);
+
+    const delivery = makeTurnDelivery({
+      requestId: 'x:999:post-1',
+      state: 'accepted',
+      attempt: 0,
+      retryAt: null,
+      error: null,
+    });
+    opts.onMessage(delivery, () => true);
+    expect(handleTurnDelivery).not.toHaveBeenCalled();
+
+    opts.onWelcome?.({
+      serverName: 'x-hook',
+      features: [
+        HOOK_FEATURE_PROVIDER_BIND,
+        HOOK_FEATURE_PROVIDER_PREFS,
+        HOOK_FEATURE_SESSION_PICKER,
+        HOOK_FEATURE_PROVIDER_X,
+        HOOK_FEATURE_TURN_DELIVERY,
+      ],
+    });
+    opts.onStatus('connected', null);
+    opts.onMessage(delivery, () => true);
+    expect(handleTurnDelivery).toHaveBeenCalledWith(expect.stringMatching(/:x$/), delivery.payload);
+    manager.dispose();
+  });
+
   it('keeps an enabled cloud preference disconnected when the capability is unavailable', () => {
     const createTransport = vi.fn(() => {
       throw new Error('transport must not start');
@@ -1521,9 +1584,13 @@ describe('Telegram provider capability, binding and prefs', () => {
       handleDispatch,
       onConnected: vi.fn(),
       onDisconnected: vi.fn(),
+      onMessageOpResult: vi.fn(),
+      setEmojiReactionsMode: vi.fn(),
+      settleAckReactions: vi.fn(),
       cancel: vi.fn(),
       handleSessionArchive: vi.fn(),
       handleInteractionDecision: vi.fn(),
+      handleTurnDelivery: vi.fn(),
       activateAccount: vi.fn(),
       deactivateAccount: vi.fn(async () => undefined),
       dispose: vi.fn(),
@@ -2619,9 +2686,7 @@ describe('Telegram provider capability, binding and prefs', () => {
     const server = collectFrames(sock);
     const hello = await server.waitFor('hello');
     if (hello.type !== 'hello') throw new Error('unreachable');
-    expect(hello.payload.features).toEqual(
-      expect.arrayContaining(TELEGRAM_FEATURES),
-    );
+    expect(hello.payload.features).toEqual(expect.arrayContaining(TELEGRAM_FEATURES));
     sock.send(
       serializeHookMessage(
         makeWelcome({ serverName: 'telegram-server', features: TELEGRAM_FEATURES }),
@@ -2719,10 +2784,29 @@ describe('Telegram provider capability, binding and prefs', () => {
     await expect(manager.getTelegramBehavior('stale-binding')).rejects.toBeInstanceOf(
       HookNotConnectedError,
     );
-    expect(server.frames.some((frame) => frame.type === 'provider.behavior.get')).toBe(false);
+    // 绑定确认后客户端会主动拉一次表情档位(ack 表情要在首次派发前就按用户的
+    // 选择发), 所以这里不能断言「一帧 behavior.get 都没有」—— 要断言的是
+    // **stale binding 那次请求没有出帧**。
+    expect(
+      server.frames
+        .filter((frame) => frame.type === 'provider.behavior.get')
+        .every((frame) => frame.payload.bindingId !== 'stale-binding'),
+    ).toBe(true);
 
+    // 绑定确认时客户端已经主动拉过一次, waitFor 会命中那一帧 —— 这里要等的是
+    // **本次显式读取**新发出的那一帧, 所以按帧数增长取最后一个。
+    const behaviorGetsBefore = server.frames.filter(
+      (frame) => frame.type === 'provider.behavior.get',
+    ).length;
     const behaviorRead = manager.getTelegramBehavior('binding-telegram-1');
-    const behaviorGet = await server.waitFor('provider.behavior.get');
+    await vi.waitFor(() =>
+      expect(
+        server.frames.filter((frame) => frame.type === 'provider.behavior.get').length,
+      ).toBeGreaterThan(behaviorGetsBefore),
+    );
+    const behaviorGet = server.frames
+      .filter((frame) => frame.type === 'provider.behavior.get')
+      .at(-1)!;
     if (behaviorGet.type !== 'provider.behavior.get') throw new Error('unreachable');
     sock.send(
       serializeHookMessage(

@@ -117,6 +117,60 @@ test("client CI owns the complete Desktop Git integration tier", () => {
 	);
 });
 
+test("client CI builds model-access protocol before consumer checks", () => {
+	const workflow = fs.readFileSync(
+		path.join(ROOT, ".github", "workflows", "ci.yml"),
+		"utf8",
+	).replace(/\r\n/g, "\n");
+	const jobs = [
+		{
+			name: "verify-checks",
+			body: workflow.match(/\n  verify-checks:\n([\s\S]*?)\n  linux-unit-shards:/)?.[1],
+			consumerCommand: "run: pnpm --filter desktop typecheck",
+		},
+		{
+			name: "linux-unit-shards",
+			body: workflow.match(/\n  linux-unit-shards:\n([\s\S]*?)\n  verify:/)?.[1],
+			consumerCommand: "run: pnpm exec node scripts/test-workspaces.mjs --tier unit",
+		},
+		{
+			name: "windows-unit-shards",
+			body: workflow.match(/\n  windows-unit-shards:\n([\s\S]*?)\n  windows-unit:/)?.[1],
+			consumerCommand: "run: pnpm test:unit",
+		},
+	];
+
+	for (const { name, body, consumerCommand } of jobs) {
+		assert.ok(body, `client CI must define the ${name} job`);
+		const installIndex = body.indexOf("run: pnpm install --frozen-lockfile");
+		const buildIndex = body.indexOf(
+			"run: pnpm --filter @cindy/model-access-protocol build",
+		);
+		const consumerIndex = body.indexOf(consumerCommand);
+		assert.ok(installIndex >= 0, `${name} must install dependencies`);
+		assert.ok(buildIndex > installIndex, `${name} must build protocol after install`);
+		assert.ok(
+			consumerIndex > buildIndex,
+			`${name} must build protocol before consumer checks`,
+		);
+	}
+});
+
+test("Linux unit shards reject unsafe protocol gitlinks before installing dependencies", () => {
+	const workflow = fs.readFileSync(
+		path.join(ROOT, ".github", "workflows", "ci.yml"),
+		"utf8",
+	).replace(/\r\n/g, "\n");
+	const body = workflow.match(/\n  linux-unit-shards:\n([\s\S]*?)\n  verify:/)?.[1];
+	assert.ok(body, "client CI must define Linux unit shards");
+	const fetchIndex = body.indexOf("git submodule update --init --force --recursive -- cindy-protocol");
+	const guardIndex = body.indexOf("run: node scripts/check-submodule-forward.mjs");
+	const installIndex = body.indexOf("run: pnpm install --frozen-lockfile");
+	assert.ok(fetchIndex >= 0, "Linux unit shards must fetch cindy-protocol");
+	assert.ok(guardIndex > fetchIndex, "Linux unit shards must validate the fetched protocol gitlink");
+	assert.ok(installIndex > guardIndex, "Linux unit shards must reject unsafe gitlinks before install");
+});
+
 test("help groups copyable desktop, binary, and Mobile workflows", async () => {
 	const { printHelp } = await import("../help.mjs");
 	const lines = [];
@@ -938,6 +992,20 @@ test("test gate lock decision prefers an existing owner over an earlier free por
 	assert.equal(classifyTestGateLockProbeError("ETIMEDOUT"), "collision");
 });
 
+test("test gate lock rejects invalid port counts before deriving candidates", async () => {
+	for (const lockPortCount of [0, -1, 1.5, Number.NaN]) {
+		await assert.rejects(
+			() =>
+				acquireTestGateLock({
+					repoRoot: "unused",
+					owner: { pid: 99, tier: "unit", cwd: "unused" },
+					lockPortCount,
+				}),
+			/lockPortCount must be a positive integer/,
+		);
+	}
+});
+
 test("test gate lock reports the holder, waits, and acquires after release", async () => {
 	const root = fs.mkdtempSync(path.join(os.tmpdir(), "test-gate-lock-"));
 	let probeRound = 0;
@@ -994,6 +1062,12 @@ test("test gate lock reports the holder, waits, and acquires after release", asy
 // fails for reasons unrelated to the lock protocol.
 const REAL_LOCK_WAIT_WINDOW_MS = 30_000;
 const REAL_LOCK_ACQUIRE_TIMEOUT_MS = 60_000;
+// Windows assigns 49152+ as its default dynamic client-port range. Keep this
+// real socket test outside that range so unrelated CI network traffic cannot
+// occupy all deterministic candidates while preserving the production range.
+const REAL_LOCK_TEST_PORT_START = 10_000;
+const REAL_LOCK_TEST_PORT_COUNT = 30_000;
+const REAL_LOCK_TEST_PORT_STRIDE = 997;
 
 function raceWithDeadline(candidates, deadlineMs, deadlineValue) {
 	let timer;
@@ -1017,11 +1091,17 @@ test("two real test gate lock holders serialize on the same identity", async () 
 		firstLock = await acquireTestGateLock({
 			repoRoot: root,
 			owner: { pid: 41, tier: "unit", cwd: path.join(root, "first") },
+			lockPortStart: REAL_LOCK_TEST_PORT_START,
+			lockPortCount: REAL_LOCK_TEST_PORT_COUNT,
+			lockPortStride: REAL_LOCK_TEST_PORT_STRIDE,
 			output: () => {},
 		});
 		secondLockPromise = acquireTestGateLock({
 			repoRoot: root,
 			owner: { pid: 42, tier: "db", cwd: path.join(root, "second") },
+			lockPortStart: REAL_LOCK_TEST_PORT_START,
+			lockPortCount: REAL_LOCK_TEST_PORT_COUNT,
+			lockPortStride: REAL_LOCK_TEST_PORT_STRIDE,
 			timeoutMs: REAL_LOCK_ACQUIRE_TIMEOUT_MS,
 			retryDelayMs: 10,
 			output: reportWaiting,
@@ -1043,7 +1123,10 @@ test("two real test gate lock holders serialize on the same identity", async () 
 		await firstLock.release();
 		firstLock = undefined;
 		const secondLock = await secondLockPromise;
-		assert.ok(secondLock.port >= 49_152);
+		assert.ok(secondLock.port >= REAL_LOCK_TEST_PORT_START);
+		assert.ok(
+			secondLock.port < REAL_LOCK_TEST_PORT_START + REAL_LOCK_TEST_PORT_COUNT,
+		);
 	} finally {
 		// Order matters: releasing the first lock lets the second acquisition
 		// settle immediately instead of waiting out its own timeout.

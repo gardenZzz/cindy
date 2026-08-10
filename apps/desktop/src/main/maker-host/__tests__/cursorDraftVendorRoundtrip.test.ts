@@ -82,7 +82,7 @@ describe('cursor AgentKind→DraftVendor 草稿偏好链', () => {
 
     // 3) push：NEW_MAKER_DRAFT_CHANGED 必须含 cursor 槽（修复前只有 claudeCode/codex）
     const payload = buildNewMakerDraftChangedPayload();
-    expect(Object.keys(payload).sort()).toEqual(['claudeCode', 'codex', 'cursor']);
+    expect(Object.keys(payload).sort()).toEqual(['claudeCode', 'codex', 'cursor', 'pi']);
     expect(payload[agentKindToDraftPushSlot('cursor')]).toMatchObject({
       model: 'composer-1',
       effort: 'xhigh',

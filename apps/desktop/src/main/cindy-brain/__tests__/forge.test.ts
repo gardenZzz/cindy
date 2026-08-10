@@ -13,6 +13,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { GHOST_MANIFEST_SUMMARY_MAX_CHARS } from '@cindy/plugin-protocol';
 
 import {
   FORGE_GUIDE,
@@ -696,6 +697,50 @@ describe('scaffoldGhostDir', () => {
 });
 
 describe('FORGE_GUIDE', () => {
+  it('写死 whenToUse 发现面与二级分派 RULES 契约', () => {
+    expect(FORGE_GUIDE).toContain('给模型做插件发现与判断的唯一字段');
+    expect(FORGE_GUIDE).toContain(`最多 ${GHOST_MANIFEST_SUMMARY_MAX_CHARS} 字符`);
+    expect(FORGE_GUIDE).toContain('花名册 → `ghost_info` → `ghost_call`');
+    expect(FORGE_GUIDE).toContain(
+      '禁止塞入"必须/不得"式行为规则、工具调用顺序、参数协议、错误码与重试策略',
+    );
+    expect(FORGE_GUIDE).toContain(
+      '"whenToUse": "管理项目时找我;必须先调用 list_tools(category=project),再调用 call_tool;遇到 INVALID_ARGS 不得改用其它工具"',
+    );
+    expect(FORGE_GUIDE).toContain(
+      '"whenToUse": "需要查询、创建或更新项目、任务、成员、迭代与发布状态时找我"',
+    );
+    expect(FORGE_GUIDE).toContain(
+      '`list_tools(category)` 返回工具明细时,必须在同一份结果里一并下发该类目的',
+    );
+    expect(FORGE_GUIDE).toContain(
+      '传 category 返回该类目下所有操作的名称、说明与该类目 RULES',
+    );
+    expect(FORGE_GUIDE).toContain('`rules: [规则键]`');
+    expect(FORGE_GUIDE).toContain('参数 schema **和本次自纠必需的规则**');
+    expect(FORGE_GUIDE).not.toContain('这是你影响 AI 行为的**唯一合法通道**');
+    expect(FORGE_GUIDE).not.toContain('description(花名册自述)');
+    expect(FORGE_GUIDE).not.toContain('选错会拖累所有会话');
+    expect(FORGE_GUIDE).not.toContain('所有意识的工具清单会一起被你一家撑爆');
+  });
+
+  it('向量检索示例按请求维度回放,不把回执 dim 当作请求判据', () => {
+    expect(FORGE_GUIDE).toContain('const requestedDim = undefined');
+    expect(FORGE_GUIDE).toContain('requestedDim 来自这次请求而不是回执');
+    expect(FORGE_GUIDE).toContain(
+      '...(storedRequestedDim !== undefined ? { dimensions: storedRequestedDim } : {}),',
+    );
+    expect(FORGE_GUIDE).not.toContain(
+      '...(storedDim !== undefined ? { dimensions: storedDim } : {}),',
+    );
+  });
+
+  it('app-context 保持插件协议旧四语并说明新增宿主语言的兼容回退', () => {
+    expect(FORGE_GUIDE).toContain("locale: 'zh-CN' | 'en' | 'ja' | 'ko'");
+    expect(FORGE_GUIDE).not.toContain("locale: 'zh-CN' | 'zh-TW' | 'en' | 'ja' | 'ko'");
+    expect(FORGE_GUIDE).toContain('会在插件边界固定映射为 `en`');
+  });
+
   it('分章体量守卫:每个 ## 章节须留在单次工具结果安全体量内(#890 分章投递的不变量)', () => {
     // 手册"随主机版本演进"持续增长;任一章越过单次 MCP 结果上限会静默复现 #890 于该章。
     // 上限取 32KB:当前最大章 ~22KB,余量 ~45%,越线即该拆小节。
@@ -734,6 +779,7 @@ describe('FORGE_GUIDE', () => {
       'notify 槽',
       'will-user-message',
       'will-assistant-message',
+      '同轮插话(steer)时是当前运行中 turn 的模型 id',
       'event-verdict',
       'data-ghost-action',
       'data-ghost-prompt',
@@ -747,7 +793,20 @@ describe('FORGE_GUIDE', () => {
       // 2026-07-31 快问快答(cindy.text.oneshot)与派活取件(agent.errand)。
       'oneshot_text',
       'NO_CANDIDATE',
+      // 2026-08-05 快问快答偏好模型声明(目录模型 id;用户钉档 > 插件声明 > 默认链)。
+      'oneshotModel',
       'expectJson',
+      // 2026-08-04 文本转向量(cindy.embed.text):作者最容易踩的是"换模型 =
+      // 换向量空间",手册必须讲到 model + dim 要跟向量一起存。
+      'embed_text',
+      "\"embed\": [\"text\"]",
+      'inputType',
+      'dimensions',
+      // 上下文化(voyage-context-*):二维 documents 与三层 documentEmbeddings 是
+      // 作者最容易写错的两处,手册必须给出可照抄的形态。
+      'documents',
+      'documentEmbeddings',
+      'voyage/voyage-context-4',
       '4.11.1',
       'cindy.agent.errand',
       'queryErrand',
@@ -789,6 +848,9 @@ describe('FORGE_GUIDE', () => {
       'exchange',
       'tokenPath',
       'login-email',
+      'gh-cli',
+      'gh auth token',
+      'hostAvailable',
       // 多连接(connections,2026-07-14):声明形态 / 设置页协议 / 主机受信确认。
       'connections',
       '/connections',

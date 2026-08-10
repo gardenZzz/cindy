@@ -18,7 +18,10 @@ const sessionViewSource = readFileSync(
 
 function matchIndexes(haystack: string, pattern: RegExp): number[] {
   const indexes: number[] = [];
-  const re = new RegExp(pattern.source, pattern.flags.includes('g') ? pattern.flags : `${pattern.flags}g`);
+  const re = new RegExp(
+    pattern.source,
+    pattern.flags.includes('g') ? pattern.flags : `${pattern.flags}g`,
+  );
   for (const match of haystack.matchAll(re)) {
     if (typeof match.index === 'number') indexes.push(match.index);
   }
@@ -27,8 +30,11 @@ function matchIndexes(haystack: string, pattern: RegExp): number[] {
 
 describe('interrupted continuation enqueue contract', () => {
   it('does not durable-ack continue prompts at INPUT_ENQUEUE or onAccepted time', () => {
-    const enqueueStart = registerSource.indexOf('ipcMain.handle(MAKER_INVOKE.INPUT_ENQUEUE');
-    const enqueueEnd = registerSource.indexOf('ipcMain.handle(MAKER_INVOKE.INPUT_COMPACT', enqueueStart);
+    const enqueueStart = registerSource.search(/ipcMain\.handle\(\s*MAKER_INVOKE\.INPUT_ENQUEUE/);
+    const enqueueEndMatch = /ipcMain\.handle\(\s*MAKER_INVOKE\.INPUT_COMPACT/.exec(
+      registerSource.slice(enqueueStart + 1),
+    );
+    const enqueueEnd = enqueueEndMatch ? enqueueStart + 1 + enqueueEndMatch.index : -1;
     expect(enqueueStart).toBeGreaterThan(-1);
     expect(enqueueEnd).toBeGreaterThan(enqueueStart);
     const enqueueHandler = registerSource.slice(enqueueStart, enqueueEnd);
@@ -207,6 +213,24 @@ describe('interrupted continuation enqueue contract', () => {
     expect(registerSource.slice(errorStart, errorEnd)).toMatch(
       /autoResumeBookkeeping\.settleOutcome\(session\.id, failedAttemptToken, 'failed'\);\s*interruptedTurnAutoResumeGuard\.noteAttemptSettled\(session\.id, failedAttemptToken\);/,
     );
+  });
+
+  it('keeps background substantive events out of interrupted-turn progress bookkeeping', () => {
+    const progressStart = registerSource.indexOf(
+      "if (event.turnScope !== 'background' && isSubstantiveProgressEvent(event))",
+    );
+    expect(progressStart).toBeGreaterThan(-1);
+    const progressEnd = registerSource.indexOf(
+      '\n      }\n      if (event.type === \'text\')',
+      progressStart,
+    );
+    expect(progressEnd).toBeGreaterThan(progressStart);
+    const progressBlock = registerSource.slice(progressStart, progressEnd);
+    expect(progressBlock).toContain('interruptedTurnAutoResumeGuard.noteProgress(');
+    expect(registerSource.indexOf('onToolUseEvent(', progressEnd)).toBeGreaterThan(progressEnd);
+    expect(
+      registerSource.indexOf('broadcastToAllWindows(MAKER_PUSH.EVENT', progressEnd),
+    ).toBeGreaterThan(progressEnd);
   });
 
   it('advertises interval null-clear support for mobile wire compatibility', () => {

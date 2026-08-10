@@ -4,7 +4,8 @@ import { ChevronDown, ExternalLink, Folder, MessageCircle, Timer, SlidersHorizon
 import { useTranslation } from 'react-i18next';
 import { Popover, PopoverTrigger, PopoverContent } from '@/components/ui/popover';
 import { Tip } from '@/components/ui/tooltip';
-import { VendorIcon } from '@/components/sidebar/VendorIcon';
+import { agentKindToVendor } from '@/components/sidebar/VendorIcon';
+import { AgentSelect } from '@/components/new-chat/AgentSelect';
 import {
   addRecentFolder,
   FolderPickerPopover,
@@ -54,8 +55,14 @@ import {
   type CodexScheduleConfig,
 } from '../lib/cronCodexPreset';
 import { getScheduleDefaultModel, type EffortValue } from '../hooks/useScheduleForm';
-import { PENDING_SESSION_ID, resolveScheduleModelEfforts } from '../lib/scheduleFormLogic';
+import {
+  isFollowingSessionSelection,
+  PENDING_SESSION_ID,
+  resolveScheduleModelEfforts,
+  usesBoundSessionModel,
+} from '../lib/scheduleFormLogic';
 import type { SessionReference } from '../../../../shared/sessionReference';
+import { isReviewSessionSource } from '../../../../shared/sessionSource';
 import type { AgentKind } from '@cindy/maker-core';
 
 export type Destination = 'local' | 'worktree' | 'thread';
@@ -81,7 +88,7 @@ export const ChipButton = React.forwardRef<HTMLButtonElement, ChipButtonProps>(f
       disabled={disabled}
       onClick={onClick}
       className={cn(
-        'inline-flex h-[34px] shrink-0 items-center rounded-full text-[13px] leading-none transition-colors',
+        'inline-flex h-[34px] shrink-0 items-center rounded-full text-13 leading-none transition-colors',
         'gap-1.5 px-3',
         variant === 'toolbar'
           ? cn(
@@ -99,7 +106,7 @@ export const ChipButton = React.forwardRef<HTMLButtonElement, ChipButtonProps>(f
       {...rest}
     >
       {icon && <span className="shrink-0 -translate-y-px">{icon}</span>}
-      {label && <span className="truncate text-center text-[13px] font-normal leading-[1.33]">{label}</span>}
+      {label && <span className="truncate text-center text-13 font-normal leading-[1.33]">{label}</span>}
       <ChevronDown size={13} className="shrink-0 opacity-60" />
     </button>
   );
@@ -173,46 +180,33 @@ export function ProjectChip({
   );
 }
 
-/** Agent tabs: Claude Code / Codex / Cursor / Pi. */
-const VISIBLE_AGENT_KINDS: readonly AgentKind[] = ['claude-code', 'codex', 'cursor', 'pi'];
-
-const AGENT_META: Record<AgentKind, { label: string; vendor: 'cc' | 'codex' | 'cursor' | 'pi' }> = {
-  'claude-code': { label: 'Claude Code', vendor: 'cc' },
-  codex: { label: 'Codex', vendor: 'codex' },
-  cursor: { label: 'Cursor', vendor: 'cursor' },
-  pi: { label: 'Pi', vendor: 'pi' },
-};
-
+/**
+ * Scheduler compatibility adapter: keep the persisted scheduler kind shape,
+ * while sharing the same AgentSelect dropdown used by IM settings and chat.
+ */
 export function AgentTabs({ value, onChange, disabled }: { value: AgentKind; onChange: (v: AgentKind) => void; disabled?: boolean }) {
   return (
-    <div
-      className={cn(
-        'flex h-[34px] w-[117px] shrink-0 items-center gap-0.5 rounded-full p-[3px]',
-        'bg-[var(--chat-input-chip-bg)] dark:border dark:border-[var(--cmd-palette-border)] dark:bg-[var(--cmd-palette-bg)]',
-        disabled && 'pointer-events-none opacity-50',
-      )}
-    >
-      {VISIBLE_AGENT_KINDS.map((kind) => {
-        const active = kind === value;
-        const meta = AGENT_META[kind];
-        return (
-          <button
-            key={kind}
-            type="button"
-            aria-label={meta.label}
-            onClick={() => onChange(kind)}
-            className={cn(
-              'flex h-full flex-1 items-center justify-center rounded-full transition-colors',
-              active
-                ? 'border border-[var(--confirm-btn-secondary-border)] bg-[var(--cmd-palette-bg)] dark:border-transparent dark:bg-[var(--chat-input-chip-bg)]'
-                : 'border border-transparent bg-transparent hover:bg-black/5 dark:hover:bg-white/5',
-            )}
-          >
-            <VendorIcon vendor={meta.vendor} size={14} />
-          </button>
+    <AgentSelect
+      value={agentKindToVendor(value)}
+      disabled={disabled}
+      side="top"
+      // ScheduleFormDialog 是 Radix modal。MorphPopover 的 custom portal 不在
+      // Dialog focus scope 内，动画结束聚焦选中项时会被拉回并立即自动收起；
+      // 此处使用 Radix Popover，让嵌套焦点与 outside-interaction 语义正确组合。
+      useMorphPopover={false}
+      overlayContentClassName="z-[10010]"
+      onChange={(vendor) => {
+        onChange(
+          vendor === 'cc'
+            ? 'claude-code'
+            : vendor === 'cursor'
+              ? 'cursor'
+              : vendor === 'pi'
+                ? 'pi'
+                : 'codex',
         );
-      })}
-    </div>
+      }}
+    />
   );
 }
 
@@ -267,12 +261,12 @@ export function ScheduleSettingsButton({
         className={cn(POPOVER_BASE, 'w-[240px]')}
         onWheel={stopWheel}
       >
-        <div className="px-2 pt-1.5 pb-1 text-[13px] font-medium text-[var(--cmd-palette-item-meta)] dark:text-[var(--settings-section-desc)]">
+        <div className="px-2 pt-1.5 pb-1 text-13 font-medium text-[var(--cmd-palette-item-meta)] dark:text-[var(--settings-section-desc)]">
           {t('scheduler.chips.advanced')}
         </div>
 
         {enabled && (
-          <p className="px-2 pb-1 text-[11px] leading-4 text-[var(--cmd-palette-item-meta)] dark:text-[var(--settings-section-desc)]">
+          <p className="px-2 pb-1 text-11 leading-4 text-[var(--cmd-palette-item-meta)] dark:text-[var(--settings-section-desc)]">
             {t('scheduler.chips.worktreeHint')}
           </p>
         )}
@@ -284,7 +278,7 @@ export function ScheduleSettingsButton({
             onClick={() => !switchDisabled && onEnabledChange(!enabled)}
             disabled={switchDisabled}
             className={cn(
-              'flex h-8 w-full items-center gap-2 rounded-md px-2 text-[13px] transition-colors',
+              'flex h-8 w-full items-center gap-2 rounded-md px-2 text-13 transition-colors',
               'hover:bg-[var(--surface-hover)] dark:hover:bg-[var(--settings-btn-secondary-hover-bg)]',
               'disabled:cursor-not-allowed disabled:opacity-50',
               enabled ? 'text-[var(--msg-assistant-text)] dark:text-[var(--msg-assistant-text)]' : 'text-[var(--cmd-palette-item-meta)] dark:text-[var(--settings-section-desc)]',
@@ -484,7 +478,7 @@ export function ScheduleChip({
                 );
               })}
             </div>
-            <p className="px-1 pt-1.5 text-[11px] leading-4 text-[var(--cmd-palette-item-meta)] dark:text-[var(--settings-section-desc)]">
+            <p className="px-1 pt-1.5 text-11 leading-4 text-[var(--cmd-palette-item-meta)] dark:text-[var(--settings-section-desc)]">
               {t(
                 timingMode === 'interval' && !intervalIsPreset
                   ? 'scheduler.chips.timingMode.intervalUnsupportedHint'
@@ -538,10 +532,10 @@ function ExactIntervalPanel({ summary }: { summary: string }) {
   const { t } = useTranslation();
   return (
     <div className="min-w-0 flex-1 rounded-xl border border-[var(--cmd-palette-border)] bg-[var(--cmd-palette-bg)] p-3 shadow-lg dark:border-[var(--cmd-palette-border)] dark:bg-[var(--cmd-palette-bg)]">
-      <div className="text-[13px] font-medium text-[var(--msg-assistant-text)]">
+      <div className="text-13 font-medium text-[var(--msg-assistant-text)]">
         {t('scheduler.chips.timingMode.currentExact', { schedule: summary })}
       </div>
-      <p className="pt-2 text-[11px] leading-4 text-[var(--cmd-palette-item-meta)] dark:text-[var(--settings-section-desc)]">
+      <p className="pt-2 text-11 leading-4 text-[var(--cmd-palette-item-meta)] dark:text-[var(--settings-section-desc)]">
         {t('scheduler.chips.timingMode.exactIntervalPanelHint')}
       </p>
     </div>
@@ -576,7 +570,7 @@ function ScheduleConfigPanel({
                 onFocus={commit}
                 onChange={(intervalMinutes) => onUpdate({ mode: 'intervalMinutes', intervalMinutes })}
               />
-              <span className="text-[13px] text-[var(--cmd-palette-item-meta)] dark:text-[var(--settings-section-desc)]">{t('scheduler.chips.scheduleField.minutesSuffix')}</span>
+              <span className="text-13 text-[var(--cmd-palette-item-meta)] dark:text-[var(--settings-section-desc)]">{t('scheduler.chips.scheduleField.minutesSuffix')}</span>
             </div>
             <PreviewPill
               text={
@@ -595,7 +589,7 @@ function ScheduleConfigPanel({
                 onFocus={commit}
                 onChange={(intervalHours) => onUpdate({ mode: 'interval', intervalHours })}
               />
-              <span className="text-[13px] text-[var(--cmd-palette-item-meta)] dark:text-[var(--settings-section-desc)]">{t('scheduler.chips.scheduleField.hoursSuffix')}</span>
+              <span className="text-13 text-[var(--cmd-palette-item-meta)] dark:text-[var(--settings-section-desc)]">{t('scheduler.chips.scheduleField.hoursSuffix')}</span>
             </div>
             <PreviewPill text={panelConfig.intervalHours === 1 ? t('scheduler.chips.schedulePreview.everyHour') : t('scheduler.chips.schedulePreview.everyHours', { count: panelConfig.intervalHours })} />
           </>
@@ -806,7 +800,7 @@ function TimePicker({
         setOpen(next);
       }}
     >
-      <div className="grid h-[34px] w-[112px] grid-cols-[1fr_24px] items-center rounded-lg border border-[var(--settings-input-border)] bg-background px-2 text-[13px] font-medium text-[var(--settings-input-text)] dark:border-[var(--settings-input-border)] dark:text-[var(--settings-input-text)]">
+      <div className="grid h-[34px] w-[112px] grid-cols-[1fr_24px] items-center rounded-lg border border-[var(--settings-input-border)] bg-background px-2 text-13 font-medium text-[var(--settings-input-text)] dark:border-[var(--settings-input-border)] dark:text-[var(--settings-input-text)]">
         <div className="flex items-center justify-center">
         <input
           ref={hourInputRef}
@@ -838,7 +832,7 @@ function TimePicker({
             }
           }}
           aria-label={t('scheduler.chips.scheduleField.scheduleHourAria')}
-          className="w-5 bg-transparent text-center text-[13px] font-medium outline-none"
+          className="w-5 bg-transparent text-center text-13 font-medium outline-none"
         />
         <span className="select-none text-[var(--cmd-palette-item-meta)] dark:text-[var(--settings-section-desc)]">:</span>
         <input
@@ -871,7 +865,7 @@ function TimePicker({
             }
           }}
           aria-label={t('scheduler.chips.scheduleField.scheduleMinuteAria')}
-          className="w-5 bg-transparent text-center text-[13px] font-medium outline-none"
+          className="w-5 bg-transparent text-center text-13 font-medium outline-none"
         />
         </div>
         <PopoverTrigger asChild>
@@ -923,7 +917,7 @@ function TimeColumn({
 }) {
   return (
     <div className="min-w-0">
-      <div className="px-2 pb-1 text-[11px] text-[var(--cmd-palette-item-meta)] dark:text-[var(--settings-section-desc)]">{label}</div>
+      <div className="px-2 pb-1 text-11 text-[var(--cmd-palette-item-meta)] dark:text-[var(--settings-section-desc)]">{label}</div>
       <div className="max-h-[180px] overflow-y-auto pr-1" onWheel={stopWheel}>
         {options.map((option) => {
           const active = option === value;
@@ -933,7 +927,7 @@ function TimeColumn({
               type="button"
               onClick={() => onChange(option)}
               className={cn(
-                'flex h-7 w-full items-center justify-center rounded-md text-[13px] transition-colors',
+                'flex h-7 w-full items-center justify-center rounded-md text-13 transition-colors',
                 active
                   ? 'bg-[var(--chat-input-chip-bg)] font-medium text-[var(--msg-assistant-text)] dark:bg-[var(--chat-input-chip-bg)] dark:text-[var(--msg-assistant-text)]'
                   : 'text-[var(--cmd-palette-item-meta)] hover:bg-[var(--surface-hover)] dark:text-[var(--settings-section-desc)] dark:hover:bg-[var(--settings-btn-secondary-hover-bg)]',
@@ -972,7 +966,7 @@ function WeekdayRow({
               onFocus={onFocus}
               onClick={() => onChange(day)}
               className={cn(
-                'flex h-8 w-[38px] items-center justify-center rounded-full border text-[13px] transition-colors',
+                'flex h-8 w-[38px] items-center justify-center rounded-full border text-13 transition-colors',
                 active
                   ? 'border-transparent bg-[var(--chat-input-chip-bg)] font-medium text-[var(--msg-assistant-text)] dark:bg-[var(--chat-input-chip-bg)] dark:text-[var(--msg-assistant-text)]'
                   : 'border-[var(--cmd-palette-border)] bg-transparent text-[var(--cmd-palette-item-meta)] hover:bg-[var(--confirm-btn-secondary-hover)] dark:border-[var(--cmd-palette-border)] dark:hover:bg-[var(--settings-btn-secondary-hover-bg)]',
@@ -1006,7 +1000,7 @@ function MonthDayRow({
 
   return (
     <div className="flex min-h-[34px] w-full items-center gap-1.5">
-      <span className="text-[13px] text-[var(--cmd-palette-item-meta)] dark:text-[var(--settings-section-desc)]">{t('scheduler.chips.scheduleField.daySuffix')}</span>
+      <span className="text-13 text-[var(--cmd-palette-item-meta)] dark:text-[var(--settings-section-desc)]">{t('scheduler.chips.scheduleField.daySuffix')}</span>
       <input
         type="text"
         inputMode="numeric"
@@ -1032,7 +1026,7 @@ function MonthDayRow({
 
 function PreviewPill({ text }: { text: string }) {
   return (
-    <div className="flex h-[34px] w-full items-center rounded-full bg-background px-3 text-[13px] text-[var(--cmd-palette-item-meta)] dark:text-[var(--settings-section-desc)]">
+    <div className="flex h-[34px] w-full items-center rounded-full bg-background px-3 text-13 text-[var(--cmd-palette-item-meta)] dark:text-[var(--settings-section-desc)]">
       {text}
     </div>
   );
@@ -1040,7 +1034,7 @@ function PreviewPill({ text }: { text: string }) {
 
 function inputPillClass(className?: string) {
   return cn(
-    'h-[34px] rounded-lg border px-3 text-[13px] outline-none',
+    'h-[34px] rounded-lg border px-3 text-13 outline-none',
     'border-[var(--settings-input-border)] bg-background text-[var(--settings-input-text)]',
     'dark:border-[var(--settings-input-border)] dark:text-[var(--settings-input-text)]',
     className,
@@ -1167,11 +1161,17 @@ export function ModelEffortChip({
       ),
     [availableModels, agentKind, xdConnected],
   );
-  // followSession 形态下 model 空值 = "跟随会话",不做默认回退(回退会显示一个并不会
-  // 运行的模型);非 followSession 维持原逻辑:空值回退跟实际运行语义同源(三级回退默认),
-  // 绝不回退 models[0]——列表第一个是最贵的 Opus,显示它实际跑别的就是 2026-06 的事故根源。
-  const isFollowingSession = !!followSession && !modelValue;
-  const effectiveId = isFollowingSession ? '' : modelValue || getScheduleDefaultModel(agentKind);
+  // 只有 model/provider/effort 都为空时才显示「跟随会话」;混合覆盖态必须显式暴露，
+  // 不能把来源或强度覆盖伪装成完整继承。非 followSession 维持原逻辑:空值回退跟实际
+  // 运行语义同源(三级回退默认),绝不回退 models[0]。
+  const isFollowingSession = isFollowingSessionSelection({
+    followSession,
+    model: modelValue,
+    providerId,
+    effort: effortValue,
+  });
+  const followsSessionModel = usesBoundSessionModel({ followSession, model: modelValue });
+  const effectiveId = followsSessionModel ? '' : modelValue || getScheduleDefaultModel(agentKind);
   const current = models.find((m) => m.id === effectiveId);
   // 档位能力按 (生效来源, 模型) 解析,不用扁平 capabilities:Pi + 自定义 API 同 id 时
   // 扁平表给的是跨来源交集,会塌成空,chip 于是显示「默认档」且吃掉用户挑的档位
@@ -1193,8 +1193,14 @@ export function ModelEffortChip({
   const fallbackEffort = (modelEfforts.defaultEffort ?? 'high') as EffortValue;
   const effectiveEffort: EffortValue = effortValue && allowedEfforts.includes(effortValue) ? effortValue : fallbackEffort;
   const effortLabel = (e: EffortValue) => t(`effortLevels.${e}`);
-  const display = isFollowingSession
-    ? t('scheduler.chips.model.followSession')
+  const display = followsSessionModel
+    ? [
+      t('scheduler.chips.model.followSession'),
+      providerId.trim()
+        ? (providers.find((provider) => provider.id === providerId)?.name ?? providerId)
+        : null,
+      effortValue ? effortLabel(effortValue) : null,
+    ].filter(Boolean).join(' · ')
     : current
       ? `${current.displayName} · ${allowedEfforts.length ? effortLabel(effectiveEffort) : t('scheduler.chips.model.effortDefault')}`
       : t('scheduler.chips.model.default');
@@ -1331,10 +1337,18 @@ export function ModelEffortChip({
           onProviderChange={(pid, reconciledModelId, reconciledEffort) => {
             onChangeProviderId(pid && pid !== nativeDefault ? pid : '');
             if (reconciledModelId) onChangeModel(reconciledModelId);
-            if (reconciledEffort) onChangeEffort(reconciledEffort as EffortValue);
-            else if (reconciledModelId) applyRememberedModelConfig(reconciledModelId, pid);
+            if (reconciledEffort !== undefined) {
+              onChangeEffort(reconciledEffort as EffortValue | '');
+            } else if (reconciledModelId) {
+              applyRememberedModelConfig(reconciledModelId, pid);
+            }
           }}
           onNavigateToProviders={onNavigateToProviders}
+          // A stale explicit provider is rendered as the effective fallback row.
+          // Re-selecting that highlighted row must repair the stored provider
+          // before the effort configuration card opens.
+          reselectEmitsChange
+          selectedRowClickOpensConfiguration
           overlayContentClassName="z-[10020]"
           discoveringModels={discovery.pending}
           followSession={
@@ -1380,7 +1394,7 @@ export function ThreadPickerInline({ value, onSelect, onOpen, reference }: {
       .list(50, 'active')
       .then((list) => {
         if (!alive) return;
-        setSessions(list);
+        setSessions(list.filter((session) => !isReviewSessionSource(session.source)));
         setError(null);
       })
       .catch((e: unknown) => {

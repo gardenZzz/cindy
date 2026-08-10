@@ -124,12 +124,19 @@ export function resolveScheduleModelEfforts(input: {
 
   const model = input.model.trim();
   if (!model) return fallback();
+  const explicitProviderId = input.providerId.trim();
   const sourceId = effectiveSourceIdForModel(
     input.providers,
-    input.providerId.trim() || null,
+    explicitProviderId || null,
     model,
     input.agentKind,
   );
+  // 显式钉住的来源不跨界:它掉线 / 被停用时 effectiveSourceIdForModel 会回落到别的
+  // 来源,拿那份档位表校验等于悄悄换了路由。此时按「没有权威条目」处理,让调用方
+  // 保留用户存好的档位,直到该来源修好。
+  if (explicitProviderId && sourceId !== explicitProviderId) {
+    return { efforts: [], defaultEffort: null, known: false };
+  }
   const provider = sourceId ? input.providers.find((p) => p.id === sourceId) : undefined;
   const entry = provider ? getModel(provider, model, input.agentKind) : undefined;
   if (!provider || !entry) return fallback();
@@ -230,14 +237,69 @@ export function hasRealBinding(form: Pick<ScheduleFormState, 'targetSessionId'>)
   return !!tgt && tgt !== PENDING_SESSION_ID;
 }
 
-/** True only for a bound schedule that intentionally follows its session route. */
-export function shouldFollowBoundSessionGenerationRoute(
-  form: Pick<ScheduleFormState, 'persistentSession' | 'targetSessionId' | 'providerId' | 'model'>,
+/**
+ * A bound schedule follows its session route when model and provider are both
+ * inherited. Effort is an independent runtime override and must not alter the
+ * generation route predicate.
+ */
+export function isFollowingSessionSelection(input: {
+  followSession?: boolean;
+  model: string;
+  providerId: string;
+  effort: string;
+}): boolean {
+  return Boolean(
+    input.followSession &&
+      !input.model.trim() &&
+      !input.providerId.trim() &&
+      !input.effort.trim(),
+  );
+}
+
+/**
+ * 前置脚本生成是否应沿用绑定会话的模型。
+ *
+ * model 是绑定任务的继承维度；provider/effort 可以独立覆盖，不能因为这两个
+ * 覆盖值存在就把空 model 当成“没有可生成的模型”。
+ */
+export function usesBoundSessionGenerationModel(
+  form: Pick<ScheduleFormState, 'persistentSession' | 'targetSessionId' | 'model'>,
 ): boolean {
   return deriveRunMode(form) === 'bound'
     && hasRealBinding(form)
-    && !form.providerId.trim()
     && !form.model.trim();
+}
+
+/** bound 任务生成前置脚本时，是否需要 main 用会话路由补齐缺省维度。 */
+export function needsBoundSessionGenerationRouteResolution(
+  form: Pick<
+    ScheduleFormState,
+    'persistentSession' | 'targetSessionId' | 'providerId' | 'model'
+  >,
+): boolean {
+  return deriveRunMode(form) === 'bound'
+    && hasRealBinding(form)
+    && (!form.model.trim() || !form.providerId.trim());
+}
+
+/** 前置脚本生成沿用绑定会话的完整模型/来源路由(努力强度是独立覆盖)。 */
+export function shouldFollowBoundSessionGenerationRoute(
+  form: Pick<
+    ScheduleFormState,
+    'persistentSession' | 'targetSessionId' | 'providerId' | 'model' | 'effort'
+  >,
+): boolean {
+  return needsBoundSessionGenerationRouteResolution(form)
+    && usesBoundSessionGenerationModel(form)
+    && !form.providerId.trim();
+}
+
+/** 绑定任务 model 为空时，运行模型仍来自绑定会话；provider/effort 可独立覆盖。 */
+export function usesBoundSessionModel(input: {
+  followSession?: boolean;
+  model: string;
+}): boolean {
+  return Boolean(input.followSession && !input.model.trim());
 }
 
 /**

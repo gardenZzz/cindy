@@ -118,6 +118,13 @@ export const CONTROLLER_CAPABILITY_PROVIDER_LOGO_KINDS_V2 = 'provider-logo-kinds
 export const CONTROLLER_CAPABILITY_SET_MODEL_EXPLICIT_PROVIDER_NULL_V1 =
   'set-model-explicit-provider-null-v1';
 
+/**
+ * 控制端能消费 `maker:event:batch` 微批帧(拆包后逐条按原路消费)。
+ * 被控端只对声明了本能力的控制端发批,未声明者照旧逐帧转发——旧控制端
+ * 因此永远收不到该 channel,无需为未知 channel 做任何兼容。
+ */
+export const CONTROLLER_CAPABILITY_MAKER_EVENT_BATCH_V1 = 'maker-event-batch-v1';
+
 export interface LinkAcceptPayload {
   appVersion: string;
   /** 被控端 allowlist 的指纹,便于控制端探测版本差异 */
@@ -173,9 +180,16 @@ export type InvokeResultPayload =
     };
 
 /** 被控端 → 控制端:广播转发(MAKER_PUSH.* / local-db 推送) */
+export interface PushOwnerStamp {
+  dataOwnerId: string | null;
+  ownerGeneration: number;
+}
+
 export interface PushPayload {
   channel: string;
   payload: unknown;
+  /** Optional for compatibility with older controlled desktops. */
+  ownerStamp?: PushOwnerStamp;
 }
 
 // ─── REST 管理面(GET /api/device-link/devices)────────────────────────────────

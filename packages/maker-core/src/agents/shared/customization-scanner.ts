@@ -22,6 +22,9 @@ export interface SourceDef {
   scope: string;
   dir: string;
   workingDir?: string;
+  runtimeStatus?: AgentCustomization['runtimeStatus'];
+  /** Optional physical root that the skill source, folder, and SKILL.md must stay inside. */
+  skillContainWithin?: string;
 }
 
 export function parseFrontmatter(raw: string): {
@@ -101,6 +104,7 @@ function readFolderSkill(source: SourceDef, folder: string, mdPath: string): Age
     frontmatter,
     parseError,
     ...(source.workingDir ? { workingDir: source.workingDir } : {}),
+    ...(source.runtimeStatus ? { runtimeStatus: source.runtimeStatus } : {}),
   };
 }
 
@@ -129,7 +133,27 @@ function readFileCustomization(source: SourceDef, mdPath: string): AgentCustomiz
     frontmatter,
     parseError,
     ...(source.workingDir ? { workingDir: source.workingDir } : {}),
+    ...(source.runtimeStatus ? { runtimeStatus: source.runtimeStatus } : {}),
   };
+}
+
+type PathContainmentApi = Pick<typeof path, 'relative' | 'isAbsolute'>;
+
+export function isCustomizationPathInside(
+  parent: string,
+  child: string,
+  pathApi: PathContainmentApi = path,
+): boolean {
+  const relative = pathApi.relative(parent, child);
+  return relative === '' || (!relative.startsWith('..') && !pathApi.isAbsolute(relative));
+}
+
+function realPathInside(parentRealPath: string, candidate: string): boolean {
+  try {
+    return isCustomizationPathInside(parentRealPath, fs.realpathSync(candidate));
+  } catch {
+    return false;
+  }
 }
 
 function scanOneSource(source: SourceDef): {
@@ -141,6 +165,15 @@ function scanOneSource(source: SourceDef): {
     if (!fs.existsSync(source.dir)) return { items: [], errors };
     const stat = fs.statSync(source.dir);
     if (!stat.isDirectory()) return { items: [], errors };
+    let containmentRoot: string | null = null;
+    if (source.skillContainWithin) {
+      try {
+        containmentRoot = fs.realpathSync(source.skillContainWithin);
+      } catch {
+        return { items: [], errors };
+      }
+      if (!realPathInside(containmentRoot, source.dir)) return { items: [], errors };
+    }
 
     const entries = fs.readdirSync(source.dir, { withFileTypes: true });
     const items: AgentCustomization[] = [];
@@ -161,6 +194,12 @@ function scanOneSource(source: SourceDef): {
           } else {
             continue;
           }
+        }
+        if (
+          containmentRoot &&
+          (!realPathInside(containmentRoot, folder) || !realPathInside(containmentRoot, actualMd))
+        ) {
+          continue;
         }
         items.push(readFolderSkill(source, folder, actualMd));
       } else {

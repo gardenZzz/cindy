@@ -44,6 +44,8 @@
   提的，提交者身份不构成例外。
 - 新增或调整产品功能、判断能力应进入 Core / Skill / 插件、设计人机交互或多端体验
   前，必须先读 `docs/product-rules/core-product-principles.md`。
+- 新增或修改 `/review`、Reviewer 任务、成果快照、Finding 协议、复核入口、结果呈现或
+  复核生命周期前，必须先读 `docs/product-rules/review-product-direction.md`。
 - 新增或修改按区域（`cn` / `global`）分支的逻辑、构建身份与命名、端点选择、区域相关
   UI 标注，或涉及两个版本关系的对外文案前，必须先读
   `docs/product-rules/region-and-editions.md`：**无限定词身份归 Global，未显式指定
@@ -55,6 +57,10 @@
   的术语照用，不自造译法；表里没有或拿不准的，在 `i18n/glossary.json` 加
   `status: "proposed"` 条目再讨论。门禁为 `pnpm check:i18n-glossary`，规则见
   `docs/dev-rules/engineering-conventions.md` §5.1。
+- 新增或修改**任一 Telegram bot 的用户可见行为**（命令、消息呈现、收口策略、群行为、
+  权限口径、附件与表情）前，必须先读能力台账 `docs/product-rules/telegram-bot-parity.md`：
+  两个 bot 是两套架构，差异可以有但必须登记在表里；表里标「有意不同」的行**不要去
+  "统一"**，动它要先推翻对应裁决。改完记得把对应行写回去。
 - 文案里出现**任务 / 对话 / 消息**这几个词时，必须先读
   `docs/product-rules/task-and-conversation-naming.md`：`session` 面向用户叫「任务」，
   「对话」只用于任务内的交流过程与内容，单条往来叫「消息」；**「任务」与 `task` 同句出现
@@ -83,11 +89,20 @@
   能力 slot、打包与内容判据、manifest 契约、装入与权限确认 UI、已装列表投影）的 PR 一律
   走白名单确认门，需放行人明确 Approve 才能合并，不看 diff 大小、不因「是 bugfix／纯技术
   改动」豁免。
+- 修改插件发现链（花名册注入、`ghost_list` / `ghost_info` / `ghost_call`）、插件运行期
+  可见性门禁或 FORGE_GUIDE 作者契约前，必须先读 `docs/ghost-progressive-discovery.md`。
 - 修改客户端自动更新链路（`cindy-updater` 或 Electron 侧更新服务）前，必须先读
   `docs/dev-rules/cindy-updater.md`。
 - 新增或修改 Desktop 日志、IPC 错误处理、main 侧业务逻辑与测试、跨平台（macOS／
   Windows）行为，或任何 UI 文案的 i18n 落地前，必须先读
   `docs/dev-rules/engineering-conventions.md`。
+- 修改客户端日志采集／脱敏／上报链路（`apps/desktop/src/main/log-upload/**`）、`logger.ts`
+  的 main 日志行格式、崩溃判定或待补传标记前，必须先读
+  `docs/dev-rules/log-upload-and-redaction.md`。其中三条是**不变量**：**记录边界**（写侧
+  续行转义与读侧切分是同一条不变量的两半，破坏任一侧即隐私逃逸）、**白名单方向**
+  （deny-by-default，不得改成黑名单——调试级别的功能日志是用户内容的主要泄漏源）、
+  **标记代次 + 原子清除**（并发实例下仅靠时间戳会误删另一实例刚写的新崩溃标记）。
+  脱敏规则**只增不减**，放宽任一条视为隐私变更、需重新评审。
 - 升级 `cindy-protocol`、修改插件分发来源边界或 device-link 协议／relay／隧道
   payload／IPC allowlist，或任何改动跨端 wire protocol 前，必须先读
   `docs/dev-rules/protocol-and-submodules.md`。

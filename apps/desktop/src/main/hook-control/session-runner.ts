@@ -51,11 +51,13 @@ import { getMaker } from '../maker-host/index.js';
 import { resolveLenientRoute } from '../maker-host/model-route-guard.js';
 import { resolveLenientSessionRoute } from '../maker-host/model-route-guard-live.js';
 import {
+  beginTurnChangeSetAtDispatch,
   wireSessionToIpc,
   isSessionInTurn,
   noteSilentStopUserSend,
   onSilentStopSettled,
 } from '../maker-ipc/register.js';
+import { clearPendingTurnChangeSets } from '../turn-change-set/store.js';
 import {
   beginInteractionRoute,
   type InteractionHandler,
@@ -68,6 +70,7 @@ import { toDesktopSessionDispatchOutcome } from '../maker-host/send-outcome.js';
 import { createMessage } from '../localDb/ipc/messages.js';
 import {
   getSessionRowSnapshot,
+  getSessionRowSnapshotStrict,
   setSessionProviderIdInDb,
   setSessionSourceInDb,
   setWorktreePathInDb,
@@ -87,6 +90,7 @@ import { getWorkspaceProviderSource } from './workspaceProviderSourceStore.js';
 import { getDesktopProviderService } from '../maker-host/createDesktopProviderService.js';
 import { beginHeadlessGhostSetupTurn } from '../mcp-integrations/ghostSetupInteractionSurface.js';
 import { observeHookTurn, type HookTurnObserver } from './turnObserver.js';
+import { beginGroupHistoryAccess } from '../im/shared/groupHistoryAccess.js';
 
 import type {
   HookContinuationWatchRequest,
@@ -339,10 +343,9 @@ function collectOutboundImages(
 /**
  * 一轮 turn 的两份正文。**必须成对传递**, 所以做成一个值而不是两个参数。
  *
- * 两者在 X 上不相等, 而它们的用途完全不同 —— 混用过一次就是本 PR 的缺陷:
- * 把公开正文缩到末段时, 附件的引用扫描跟着缩了, agent 贴在中间那条消息里的
- * 图和文件被静默丢掉。两个相邻的 string 参数编译器管不了传反, 收成命名字段
- * 之后传错就写不出来。
+ * 两者的用途完全不同 —— 混用过一次就是本 PR 的缺陷: 把引用扫描范围缩到公开
+ * 正文时, agent 贴在被折叠工作过程里的图和文件会被静默丢掉。两个相邻的 string
+ * 参数编译器管不了传反, 收成命名字段之后传错就写不出来。
  */
 interface HookTurnTexts {
   /** 发出去的正文。 */
@@ -355,19 +358,26 @@ interface HookTurnTexts {
  * 收口取文(run() 与 watchContinuation 共用 —— 两处必须同判据, 所以两份正文
  * 的关系只在这里定义一次, 调用方不自己拼)。
  *
- * X 的**公开正文**只取最后一条助手消息: 一次 mention 只有一条公开回帖的名额,
- * 而 agent 的常态是"先说一句要去看看 → 干活 → 给结论", 整轮拼接会把过程叙述
- * 原样发到公开时间线, 稀释真正要公开的最终结论(见 turnObserver.finalSegment)。
+ * X 的**公开消息数**只有一条,但正文判定不能因此改成「只取最后一条助手消息」。
+ * 先按桌面消息流的完成态分组取未折叠的正式答复,再把这份正文作为唯一一条
+ * 公开回帖发送。这样"先说一句要去看看 → 干活 → 给结论"里的短过程旁白仍会
+ * 折进工作过程,而标题、表格、长正文、三项以上列表等正式内容不会被误删。
  *
- * 其余渠道公开正文就是整轮, 不能跟着改: IM 里过程叙述有用, 且只取最后一条会
- * 丢掉"先答后补"型 turn 的正文(实踩: Telegram 群里最终答案丢失 —— 见
- * turnObserver 的文本累积语义注释)。
+ * 所有渠道公开正文都按桌面消息流的完成态分组取「未折叠的正式答复」:
+ * done seal 前、最后一次真实动作后的连续 assistant 正文保留,较早但具有交付
+ * 结构的正文也保留,短过程旁白折进工作过程。判据由 maker-shared 共用实现，
+ * Hook 不再把整轮过程文字原样铺到最终消息里。
  *
  * wholeTurn 则**任何渠道都是整轮**: 它只用于扫描出站引用, 与"发什么"无关。
  */
-function turnTextsFor(observer: HookTurnObserver, im: string | undefined): HookTurnTexts {
+function turnTextsFor(observer: HookTurnObserver): HookTurnTexts {
   const wholeTurn = observer.text();
-  return { publicText: im === 'x' ? observer.finalSegment() : wholeTurn, wholeTurn };
+  return {
+    // 所有 IM 共用桌面版的最终正文判定; X 的特殊性只在出站层限制为一条消息,
+    // 不能把发送次数限制误写成「只取最后一段」。
+    publicText: observer.finalText(),
+    wholeTurn,
+  };
 }
 
 /**
@@ -377,7 +387,7 @@ function turnTextsFor(observer: HookTurnObserver, im: string | undefined): HookT
  * 拖垮收口, 附件是回帖增强, 文本永远要发出去。
  *
  * 引用扫描按**整轮**来, 而不是按要发出去的那段(见 HookTurnTexts): 否则 agent
- * 贴在中间那条消息里的图和文件会随着"只取末段"一起被丢掉(PR #1272 review)。
+ * 贴在被折叠工作过程里的图和文件会随着正文投影一起被丢掉(PR #1272 review)。
  */
 async function collectOutboundForFinalText(
   texts: HookTurnTexts,
@@ -425,10 +435,8 @@ export function createMakerHookSessionRunner(deps: {
 
     async inspect(sessionId) {
       const [meta, row] = await Promise.all([
-        getMaker()
-          .getSessionMeta(sessionId)
-          .catch(() => null),
-        getSessionRowSnapshot(sessionId),
+        getMaker().getSessionMeta(sessionId),
+        getSessionRowSnapshotStrict(sessionId),
       ]);
       if (!meta && !row) return null;
       const usable =
@@ -520,6 +528,12 @@ export function createMakerHookSessionRunner(deps: {
        */
       const isTelegramGroupTurn = req.source?.im === 'telegram' && req.laneKind === 'group';
       let releaseTelegramGroupTurnLease: (() => void) | null = null;
+      let releaseGroupHistoryAccess: (() => void) | null = null;
+      const releaseGroupHistory = (): void => {
+        const release = releaseGroupHistoryAccess;
+        releaseGroupHistoryAccess = null;
+        release?.();
+      };
       const releaseTelegramGroupTurn = (): void => {
         releaseTelegramGroupTurnLease?.();
         releaseTelegramGroupTurnLease = null;
@@ -702,6 +716,7 @@ export function createMakerHookSessionRunner(deps: {
           // 可能根本不在这个会话里(Telegram 群里的授权卡改投宿主私聊)。挂一行状态,
           // 收口后摘掉; 全程只改已经在发的那条快照, 不新增群消息。
           pendingInteractionNotices.set(ireq.requestId, awaitingInteractionNotice(ireq.kind));
+          activeObserver?.markInteractionBoundary();
           activeObserver?.setNotice(awaitingInteractionNotice(ireq.kind));
           try {
             const decision = await registerHookInteraction({
@@ -788,10 +803,14 @@ export function createMakerHookSessionRunner(deps: {
       // 就会让"续跑接回渠道"那条路径静默落后于本路径。
       // tool_result 旁路收集的出站图片 absPath(收口时随 turn.end 附件外发)
       const extraImageAbsPaths: string[] = [];
+      const useTelegramProgressParity = req.source?.im === 'telegram';
       const observer = observeHookTurn(session, {
-        // 进度快照不按渠道/聊天类型分叉: 过程区时间线在上正文在下,
-        // Telegram DM / 群 / topic 与 Slack 一致。
+        // Telegram 对齐个人 bot：过程消息累积展示整轮正文，done 先冲刷最后一帧。
+        // Slack / X 保留只展示当前消息的旧行为，避免顺带改变其它车道。
         ...(req.onProgress ? { onProgress: req.onProgress } : {}),
+        ...(useTelegramProgressParity
+          ? { progressBodyMode: 'whole' as const, flushProgressOnDone: true }
+          : {}),
         onToolResult: (fullText) => collectOutboundImages(fullText, extraImageAbsPaths, log),
         onSilentStopSettled,
         log,
@@ -945,6 +964,8 @@ export function createMakerHookSessionRunner(deps: {
           ? { text: req.prompt, images: imageRefs, files: fileRefs }
           : req.prompt;
 
+      const turnChangeAnchorClientId = randomUUID();
+      let turnChangeSetStarted = false;
       try {
         const pendingHandoff = await agentHandoffPending.peek(session.id);
         const outgoingMessage: UserMessage = pendingHandoff
@@ -964,6 +985,13 @@ export function createMakerHookSessionRunner(deps: {
             }
           },
           beforeProviderStart: () => {
+            if (req.groupHistoryAccess) {
+              releaseGroupHistoryAccess = beginGroupHistoryAccess({
+                sessionId: session.id,
+                sessionInstanceId: session.instanceId,
+                scope: req.groupHistoryAccess,
+              });
+            }
             const routeOrigin: RoutedTurnOrigin =
               req.source?.im === 'slack'
                 ? { kind: 'im', channel: 'slack' }
@@ -996,11 +1024,13 @@ export function createMakerHookSessionRunner(deps: {
             // 裸 path 的 image block 会被忽略), 无图为纯文本 string。
             noteSilentStopUserSend(session.id);
             await createMessage(session.id, {
-              clientId: randomUUID(),
+              clientId: turnChangeAnchorClientId,
               role: 'user',
               content: userMessageContent,
               agentMeta: { origin, ...(req.source ? { hookSource: req.source } : {}) },
             });
+            await beginTurnChangeSetAtDispatch(session, turnChangeAnchorClientId);
+            turnChangeSetStarted = true;
             // 每次被接受的 IM 消息都是一次用户发送: bump userSendAt 让排序
             // 时间轴与桌面端 sendMessage 口径一致, sessions:patched 广播顺带把
             // 复用/接管会话即时重排序(新建路径已在广播前落过, 这里更新为实际
@@ -1016,15 +1046,31 @@ export function createMakerHookSessionRunner(deps: {
           context: `hook:${req.origin.connectionId}`,
         });
         if (!outcome.dispatched) {
+          if (turnChangeSetStarted) clearPendingTurnChangeSets(session.id);
           observer.stop();
           finalizeInteractions();
           releaseTelegramGroupTurn();
+          releaseGroupHistory();
           return fail(`send not dispatched: ${outcome.reason}`);
         }
+        // 与个人 IM turnRunner 的 route-resolved 时机一致：只有 provider 已
+        // 实际接受本次 send 后才执行 durable 群游标提交。回调失败不能反转
+        // 已受理 turn；旧游标会让下次最多重复携带，而不会永久跳过消息。
+        try {
+          await req.onProviderAccepted?.();
+        } catch (err) {
+          log.warn(
+            `provider-accepted callback failed for session=${session.id.slice(-8)}: ${
+              err instanceof Error ? err.message : String(err)
+            }`,
+          );
+        }
       } catch (err) {
+        if (turnChangeSetStarted) clearPendingTurnChangeSets(session.id);
         observer.stop();
         finalizeInteractions();
         releaseTelegramGroupTurn();
+        releaseGroupHistory();
         return fail(err instanceof Error ? err.message : String(err));
       }
 
@@ -1041,6 +1087,7 @@ export function createMakerHookSessionRunner(deps: {
         // lease 在这里才能放: observer.finished 已把后台任务一并定格
         // (早放 = 后台续跑期间又回到共享 session 的旧行为)。幂等。
         releaseTelegramGroupTurn();
+        releaseGroupHistory();
       }
 
       // 已知 v1 取舍: 不做 scheduler 4.5.1 的完整 backfillSessionMeta。
@@ -1049,7 +1096,7 @@ export function createMakerHookSessionRunner(deps: {
       // 出站附件: 文本引用 / 旁路图存在时才收集(读盘 + base64 只在需要时
       // 发生); 收集失败不拖垮收口 —— 附件是回帖增强, 文本永远要发出去
       const collected = await collectOutboundForFinalText(
-        turnTextsFor(observer, req.source?.im),
+        turnTextsFor(observer),
         extraImageAbsPaths,
         [workingDir],
         log,
@@ -1114,12 +1161,16 @@ function beginContinuationWatch(
   const extraImageAbsPaths: string[] = [];
   let claimed = false;
   let settled = false;
+  const useTelegramProgressParity = req.source?.im === 'telegram';
   const observer = observeHookTurn(session, {
-    // 与 run() 同一呈现: 过程区时间线在上正文在下, 不按聊天类型分叉。
+    // 与 run() 同一呈现；Telegram 续跑同样累计正文并在 done 冲刷最后一帧。
     onProgress: (text) => {
       // 认领之前不发进度: 那时 server 还没把这条消息挂到新 requestId 上。
       if (claimed) req.onProgress(text);
     },
+    ...(useTelegramProgressParity
+      ? { progressBodyMode: 'whole' as const, flushProgressOnDone: true }
+      : {}),
     onToolResult: (fullText) => collectOutboundImages(fullText, extraImageAbsPaths, log),
     onSilentStopSettled,
     log,
@@ -1158,7 +1209,7 @@ function beginContinuationWatch(
       // workDir 以 live session 为权威(会话可能被移动过), 与 run() 里
       // isDirAuthorized 用 session.workDir 复核同理。
       const collected = await collectOutboundForFinalText(
-        turnTextsFor(observer, req.source?.im),
+        turnTextsFor(observer),
         extraImageAbsPaths,
         [session.workDir],
         log,

@@ -69,6 +69,7 @@ import type {
   ListCustomizationsOptions,
   ListCustomizationsResult,
 } from '../types/customizations.js';
+import type { PiRuntimeCapabilityManifest } from '../types/pi-runtime-capabilities.js';
 import { scanWorkspaceFileResources } from './shared/palette-scanner.js';
 import type { AutoReviewDelegate } from './shared/auto-review-decision.js';
 
@@ -82,6 +83,9 @@ export interface AgentCapabilityAdditions {
 export interface CodexMcpThreadContextArgs {
   threadId: string;
   sessionId: string;
+  /** Host-owned app-server thread lineage. */
+  mcpCallerKind: 'root' | 'descendant' | 'unknown';
+  mcpCallerAttested: boolean;
   /** 当前 Maker Session 实例代号；同 business session 重建后必须变化。 */
   sessionInstanceId?: string;
   workingDir: string;
@@ -208,11 +212,21 @@ export interface PiExtraSpawnConfigContext {
   sessionInstanceId?: string;
   workingDir: string;
   vendorOptions?: Record<string, unknown>;
+  mcpCallerKind?: 'root' | 'descendant' | 'unknown';
+  mcpCallerAttested?: boolean;
 }
 
 export interface CodexExtraSpawnConfig {
   extraArgs: string[];
   extraEnv: Record<string, string>;
+  /** Cindy-side display fallback for Codex subagent cards. */
+  subagentModelFallback?: string;
+  /** Whether this exact app-server spawn was provisioned with Codex Chrome. */
+  codexBrowserUseAvailable?: boolean;
+  /** Exact verified Chrome plugin version provisioned into this app-server. */
+  codexBrowserUseVersion?: string;
+  /** Maximum startup wait copied from the verified companion descriptor. */
+  codexBrowserUseStartupTimeoutMs?: number;
   /**
    * Build per-thread config overrides that bind host-owned HTTP MCP URLs to one
    * in-memory Session instance. The app-server process is shared, so the spawn
@@ -229,6 +243,19 @@ export interface CodexExtraSpawnConfig {
    * (本地压缩)—— 网关 / xAI / 自定义供应商上游不实现远端压缩,错配是硬失败。
    */
   codexRemoteCompactionProviderId?: string;
+}
+
+export type CodexAppServerProcessRole = 'task-host' | 'control-plane-service';
+
+export interface CodexAppServerProcessRegistration {
+  pid: number;
+  role: CodexAppServerProcessRole;
+}
+
+export interface LocalAgentProcessRegistration {
+  pid: number;
+  kind: 'claude' | 'pi';
+  role: 'task-host' | 'control-plane-service';
 }
 
 export interface CodexLocalCredentialModeSwitchContext {
@@ -276,7 +303,27 @@ export class CodexResumePreparationBlockedError extends Error {
   }
 }
 
+export interface TurnChangeCaptureHooks {
+  /** Capture one known target before the provider is allowed to mutate it. */
+  beforeKnownFileWrite(input: {
+    sessionId: string;
+    provider: 'claude-code' | 'pi';
+    cwd: string;
+    targetPath: string;
+    remote?: boolean;
+  }): Promise<void>;
+  /** Record a tool whose filesystem effects cannot be known before execution. */
+  noteOpaqueWrite(input: {
+    sessionId: string;
+    provider: 'claude-code' | 'pi';
+    cwd: string;
+    remote?: boolean;
+  }): void;
+}
+
 export interface AgentDeps {
+  /** Optional low-I/O, provider-neutral turn change recorder supplied by the host. */
+  turnChangeCapture?: TurnChangeCaptureHooks;
   auth: AuthAdapter;
   runtimeConfig: AgentRuntimeConfig;
   /**
@@ -385,6 +432,23 @@ export interface AgentDeps {
   capabilityRouting?: CapabilityRoutingPolicy;
 
   /**
+   * Resolve capability arbitration once for a new session. Use this for
+   * workspace-scoped sources whose effective state is already frozen into
+   * vendorOptions by the host. Static capabilityRouting remains the fallback.
+   */
+  resolveCapabilityRouting?: (ctx: {
+    workingDir: string;
+    remoteHostId?: string | null;
+    vendorOptions: Readonly<Record<string, unknown>>;
+    /** Frozen fact: the concrete app-server was provisioned with the companion. */
+    codexBrowserUseProvisioned: boolean;
+    /** Exact Chrome plugin version bound to that host, when provisioned. */
+    codexBrowserUseVersion: string | null;
+    /** Post-start readiness check, invoked only when this session needs the fallback. */
+    ensureCodexBrowserUseReady: () => Promise<boolean>;
+  }) => CapabilityRoutingPolicy | undefined | Promise<CapabilityRoutingPolicy | undefined>;
+
+  /**
    * 解析某条**具体路由**上该模型已核实的上下文窗口上限（host 注入）；没有则返回 null。
    *
    * 用于把上游上报的窗口收敛到真实上限：app-server 对网关路由的模型常报**基础模型**的窗口
@@ -431,7 +495,7 @@ export interface AgentDeps {
       remoteHostId?: string;
       credentialMode?: AgentCredentialMode;
       /** Marks one-off app-server work (e.g. model/list) that must not alter session routing. */
-      hostPurpose?: 'control-plane';
+      hostPurpose?: 'control-plane' | 'review';
     },
   ) => Promise<CodexExtraSpawnConfig>;
 
@@ -473,6 +537,22 @@ export interface AgentDeps {
     | { ok: true; url: string; filename: string }
     | { ok: false; reason: string }
   >;
+
+  /**
+   * Codex 专用：登记本机 stdio app-server 的 PID 与职责。
+   * 返回 disposer 时会跟随 transport close 调用；远端 SSH transport 不触发。
+   */
+  registerLocalCodexAppServerProcess?: (
+    info: CodexAppServerProcessRegistration,
+  ) => void | (() => void);
+
+  /**
+   * Register a locally spawned Claude/Pi root process with the host. The returned
+   * disposer follows that exact process generation; remote transports never call it.
+   */
+  registerLocalAgentProcess?: (
+    info: LocalAgentProcessRegistration,
+  ) => void | (() => void);
 
   /**
    * Codex 本地 shared app-server 凭证形态要切换前的宿主协调点。
@@ -616,6 +696,9 @@ export interface AgentDeps {
    * 缺省 / undefined → 两段都不注入 (host 未接线, 与改造前行为一致)。
    */
   getContactsPromptState?: (ctx: { workingDir?: string }) => ContactsPromptState;
+
+  /** Session 装配时求值一次的插件花名册 system/developer 段；空清单返回空串。 */
+  getGhostRosterPrompt?: (ctx: { workingDir?: string }) => string;
 
   /**
    * Host-side MCP approval policy, shared by **both** agents. `auto-approve`
@@ -986,6 +1069,20 @@ export interface StartSessionOptions {
    * 共享 manager 的 enablement 由 host setting 控制，不由 session flag 改写。
    */
   makerMemoryEnabled?: boolean;
+  /**
+   * Host-owned Cindy Review policy. This is not a user permission preset:
+   * adapters must keep the session local, fresh, memory-free and hard
+   * read-only even if a later control request tries to widen permissions.
+   */
+  reviewMode?: true;
+  /**
+   * Exact local files or directories that a host-owned Review may inspect in
+   * addition to workingDir. Adapters must treat files as exact grants and
+   * directories as subtree grants; this is narrower than extraDirs, whose
+   * parent-directory transport semantics are only used to make attachments
+   * visible to the underlying harness.
+   */
+  reviewReadPaths?: string[];
   permissionMode?: PermissionMode;
   /**
    * 计划模式开关（与 permissionMode 正交，见 Capabilities.planMode）。
@@ -1147,6 +1244,18 @@ export interface BackgroundTaskSnapshot {
 }
 
 /**
+ * Provider-owned lifecycle of the turn boundary after a foreground `done`.
+ *
+ * `awaiting` means the provider has an automatic continuation queued or still
+ * expected. `active` means that continuation has started. `cancelled` means
+ * the continuation was explicitly stopped; observers may settle immediately,
+ * while the provider appends an ordered terminal boundary for Session state.
+ * Provider/session failure settles via the normal terminal error and
+ * session-status paths instead.
+ */
+export type TurnContinuationState = 'awaiting' | 'active' | 'cancelled';
+
+/**
  * 一个已启动的 agent 会话句柄。
  * 上层 Session 类持有此句柄并对外暴露 UI 友好的 API。
  */
@@ -1162,6 +1271,12 @@ export interface AgentSessionHandle {
   readonly startupEvents?: readonly AgentEvent[];
   /** 后台 bootstrap 就绪信号；仅支持后台启动的 agent 提供。 */
   readonly bootstrapReady?: Promise<void>;
+  /** Pi-only, per-session runtime command catalog. Undefined for other agents. */
+  getRuntimeCapabilities?(): PiRuntimeCapabilityManifest | undefined;
+  /** Subscribe to Pi runtime catalog replacement; returns an idempotent disposer. */
+  onRuntimeCapabilitiesChange?(
+    listener: (manifest: PiRuntimeCapabilityManifest | undefined) => void,
+  ): () => void;
   /** Codex-only: 当前会话绑定的 app-server host 是否经 loopback proxy 出口。 */
   readonly codexProxyActive?: boolean;
   /**
@@ -1217,6 +1332,21 @@ export interface AgentSessionHandle {
    * 不支持的 agent 留空(Session 层回退为空数组)。
    */
   listBackgroundTasks?(): BackgroundTaskSnapshot[];
+
+  /**
+   * Resolve the provider claim attached atomically to a specific `done` event.
+   * Returns null when that event has no matching continuation boundary.
+   */
+  beginTurnContinuationWait?(continuationId?: number): TurnContinuationState | null;
+
+  /**
+   * Observe provider-owned continuation cancellation/start transitions. The
+   * subscription is intentionally separate from task-card events: a stopped
+   * wake task does not necessarily produce another provider `done`.
+   */
+  onTurnContinuationChange?(
+    listener: (continuationId: number, state: TurnContinuationState) => void,
+  ): () => void;
 
   /** 关闭会话，清理子进程 */
   close(): Promise<void>;

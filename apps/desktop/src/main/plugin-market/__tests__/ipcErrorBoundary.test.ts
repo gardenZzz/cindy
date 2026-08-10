@@ -29,7 +29,40 @@ describe('Plugin Market IPC error boundary', () => {
 
     expect(body).toContain('if (isIpcError(error)) throw error;');
     expect(body).toContain("throwIpcError('INTERNAL', 'Plugin market operation failed');");
-    expect(registerSource.match(/return invokePluginMarket\(/g)?.length).toBe(10);
+    expect(registerSource.match(/return invokePluginMarket\(/g)?.length).toBe(13);
+  });
+
+  it('validates local icon keys with the same reserved-prefix contract as the service', () => {
+    const start = registerSource.indexOf("ipcMain.handle('plugin-market:local-icons'");
+    const end = registerSource.indexOf("ipcMain.handle(\n    'plugin-market:install'", start);
+    const body = registerSource.slice(start, end);
+
+    expect(body).toContain('isPluginMarketCustomIconKey(expectedIconKey)');
+    expect(registerSource).toContain(
+      "import { isPluginMarketCustomIconKey } from '../../shared/pluginMarket.js';",
+    );
+    expect(body).toContain('localIconRequestGate.tryRun');
+    expect(body).toContain(
+      "throwIpcError('PRECONDITION_FAILED', 'Too many local Plugin icon requests');",
+    );
+  });
+
+  it('guards removal notice consumption and signals trusted app windows only', () => {
+    const consumeStart = registerSource.indexOf(
+      "ipcMain.handle('plugin-market:consume-removal-notice'",
+    );
+    const consumeEnd = registerSource.indexOf("ipcMain.handle('plugin-market:detail'", consumeStart);
+    const consumeBody = registerSource.slice(consumeStart, consumeEnd);
+    expect(consumeBody).toContain('assertTrustedAppRendererEvent(event);');
+    expect(consumeBody).toContain('service().consumeRemovalNotice()');
+
+    const signalStart = registerSource.indexOf('function signalRemovalNoticeAvailable()');
+    const signalEnd = registerSource.indexOf('\n}\n', signalStart);
+    const signalBody = registerSource.slice(signalStart, signalEnd);
+    // 出站广播必须走共享的可信窗口收口(isDestroyed + isTrustedAppRendererWindow
+    // 判据都在 helper 里),不允许退回手写 getAllWindows 循环。
+    expect(signalBody).toContain('sendToTrustedAppWindows(REMOVAL_NOTICE_AVAILABLE_CHANNEL');
+    expect(signalBody).not.toContain('getAllWindows');
   });
 
   it('refuses renderer-supplied local paths and only grants them via the picker', () => {
@@ -54,8 +87,14 @@ describe('Plugin Market IPC error boundary', () => {
     );
     const syncEnd = registerSource.indexOf('\n}\n\n/**\n * Preserve stable IPC errors', syncStart);
     const syncBody = registerSource.slice(syncStart, syncEnd);
-    expect(syncBody).toContain('await service().snapshot();');
+    expect(syncBody).toContain('await snapshotAndSignalRemovalNotice();');
     expect(syncBody).toContain("log.warn('default plugin startup sync failed'");
+
+    const snapshotStart = registerSource.indexOf('async function snapshotAndSignalRemovalNotice()');
+    const snapshotEnd = registerSource.indexOf('\n}\n\n/**', snapshotStart);
+    const snapshotBody = registerSource.slice(snapshotStart, snapshotEnd);
+    expect(snapshotBody).toContain('finally {');
+    expect(snapshotBody).toContain('signalRemovalNoticeAvailable();');
 
     const ownerSyncStart = bootstrapSource.indexOf(
       'function syncDefaultPluginsForActiveOwner(): void',

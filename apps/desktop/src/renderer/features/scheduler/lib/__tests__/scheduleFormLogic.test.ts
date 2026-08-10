@@ -30,11 +30,15 @@ import {
   deriveRunMode,
   hasRealBinding,
   isExplicitScheduleModelUnavailable,
+  isFollowingSessionSelection,
+  needsBoundSessionGenerationRouteResolution,
   resolveScheduleGenerationProviderId,
   resolveScheduleModelEfforts,
   resolveTemplateAgentFields,
   sessionAgentKindToScheduleAgentKind,
   shouldFollowBoundSessionGenerationRoute,
+  usesBoundSessionGenerationModel,
+  usesBoundSessionModel,
 } from '../scheduleFormLogic';
 import type { ScheduleFormState } from '../scheduleFormLogic';
 import {
@@ -205,6 +209,51 @@ describe('resolveScheduleGenerationProviderId', () => {
   });
 });
 
+describe('resolveScheduleModelEfforts', () => {
+  const fallbackProvider: ProviderView = {
+    ...tapsvcProvider,
+    id: 'openai',
+    name: 'OpenAI',
+    source: 'builtin',
+    models: {
+      codex: [{
+        ...tapsvcProvider.models.codex![0],
+        efforts: ['medium'],
+        defaultEffort: 'medium',
+      }],
+    },
+  };
+
+  it('preserves effort when a pinned provider is disconnected instead of validating against a fallback', () => {
+    expect(resolveScheduleModelEfforts({
+      providers: [{ ...tapsvcProvider, connected: false }, fallbackProvider],
+      providerId: 'tapsvc',
+      model: 'gpt-5.5',
+      agentKind: 'codex',
+      fallback: { efforts: ['low'], defaultEffort: null },
+    })).toEqual({ efforts: [], defaultEffort: null, known: false });
+  });
+
+  it('uses the effective fallback source only when providerId is empty', () => {
+    expect(resolveScheduleModelEfforts({
+      providers: [{ ...tapsvcProvider, connected: false }, fallbackProvider],
+      providerId: '',
+      model: 'gpt-5.5',
+      agentKind: 'codex',
+      fallback: { efforts: ['low'], defaultEffort: null },
+    })).toEqual({ efforts: ['medium'], defaultEffort: 'medium', known: true });
+  });
+
+  it('validates effort against a connected pinned provider', () => {
+    expect(resolveScheduleModelEfforts({
+      providers: [tapsvcProvider, fallbackProvider],
+      providerId: 'tapsvc',
+      model: 'gpt-5.5',
+      agentKind: 'codex',
+    })).toEqual({ efforts: ['high'], defaultEffort: 'high', known: true });
+  });
+});
+
 describe('shouldFollowBoundSessionGenerationRoute', () => {
   it('only follows a true bound session with empty provider and model', () => {
     expect(shouldFollowBoundSessionGenerationRoute({
@@ -212,6 +261,7 @@ describe('shouldFollowBoundSessionGenerationRoute', () => {
       targetSessionId: 'session-1',
       providerId: '',
       model: '',
+      effort: '',
     })).toBe(true);
   });
 
@@ -221,7 +271,99 @@ describe('shouldFollowBoundSessionGenerationRoute', () => {
       targetSessionId: 'session-1',
       providerId: 'tapsvc',
       model: 'gpt-5.5',
+      effort: '',
     })).toBe(false);
+
+    expect(shouldFollowBoundSessionGenerationRoute({
+      persistentSession: false,
+      targetSessionId: 'session-1',
+      providerId: '',
+      model: '',
+      effort: 'high',
+    })).toBe(true);
+  });
+});
+
+describe('usesBoundSessionGenerationModel', () => {
+  it('inherits the bound session model even when provider or effort is overridden', () => {
+    expect(usesBoundSessionGenerationModel({
+      persistentSession: false,
+      targetSessionId: 'session-1',
+      model: '',
+    })).toBe(true);
+  });
+
+  it('does not treat persistent or explicit-model schedules as bound-model routes', () => {
+    expect(usesBoundSessionGenerationModel({
+      persistentSession: true,
+      targetSessionId: 'session-1',
+      model: '',
+    })).toBe(false);
+    expect(usesBoundSessionGenerationModel({
+      persistentSession: false,
+      targetSessionId: 'session-1',
+      model: 'gpt-5.5',
+    })).toBe(false);
+  });
+});
+
+describe('needsBoundSessionGenerationRouteResolution', () => {
+  it('asks main to fill either missing model or provider for bound schedules', () => {
+    expect(needsBoundSessionGenerationRouteResolution({
+      persistentSession: false,
+      targetSessionId: 'session-1',
+      model: '',
+      providerId: 'openai',
+    })).toBe(true);
+    expect(needsBoundSessionGenerationRouteResolution({
+      persistentSession: false,
+      targetSessionId: 'session-1',
+      model: 'gpt-5.5',
+      providerId: '',
+    })).toBe(true);
+  });
+
+  it('does not resolve a complete route or a persistent schedule through the session', () => {
+    expect(needsBoundSessionGenerationRouteResolution({
+      persistentSession: false,
+      targetSessionId: 'session-1',
+      model: 'gpt-5.5',
+      providerId: 'openai',
+    })).toBe(false);
+    expect(needsBoundSessionGenerationRouteResolution({
+      persistentSession: true,
+      targetSessionId: 'session-1',
+      model: '',
+      providerId: '',
+    })).toBe(false);
+  });
+});
+
+describe('isFollowingSessionSelection', () => {
+  const base = {
+    followSession: true,
+    model: '',
+    providerId: '',
+    effort: '',
+  };
+
+  it('requires model, provider and effort to all remain inherited', () => {
+    expect(isFollowingSessionSelection(base)).toBe(true);
+    expect(isFollowingSessionSelection({ ...base, model: 'gpt-5.5' })).toBe(false);
+    expect(isFollowingSessionSelection({ ...base, providerId: 'openai' })).toBe(false);
+    expect(isFollowingSessionSelection({ ...base, effort: 'high' })).toBe(false);
+  });
+
+  it('does not treat an unbound empty selection as follow-session', () => {
+    expect(isFollowingSessionSelection({ ...base, followSession: false })).toBe(false);
+  });
+});
+
+describe('usesBoundSessionModel', () => {
+  it('keeps provider/effort-only overrides on the bound session model route', () => {
+    expect(usesBoundSessionModel({ followSession: true, model: '' })).toBe(true);
+    expect(usesBoundSessionModel({ followSession: true, model: 'gpt-5.5' })).toBe(false);
+    expect(usesBoundSessionModel({ followSession: false, model: '' })).toBe(false);
   });
 });
 

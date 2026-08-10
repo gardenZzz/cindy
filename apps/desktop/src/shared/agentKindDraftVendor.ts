@@ -10,25 +10,27 @@
 import type { AgentKind } from '@cindy/maker-core';
 
 /** New Maker draft / lastByVendor / main cache 用的 vendor 键（不含 orca）。 */
-export type DraftVendorKey = 'cc' | 'codex' | 'cursor';
+export type DraftVendorKey = 'cc' | 'codex' | 'cursor' | 'pi';
 
 /** `maker:new-maker-draft:changed` push payload 的 per-agent 槽名。 */
-export type DraftPushSlot = 'claudeCode' | 'codex' | 'cursor';
+export type DraftPushSlot = 'claudeCode' | 'codex' | 'cursor' | 'pi';
 
 export const MAKER_CORE_AGENT_KINDS = [
   'claude-code',
   'codex',
   'cursor',
+  'pi',
 ] as const satisfies readonly AgentKind[];
 
 export function isMakerCoreAgentKind(value: unknown): value is AgentKind {
-  return value === 'claude-code' || value === 'codex' || value === 'cursor';
+  return value === 'claude-code' || value === 'codex' || value === 'cursor' || value === 'pi';
 }
 
 /** maker-core AgentKind → draft / lastByVendor / cache VendorKey。 */
 export function agentKindToDraftVendor(kind: AgentKind): DraftVendorKey {
   if (kind === 'codex') return 'codex';
   if (kind === 'cursor') return 'cursor';
+  if (kind === 'pi') return 'pi';
   return 'cc';
 }
 
@@ -36,5 +38,6 @@ export function agentKindToDraftVendor(kind: AgentKind): DraftVendorKey {
 export function agentKindToDraftPushSlot(kind: AgentKind): DraftPushSlot {
   if (kind === 'codex') return 'codex';
   if (kind === 'cursor') return 'cursor';
+  if (kind === 'pi') return 'pi';
   return 'claudeCode';
 }

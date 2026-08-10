@@ -570,6 +570,7 @@ export async function forkSessionAtMessage(
     const agentKind = dbToMakerAgentKind(forkSource.agentKind);
     const forkResult = await getMaker().forkSdkSession(agentKind, {
       sourceSdkSessionId: forkSource.sdkSessionId,
+      ...(isCodex ? { model: forkSource.model, providerId: forkSource.providerId } : {}),
       upToMessageId: assistantUuid,
       ...(tailTurnsToDrop !== undefined ? { tailTurnsToDrop } : {}),
       title: newTitle,
@@ -706,6 +707,8 @@ export async function forkSessionStripEncrypted(sourceSessionId: string): Promis
     : `[Fork·已剥离] ${source.title}`;
   const { newSdkSessionId, uuidMap } = await getMaker().forkSdkSession('codex', {
     sourceSdkSessionId: source.sdkSessionId,
+    model: source.model,
+    providerId: source.providerId,
     upToMessageId: undefined,
     title: newTitle,
     workingDir: source.workingDir ?? undefined,

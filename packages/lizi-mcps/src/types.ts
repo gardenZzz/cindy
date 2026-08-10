@@ -401,6 +401,12 @@ export interface ContactsMcpDeps {
     items: import('@cindy/maker-core').SystemContactWriteItem[],
   ) => Promise<import('@cindy/maker-core').SystemContactWriteResult[]>;
   /**
+   * 系统通讯录回写的单批上限(host 侧 writeSystemContacts 一次能接收的最大条数)。
+   * 只接受 1..200 的整数, 缺省 200(host 硬限制);非法值/超限回退 200。
+   * 测试注入小值可省去大量建卡开销, 仍能验证分批边界。
+   */
+  systemWriteBatchSize?: number;
+  /**
    * write/manage 类工具成功后的变更通知(host 注入, 用于广播 renderer 刷新)。
    * MCP 直写同进程 store 不经 IPC 层, 没有这个回调 UI 就收不到 agent 侧变更。
    */
@@ -723,9 +729,20 @@ export interface AndroidMcpDeps {
   logger?: LiziMcpLogger;
 }
 
+export type LiziMcpCallerKind = 'root' | 'descendant' | 'unknown';
+
 export interface LiziMcpSessionContext {
   agentKind: string;
   workingDir: string;
+  /**
+   * 当前 tool-call 的权威 session ctx accessor。
+   *
+   * Claude in-process 路径返回闭包绑定的当前 session；Codex / Pi bridge
+   * 路径从请求作用域恢复当前 session。只要提供了本 accessor，它就是唯一可信
+   * 来源：返回 undefined 表示本次调用无法确认归属，调用方必须 fail closed，
+   * 不能再回落到构建 server 时捕获的 ctx 或环境中的其它 AsyncLocalStorage store。
+   */
+  getSessionContext?: () => LiziMcpSessionContext | undefined;
   /**
    * SSH remote 会话的 host id (本地会话缺省)。workingDir 此时是远端机器上的
    * 路径字符串 — cindy_memory 等按 workdir 分区的工具必须用
@@ -752,6 +769,10 @@ export interface LiziMcpSessionContext {
    * 模型或插件可控的工具参数。
    */
   sessionInstanceId?: string;
+  /** Host-owned caller provenance; never sourced from model tool arguments. */
+  mcpCallerKind?: LiziMcpCallerKind;
+  /** True only when the harness bridge has installed provenance enforcement. */
+  mcpCallerAttested?: boolean;
 }
 
 export interface CodexHttpMcpConfig {

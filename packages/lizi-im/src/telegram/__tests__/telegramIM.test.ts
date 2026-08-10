@@ -10,8 +10,9 @@ import path from 'node:path';
 
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
-import type { IMHost, IMMessageEvent } from '../../types.js';
+import type { IMCardActionEvent, IMHost, IMMessageEvent } from '../../types.js';
 import { TelegramApiError, type TelegramApiClient, type TgUpdate } from '../api.js';
+import { encodeCallbackData, encodeMessageId } from '../codec.js';
 import { TelegramIM, type TelegramGroupWindowEntry } from '../index.js';
 
 const BOT = { id: 999, is_bot: true, first_name: 'Cindy', username: 'my_cindy_bot' };
@@ -21,12 +22,14 @@ interface FakeApi extends TelegramApiClient {
   calls: Array<{ method: string; params: Record<string, unknown> }>;
   pushUpdates(updates: TgUpdate[]): void;
   failNextGetUpdates(err: Error): void;
+  failNextCall(method: string, err: Error): void;
 }
 
 function createFakeApi(opts: { getMeError?: Error } = {}): FakeApi {
   const pending: TgUpdate[][] = [];
   let waiter: ((u: TgUpdate[]) => void) | null = null;
   let nextFailure: Error | null = null;
+  let nextCallFailure: { method: string; err: Error } | null = null;
   let sentSeq = 1000;
 
   const api: FakeApi = {
@@ -49,6 +52,9 @@ function createFakeApi(opts: { getMeError?: Error } = {}): FakeApi {
         w([]);
       }
     },
+    failNextCall(method, err) {
+      nextCallFailure = { method, err };
+    },
     fileUrl: (p) => `https://files.local/${p}`,
     async callForm(method) {
       api.calls.push({ method, params: {} });
@@ -57,6 +63,11 @@ function createFakeApi(opts: { getMeError?: Error } = {}): FakeApi {
     },
     async call(method, params = {}, signal) {
       api.calls.push({ method, params });
+      if (nextCallFailure?.method === method) {
+        const { err } = nextCallFailure;
+        nextCallFailure = null;
+        throw err;
+      }
       if (method === 'getMe') {
         if (opts.getMeError) throw opts.getMeError;
         return BOT as never;
@@ -125,14 +136,25 @@ function createHost(tmpDir: string): { host: IMHost; broadcasts: unknown[]; secr
   return { host, broadcasts, secrets, handlers };
 }
 
-function privateMessage(text: string, fromId: number, messageId = 1): TgUpdate {
+/**
+ * 固件消息默认「刚刚到达」。
+ *
+ * 写死一个过去的时间戳会让每条固件消息都撞上离线积压判据(STALE_MESSAGE_MS);
+ * 这些固件模拟的本来就是实时到达的 update, 时间戳按当下取。要造陈旧消息的
+ * 用例显式传 `ageSec`。
+ */
+function nowSec(ageSec = 0): number {
+  return Math.floor(Date.now() / 1_000) - ageSec;
+}
+
+function privateMessage(text: string, fromId: number, messageId = 1, ageSec = 0): TgUpdate {
   return {
     update_id: messageId,
     message: {
       message_id: messageId,
       from: { id: fromId, is_bot: false, first_name: 'U' },
       chat: { id: fromId, type: 'private' },
-      date: 1_753_000_000,
+      date: nowSec(ageSec),
       text,
     },
   };
@@ -144,6 +166,8 @@ function groupMessage(args: {
   messageId: number;
   mentionBot?: boolean;
   threadId?: number;
+  hasProtectedContent?: boolean;
+  ageSec?: number;
 }): TgUpdate {
   const text = args.mentionBot ? `@${BOT.username} ${args.text}` : args.text;
   return {
@@ -152,8 +176,9 @@ function groupMessage(args: {
       message_id: args.messageId,
       from: { id: args.fromId, is_bot: false, first_name: 'U' },
       chat: { id: -100200, type: 'supergroup', title: 'Ops' },
-      date: 1_753_000_000,
+      date: nowSec(args.ageSec),
       text,
+      ...(args.hasProtectedContent ? { has_protected_content: true } : {}),
       ...(args.mentionBot
         ? { entities: [{ type: 'mention', offset: 0, length: BOT.username.length + 1 }] }
         : {}),
@@ -310,6 +335,34 @@ describe('TelegramIM', () => {
     expect(events[1]).toMatchObject({ senderId: 'g/-100200', text: '帮我看看这个' });
   });
 
+  it('受保护群的消息一个字都不落本地窗口, 但仍可照常触发一轮', async () => {
+    // 「禁止保存内容」的群: 与官方 bot 服务端「has_protected_content 的消息
+    // 不中继」同一条边界 —— 本地池是个人 bot 的记忆, 不能成为绕过它的通道。
+    // 触发判定不受影响: owner @ 机器人照常起 turn, 只是不留历史。
+    const events: IMMessageEvent[] = [];
+    const windowEntries: TelegramGroupWindowEntry[] = [];
+    im.onMessage((e) => events.push(e));
+    im.onGroupWindowMessage((e) => windowEntries.push(e));
+    await connect();
+    api.pushUpdates([
+      groupMessage({ text: '机密闲聊', fromId: 222, messageId: 40, hasProtectedContent: true }),
+      groupMessage({
+        text: '看一下',
+        fromId: 111,
+        messageId: 41,
+        mentionBot: true,
+        hasProtectedContent: true,
+      }),
+      // 同一用例里放一条未保护消息, 证明判据只挡带标的那些。
+      groupMessage({ text: '普通闲聊', fromId: 222, messageId: 42 }),
+    ]);
+    await vi.waitFor(() => expect(events).toHaveLength(1));
+    await vi.waitFor(() => expect(windowEntries).toHaveLength(1));
+    expect(events[0]).toMatchObject({ senderId: 'g/-100200', text: '看一下' });
+    expect(windowEntries[0]).toMatchObject({ messageId: '42', text: '普通闲聊' });
+    expect(windowEntries.some((e) => e.text.includes('机密'))).toBe(false);
+  });
+
   it('群多人: 全员 @bot 可触发且共享同一条群 lane; 命令仍 owner 专属', async () => {
     const events: IMMessageEvent[] = [];
     const windowEntries: TelegramGroupWindowEntry[] = [];
@@ -359,7 +412,7 @@ describe('TelegramIM', () => {
       message_id: answerId,
       from: { id: BOT.id, is_bot: true, first_name: 'Cindy' },
       chat: { id: -100200, type: 'supergroup' as const },
-      date: 1_753_000_050,
+      date: nowSec(150),
       text: '这是 Cindy 呀',
     };
     // 成员回复 bot → 同一条群 lane
@@ -370,7 +423,7 @@ describe('TelegramIM', () => {
           message_id: 41,
           from: { id: 222, is_bot: false, first_name: 'F' },
           chat: { id: -100200, type: 'supergroup', title: 'Ops' },
-          date: 1_753_000_100,
+          date: nowSec(100),
           text: '再多讲讲',
           reply_to_message: replyTo,
         },
@@ -386,7 +439,7 @@ describe('TelegramIM', () => {
           message_id: 42,
           from: { id: 111, is_bot: false, first_name: 'U' },
           chat: { id: -100200, type: 'supergroup', title: 'Ops' },
-          date: 1_753_000_200,
+          date: nowSec(0),
           text: '我来补充',
           reply_to_message: replyTo,
         },
@@ -731,7 +784,7 @@ describe('TelegramIM', () => {
         message_id: 50,
         from: { id: 111, is_bot: false, first_name: 'U' },
         chat: { id: 111, type: 'private' },
-        date: 1_753_000_000,
+        date: nowSec(200),
         caption: '慢附件',
         photo: [{ file_id: 'slow', file_unique_id: 'slow-u', width: 10, height: 10 }],
       },
@@ -1076,7 +1129,7 @@ describe('TelegramIM', () => {
         message_id: messageId,
         from: { id: 111, is_bot: false, first_name: 'U' },
         chat: { id: 111, type: 'private' },
-        date: 1_753_000_000,
+        date: nowSec(200),
         media_group_id: 'album-ord',
         ...(caption ? { caption } : {}),
         photo: [{ file_id: `f${messageId}`, file_unique_id: `u${messageId}`, width: 10, height: 10 }],
@@ -1109,7 +1162,7 @@ describe('TelegramIM', () => {
         message_id: messageId,
         from: { id: 111, is_bot: false, first_name: 'U' },
         chat: { id: 111, type: 'private' },
-        date: 1_753_000_000,
+        date: nowSec(200),
         media_group_id: 'album-cap',
         ...(messageId === 45 ? { caption: '慢速相册' } : {}),
         photo: [{ file_id: `f${messageId}`, file_unique_id: `u${messageId}`, width: 10, height: 10 }],
@@ -1140,7 +1193,7 @@ describe('TelegramIM', () => {
         message_id: messageId,
         from: { id: 111, is_bot: false, first_name: 'U' },
         chat: { id: 111, type: 'private' },
-        date: 1_753_000_000,
+        date: nowSec(200),
         media_group_id: 'album-1',
         ...(caption ? { caption } : {}),
         photo: [{ file_id: `f${messageId}`, file_unique_id: `u${messageId}`, width: 10, height: 10 }],
@@ -1168,13 +1221,13 @@ describe('TelegramIM', () => {
           message_id: 51,
           from: { id: 111, is_bot: false, first_name: 'U' },
           chat: { id: 111, type: 'private' },
-          date: 1_753_000_000,
+          date: nowSec(200),
           text: '按这个继续',
           reply_to_message: {
             message_id: 40,
             from: { id: BOT.id, is_bot: true, first_name: 'Cindy' },
             chat: { id: 111, type: 'private' },
-            date: 1_752_999_000,
+            date: nowSec(1_000),
             text: '方案 A: 先改 transport',
           },
         },
@@ -1407,6 +1460,84 @@ describe('TelegramIM', () => {
     await handle2.finalize('一张图的回答');
     expect(api.calls.filter((c) => c.method === 'sendMediaGroup').length).toBe(1);
     expect(api.calls.filter((c) => c.method === 'sendPhoto').length).toBe(1);
+  });
+
+  describe('相册发送失败的回落判据', () => {
+    // Telegram 没有发送端幂等键: 一次 sendMediaGroup 只要被接受, 图片就已经在
+    // 聊天里了 —— 哪怕响应在网络上丢了。逐张补发会让用户看到两套同样的图, 且
+    // 无法分辨哪些是重复。只有 400(确定性拒绝相册形状)才可以安全回落。
+
+    function threeImages(): string[] {
+      return ['x1.png', 'x2.png', 'x3.png'].map((name) => {
+        const abs = path.join(tmpDir, name);
+        fs.writeFileSync(abs, 'fake-png');
+        return abs;
+      });
+    }
+
+    async function sendAlbumWith(
+      failure: unknown,
+    ): Promise<{ groups: number; singles: number }> {
+      await connect();
+      const originalForm = api.callForm.bind(api);
+      api.callForm = (async (method: string, form: FormData, signal?: AbortSignal) => {
+        if (method === 'sendMediaGroup') throw failure;
+        return originalForm(method, form, signal);
+      }) as FakeApi['callForm'];
+      const handle = await im.startStreamingText(Number(OWNER_ID).toString());
+      for (const abs of threeImages()) handle.addExtraImageAbsPath?.(abs);
+      await handle.finalize('三张图的回答');
+      return {
+        groups: api.calls.filter((c) => c.method === 'sendMediaGroup').length,
+        singles: api.calls.filter((c) => c.method === 'sendPhoto').length,
+      };
+    }
+
+    it('某张图读不出来 → 逐张回落, 其余照发(不因一张丢整组)', async () => {
+      // 本地读盘失败时请求根本没发出, 一张都没进聊天 —— 与 Telegram 回 400
+      // 同一类确定性失败。把它混进 uncertain 会让整组静默消失。
+      await connect();
+      const present = ['ok1.png', 'ok2.png'].map((name) => {
+        const abs = path.join(tmpDir, name);
+        fs.writeFileSync(abs, 'fake-png');
+        return abs;
+      });
+      const missing = path.join(tmpDir, 'gone.png'); // 故意不创建
+      const handle = await im.startStreamingText(Number(OWNER_ID).toString());
+      for (const abs of [present[0], missing, present[1]]) handle.addExtraImageAbsPath?.(abs);
+      await handle.finalize('三张图, 其中一张缺失');
+      // 相册组装即失败, 一次 sendMediaGroup 都没打成
+      expect(api.calls.filter((c) => c.method === 'sendMediaGroup')).toHaveLength(0);
+      // 两张可读的仍然逐张发了出去; 缺失那张在读盘处失败, 不产生出站
+      expect(api.calls.filter((c) => c.method === 'sendPhoto')).toHaveLength(2);
+    });
+
+    it('400 拒绝 → 逐张回落(确定一张都没进聊天)', async () => {
+      const { singles } = await sendAlbumWith(
+        new TelegramApiError('sendMediaGroup', 400, 'Bad Request: wrong file identifier'),
+      );
+      expect(singles).toBe(3);
+    });
+
+    it('网络错误 → 不逐张补发(可能已经发出去了)', async () => {
+      const { singles } = await sendAlbumWith(new TypeError('fetch failed'));
+      // 这一组宁可丢失也不重复 —— 重复的图进了聊天记录就撤不回来了。
+      expect(singles).toBe(0);
+    });
+
+    it('5xx → 不逐张补发', async () => {
+      const { singles } = await sendAlbumWith(
+        new TelegramApiError('sendMediaGroup', 500, 'Internal Server Error'),
+      );
+      expect(singles).toBe(0);
+    });
+
+    it('429 限流 → 不逐张补发', async () => {
+      const { singles } = await sendAlbumWith(
+        new TelegramApiError('sendMediaGroup', 429, 'Too Many Requests', 3),
+      );
+      expect(singles).toBe(0);
+    });
   });
 
   it('connect 后把命令菜单注册到 owner scope; disconnect 清理', async () => {
@@ -2254,6 +2385,268 @@ describe('TelegramIM', () => {
       api.calls.filter((c) => c.method === 'sendChatAction' && c.params.chat_id === '-100200')
         .length,
     ).toBe(groupTypingAfterCard);
+  });
+
+  // 交互卡的 callback token 只活在进程内存里(codec 的 callbackRefs), 重启或被淘汰后
+  // 解不出来。此前只弹一次「已过期」、按钮原样留在消息上, 看起来还能点。
+  describe('失效回调的卡片收口', () => {
+    const NOTICE = 'NOTICE-EXPIRED';
+
+    beforeEach(async () => {
+      await im.dispose();
+      im = new TelegramIM(ctx.host, { apiFactory: () => api, expiredCardNotice: NOTICE });
+      im.registerIpc();
+      api.calls.length = 0;
+    });
+
+    function callbackUpdate(args: {
+      data: string;
+      fromId: number;
+      updateId: number;
+      queryId?: string;
+      /** 该消息当前挂着的键盘(Telegram 会随 callback_query 一起送来)。 */
+      keyboard?: string[];
+    }): TgUpdate {
+      return {
+        update_id: args.updateId,
+        callback_query: {
+          id: args.queryId ?? `cbq-${args.updateId}`,
+          from: { id: args.fromId, is_bot: false, first_name: 'U' },
+          message: {
+            message_id: 55,
+            chat: { id: args.fromId, type: 'private' },
+            date: nowSec(200),
+            ...(args.keyboard
+              ? {
+                  reply_markup: {
+                    inline_keyboard: args.keyboard.map((d) => [{ callback_data: d }]),
+                  },
+                }
+              : {}),
+          },
+          data: args.data,
+        },
+      };
+    }
+
+    it('ref 失效: 唯一一次应答带过期 alert, 并清掉该消息的键盘', async () => {
+      await connect();
+      api.calls.length = 0;
+      // 重启后整卡 token 全丢 —— 键盘上每个按钮都解不开, 这才是该清键盘的情形。
+      api.pushUpdates([
+        callbackUpdate({
+          data: 'cbr:gone-after-restart',
+          fromId: 111,
+          updateId: 9,
+          keyboard: ['cbr:gone-after-restart'],
+        }),
+      ]);
+
+      await vi.waitFor(() =>
+        expect(api.calls.some((c) => c.method === 'editMessageReplyMarkup')).toBe(true),
+      );
+      // 只应答一次 —— 二次 answer 会被 Telegram 拒掉, 先发空 answer 会把 alert 吞掉。
+      const answers = api.calls.filter((c) => c.method === 'answerCallbackQuery');
+      expect(answers).toHaveLength(1);
+      expect(answers[0].params).toMatchObject({ text: NOTICE, show_alert: true });
+      expect(api.calls.find((c) => c.method === 'editMessageReplyMarkup')!.params).toMatchObject({
+        chat_id: 111,
+        message_id: 55,
+        reply_markup: { inline_keyboard: [] },
+      });
+    });
+
+    it('同卡还有能解开的按钮时只提示、不清键盘(token 是逐个淘汰的)', async () => {
+      await connect();
+      const live = encodeCallbackData('deny', { requestId: 'req-multi' });
+      api.calls.length = 0;
+      // 被点的那个 token 已被淘汰, 但同卡的「拒绝」还在 —— 这次交互仍然能完成。
+      api.pushUpdates([
+        callbackUpdate({
+          data: 'cbr:evicted-one',
+          fromId: 111,
+          updateId: 12,
+          keyboard: ['cbr:evicted-one', live],
+        }),
+      ]);
+
+      await vi.waitFor(() =>
+        expect(api.calls.filter((c) => c.method === 'answerCallbackQuery')).toHaveLength(1),
+      );
+      expect(api.calls.some((c) => c.method === 'editMessageReplyMarkup')).toBe(false);
+    });
+
+    it('整卡的 token 都解不开才清键盘', async () => {
+      await connect();
+      api.calls.length = 0;
+      api.pushUpdates([
+        callbackUpdate({
+          data: 'cbr:evicted-a',
+          fromId: 111,
+          updateId: 13,
+          keyboard: ['cbr:evicted-a', 'cbr:evicted-b'],
+        }),
+      ]);
+
+      await vi.waitFor(() =>
+        expect(api.calls.some((c) => c.method === 'editMessageReplyMarkup')).toBe(true),
+      );
+      expect(api.calls.find((c) => c.method === 'editMessageReplyMarkup')!.params).toMatchObject({
+        reply_markup: { inline_keyboard: [] },
+      });
+    });
+
+    it('容量淘汰后同卡幸存按钮仍可用: 不清键盘且照常派发', async () => {
+      await connect();
+      // 真实触发容量淘汰: 先发的按钮被 512 个后来者挤出 callbackRefs, 后发的还在。
+      // (survivor 必须在填充**之后**创建 —— 否则它会和 evicted 一起被挤掉。)
+      const evicted = encodeCallbackData('allow', { requestId: 'req-old' });
+      for (let i = 0; i < 512; i += 1) encodeCallbackData('filler', { n: i });
+      const survivor = encodeCallbackData('deny', { requestId: 'req-old' });
+
+      const seen: IMCardActionEvent[] = [];
+      im.onCardAction((e) => void seen.push(e));
+      api.calls.length = 0;
+      // 被挤掉的那个先点: 只提示, 不能把幸存的「拒绝」一起清掉。
+      api.pushUpdates([
+        callbackUpdate({
+          data: evicted,
+          fromId: 111,
+          updateId: 14,
+          keyboard: [evicted, survivor],
+        }),
+      ]);
+      await vi.waitFor(() =>
+        expect(api.calls.filter((c) => c.method === 'answerCallbackQuery')).toHaveLength(1),
+      );
+      expect(api.calls.find((c) => c.method === 'answerCallbackQuery')!.params).toMatchObject({
+        text: NOTICE,
+        show_alert: true,
+      });
+      expect(api.calls.some((c) => c.method === 'editMessageReplyMarkup')).toBe(false);
+
+      // 幸存按钮照常派发, 这次交互仍然能被完成。
+      api.pushUpdates([
+        callbackUpdate({ data: survivor, fromId: 111, updateId: 15, keyboard: [evicted, survivor] }),
+      ]);
+      await vi.waitFor(() => expect(seen).toHaveLength(1));
+      expect(seen[0]).toMatchObject({ buttonId: 'deny', payload: { requestId: 'req-old' } });
+    });
+
+    it('ref 有效: 应答一次(不带 alert)并派发给卡片处理器, 不动键盘', async () => {
+      await connect();
+      const seen: IMCardActionEvent[] = [];
+      im.onCardAction((e) => void seen.push(e));
+      api.calls.length = 0;
+      const data = encodeCallbackData('allow', { requestId: 'req-1' });
+      api.pushUpdates([callbackUpdate({ data, fromId: 111, updateId: 10 })]);
+
+      await vi.waitFor(() => expect(seen).toHaveLength(1));
+      expect(seen[0]).toMatchObject({ buttonId: 'allow', payload: { requestId: 'req-1' } });
+      const answers = api.calls.filter((c) => c.method === 'answerCallbackQuery');
+      expect(answers).toHaveLength(1);
+      expect(answers[0].params.text).toBeUndefined();
+      expect(api.calls.some((c) => c.method === 'editMessageReplyMarkup')).toBe(false);
+    });
+
+    it('非 owner 点按: 只消 loading, 不派发也不改别人看到的卡片', async () => {
+      await connect();
+      const seen: IMCardActionEvent[] = [];
+      im.onCardAction((e) => void seen.push(e));
+      api.calls.length = 0;
+      api.pushUpdates([callbackUpdate({ data: 'cbr:whatever', fromId: 222, updateId: 11 })]);
+
+      await vi.waitFor(() =>
+        expect(api.calls.filter((c) => c.method === 'answerCallbackQuery')).toHaveLength(1),
+      );
+      expect(api.calls[api.calls.length - 1].params.text).toBeUndefined();
+      expect(seen).toHaveLength(0);
+      expect(api.calls.some((c) => c.method === 'editMessageReplyMarkup')).toBe(false);
+    });
+
+    it('HTML 编辑失败退回纯文本时仍带上空键盘(否则收口卡片的按钮还在)', async () => {
+      await connect();
+      api.calls.length = 0;
+      api.failNextCall(
+        'editMessageText',
+        new TelegramApiError('editMessageText', 400, "can't parse entities"),
+      );
+      await im.updateInteractiveCard(encodeMessageId('111', '55'), {
+        body: '已过期',
+        buttons: [],
+      });
+
+      const edits = api.calls.filter((c) => c.method === 'editMessageText');
+      expect(edits).toHaveLength(2);
+      expect(edits[1].params.parse_mode).toBeUndefined();
+      expect(edits[1].params.reply_markup).toEqual({ inline_keyboard: [] });
+    });
+  });
+
+  describe('离线期积压消息(stale update)', () => {
+    // Telegram 会替离线的 bot 保留最长 24h 的 update, 一上线整批推来。桌面端
+    // 天天关机开机, 这是个人 bot 的常态而非异常 —— 官方 bot 服务端早有这道闸
+    // (2026-07-27 实踩: 整批历史消息被诈尸回复), 个人侧此前一道都没有。
+
+    it('隔夜私聊消息不再起 turn', async () => {
+      const events: IMMessageEvent[] = [];
+      im.onMessage((e) => events.push(e));
+      await connect();
+      api.pushUpdates([
+        privateMessage('昨晚发的', Number(OWNER_ID), 80, 8 * 3_600),
+        privateMessage('刚发的', Number(OWNER_ID), 81),
+      ]);
+      await vi.waitFor(() => expect(events).toHaveLength(1));
+      // 只有新鲜那条进了 turn; 陈旧那条静默消费。
+      expect(events[0]).toMatchObject({ text: '刚发的' });
+      await new Promise((r) => setTimeout(r, 200));
+      expect(events).toHaveLength(1);
+    });
+
+    it('陌生人的陈旧私聊不再收到「我不认识你」', async () => {
+      await connect();
+      const before = api.calls.filter((c) => c.method === 'sendMessage').length;
+      api.pushUpdates([privateMessage('在吗', 999, 82, 8 * 3_600)]);
+      await new Promise((r) => setTimeout(r, 300));
+      // 隔夜再回一句拒绝语同样是诈尸 —— 一条出站都不该有。
+      expect(api.calls.filter((c) => c.method === 'sendMessage').length).toBe(before);
+    });
+
+    it('陈旧群消息仍进历史池, 但不再唤起回答', async () => {
+      const events: IMMessageEvent[] = [];
+      const windowEntries: TelegramGroupWindowEntry[] = [];
+      im.onMessage((e) => events.push(e));
+      im.onGroupWindowMessage((e) => windowEntries.push(e));
+      await connect();
+      api.pushUpdates([
+        groupMessage({ text: '昨晚问的', fromId: 111, messageId: 83, mentionBot: true, ageSec: 8 * 3_600 }),
+        groupMessage({ text: '刚问的', fromId: 111, messageId: 84, mentionBot: true }),
+      ]);
+      // 群消息的历史价值与「该不该现在回答」是两件事: 两条都入窗, 只有一条起 turn。
+      await vi.waitFor(() => expect(windowEntries).toHaveLength(2));
+      await vi.waitFor(() => expect(events).toHaveLength(1));
+      expect(events[0]).toMatchObject({ text: '刚问的' });
+    });
+
+    it('阈值内的离线积压照常处理 —— 短暂离线不误杀', async () => {
+      const events: IMMessageEvent[] = [];
+      im.onMessage((e) => events.push(e));
+      await connect();
+      // 用户合上电脑二十分钟再打开, 那条正等回复的消息仍然该被处理。
+      api.pushUpdates([privateMessage('二十分钟前发的', Number(OWNER_ID), 85, 20 * 60)]);
+      await vi.waitFor(() => expect(events).toHaveLength(1));
+      expect(events[0]).toMatchObject({ text: '二十分钟前发的' });
+    });
+
+    it('时间戳缺失按新鲜处理 —— 拦错比多回一条严重', async () => {
+      const events: IMMessageEvent[] = [];
+      im.onMessage((e) => events.push(e));
+      await connect();
+      const update = privateMessage('没有时间戳', Number(OWNER_ID), 86);
+      update.message!.date = 0;
+      api.pushUpdates([update]);
+      await vi.waitFor(() => expect(events).toHaveLength(1));
+    });
   });
 
   it('disconnect 清空凭证并回 idle', async () => {

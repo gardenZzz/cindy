@@ -8,10 +8,11 @@
 
 import { ipcMain } from 'electron';
 import type { BrowserWindow } from 'electron';
+import type { SubagentProvider } from '@cindy/maker-shared/subagent-workspace';
 
 import { MAKER_INVOKE, MAKER_SEND } from '../maker-ipc/channels.js';
 import { createLogger } from '../logger.js';
-import { requireObject, throwIpcError } from '../utils/ipcValidate.js';
+import { requireEnum, requireObject, throwIpcError } from '../utils/ipcValidate.js';
 import type {
   RsbWindowCommand,
   RsbWindowCommandRouteRequest,
@@ -22,6 +23,11 @@ import { hasActiveRsbNativePopupSurfaces } from '../rsb-browser-bridge/native-po
 import type { RsbWindowController } from './controller.js';
 
 const log = createLogger('right-sidebar-window-ipc');
+const SUBAGENT_PROVIDERS = [
+  'claude-code',
+  'codex',
+  'pi',
+] as const satisfies readonly SubagentProvider[];
 
 function parseContext(raw: unknown): RsbWindowContext {
   const r = requireObject(raw, 'context');
@@ -103,6 +109,88 @@ function parseCommand(raw: unknown): RsbWindowCommand {
       type: 'open-background-tasks-tab',
       sessionId: r.sessionId,
       ...(hasFocusTaskId ? { focusTaskId: r.focusTaskId as string | null } : {}),
+    };
+  }
+  if (r.type === 'open-subagents-tab') {
+    const hasFocusRunId =
+      Object.prototype.hasOwnProperty.call(r, 'focusRunId') && r.focusRunId !== undefined;
+    const hasFocusProvider =
+      Object.prototype.hasOwnProperty.call(r, 'focusProvider') && r.focusProvider !== undefined;
+    if (hasFocusRunId && r.focusRunId !== null && typeof r.focusRunId !== 'string') {
+      throwIpcError('INVALID_PARAMS', 'command.focusRunId must be string | null');
+    }
+    const focusProvider = r.focusProvider === null || !hasFocusProvider
+      ? r.focusProvider as null | undefined
+      : requireEnum(r.focusProvider, SUBAGENT_PROVIDERS, 'command.focusProvider');
+    const hasRunFocus = typeof r.focusRunId === 'string' && r.focusRunId.length > 0;
+    const hasProviderFocus = typeof focusProvider === 'string';
+    if (hasRunFocus !== hasProviderFocus) {
+      throwIpcError(
+        'INVALID_PARAMS',
+        'command.focusRunId and command.focusProvider must be provided together',
+      );
+    }
+    if (
+      Object.prototype.hasOwnProperty.call(r, 'focusTab') &&
+      r.focusTab !== undefined &&
+      typeof r.focusTab !== 'boolean'
+    ) {
+      throwIpcError('INVALID_PARAMS', 'command.focusTab must be boolean');
+    }
+    if (
+      Object.prototype.hasOwnProperty.call(r, 'revealSidebar') &&
+      r.revealSidebar !== undefined &&
+      typeof r.revealSidebar !== 'boolean'
+    ) {
+      throwIpcError('INVALID_PARAMS', 'command.revealSidebar must be boolean');
+    }
+    return {
+      type: 'open-subagents-tab',
+      sessionId: r.sessionId,
+      ...(hasFocusRunId ? { focusRunId: r.focusRunId as string | null } : {}),
+      ...(hasFocusProvider ? { focusProvider } : {}),
+      ...(typeof r.focusTab === 'boolean' ? { focusTab: r.focusTab } : {}),
+      ...(typeof r.revealSidebar === 'boolean' ? { revealSidebar: r.revealSidebar } : {}),
+    };
+  }
+  if (r.type === 'open-turn-review') {
+    if (
+      !Array.isArray(r.changeSetIds)
+      || r.changeSetIds.length === 0
+      || r.changeSetIds.length > 16
+      || r.changeSetIds.some((id) => typeof id !== 'string' || id.length === 0 || id.length > 256)
+    ) {
+      throwIpcError('INVALID_PARAMS', 'command.changeSetIds must contain 1-16 ids');
+    }
+    if (r.selectedPath !== undefined && r.selectedPath !== null && typeof r.selectedPath !== 'string') {
+      throwIpcError('INVALID_PARAMS', 'command.selectedPath must be string | null');
+    }
+    if (
+      r.selectedDiffId !== undefined
+      && r.selectedDiffId !== null
+      && (typeof r.selectedDiffId !== 'string' || r.selectedDiffId.length > 512)
+    ) {
+      throwIpcError('INVALID_PARAMS', 'command.selectedDiffId must be string | null');
+    }
+    if (typeof r.requestNonce !== 'number' || !Number.isSafeInteger(r.requestNonce)) {
+      throwIpcError('INVALID_PARAMS', 'command.requestNonce must be an integer');
+    }
+    if (
+      r.hostSessionId !== undefined
+      && r.hostSessionId !== null
+      && (typeof r.hostSessionId !== 'string' || r.hostSessionId.length === 0 || r.hostSessionId.length > 256)
+    ) {
+      throwIpcError('INVALID_PARAMS', 'command.hostSessionId must be string | null');
+    }
+    return {
+      type: 'open-turn-review',
+      sessionId: r.sessionId,
+      changeSetIds: r.changeSetIds as string[],
+      selectedDiffId: typeof r.selectedDiffId === 'string' ? r.selectedDiffId : null,
+      selectedPath: typeof r.selectedPath === 'string' ? r.selectedPath : null,
+      requestNonce: r.requestNonce,
+      // 协同面板里 worker 流的入口带宿主(lead)桶;缺省 null = tab 落 sessionId 自身桶。
+      hostSessionId: typeof r.hostSessionId === 'string' ? r.hostSessionId : null,
     };
   }
   if (r.type === 'open-file-browser') {

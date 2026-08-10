@@ -310,6 +310,46 @@ describe('maker SEND transaction', () => {
     ).toEqual(expect.objectContaining({ turnAttemptToken: 7 }));
   });
 
+  it('persists the shared recovery checkpoint for manual retries too', async () => {
+    const { deps } = createDeps();
+    const transaction = createMakerSendTransaction(deps);
+    const checkpoint = {
+      version: 1,
+      source: 'manual',
+      mode: 'checkpoint',
+      attempt: 2,
+      failedUserClientId: 'failed-1',
+      rootUserClientId: 'failed-0',
+      contextTokens: 180_000,
+      contextWindow: 200_000,
+      contextRatio: 0.9,
+      progressCount: 4,
+      createdAt: '2026-08-04T00:00:00.000Z',
+      recentProgress: [],
+    };
+
+    await transaction.sendToAgentAccepted(
+      'session-1',
+      { type: 'user', content: '[UI_ACTION_TRIGGER] continue' },
+      undefined,
+      {
+        messageUuid: 'message-uuid',
+        persistUserMessage: {
+          clientId: 'client-2',
+          content: '[UI_ACTION_TRIGGER] continue',
+          delivery: 'turn',
+          recoveryCheckpoint: checkpoint,
+        },
+      },
+    );
+
+    expect(deps.createDbMessage).toHaveBeenCalledWith(
+      'session-1',
+      expect.objectContaining({ agentMeta: expect.objectContaining({ recoveryCheckpoint: checkpoint }) }),
+      undefined,
+    );
+  });
+
   it('omits autoResume for ordinary user sends', async () => {
     const { deps } = createDeps();
     const transaction = createMakerSendTransaction(deps);
@@ -439,6 +479,94 @@ describe('maker SEND transaction', () => {
     expect(cleanupBeforeAcceptance).toHaveBeenCalledTimes(1);
   });
 
+  it('preserves local media when onAccepted persisted the row before a late abort returns accepted=false', async () => {
+    const cleanupBeforeAcceptance = vi.fn(async () => {});
+    const cleanupAfterAcceptance = vi.fn();
+    const materializeDirectSendOssAttachments = vi.fn(async () => ({
+      message: { type: 'user', content: 'materialized' },
+      sendOpts: undefined,
+      cleanupBeforeAcceptance,
+      cleanupAfterAcceptance,
+    }));
+    const session = createSession({
+      send: vi.fn(async (_message, opts) => {
+        await opts?.onAccepted?.();
+        return {
+          accepted: false,
+          reason: 'cancelled-before-dispatch',
+        } satisfies SessionSendResult;
+      }),
+    });
+    const { deps } = createDeps({
+      getSession: vi.fn(() => session),
+      materializeDirectSendOssAttachments,
+    });
+    const transaction = createMakerSendTransaction(deps);
+
+    await expect(
+      transaction.sendToAgentAccepted(
+        'session-1',
+        { type: 'user', content: 'hello' },
+        undefined,
+        {
+          persistUserMessage: {
+            clientId: 'client-1',
+            content: 'hello',
+          },
+        },
+      ),
+    ).resolves.toMatchObject({ accepted: false });
+
+    expect(deps.createDbMessage).toHaveBeenCalledTimes(1);
+    expect(cleanupBeforeAcceptance).not.toHaveBeenCalled();
+    expect(cleanupAfterAcceptance).toHaveBeenCalledTimes(1);
+  });
+
+  it('rewinds a persisted user row when clear wins during onPersisted before dispatch', async () => {
+    let clearBoundaryCurrent = true;
+    let observedGeneration: number | undefined;
+    const rewindPersistedUserMessageAfterClear = vi.fn(async () => {});
+    const onPersisted = vi.fn(async () => {
+      clearBoundaryCurrent = false;
+      throw new Error('[SEND_CANCELLED_BEFORE_DISPATCH] clear won before dispatch');
+    });
+    const session = createSession({
+      send: vi.fn(async (_message, opts) => {
+        await opts?.onAccepted?.();
+        return { accepted: true } satisfies SessionSendResult;
+      }),
+    });
+    const { deps } = createDeps({
+      getSession: vi.fn(() => session),
+      isClearBoundaryCurrent: vi.fn((_sessionId, _expectedBoundary, expectedGeneration) => {
+        observedGeneration = expectedGeneration;
+        return clearBoundaryCurrent;
+      }),
+      rewindPersistedUserMessageAfterClear,
+    });
+    const transaction = createMakerSendTransaction(deps);
+
+    await expect(
+      transaction.sendToAgentAccepted('session-1', 'hello', undefined, {
+        persistUserMessage: {
+          clientId: 'client-clear-race',
+          content: 'hello',
+          expectedClearBoundaryMs: null,
+          expectedInputGeneration: 7,
+          onPersisted,
+        },
+      }),
+    ).rejects.toThrow('clear won before dispatch');
+
+    expect(deps.createDbMessage).toHaveBeenCalledTimes(1);
+    expect(onPersisted).toHaveBeenCalledTimes(1);
+    expect(observedGeneration).toBe(7);
+    expect(rewindPersistedUserMessageAfterClear).toHaveBeenCalledWith(
+      'session-1',
+      'client-clear-race',
+    );
+  });
+
   it('cleans direct OSS materializations when vendor send throws before dispatch', async () => {
     const cleanupBeforeAcceptance = vi.fn(async () => {});
     const materializeDirectSendOssAttachments = vi.fn(async () => ({
@@ -466,11 +594,40 @@ describe('maker SEND transaction', () => {
   it('keeps local OSS materializations after accepted vendor dispatch', async () => {
     const cleanupAfterAcceptance = vi.fn();
     const cleanupBeforeAcceptance = vi.fn(async () => {});
+    const cleanupLocalMaterialization = vi.fn(async () => {});
     const materializeDirectSendOssAttachments = vi.fn(async () => ({
       message: { type: 'user', content: 'materialized' },
       sendOpts: undefined,
       cleanupAfterAcceptance,
       cleanupBeforeAcceptance,
+      cleanupLocalMaterialization,
+    }));
+    const { deps } = createDeps({ materializeDirectSendOssAttachments });
+    const transaction = createMakerSendTransaction(deps);
+
+    await expect(
+      transaction.sendToAgentAccepted('session-1', 'hello', undefined, {
+        persistUserMessage: {
+          clientId: 'client-1',
+          content: 'hello',
+        },
+      }),
+    ).resolves.toMatchObject({ accepted: true });
+    expect(cleanupAfterAcceptance).toHaveBeenCalledTimes(1);
+    expect(cleanupBeforeAcceptance).not.toHaveBeenCalled();
+    expect(cleanupLocalMaterialization).not.toHaveBeenCalled();
+  });
+
+  it('cleans local OSS materializations after accepted direct sends without persistence', async () => {
+    const cleanupAfterAcceptance = vi.fn();
+    const cleanupBeforeAcceptance = vi.fn(async () => {});
+    const cleanupLocalMaterialization = vi.fn(async () => {});
+    const materializeDirectSendOssAttachments = vi.fn(async () => ({
+      message: { type: 'user', content: 'materialized' },
+      sendOpts: undefined,
+      cleanupAfterAcceptance,
+      cleanupBeforeAcceptance,
+      cleanupLocalMaterialization,
     }));
     const { deps } = createDeps({ materializeDirectSendOssAttachments });
     const transaction = createMakerSendTransaction(deps);
@@ -478,8 +635,10 @@ describe('maker SEND transaction', () => {
     await expect(transaction.sendToAgentAccepted('session-1', 'hello')).resolves.toMatchObject({
       accepted: true,
     });
+
     expect(cleanupAfterAcceptance).toHaveBeenCalledTimes(1);
     expect(cleanupBeforeAcceptance).not.toHaveBeenCalled();
+    expect(cleanupLocalMaterialization).toHaveBeenCalledTimes(1);
   });
 
   it('does not materialize direct OSS attachments when workdir preflight rejects', async () => {
@@ -1136,6 +1295,74 @@ describe('maker SEND transaction', () => {
 
     const persistedMessage = vi.mocked(deps.createDbMessage).mock.calls[0]?.[1];
     expect(persistedMessage).not.toHaveProperty('createdAt');
+  });
+});
+
+describe('mobile client prompt note', () => {
+  it('keeps ordinary mobile messages annotated on the wire but persists the original text', async () => {
+    const session = createSession({ agentKind: 'claude-code' });
+    const { deps } = createDeps({
+      getSession: vi.fn(() => session),
+      isMobileClientInvoke: vi.fn(() => true),
+    });
+    const transaction = createMakerSendTransaction(deps);
+
+    await transaction.sendToAgentAccepted('session-1', 'hello', undefined, {
+      persistUserMessage: { clientId: 'mobile-1', content: 'hello' },
+    });
+
+    const sent = vi.mocked(session.send).mock.calls[0]?.[0];
+    expect(sent).toEqual(expect.stringMatching(/^\[客户端说明\]/));
+    expect(sent).toEqual(expect.stringMatching(/\n\nhello$/));
+    expect(vi.mocked(deps.createDbMessage).mock.calls[0]?.[1].content).toBe('hello');
+  });
+
+  it('sends mobile Claude Code /compact commands without a prepended note', async () => {
+    const session = createSession({ agentKind: 'claude-code' });
+    const { deps } = createDeps({
+      getSession: vi.fn(() => session),
+      isMobileClientInvoke: vi.fn(() => true),
+    });
+    const transaction = createMakerSendTransaction(deps);
+
+    await transaction.sendToAgentAccepted('session-1', '/compact focus on decisions');
+
+    expect(session.send).toHaveBeenCalledWith('/compact focus on decisions', expect.anything());
+  });
+
+  it('keeps the mobile note for /compact text sent to a non-Claude agent', async () => {
+    const session = createSession({ agentKind: 'pi' });
+    const { deps } = createDeps({
+      getSession: vi.fn(() => session),
+      isMobileClientInvoke: vi.fn(() => true),
+    });
+    const transaction = createMakerSendTransaction(deps);
+
+    await transaction.sendToAgentAccepted('session-1', '/compact');
+
+    const sent = vi.mocked(session.send).mock.calls[0]?.[0];
+    expect(sent).toEqual(expect.stringMatching(/^\[客户端说明\]/));
+  });
+
+  it('applies the same command bypass to coordinator-drained mobile messages', async () => {
+    const session = createSession({ agentKind: 'claude-code' });
+    const { deps } = createDeps({
+      getSession: vi.fn(() => session),
+      isMobileClientInvoke: vi.fn(() => false),
+    });
+    const transaction = createMakerSendTransaction(deps);
+
+    await transaction.sendToAgentAccepted(
+      'session-1',
+      { type: 'user', content: '/compact' },
+      undefined,
+      { fromMobileClient: true },
+    );
+
+    expect(session.send).toHaveBeenCalledWith(
+      { type: 'user', content: '/compact' },
+      expect.anything(),
+    );
   });
 });
 

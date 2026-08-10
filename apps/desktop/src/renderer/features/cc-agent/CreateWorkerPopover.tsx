@@ -1,7 +1,8 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useNavigate } from 'react-router-dom';
-import { X } from 'lucide-react';
+import { TriangleAlert, X } from 'lucide-react';
+import { requiresFullAccessConfirmation } from '@cindy/maker-shared/permission-mode';
 import {
   connectedProvidersForAgent,
   effectiveSourceIdForModel,
@@ -13,7 +14,10 @@ import {
 
 import { AgentSelect } from '@/components/new-chat/AgentSelect';
 import { FastModeToggle } from '@/components/new-chat/FastModeToggle';
+import { FullAccessConfirmContent } from '@/components/new-chat/FullAccessConfirmContent';
 import { ModelSelector } from '@/components/new-chat/ModelSelector';
+import { PermissionSelector } from '@/components/new-chat/PermissionSelector';
+import { VendorSegmentedSwitcher } from '@/components/new-chat/VendorSegmentedSwitcher';
 import { agentKindToVendor } from '@/components/sidebar/VendorIcon';
 import type { MakerVendor } from '@/lib/ccAgent.types';
 import { useAgentCapabilities } from '@/hooks/useAgentCapabilities';
@@ -31,84 +35,25 @@ import {
   setProviderModelEffort,
   setProviderModelFast,
 } from '@/state/providerModelMemory';
+import {
+  DEFAULT_WORKER_CREATION_PREFS,
+  readWorkerCreationPrefs,
+  writeWorkerCreationPrefs,
+  type WorkerAgentKind,
+  type WorkerCreationPrefs,
+} from '@/state/workerCreationPrefs';
 import type { Effort } from '@/lib/userPreferences.types';
+import { useConfirmDialog } from '@/components/ui/confirm-dialog-provider';
+import {
+  DEFAULT_ORCA_WORKER_PERMISSION_MODE,
+  ORCA_WORKER_PERMISSION_MODES,
+  type OrcaWorkerPermissionMode,
+} from '../../../shared/orca-worker-permission-mode';
 import { selectWorkerModels } from './workerModelAvailability';
 import type { AgentKind } from '@cindy/maker-core';
 
 const PREDEFINED_ROLES = ['developer', 'designer', 'reviewer', 'tester', 'merger'] as const;
-const PREFS_KEY = 'workerCreationPrefs';
-
-/** Orca worker 可选 agent；cursor 段只在本机装了 cursor-agent 时翻开。 */
-type WorkerSelectableAgent = AgentKind;
-
-interface WorkerAgentPrefs {
-  model: string;
-  effort: Effort;
-  fast: boolean;
-  /** 上次显式选定的模型来源;null = 未显式选择(跟随默认路由解析)。 */
-  providerId: string | null;
-}
-
-interface WorkerPrefs {
-  lastAgent: WorkerSelectableAgent;
-  codex: WorkerAgentPrefs;
-  'claude-code': WorkerAgentPrefs;
-  cursor: WorkerAgentPrefs;
-  pi: WorkerAgentPrefs;
-}
-
-const DEFAULT_PREFS: WorkerPrefs = {
-  lastAgent: 'codex',
-  codex: { model: 'codex/gpt-5.5', effort: 'high', fast: false, providerId: null },
-  'claude-code': { model: 'claude-opus-4-7', effort: 'high', fast: false, providerId: null },
-  // cursor 的模型目录来自 ACP session/new，'auto' 是产品级默认档；无供应商维度。
-  cursor: { model: 'auto', effort: 'high', fast: false, providerId: null },
-  // pi worker 默认模型与 orcaWorkerCreationService.resolveWorkerConfig 的 pi 分支一致。
-  pi: { model: 'claude-sonnet-4-6', effort: 'high', fast: false, providerId: null },
-};
-
-function readWorkerPrefs(): WorkerPrefs {
-  try {
-    const raw = window.localStorage.getItem(PREFS_KEY);
-    if (!raw) return DEFAULT_PREFS;
-    const parsed = JSON.parse(raw) as Partial<WorkerPrefs>;
-    const agentPrefs = (agent: WorkerSelectableAgent): WorkerAgentPrefs => {
-      const p = parsed[agent];
-      return {
-        ...DEFAULT_PREFS[agent],
-        ...(p ?? {}),
-        fast: p?.fast === true,
-        // 老版本 prefs 无此字段 → null(未显式);非法类型/空白串同样回落(与 IPC 同口径 trim)。
-        providerId:
-          typeof p?.providerId === 'string' && p.providerId.trim() ? p.providerId.trim() : null,
-      };
-    };
-    return {
-      lastAgent:
-        parsed.lastAgent === 'claude-code'
-          ? 'claude-code'
-          : parsed.lastAgent === 'cursor'
-            ? 'cursor'
-            : parsed.lastAgent === 'pi'
-              ? 'pi'
-              : 'codex',
-      codex: agentPrefs('codex'),
-      'claude-code': agentPrefs('claude-code'),
-      cursor: agentPrefs('cursor'),
-      pi: agentPrefs('pi'),
-    };
-  } catch {
-    return DEFAULT_PREFS;
-  }
-}
-
-function writeWorkerPrefs(prefs: WorkerPrefs): void {
-  try {
-    window.localStorage.setItem(PREFS_KEY, JSON.stringify(prefs));
-  } catch {
-    // localStorage can be unavailable in restricted contexts; prefs are best-effort.
-  }
-}
+const AUTO_ONLY_WORKER_PERMISSION_MODES = ['auto'] as const;
 
 export interface CreateWorkerForm {
   role: string;
@@ -119,6 +64,8 @@ export interface CreateWorkerForm {
   /** 显式选定的模型来源;null = 未显式,由 main 侧按默认路由解析。 */
   providerId: string | null;
   initialTask: string;
+  /** 本次 Worker 权限；提交后同时成为下一次创建 Worker 的默认值。 */
+  workerPermissionMode?: OrcaWorkerPermissionMode;
 }
 
 export interface CreateWorkerPopoverProps {
@@ -137,6 +84,8 @@ export interface CreateWorkerPopoverProps {
    * (codex review R28)。提交前就在面板里藏掉,与 ChatInput 同口径。
    */
   sshRemote?: boolean;
+  /** 开启新协同时必须确认执行端支持权限偏好；已有旧版远程 Team 创建 Worker 仍兼容旧行为。 */
+  requireWorkerPermissionModeSupport?: boolean;
 }
 
 export function CreateWorkerPopover({
@@ -148,20 +97,24 @@ export function CreateWorkerPopover({
   className,
   deviceId,
   sshRemote,
+  requireWorkerPermissionModeSupport = false,
 }: CreateWorkerPopoverProps) {
   const { t } = useTranslation();
+  const { confirm: confirmDialog } = useConfirmDialog();
   const navigate = useNavigate();
   const [role, setRole] = useState('developer');
   const [customRole, setCustomRole] = useState('');
-  const [agent, setAgent] = useState<WorkerSelectableAgent>('codex');
-  const [model, setModel] = useState(DEFAULT_PREFS.codex.model);
-  const [effort, setEffort] = useState<Effort>(DEFAULT_PREFS.codex.effort);
-  const [fast, setFast] = useState(DEFAULT_PREFS.codex.fast);
+  const [agent, setAgent] = useState<WorkerAgentKind>('codex');
+  const [model, setModel] = useState(DEFAULT_WORKER_CREATION_PREFS.codex.model);
+  const [effort, setEffort] = useState<Effort>(DEFAULT_WORKER_CREATION_PREFS.codex.effort);
+  const [fast, setFast] = useState(DEFAULT_WORKER_CREATION_PREFS.codex.fast);
   // 显式选定的模型来源(标准面板供应商分段);null = 未显式。device-link 远程创建
   // 面板退化为被控端纯列表(无来源维度),恒为 null。
   const [providerSource, setProviderSource] = useState<string | null>(null);
   const [initialTask, setInitialTask] = useState('');
-  const [prefs, setPrefs] = useState<WorkerPrefs>(DEFAULT_PREFS);
+  const [selectedWorkerPermissionMode, setSelectedWorkerPermissionMode] =
+    useState<OrcaWorkerPermissionMode>(DEFAULT_ORCA_WORKER_PERMISSION_MODE);
+  const [prefs, setPrefs] = useState<WorkerCreationPrefs>(DEFAULT_WORKER_CREATION_PREFS);
   const [prefsRestored, setPrefsRestored] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const submittingRef = useRef(false);
@@ -187,6 +140,12 @@ export function CreateWorkerPopover({
           ? piCaps
           : ccCaps;
   const activeCaps = activeCapabilitiesState.capabilities;
+  const supportsWorkerPermissionModeSelection =
+    !deviceId || activeCaps?.supportsOrcaWorkerPermissionMode === true;
+  const remoteWorkerPermissionModeUnsupported =
+    !!deviceId
+    && activeCaps !== null
+    && activeCaps?.supportsOrcaWorkerPermissionMode !== true;
   const activeModels = useMemo(() => {
     return selectWorkerModels({
       agent,
@@ -334,7 +293,7 @@ export function CreateWorkerPopover({
       setPrefsRestored(false);
       return;
     }
-    const stored = readWorkerPrefs();
+    const stored = readWorkerCreationPrefs();
     const agentPrefs = stored[stored.lastAgent];
     setPrefs(stored);
     setAgent(stored.lastAgent);
@@ -343,8 +302,18 @@ export function CreateWorkerPopover({
     setFast(agentPrefs.fast);
     setProviderSource(deviceId ? null : agentPrefs.providerId);
     setInitialTask('');
+    setSelectedWorkerPermissionMode(stored.workerPermissionMode);
     setPrefsRestored(true);
   }, [deviceId, open]);
+
+  useEffect(() => {
+    if (
+      !supportsWorkerPermissionModeSelection
+      && selectedWorkerPermissionMode !== 'auto'
+    ) {
+      setSelectedWorkerPermissionMode('auto');
+    }
+  }, [selectedWorkerPermissionMode, supportsWorkerPermissionModeSelection]);
 
   // capabilities 可能尚未加载或模型被移除；加载后把当前选择收敛到可用模型和 effort。
   useEffect(() => {
@@ -404,13 +373,13 @@ export function CreateWorkerPopover({
 
   const vendorKey = agentKindToVendor(agent);
   const updateAgent = useCallback(
-    (nextAgent: WorkerSelectableAgent) => {
+    (nextAgent: WorkerAgentKind) => {
       if (nextAgent === agent) return;
       // 切走前把当前 agent 的 live 编辑(模型/effort/Fast/来源)快照进内存 prefs:
       // 恢复读的是 prefs,不快照会把「改了还没提交就切了个 tab」的编辑静默回滚到
       // 打开弹窗时的旧值(codex review)。只更新内存态,localStorage 仍只在提交时
       // 写 —— 关闭弹窗不持久化未提交编辑,语义不变。
-      const snapshot: WorkerPrefs = {
+      const snapshot: WorkerCreationPrefs = {
         ...prefs,
         [agent]: {
           model,
@@ -606,9 +575,30 @@ export function CreateWorkerPopover({
     activeRole.length <= 32 &&
     !customRoleError &&
     !remoteModelListBlocked &&
+    (!requireWorkerPermissionModeSupport || !remoteWorkerPermissionModeUnsupported) &&
     !!currentModel;
   const resolvedTitle = title ?? t('orca.createWorker.title');
   const resolvedSubmitLabel = submitLabel ?? t('orca.createWorker.submit');
+
+  const updateWorkerPermissionMode = useCallback(
+    async (nextMode: OrcaWorkerPermissionMode) => {
+      if (requiresFullAccessConfirmation(selectedWorkerPermissionMode, nextMode)) {
+        const confirmed = await confirmDialog({
+          title: t('newChat.chatInput.fullAccessConfirmation.title'),
+          description: t('newChat.chatInput.fullAccessConfirmation.description'),
+          content: <FullAccessConfirmContent />,
+          describeContent: true,
+          maxWidth: 440,
+          confirmText: t('newChat.chatInput.fullAccessConfirmation.confirm'),
+          cancelText: t('newChat.chatInput.fullAccessConfirmation.cancel'),
+          confirmIcon: <TriangleAlert size={14} />,
+        });
+        if (!confirmed) return;
+      }
+      setSelectedWorkerPermissionMode(nextMode);
+    },
+    [confirmDialog, selectedWorkerPermissionMode, t],
+  );
 
   const handleCreate = useCallback(async () => {
     if (!canCreate || submittingRef.current) return;
@@ -616,9 +606,12 @@ export function CreateWorkerPopover({
     setIsSubmitting(true);
     // 提交前对 (来源, 模型) 再收窄一次:收敛 effect 与提交之间目录可能已变化。
     const submitProviderId = narrowProviderSource(providerSource, model);
-    const nextPrefs: WorkerPrefs = {
+    const nextPrefs: WorkerCreationPrefs = {
       ...prefs,
       lastAgent: agent,
+      workerPermissionMode: supportsWorkerPermissionModeSelection
+        ? selectedWorkerPermissionMode
+        : prefs.workerPermissionMode,
       [agent]: {
         model,
         effort,
@@ -628,7 +621,7 @@ export function CreateWorkerPopover({
       },
     };
     setPrefs(nextPrefs);
-    writeWorkerPrefs(nextPrefs);
+    writeWorkerCreationPrefs(nextPrefs);
     // 提交 effort 按**实际路由来源档位表**对账(codex/copilot review):恢复路径的
     // stale effort、以及路由来源条目无档而拍平条目有档的组合,直接把 live 值
     // explicit 下发会被 main 侧路由来源校验拒掉(INVALID_PARAMS 阻断创建)。条目
@@ -651,6 +644,9 @@ export function CreateWorkerPopover({
         fast: currentModelSupportsFast ? fast : undefined,
         providerId: submitProviderId,
         initialTask,
+        ...(supportsWorkerPermissionModeSelection
+          ? { workerPermissionMode: selectedWorkerPermissionMode }
+          : {}),
       });
     } finally {
       submittingRef.current = false;
@@ -672,6 +668,8 @@ export function CreateWorkerPopover({
     initialTask,
     onCreate,
     routeEffortMetaFor,
+    selectedWorkerPermissionMode,
+    supportsWorkerPermissionModeSelection,
   ]);
 
   if (!open) return null;
@@ -684,7 +682,7 @@ export function CreateWorkerPopover({
         style={{ boxShadow: 'var(--shadow-menu)' }}
       >
         <div className="mb-5 flex items-center justify-between">
-          <span className="text-17 font-medium text-[var(--text-primary)]">{resolvedTitle}</span>
+          <span className="text-16 font-medium text-[var(--text-primary)]">{resolvedTitle}</span>
           <button
             type="button"
             aria-label={t('orca.createWorker.closeAria')}
@@ -837,6 +835,44 @@ export function CreateWorkerPopover({
             ) : null}
           </div>
         </div>
+
+        {remoteWorkerPermissionModeUnsupported ? (
+          requireWorkerPermissionModeSupport ? (
+            <div
+              data-testid="worker-permission-mode"
+              className="mb-4 rounded-xl border border-[var(--border-default)] px-3.5 py-3"
+            >
+            <p className="text-12 leading-snug text-[var(--error-fg)]" role="status">
+              {t('newChat.collaboration.unsupportedRemoteHint')}
+            </p>
+            </div>
+          ) : null
+        ) : (
+          <div
+            data-testid="worker-permission-mode"
+            className="mb-4 grid grid-cols-[minmax(0,1fr)_220px] items-center gap-4 rounded-xl border border-[var(--border-default)] px-3.5 py-3"
+          >
+            <span className="text-12 font-medium uppercase tracking-[0.5px] text-[var(--text-tertiary)]">
+              {t('orca.createWorker.permissionLabel')}
+            </span>
+            <PermissionSelector
+              permissionMode={selectedWorkerPermissionMode}
+              onPermissionModeChange={(mode) =>
+                void updateWorkerPermissionMode(mode as OrcaWorkerPermissionMode)
+              }
+              vendorKey={vendorKey}
+              deviceId={deviceId}
+              triggerVariant="field"
+              dense
+              ariaContext={t('orca.createWorker.permissionLabel')}
+              allowedModes={
+                supportsWorkerPermissionModeSelection
+                  ? ORCA_WORKER_PERMISSION_MODES
+                  : AUTO_ONLY_WORKER_PERMISSION_MODES
+              }
+            />
+          </div>
+        )}
 
         <div className="mb-5">
           <div className="mb-2 text-12 font-medium uppercase tracking-[0.5px] text-[var(--text-tertiary)]">
