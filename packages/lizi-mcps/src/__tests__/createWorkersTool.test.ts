@@ -327,7 +327,9 @@ describe('create_workers tool', () => {
       getWorkerLimitSnapshot,
     ).call('create_workers', { workers }));
 
-    expect(getWorkerLimitSnapshot).toHaveBeenCalledTimes(1);
+    // 批前一次 + 收尾一次：批前失败可能只是瞬时错误，收尾照样要试着拿最终容量真相，
+    // 两次都失败才沿用在途结果（于是整份 payload 与「压根没有这条 dep」时逐字段相等）。
+    expect(getWorkerLimitSnapshot).toHaveBeenCalledTimes(2);
     expect(withFailedSnapshot).toEqual(withoutSnapshot);
     expect(createWithFailedSnapshot).toHaveBeenCalledTimes(5);
   });

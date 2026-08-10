@@ -349,9 +349,10 @@ export function registerCreateWorkersTool(
       // reservation 那一刻的占用，其中可能包含之后又被释放的预留（bootstrap、持久化或
       // 派发前失败）；沿用其中的最大值会把容量报成比实际更满，进而误导 Lead 去建议用户
       // 提高上限或归档 Worker。收尾快照是只读的，失败就沿用在途结果，不影响已建好的 Worker。
-      // 只在批前那次快照拿到过的时候才收尾重取：批前就失败说明这条 dep 当前不可用，
-      // 再打一次既拿不到真相也只是白白多一次往返。
-      if (usedReadOnlySnapshot && deps.getWorkerLimitSnapshot) {
+      // 只要回调存在就重取，不看批前那次成没成功：批前失败可能只是一次瞬时错误，随后
+      // 创建全程正常，这时沿用在途最大值同样会把容量报得比实际更满。重取是只读的、
+      // 已包在 try/catch 里，最坏不过多一次失败读。
+      if (deps.getWorkerLimitSnapshot) {
         try {
           const settled = await deps.getWorkerLimitSnapshot(ctx.sessionId!);
           if (isWorkerLimitSnapshot(settled)) limit = settled;
