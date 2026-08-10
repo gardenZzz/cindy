@@ -61,6 +61,7 @@ describe('subagent model settings store', () => {
       withDefaults({
         codexEffort: null,
         codexSubagentsEnabled: true,
+        codexUseCindySubagentPolicy: true,
         codexMaxConcurrentSubagents: null,
         codexAllowNestedSubagents: false,
       }),
@@ -133,10 +134,11 @@ describe('subagent model settings store', () => {
   });
 
   it('persists guardrail overrides only when they differ from defaults', () => {
-    // 等于默认的值不落 key(override store 语义):enabled=true / nested=false /
-    // 并发 null 都是默认,写入后不产生 override。
+    // 等于默认的值不落 key(override store 语义):enabled=true / Cindy 策略=true /
+    // nested=false / 并发 null 都是默认,写入后不产生 override。
     writeSubagentModelSettingsPatch({
       codexSubagentsEnabled: true,
+      codexUseCindySubagentPolicy: true,
       codexAllowNestedSubagents: false,
       codexMaxConcurrentSubagents: null,
     });
@@ -144,17 +146,20 @@ describe('subagent model settings store', () => {
 
     writeSubagentModelSettingsPatch({
       codexSubagentsEnabled: false,
+      codexUseCindySubagentPolicy: false,
       codexAllowNestedSubagents: true,
       codexMaxConcurrentSubagents: 3,
     });
     expect(JSON.parse(fs.readFileSync(settingsFile, 'utf-8'))).toEqual({
       codexSubagentsEnabled: false,
+      codexUseCindySubagentPolicy: false,
       codexAllowNestedSubagents: true,
       codexMaxConcurrentSubagents: 3,
     });
     expect(readSubagentModelSettings()).toEqual(
       withDefaults({
         codexSubagentsEnabled: false,
+        codexUseCindySubagentPolicy: false,
         codexAllowNestedSubagents: true,
         codexMaxConcurrentSubagents: 3,
       }),
@@ -174,13 +179,15 @@ describe('subagent model settings store', () => {
   });
 
   it('normalizes garbage guardrail booleans toward their semantic default', () => {
-    // 总开关 fail-open(保能力),嵌套 fail-closed(少放权)。
+    // 总开关 fail-open(保能力),Cindy 策略 fail-open(兼容),嵌套 fail-closed(少放权)。
     const normalized = __testing.normalize({
       codexSubagentsEnabled: 'nope',
+      codexUseCindySubagentPolicy: 'nope',
       codexAllowNestedSubagents: 'yes',
       codexEffort: 'warp-speed',
     });
     expect(normalized.codexSubagentsEnabled).toBe(true);
+    expect(normalized.codexUseCindySubagentPolicy).toBe(true);
     expect(normalized.codexAllowNestedSubagents).toBe(false);
     expect(normalized.codexEffort).toBeNull();
   });
@@ -284,6 +291,9 @@ describe('subagent model settings store', () => {
     expect(codexSpawnConfigChanged(base, withDefaults({ codex: 'gpt-5.6-terra' }))).toBe(true);
     expect(codexSpawnConfigChanged(base, withDefaults({ codexEffort: 'low' }))).toBe(true);
     expect(codexSpawnConfigChanged(base, withDefaults({ codexSubagentsEnabled: false }))).toBe(true);
+    expect(
+      codexSpawnConfigChanged(base, withDefaults({ codexUseCindySubagentPolicy: false })),
+    ).toBe(true);
     expect(codexSpawnConfigChanged(base, withDefaults({ codexMaxConcurrentSubagents: 3 }))).toBe(true);
     expect(codexSpawnConfigChanged(base, withDefaults({ codexAllowNestedSubagents: true }))).toBe(true);
   });

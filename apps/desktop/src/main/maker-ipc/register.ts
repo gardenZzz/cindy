@@ -237,11 +237,13 @@ import {
   applyAgentSwitchToSessionRow,
   applyAgentSwitchResumeFallbackAtomically,
   broadcastSessionPatched,
+  captureSessionRecycleScope,
   clearSessionContextInDb,
   createSessionRemoteHostIdReader,
   getSessionRowSnapshot,
   getSessionRowSnapshotStrict,
   persistSessionFields,
+  recycleSessionWorktreeForStatusChange,
 } from '../localDb/ipc/sessions.js';
 // sidebar-card-mode: turn-done 后触发任务现状摘要生成
 import { maybeGenerateSessionTaskSummary } from '../sessionTaskSummary.js';
@@ -508,6 +510,10 @@ import {
   resolveSessionReferences,
 } from './sessionReferenceResolver.js';
 import { registerAndroidAutomationHandlers } from './androidHandlers.js';
+import { registerIOSSimulatorHandlers } from './iosSimulatorHandlers.js';
+import {
+  cancelIOSSimulatorSessionOperations,
+} from '../mcp-integrations/ios-simulator.js';
 import { MAKER_INVOKE, MAKER_PUSH, MAKER_SEND } from './channels.js';
 import type { CollabDispatchOutcome } from './collabSendOutcome.js';
 import { runAcceptedCallback } from './acceptedCallbackRunner.js';
@@ -595,9 +601,7 @@ import {
   createOrcaWorkerCreationService,
   normalizeOrcaWorkerAgent,
   normalizeOrcaWorkerLabel,
-  providerRouteRequiresExplicitSelection,
   type OrcaWorkerLimitSnapshot,
-  type OrcaWorkerProviderRoutingContext,
 } from './orcaWorkerCreationService.js';
 import {
   resolveSendToSessionExecutionConfig,
@@ -662,13 +666,7 @@ import {
   refreshActiveCatalogFromSource,
   refreshCustomProvidersIntoCatalog,
 } from '../maker-host/createDesktopProviderService.js';
-import {
-  connectedProvidersForAgent,
-  effectiveSourceIdForModel,
-  findModelRegistryRoute,
-  isModelSelectableForNewRoute,
-  type ProviderView,
-} from '@cindy/model-providers';
+import { readOrcaWorkerProviderRoutingContext } from './orcaProviderRoutingContext.js';
 import {
   getSessionProvider,
   hydrateSessionProvider,
@@ -8871,8 +8869,10 @@ export function registerMakerIpc(maker: Maker, options: RegisterMakerIpcOptions)
         });
         // 上一次关闭若在 archiveWorkersByTeam 之前被打断,team 已非 active 但 worker session 还停在
         // active + hidden + unreachable —— 一并补齐归档,否则它们会成为永远触达不到的孤儿 worker。
+        const workerRecycleScope = captureSessionRecycleScope();
         const orphanedWorkerSessionIds = await reconcileInactiveTeamWorkersForLead(leadSessionId);
         for (const sid of orphanedWorkerSessionIds) {
+          await recycleSessionWorktreeForStatusChange(sid, 'archived', workerRecycleScope);
           cleanupPendingInteractionsForSession(sid, 'orca_disable');
           forgetKnownOrcaWorkerSession(sid);
         }
@@ -8893,6 +8893,7 @@ export function registerMakerIpc(maker: Maker, options: RegisterMakerIpcOptions)
     const activeWorkers = workers.filter((w) => w.teamId === team.id);
     for (const w of activeWorkers) {
       orcaTeamService.clearAutoBridgeState(w.sessionId);
+      await cancelIOSSimulatorSessionOperations(w.sessionId);
       const sess = maker.getSession(w.sessionId);
       if (sess) {
         try {
@@ -8920,7 +8921,13 @@ export function registerMakerIpc(maker: Maker, options: RegisterMakerIpcOptions)
 
     await markTeamEnded(team.id, 'completed');
     await markWorkersStatusByTeam(team.id, 'done');
-    await archiveWorkersByTeam(team.id);
+    const workerRecycleScope = captureSessionRecycleScope();
+    const archivedWorkerSessionIds = await archiveWorkersByTeam(team.id);
+    await Promise.all(
+      archivedWorkerSessionIds.map((sessionId) =>
+        recycleSessionWorktreeForStatusChange(sessionId, 'archived', workerRecycleScope),
+      ),
+    );
 
     await clearLeadOrcaRoleState(leadSessionId);
 
@@ -9077,6 +9084,7 @@ export function registerMakerIpc(maker: Maker, options: RegisterMakerIpcOptions)
     },
     markWorkerIdleIfStatus,
     restoreWorkerDoneIfIdle,
+    cancelWorkerSessionOperations: cancelIOSSimulatorSessionOperations,
     closeWorkerSession: async (sessionId) => {
       const sess = maker.getSession(sessionId);
       if (sess) {
@@ -9100,7 +9108,11 @@ export function registerMakerIpc(maker: Maker, options: RegisterMakerIpcOptions)
       );
     },
     hasSendToSessionLock: (sessionId) => sendToSessionLocks.has(sessionId),
-    archiveWorkerSession: archiveSingleWorkerSession,
+    archiveWorkerSession: async (sessionId) => {
+      const workerRecycleScope = captureSessionRecycleScope();
+      await archiveSingleWorkerSession(sessionId);
+      await recycleSessionWorktreeForStatusChange(sessionId, 'archived', workerRecycleScope);
+    },
     getManualInterrupt,
     clearManualInterrupt,
     forgetWorkerSession: forgetKnownOrcaWorkerSession,
@@ -9180,71 +9192,11 @@ export function registerMakerIpc(maker: Maker, options: RegisterMakerIpcOptions)
   });
   orcaTeamServiceForEvents = orcaTeamService;
 
-  async function getProviderRoutingContext(): Promise<OrcaWorkerProviderRoutingContext> {
-    const catalog = getDesktopSelectableCatalog();
-    const views = await getDesktopProviderService().listProviders({
-      allowSideEffects: true,
-      catalog,
+  const getProviderRoutingContext = () =>
+    readOrcaWorkerProviderRoutingContext({
+      providerService: getDesktopProviderService(),
+      getCatalog: getActiveCatalog,
     });
-    const modelRegistry = catalog.modelRegistry;
-    // 准入过滤与 modelList.ts 标准派生同口径:用户停用的模型(disabled,见
-    // model-disable-store)与非聊天模型(image/video/tts/stt/realtime/
-    // embedding/compression,issue #882 第 3 点)不进路由可用集 —— MCP
-    // create_worker / send_to_session 点名它们会在创建前结构化失败，而不是静默
-    // 路由过去。停用的供应商已在 connectedProvidersForAgent(suspended) 一层出局。
-    // models/fastModels/effortMetaByModel 是两个创建入口唯一能看到的 provider 维度
-    // 快照；同 id 模型跨来源的能力可能分叉，不能只看 Maker 的拍平首见条目。
-    const routableModels = (provider: ProviderView, agent: AgentKind) =>
-      (provider.models[agent] ?? []).filter((model) =>
-        isModelSelectableForNewRoute(model, { userProvider: provider.source === 'user' }),
-      );
-    const availabilityFor = (agent: AgentKind) =>
-      connectedProvidersForAgent(views, agent).map((provider) => {
-        const models = routableModels(provider, agent);
-        const registryIdentityByModel = Object.fromEntries(
-          models.flatMap((model) => {
-            const matched = findModelRegistryRoute(
-              modelRegistry,
-              provider.id,
-              model.id,
-              agent === 'claude-code' || agent === 'codex' ? agent : undefined,
-            );
-            return matched ? [[model.id, matched.entry.id]] : [];
-          }),
-        );
-        return {
-          id: provider.id,
-          name: provider.name,
-          models: models.map((model) => model.id),
-          registryIdentityByModel,
-          fastModels: models.filter((model) => model.supportsFastMode).map((model) => model.id),
-          effortMetaByModel: Object.fromEntries(
-            models.map((model) => [
-              model.id,
-              { efforts: model.efforts, defaultEffort: model.defaultEffort },
-            ]),
-          ),
-          requiresExplicitRoute: providerRouteRequiresExplicitSelection(
-            provider.routing[agent]?.authStrategy,
-          ),
-          chatBridgedCodex:
-            agent === 'codex' && provider.routing[agent]?.wireProtocol === 'openai-chat',
-        };
-      });
-    return {
-      availability: {
-        'claude-code': availabilityFor('claude-code'),
-        codex: availabilityFor('codex'),
-        // cursor 是登录制 agent，凭证在 cursor-agent 自己的 login 态里，
-        // model-providers 里没有它的供应商条目 —— 恒空是事实而非缺口；worker 创建
-        // 对 cursor 整段跳过供应商路由(orcaWorkerCreationService 的 isProviderRoutedAgent)。
-        cursor: [],
-        pi: availabilityFor('pi'),
-      },
-      resolveDefaultProviderIdForModel: (agent, model) =>
-        effectiveSourceIdForModel(views, null, model, agent),
-    };
-  }
 
   const orcaWorkerCreationService = createOrcaWorkerCreationService({
     getActiveTeamByLead,
@@ -9368,12 +9320,14 @@ export function registerMakerIpc(maker: Maker, options: RegisterMakerIpcOptions)
       });
     },
     rollbackCreatedWorker: async ({ workerId, workerSessionId }) => {
+      await cancelIOSSimulatorSessionOperations(workerSessionId);
       const workerSession = maker.getSession(workerSessionId);
       if (workerSession) {
         await maker.closeSession(workerSessionId).catch(() => undefined);
       }
       forgetKnownOrcaWorkerSession(workerSessionId);
       await archiveSingleWorkerSession(workerSessionId).catch(() => undefined);
+      await cancelIOSSimulatorSessionOperations(workerSessionId);
       await removeWorker(workerId);
     },
     broadcastSessionCreated,
@@ -13257,6 +13211,11 @@ export function registerMakerIpc(maker: Maker, options: RegisterMakerIpcOptions)
 
   // ── Android automation (Settings →「电脑使用」) ──────────────────────────
   registerAndroidAutomationHandlers(createElectronIpcHandlerRegistry());
+
+  // ── iOS Simulator pane / Agent discovery ────────────────────────────────
+  registerIOSSimulatorHandlers(
+    createElectronIpcHandlerRegistry(),
+  );
 
   // ── Browser automation (Settings →「电脑使用」) ───────────────────────────
   // Probe local browser detection. Drives the detection status + download
