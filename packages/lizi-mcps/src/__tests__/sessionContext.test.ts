@@ -126,6 +126,37 @@ describe('dynamic lizi MCP session context', () => {
     expect(first).toContain('create_workers');
   });
 
+  it('keeps the tool manifest byte-identical whether or not the snapshot dep is injected', () => {
+    // prompt cache 命中依赖请求前缀逐字节稳定（maker-core-and-agent-behavior.md §3.1：
+    // 禁止会话中途增删/重排 tool 定义）。getWorkerLimitSnapshot 是可选 dep，注入与否
+    // 只能影响 host 侧行为，绝不能改变模型看到的工具清单或任何一条 description。
+    const context = {
+      agentKind: 'codex' as const,
+      workingDir: '/repo',
+      sessionId: 'lead-1',
+      vendorOptions: { orcaRole: 'lead' },
+    };
+    const manifest = (deps: OrcaMcpDeps) => Object.entries(tools(createOrcaMcpServer(deps, context)))
+      .map(([name, tool]) => [name, (tool as { description?: string }).description]);
+
+    const withoutSnapshot = manifest(createOrcaDeps());
+    const withSnapshot = manifest(createOrcaDeps({
+      getWorkerLimitSnapshot: vi.fn(async () => ({
+        workerHardLimit: 8,
+        occupiedSlots: 0,
+        remainingSlots: 8,
+      })),
+    }));
+
+    expect(withSnapshot).toEqual(withoutSnapshot);
+    // 同一份 deps 连建两次也必须逐字节一致（description 里不能有插值/时间戳）。
+    expect(manifest(createOrcaDeps())).toEqual(withoutSnapshot);
+
+    const createWorkersDescription = withSnapshot.find(([name]) => name === 'create_workers')?.[1];
+    expect(createWorkersDescription).toContain('只读名额快照');
+    expect(createWorkersDescription).not.toContain('${');
+  });
+
   it('forwards the read-only worker limit snapshot into create_workers', async () => {
     // 回归:快照回调只声明在 OrcaMcpDeps、忘了转给 registerCreateWorkersTool 时，
     // 批量工具会永远走首项探测——纯 tool 级用例注入 deps，看不到这段接线。
