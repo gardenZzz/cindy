@@ -217,3 +217,128 @@ describe('removeCursorIsolatedConfigDir', () => {
     }
   });
 });
+
+describe('cli-config 合并写', () => {
+  function readConfig(configDir: string): Record<string, unknown> {
+    return JSON.parse(readFileSync(join(configDir, 'cli-config.json'), 'utf8')) as Record<
+      string,
+      unknown
+    >;
+  }
+
+  /** 起一次会话 → 上游写回它自己的缓存 → 再起一次会话。 */
+  function bootTwice(
+    userDataPath: string,
+    upstreamWrites: Record<string, unknown>,
+    opts: Parameters<typeof createCursorIsolatedConfigDir>[1] = { stableKey: 's', userDataPath: '' },
+  ): Record<string, unknown> {
+    const first = createCursorIsolatedConfigDir({}, { ...opts, userDataPath });
+    const merged = { ...readConfig(first.configDir), ...upstreamWrites };
+    writeFileSync(join(first.configDir, 'cli-config.json'), JSON.stringify(merged, null, 2));
+    const second = createCursorIsolatedConfigDir({}, { ...opts, userDataPath });
+    return readConfig(second.configDir);
+  }
+
+  it('keeps upstream-owned state across restarts', () => {
+    const userDataPath = mkUserData();
+    try {
+      const cfg = bootTwice(userDataPath, {
+        // 上游把登录态 / 隐私档 / 模型记录都放在同一个文件里；整写会让每次起
+        // 会话都退回全冷状态，重新拉一遍。
+        authInfo: { email: 'nobody@example.invalid', teamId: 1 },
+        privacyCache: { ghostMode: true, privacyMode: 2 },
+        modelSelectionHistory: ['grok-4.5'],
+      });
+      expect(cfg.authInfo).toEqual({ email: 'nobody@example.invalid', teamId: 1 });
+      expect(cfg.privacyCache).toEqual({ ghostMode: true, privacyMode: 2 });
+      expect(cfg.modelSelectionHistory).toEqual(['grok-4.5']);
+    } finally {
+      rmSync(userDataPath, { recursive: true, force: true });
+    }
+  });
+
+  it('forces the security keys back even if upstream widened them', () => {
+    const userDataPath = mkUserData();
+    try {
+      const cfg = bootTwice(userDataPath, {
+        approvalMode: 'unrestricted',
+        permissions: { allow: ['Bash(rm -rf /)'], deny: [] },
+        sandbox: { mode: 'enabled', networkAccess: 'blocked' },
+      });
+      // unrestricted 会整个屏蔽 session/request_permission；留存的 allow 条目
+      // 等于让一次性授权跨重启存活。两者都必须被打回去。
+      expect(cfg.approvalMode).toBe('allowlist');
+      expect(cfg.permissions).toEqual({ allow: [], deny: [] });
+      expect(cfg.sandbox).toEqual({ mode: 'disabled', networkAccess: 'user_config_with_defaults' });
+    } finally {
+      rmSync(userDataPath, { recursive: true, force: true });
+    }
+  });
+
+  it('falls back to a full write when the existing config is corrupt', () => {
+    const userDataPath = mkUserData();
+    try {
+      const first = createCursorIsolatedConfigDir({}, { stableKey: 's', userDataPath });
+      writeFileSync(join(first.configDir, 'cli-config.json'), '{"broken": ');
+      const cfg = readConfig(
+        createCursorIsolatedConfigDir({}, { stableKey: 's', userDataPath }).configDir,
+      );
+      expect(cfg.approvalMode).toBe('allowlist');
+      expect(cfg.broken).toBeUndefined();
+    } finally {
+      rmSync(userDataPath, { recursive: true, force: true });
+    }
+  });
+
+  it('preseeds the model so session/new comes back already configured', () => {
+    const userDataPath = mkUserData();
+    try {
+      const { configDir } = createCursorIsolatedConfigDir({}, {
+        stableKey: 's',
+        userDataPath,
+        modelSeed: { modelId: 'grok-4.5', parameters: { fast: 'false' } },
+      });
+      const cfg = readConfig(configDir);
+      expect(cfg.model).toMatchObject({ modelId: 'grok-4.5' });
+      expect(cfg.selectedModel).toEqual({
+        modelId: 'grok-4.5',
+        parameters: [{ id: 'fast', value: 'false' }],
+      });
+      expect(cfg.modelParameters).toEqual({ 'grok-4.5': [{ id: 'fast', value: 'false' }] });
+      expect(cfg.hasChangedDefaultModel).toBe(true);
+    } finally {
+      rmSync(userDataPath, { recursive: true, force: true });
+    }
+  });
+
+  it('merges the seed into upstream-remembered parameters instead of dropping them', () => {
+    const userDataPath = mkUserData();
+    try {
+      const seed = { modelId: 'grok-4.5', parameters: { fast: 'true' } };
+      const cfg = bootTwice(
+        userDataPath,
+        {
+          modelParameters: {
+            'grok-4.5': [
+              { id: 'effort', value: 'high' },
+              { id: 'fast', value: 'false' },
+            ],
+            'claude-opus-5': [{ id: 'thinking', value: 'true' }],
+          },
+        },
+        { stableKey: 's', userDataPath: '', modelSeed: seed },
+      );
+      // effort 不预写（id 与拼写随模型家族变），必须留住上游记的那份；
+      // 别的模型的记录也不能被这次预写抹掉。
+      expect(cfg.modelParameters).toEqual({
+        'grok-4.5': [
+          { id: 'effort', value: 'high' },
+          { id: 'fast', value: 'true' },
+        ],
+        'claude-opus-5': [{ id: 'thinking', value: 'true' }],
+      });
+    } finally {
+      rmSync(userDataPath, { recursive: true, force: true });
+    }
+  });
+});
