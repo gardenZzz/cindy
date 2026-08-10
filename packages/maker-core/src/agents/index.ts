@@ -11,6 +11,7 @@ export {
   type AutoPermissionVerdict,
 } from './acp/permissions.js';
 export {
+  clearCursorIsolatedCliConfigs,
   createCursorIsolatedConfigDir,
   removeCursorIsolatedConfigDir,
   resolveCursorIsolatedConfigDir,

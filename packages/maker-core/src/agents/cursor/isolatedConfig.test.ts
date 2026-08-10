@@ -4,6 +4,7 @@ import { join } from 'node:path';
 import { homedir, tmpdir } from 'node:os';
 
 import {
+  clearCursorIsolatedCliConfigs,
   createCursorIsolatedConfigDir,
   removeCursorIsolatedConfigDir,
   readUserNetworkConfigFromEnv,
@@ -337,6 +338,65 @@ describe('cli-config 合并写', () => {
         ],
         'claude-opus-5': [{ id: 'thinking', value: 'true' }],
       });
+    } finally {
+      rmSync(userDataPath, { recursive: true, force: true });
+    }
+  });
+});
+
+describe('clearCursorIsolatedCliConfigs（登出清理）', () => {
+  it('clears every session cli-config but keeps acp-sessions intact', () => {
+    const userDataPath = mkUserData();
+    try {
+      const a = createCursorIsolatedConfigDir({}, { stableKey: 'sess-a', userDataPath });
+      const b = createCursorIsolatedConfigDir({}, { stableKey: 'sess-b', userDataPath });
+      // acp-sessions 是 session/load 的依据，清理绝不能碰它。
+      for (const dir of [a.configDir, b.configDir]) {
+        mkdirSync(join(dir, 'acp-sessions', 'upstream-id'), { recursive: true });
+        writeFileSync(join(dir, 'acp-sessions', 'upstream-id', 'meta.json'), '{}');
+      }
+
+      expect(clearCursorIsolatedCliConfigs(userDataPath)).toBe(2);
+
+      for (const dir of [a.configDir, b.configDir]) {
+        expect(existsSync(join(dir, 'cli-config.json'))).toBe(false);
+        expect(existsSync(join(dir, 'acp-sessions', 'upstream-id', 'meta.json'))).toBe(true);
+      }
+    } finally {
+      rmSync(userDataPath, { recursive: true, force: true });
+    }
+  });
+
+  it('drops the cached identity so the next session rebuilds a clean config', () => {
+    const userDataPath = mkUserData();
+    try {
+      const first = createCursorIsolatedConfigDir({}, { stableKey: 'sess', userDataPath });
+      const withIdentity = {
+        ...(JSON.parse(readFileSync(join(first.configDir, 'cli-config.json'), 'utf8')) as Record<
+          string,
+          unknown
+        >),
+        authInfo: { email: 'nobody@example.invalid' },
+      };
+      writeFileSync(join(first.configDir, 'cli-config.json'), JSON.stringify(withIdentity));
+
+      clearCursorIsolatedCliConfigs(userDataPath);
+      const second = createCursorIsolatedConfigDir({}, { stableKey: 'sess', userDataPath });
+      const cfg = JSON.parse(readFileSync(join(second.configDir, 'cli-config.json'), 'utf8')) as {
+        authInfo?: unknown;
+        approvalMode: string;
+      };
+      expect(cfg.authInfo).toBeUndefined();
+      expect(cfg.approvalMode).toBe('allowlist');
+    } finally {
+      rmSync(userDataPath, { recursive: true, force: true });
+    }
+  });
+
+  it('is a no-op when no cursor session has ever run', () => {
+    const userDataPath = mkUserData();
+    try {
+      expect(clearCursorIsolatedCliConfigs(userDataPath)).toBe(0);
     } finally {
       rmSync(userDataPath, { recursive: true, force: true });
     }

@@ -1440,7 +1440,12 @@ export function getMaker(): Maker {
     // auth 走本机 cursor_login（Keychain；Cindy 不落盘凭证）。
     const cursorBinary = discoverCursorAgentBinarySync();
     const cursorAuth = cursorBinary.installed
-      ? createDesktopCursorAuthAdapter({ binaryPath: cursorBinary.binaryPath })
+      ? createDesktopCursorAuthAdapter({
+          binaryPath: cursorBinary.binaryPath,
+          // 登出时连带清掉隔离目录里上游缓存的登录身份；根必须与
+          // CursorAgent 建目录用的 runtimeConfig 同源。
+          userDataPath: desktopCursorRuntimeConfig.userDataPath,
+        })
       : null;
     const cursorAgent = cursorBinary.installed && cursorAuth
       ? new CursorAgent({

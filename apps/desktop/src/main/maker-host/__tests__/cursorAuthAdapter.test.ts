@@ -1,5 +1,8 @@
 import { EventEmitter } from 'node:events';
 import type { ChildProcess } from 'node:child_process';
+import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { describe, expect, it, vi } from 'vitest';
 
 const spawnMock = vi.hoisted(() => vi.fn());
@@ -181,6 +184,48 @@ describe('DesktopCursorAuthAdapter', () => {
         env: expect.objectContaining({ NO_OPEN_BROWSER: '1' }),
       }),
     );
+  });
+
+  it('logout clears the identity cached in per-session isolated config dirs', async () => {
+    // CLI 的 logout 只清全局目录与 Keychain；按会话隔离的 CURSOR_CONFIG_DIR 里
+    // 上游缓存的 authInfo 够不着，不显式清就会留着上一个账号的身份。
+    const userDataPath = mkdtempSync(join(tmpdir(), 'cindy-cursor-logout-'));
+    try {
+      const sessionDir = join(userDataPath, 'cursor-acp', 'sess-a-abcdef012345');
+      mkdirSync(join(sessionDir, 'acp-sessions', 'upstream-id'), { recursive: true });
+      writeFileSync(
+        join(sessionDir, 'cli-config.json'),
+        JSON.stringify({ approvalMode: 'allowlist', authInfo: { email: 'nobody@example.invalid' } }),
+      );
+      writeFileSync(join(sessionDir, 'acp-sessions', 'upstream-id', 'meta.json'), '{}');
+
+      const adapter = createDesktopCursorAuthAdapter({
+        binaryPath: '/fake/cursor-agent',
+        runCommand: async () => ({ stdout: '', stderr: '', code: 0 }),
+        userDataPath,
+      });
+      await adapter.logout();
+
+      expect(existsSync(join(sessionDir, 'cli-config.json'))).toBe(false);
+      // resume 依据不受影响。
+      expect(existsSync(join(sessionDir, 'acp-sessions', 'upstream-id', 'meta.json'))).toBe(true);
+    } finally {
+      rmSync(userDataPath, { recursive: true, force: true });
+    }
+  });
+
+  it('keeps logout succeeding when the isolated config cleanup finds nothing', async () => {
+    const userDataPath = mkdtempSync(join(tmpdir(), 'cindy-cursor-logout-empty-'));
+    try {
+      const adapter = createDesktopCursorAuthAdapter({
+        binaryPath: '/fake/cursor-agent',
+        runCommand: async () => ({ stdout: '', stderr: '', code: 0 }),
+        userDataPath,
+      });
+      await expect(adapter.logout()).resolves.toBeUndefined();
+    } finally {
+      rmSync(userDataPath, { recursive: true, force: true });
+    }
   });
 
   it('cancelLogin kills the in-flight login child', async () => {

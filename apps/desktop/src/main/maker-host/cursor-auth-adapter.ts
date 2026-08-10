@@ -11,10 +11,11 @@
 
 import { spawn, execFile, type ChildProcess } from 'node:child_process';
 
-import type {
-  AuthAdapter,
-  AuthLoginOptions,
-  AuthState,
+import {
+  clearCursorIsolatedCliConfigs,
+  type AuthAdapter,
+  type AuthLoginOptions,
+  type AuthState,
 } from '@cindy/maker-core';
 
 import { createLogger } from '../logger.js';
@@ -60,6 +61,11 @@ export interface CursorAuthAdapterDeps {
   forceSettleMs?: number;
   /** 单测注入跨平台终止（默认复用 scheduler-host killProcessTree）。 */
   killProcessTree?: CursorKillProcessTree;
+  /**
+   * 隔离配置目录的根（`<userData>/cursor-acp/`）。给出时登出会清掉各会话目录里
+   * 上游缓存的登录身份；缺省则跳过（登出本身照常）。
+   */
+  userDataPath?: string;
 }
 
 interface ActiveLoginSession {
@@ -155,6 +161,7 @@ export class DesktopCursorAuthAdapter implements AuthAdapter {
   private readonly loginTimeoutMs: number;
   private readonly forceSettleMs: number;
   private readonly killTree: CursorKillProcessTree;
+  private readonly userDataPath: string | undefined;
   private activeLogin: ActiveLoginSession | null = null;
   private loginWaiters: Array<() => void> = [];
   private forceSettleTimers = new Set<ReturnType<typeof setTimeout>>();
@@ -177,6 +184,7 @@ export class DesktopCursorAuthAdapter implements AuthAdapter {
     this.loginTimeoutMs = deps.loginTimeoutMs ?? LOGIN_TIMEOUT_MS;
     this.forceSettleMs = deps.forceSettleMs ?? LOGIN_FORCE_SETTLE_MS;
     this.killTree = deps.killProcessTree ?? killProcessTree;
+    this.userDataPath = deps.userDataPath;
   }
 
   async getState(): Promise<AuthState> {
@@ -357,6 +365,19 @@ export class DesktopCursorAuthAdapter implements AuthAdapter {
       const message = (result.stderr || result.stdout || 'cursor logout failed').trim();
       log.warn('cursor logout failed', { exitCode: result.code });
       throw new Error(message.slice(0, 200));
+    }
+    // CLI 的 logout 只清全局目录与 Keychain，够不着按会话隔离的 CURSOR_CONFIG_DIR；
+    // 那里缓存着上游写的登录身份，不清就会活到会话被删除。
+    if (this.userDataPath) {
+      try {
+        const cleared = clearCursorIsolatedCliConfigs(this.userDataPath);
+        if (cleared > 0) log.info('cleared cursor isolated cli-config', { cleared });
+      } catch (err) {
+        // 清理失败不能把已经成功的登出翻成失败。
+        log.warn('failed to clear cursor isolated cli-config', {
+          message: err instanceof Error ? err.message : String(err),
+        });
+      }
     }
     log.info('cursor logout completed');
   }
