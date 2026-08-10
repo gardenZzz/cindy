@@ -53,6 +53,7 @@ import type { XdtHelperHistoryDeps } from './xdt-helper/_history_types.js';
 import type { LiziMcpLogger } from './types.js';
 import { resolveLiziMcpSessionContext } from './session-context.js';
 import { logToolResultErrorCode } from './tool-error-telemetry.js';
+import type { AgentKind } from '@cindy/maker-core';
 
 // ── Re-exports (backward compat for consumers that imported from here) ────
 
@@ -253,7 +254,7 @@ export interface XdtHelperMcpDeps {
  * 字段惰性创建, 工具 handler 闭包捕获这些值。
  */
 export interface XdtHelperMcpSessionCtx {
-  agentKind: 'claude-code' | 'codex' | 'pi';
+  agentKind: AgentKind;
   workingDir: string;
   getSessionContext?: () => import('./types.js').LiziMcpSessionContext | undefined;
   sessionId?: string;

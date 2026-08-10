@@ -18,6 +18,7 @@ import { projectAutomationConsentToRow } from '../localDb/mapper';
 import { PROJECT_AUTOMATION_REL_SEGMENTS } from '../../shared/projectAutomationPaths';
 import { migrateLegacyXdmakerDir } from '../utils/legacyXdmakerMigration';
 import type { DrizzleScheduleStorage, SchedulerDrizzleDb } from './storage';
+import type { AgentKind } from '@cindy/maker-core';
 
 /**
  * ProjectAutomationLoader reads .cindy/automations/schedules.json and syncs it
@@ -47,12 +48,12 @@ export interface ProjectScheduleConfig {
   recurring?: boolean;
   manual?: boolean;
   intervalMs?: number;
-  agentKind?: 'claude-code' | 'codex' | 'pi';
+  agentKind?: AgentKind;
   model?: string;
   /** 可选：显式来源(供应商)id。省略 → 走原生默认来源（与旧配置字节级一致）。详见 Schedule.providerId。 */
   providerId?: string;
   effort?: string;
-  /** Codex Fast 模式开关，仅 Codex 有意义。详见 Schedule.fastMode。 */
+  /** Fast 模式开关，对 Codex / Cursor 有意义。详见 Schedule.fastMode。 */
   fastMode?: boolean;
   useWorktree?: boolean;
   persistentSession?: boolean;

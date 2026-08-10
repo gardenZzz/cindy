@@ -226,6 +226,7 @@ describe('checkModelRoute', () => {
     expect(checkModelRoute(v, 'claude-code', 'shared-id', 'openai')).toEqual({ kind: 'pass' });
   });
 
+
   it('能力模型分类按将要路由的拷贝判:未连接来源的对话拷贝不构成豁免', () => {
     // 同 id 在 xd 是图像模型、在用户自定义 mycorp 是对话模型,但 mycorp 未连接:
     // 实际路由永远不会落到未连接拷贝,隐式与点名 xd 都必须拒(PR #744 review 第六轮)。
@@ -247,6 +248,7 @@ describe('checkModelRoute', () => {
   });
 
   it('混源同 id 双连接:分类按选中来源 —— 显式选用户家对话拷贝放行,点名 XD 家能力拷贝拒,隐式默认改道到对话拷贝', () => {
+
     const catalog = {
       providers: [
         provider('xd', [model('gpt-image-2', { group: 'image' })]),
@@ -265,6 +267,7 @@ describe('checkModelRoute', () => {
     expect(checkModelRoute(v, 'claude-code', 'gpt-image-2', null)).toEqual({
       kind: 'reroute',
       providerId: 'mycorp',
+
     });
   });
 

@@ -42,6 +42,10 @@ describe('sessionControls', () => {
       agentKind: 'codex',
       fastMode: true,
     });
+    expect(buildContextUsageCreateOpts(session({ agentKind: 'cursor', model: 'auto' }))).toMatchObject({
+      agentKind: 'cursor',
+      model: 'auto',
+    });
   });
 
   it('exposes local Codex quota controls only for local subscription sessions', () => {

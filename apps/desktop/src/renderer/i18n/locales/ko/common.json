@@ -1630,6 +1630,70 @@
         "hintLoggedIn": "{{cli}}이(가) 이 기기에 로그인되어 있습니다. 인증하여 바로 연결할 수 있습니다",
         "hintInstalled": "이 기기에 {{cli}}이(가) 설치되어 있습니다"
       },
+      "cursor": {
+        "title": "Cursor",
+        "installedDescription": "이 기기에 cursor-agent가 설치되어 있습니다. 사용 가능할 때 Cursor를 선택적 Agent로 쓸 수 있습니다.",
+        "installedSignedOutDescription": "cursor-agent는 설치되어 있지만 Cursor에 로그인되어 있지 않습니다. 세션을 만들려면 로그인하세요.",
+        "loggedInDescription": "Cursor에 로그인됨({{identity}}). 새 세션은 이 로그인 상태를 사용합니다.",
+        "loggedInUnknown": "로그인된 계정",
+        "loginPendingDescription": "브라우저에서 Cursor 로그인을 기다리는 중입니다. 아래 링크를 열거나 복사하세요. Cindy는 브라우저를 자동으로 열지 않습니다.",
+        "missingDescription": "공식 cursor-agent를 설치하면 Cindy에서 Cursor를 사용할 수 있습니다. 선택 사항이며, 설치하지 않아도 다른 기능에는 영향이 없습니다.",
+        "installedPill": "설치됨",
+        "loggedInPill": "로그인됨",
+        "signedOutPill": "로그아웃됨",
+        "installCta": "설치",
+        "installing": "설치 중…",
+        "loginCta": "로그인",
+        "loggingIn": "로그인 중…",
+        "logoutCta": "로그아웃",
+        "cancelLogin": "로그인 취소",
+        "openLoginUrl": "로그인 페이지 열기",
+        "copyLoginUrl": "링크 복사",
+        "loginUrlHint": "브라우저에서 인증을 마친 뒤 돌아오세요. 링크에는 일회용 자격 증명이 포함되어 있으니 공유하지 마세요.",
+        "loginUrlCopied": "로그인 링크를 복사했습니다",
+        "loginUrlCopyFailed": "로그인 링크를 복사할 수 없습니다",
+        "loginSuccess": "Cursor에 로그인했습니다",
+        "loginFailed": "Cursor 로그인에 실패했습니다",
+        "logoutSuccess": "Cursor에서 로그아웃했습니다",
+        "logoutFailed": "Cursor 로그아웃에 실패했습니다",
+        "logoutConfirmTitle": "Cursor에서 로그아웃할까요?",
+        "logoutConfirmDescription": "이 기기의 cursor-agent 로그인 상태(Cursor CLI가 관리)를 지웁니다. Cursor 세션을 만들려면 다시 로그인해야 합니다.",
+        "logoutConfirm": "로그아웃",
+        "authRequiredTitle": "Cursor 로그인이 필요합니다",
+        "authRequiredDescription": "세션을 만들기 전에 설정 → 모델 제공자에서 Cursor에 로그인하세요.",
+        "optionalHint": "Cursor ACP",
+        "refreshAria": "Cursor 설치 상태 다시 확인",
+        "confirmTitle": "Cursor를 설치할까요?",
+        "confirmDescription": "확인하면 Cindy가 이 공식 설치 명령을 실행합니다:\n\n{{command}}\n\n확인하기 전에는 아무것도 실행되지 않습니다.",
+        "confirmInstall": "설치",
+        "confirmCancel": "취소",
+        "installSuccess": "Cursor가 설치되었습니다",
+        "installFailed": "Cursor를 설치할 수 없습니다",
+        "installNotDetected": "설치가 끝났지만 cursor-agent를 찾지 못했습니다. 새로고침하거나 터미널에서 설치해 보세요.",
+        "unsupportedPlatform": "공식 cursor-agent 설치 프로그램은 macOS와 Linux만 지원합니다.",
+        "models": {
+          "emptyState": "Cursor 모델 카탈로그가 아직 없습니다. \"모델 새로고침\"으로 가져오세요(Cursor 로그인 필요).",
+          "refreshCta": "모델 새로고침",
+          "refreshing": "탐색 {{done}} / {{total}}",
+          "refreshUnavailableInstalled": "먼저 cursor-agent 설치",
+          "refreshUnavailableAuth": "먼저 Cursor 로그인",
+          "autoHint": "대체",
+          "autoAlwaysOn": "항상 표시",
+          "effortHint_one": "추론 강도 {{count}}단계",
+          "effortHint_other": "추론 강도 {{count}}단계",
+          "cancelRefresh": "새로고침 취소",
+          "refreshFailed": "모델 새로고침에 실패했습니다. 나중에 다시 시도하세요."
+        },
+        "groups": {
+          "cursor": "Cursor",
+          "anthropic": "Anthropic",
+          "openai": "OpenAI",
+          "google": "Google",
+          "xai": "xAI",
+          "domestic": "중국 국내",
+          "other": "기타"
+        }
+      },
       "wizard": {
         "title": "제공자 추가",
         "titleWith": "추가 · {{name}}",
@@ -5408,7 +5472,8 @@
       "inlineSecretStoreFailed": "자격 증명 저장에 실패했습니다",
       "targetNotFound": "대상 플러그인이 제거되었거나 현재 사용할 수 없습니다",
       "targetDisabled": "대상 플러그인이 비활성화되었습니다",
-      "targetDisabledInWorkdir": "사용자가 현재 작업 디렉토리에서 이 플러그인을 비활성화했습니다. 재시도하지 마세요."
+      "targetDisabledInWorkdir": "사용자가 현재 작업 디렉토리에서 이 플러그인을 비활성화했습니다. 재시도하지 마세요.",
+      "targetToolNotFound": "대상 플러그인이 더 이상 이 도구를 제공하지 않습니다"
     },
     "createAgent": {
       "quickStart": "빠른 시작",
@@ -5506,6 +5571,7 @@
         "agent": {
           "claudeCode": "Claude Code",
           "codex": "Codex",
+          "cursor": "Cursor",
           "pi": "Pi",
           "pending": "다음: {{agent}}"
         }
@@ -5585,6 +5651,20 @@
           "bypassPermissions": {
             "label": "전체 접근",
             "description": "추가 확인 없이 모든 파일 편집과 네트워크 명령 실행을 허용합니다. 가장 위험하므로 신뢰할 수 있는 작업에서만 사용하세요."
+          }
+        },
+        "cursor": {
+          "ask": {
+            "label": "기본 권한",
+            "description": "승인이 필요한 도구는 실행 전에 확인합니다. 권한 요청은 Cindy 클라이언트에서 처리합니다."
+          },
+          "auto": {
+            "label": "자동 리뷰",
+            "description": "읽기·검색·사고 도구는 자동 허용하고, 편집·실행 등 고위험 도구는 확인합니다."
+          },
+          "bypassPermissions": {
+            "label": "전체 접근",
+            "description": "도구 호출을 확인 없이 허용합니다. 가장 위험하므로 신뢰할 수 있는 작업에서만 사용하세요. Cursor 샌드박스 설정은 변경하지 않습니다."
           }
         },
         "pi": {
@@ -6006,6 +6086,7 @@
       "provider": {
         "claude": "Claude Code",
         "codex": "Codex",
+        "cursor": "Cursor",
         "pi": "Pi",
         "workflow": "Workflow",
         "shell": "백그라운드 명령"
@@ -6752,6 +6833,9 @@
       "waiting": "잠시만 기다려 주세요…",
       "working": "작업 중…",
       "running": "실행 중…",
+      "starting": "시작 중…",
+      "cancelled": "취소됨",
+      "error": "실행 실패",
       "turnStart": "{{name}}님, 처리 중이에요…",
       "issueTip": "{{name}}님, /issue로 피드백이나 제안을 보내 주세요",
       "runningTool": "{{tool}} 실행 중…"
@@ -6956,7 +7040,8 @@
       "filterVendor": {
         "all": "전체",
         "cc": "Claude",
-        "codex": "Codex"
+        "codex": "Codex",
+        "cursor": "Cursor"
       },
       "filterGroupBy": {
         "project": "프로젝트",

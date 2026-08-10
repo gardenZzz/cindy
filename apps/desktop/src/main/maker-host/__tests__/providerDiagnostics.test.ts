@@ -268,6 +268,7 @@ describe('buildProbeRequest', () => {
     expect(init.headers).toEqual({
       'content-type': 'application/json',
       'x-tenant': 'local',
+
     });
   });
 });
@@ -396,6 +397,7 @@ describe('resolveSavedProbeSpec / testProviderConnection(saved)', () => {
     expect(headers['x-api-key']).toBe('stale');
     expect(headers.Authorization).toBeUndefined();
     expect(headers['X-API-Key']).toBeUndefined();
+
   });
 
   it('api-key-header + openai-chat 供应商:saved 探测带上 wireProtocol → 打 /chat/completions', async () => {

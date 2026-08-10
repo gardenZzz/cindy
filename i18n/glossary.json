@@ -69,6 +69,17 @@
       "note": "远端主机上由 Cindy 管理的 Codex 凭证目录（~/.xdt-server/v1/codex-home/），与用户本机 ~/.codex 相区分。四语统一保留英文原词（home 小写），避免各语言自造「Codex 主目录」等不同说法；syncAuth 与 codexAuthMissing 等远端登录态文案使用。"
     },
     {
+      "id": "cursor",
+      "status": "proposed",
+      "en": "Cursor",
+      "translations": {
+        "zh-CN": "Cursor",
+        "ja": "Cursor",
+        "ko": "Cursor"
+      },
+      "note": "经官方 ACP 通道接入的第三个 Agent（上游产品 Cursor 的编码 agent；二进制名 cursor-agent 是实现细节）。产品面统一称 Cursor，kind 标识为 cursor。四语保留英文原词，避免自造「光标 / Cursor Agent / Cursor CLI」等说法。"
+    },
+    {
       "id": "passkey",
       "status": "proposed",
       "en": "Passkey",

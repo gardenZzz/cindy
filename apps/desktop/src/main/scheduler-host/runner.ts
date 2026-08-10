@@ -825,10 +825,10 @@ export class MakerScheduleRunner implements ScheduleRunner {
       ? (dynamicDefaultRoute?.providerId ?? null)
       : null;
     const permissionMode = defaultPermissionModeForSchedule();
-    // fastMode 对 Codex / Pi 生效（claude-code agent 忽略此字段）；Claude 恒不传，
+    // fastMode 对 Codex / Cursor / Pi 生效（claude-code agent 忽略此字段）；Claude 恒不传，
     // 确保「不影响 Claude」。heartbeat 沿用 session meta 里的 fast 态，非 heartbeat 取 schedule。
     let fastMode =
-      effectiveAgentKind === 'codex' || effectiveAgentKind === 'pi'
+      effectiveAgentKind === 'codex' || effectiveAgentKind === 'cursor' || effectiveAgentKind === 'pi'
         ? isHeartbeat
           ? heartbeatFastMode
           : schedule.fastMode

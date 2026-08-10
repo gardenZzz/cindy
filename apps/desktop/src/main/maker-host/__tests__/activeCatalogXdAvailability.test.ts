@@ -21,8 +21,9 @@ import {
   setXdGatewayModels,
 } from '../active-catalog.js';
 import { deriveAvailableModels } from '../catalog-to-descriptors.js';
+import type { AgentKind } from '@cindy/maker-core';
 
-function xdModels(agent: 'claude-code' | 'codex') {
+function xdModels(agent: AgentKind) {
   const xd = getActiveCatalog().providers.find((p) => p.id === 'xd');
   return xd?.models[agent] ?? [];
 }

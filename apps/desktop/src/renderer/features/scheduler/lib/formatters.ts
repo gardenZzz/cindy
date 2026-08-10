@@ -161,9 +161,12 @@ export function basenameOf(p?: string | null): string | null {
  * 'claude-code' → 'Claude'（agent 标识对齐草稿界面 vendor 切换；provider 分离后
  * cc agent 统一以 Claude 品牌呈现，路由到哪个供应商由来源选择器单独控制）。
  * 'codex' → 'Codex'（保持 OpenAI 原品牌名）。
+ * 'cursor' → 'Cursor'。
  */
 export function humanizeAgentKind(k: AgentKind): string {
-  return k === 'codex' ? 'Codex' : 'Claude';
+  if (k === 'codex') return 'Codex';
+  if (k === 'cursor') return 'Cursor';
+  return 'Claude';
 }
 
 /**

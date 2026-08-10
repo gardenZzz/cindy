@@ -70,6 +70,7 @@ interface AgentSelectProps {
   /**
    * 面板弹出方向。工具条在底部所以默认 'top'; 设置面板里的字段在
    * 页面中部, 往下弹才不遮住自己(与 ModelSelector 的 popoverSide 同口径)。
+   * 居中弹窗(如「开启协同」)传 bottom,避免顶到视口上沿。
    */
   side?: 'top' | 'bottom';
   /**

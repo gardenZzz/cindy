@@ -244,7 +244,16 @@ async function doStart(
     vendorOptions: {},
     getSessionContext: () => {
       const active = getLiziMcpSessionContext();
-      if (active?.agentKind !== 'codex' && active?.agentKind !== 'claude-code') return undefined;
+      // cursor 也经同一座 bridge 进来（本地 ACP session/new 注入，见
+      // maker-host/cursor-acp-mcp.ts）；漏掉它会让 cursor 的协同工具调用
+      // 拿不到 ctx，一律 fail-closed 成 NO_SESSION_CONTEXT。
+      if (
+        active?.agentKind !== 'codex'
+        && active?.agentKind !== 'claude-code'
+        && active?.agentKind !== 'cursor'
+      ) {
+        return undefined;
+      }
       return {
         agentKind: active.agentKind,
         workingDir: active.workingDir,

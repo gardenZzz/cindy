@@ -151,6 +151,10 @@ import {
 } from './atAgentCatalog.js';
 import * as imageCacheStore from '../imageCacheStore.js';
 import * as cindyChatAttachments from '../cindy-media/chatAttachments.js';
+import {
+  defaultCursorGeneratedImageRoots,
+  materializeCursorGeneratedImageSource,
+} from '../cindy-media/cursorGeneratedImage.js';
 import { materializeGeneratedImage } from '../cindy-media/generatedMedia.js';
 import { getDbClient } from '../localDb/client/current.js';
 import {
@@ -332,8 +336,8 @@ import {
 } from './collabProjectPolicy.js';
 import type { GitSnapshotCoordinator } from '../git-snapshot/gitSnapshotCoordinator.js';
 import {
+  buildNewMakerDraftChangedPayload,
   getRemoteNewMakerDefaults,
-  getRemoteNewMakerDefaultsByVendor,
   getWorkerDefaultsFromNewMaker,
   getWorkerPermissionModeFromCreationPrefs,
   type NewMakerDraftSnapshot,
@@ -602,6 +606,7 @@ import {
 } from './orcaTeamService.js';
 import {
   createOrcaWorkerCreationService,
+  normalizeOrcaWorkerAgent,
   normalizeOrcaWorkerLabel,
   type OrcaWorkerLimitSnapshot,
 } from './orcaWorkerCreationService.js';
@@ -646,7 +651,11 @@ import {
 import { hydrateQueuedAgentReferences } from './agentInputReferences.js';
 import { agentHandoffPending } from './agentHandoffPendingSingleton.js';
 import { buildPlanReconcileNote, summarizeOpenPlan } from './planReconcile.js';
-import { type MakerSessionCreateOpts, withCreateSessionStderr } from './sessionRequest.js';
+import {
+  type MakerSessionCreateOpts,
+  readCreateSessionOpts,
+  withCreateSessionStderr,
+} from './sessionRequest.js';
 import { persistAndHydrateSessionProvider } from './sessionProviderBootstrap.js';
 import { registerMakerSessionSendHandler } from './sessionSendHandler.js';
 import {
@@ -1641,6 +1650,7 @@ interface OrcaCollabService {
         ok: true;
         codex?: Array<{ id: string; label: string }>;
         claude_code?: Array<{ id: string; label: string }>;
+        cursor?: Array<{ id: string; label: string }>;
         pi?: Array<{ id: string; label: string }>;
       }
     | { ok: false; errorCode: string; message: string }
@@ -1745,7 +1755,7 @@ export function stopOrcaIdleWatcher(): void {
 }
 
 function requireAgentKind(value: unknown): AgentKind {
-  if (value === 'claude-code' || value === 'codex' || value === 'pi') return value;
+  if (value === 'claude-code' || value === 'codex' || value === 'cursor' || value === 'pi') return value;
   throwIpcError('INVALID_PARAMS', 'agentKind required');
 }
 
@@ -3607,8 +3617,8 @@ export function wireSessionToIpc(session: ReturnType<Maker['getSession']>): void
         });
         return;
       }
-      if (event.type === 'image' && event.source === 'codex') {
-        void broadcastCodexImageAsToolResult(session.id, event);
+      if (event.type === 'image' && (event.source === 'codex' || event.source === 'cursor')) {
+        void broadcastGeneratedImageAsToolResult(session.id, event);
         return;
       }
       if (event.type === 'plan_mode_changed') {
@@ -5124,13 +5134,17 @@ export async function beginTurnChangeSetAtDispatch(
   session: SendToSessionDispatchSession,
   anchorClientId: string,
 ): Promise<void> {
+  // turn change set 只覆盖 claude-code / codex / pi(store 的 PROVIDERS 白名单);
+  // cursor 尚未接入,提前返回而不是塞一个 store 会拒的 provider。
+  const provider = session.agentKind;
+  if (provider !== 'claude-code' && provider !== 'codex' && provider !== 'pi') return;
   await waitForTurnChangeSetSeal(session.id);
   await finalizeTurnChangeSet(session.id, null, 'partial');
   await waitForTurnChangeSetSeal(session.id);
   await beginTurnChangeSet({
     sessionId: session.id,
     anchorClientId,
-    provider: session.agentKind,
+    provider,
     cwd: session.workDir,
     remote: session.remoteHostId !== null,
   });
@@ -5458,10 +5472,52 @@ export function registerMakerIpc(maker: Maker, options: RegisterMakerIpcOptions)
   );
 
   ipcMain.handle(MAKER_INVOKE.GET_CAPABILITIES, (_e, agentKind: unknown) => {
+    const kind = requireAgentKind(agentKind);
+    // Cursor 未探测到二进制时不注册；UI 仍可能短暂查询 —— 回空壳 capability，不抛错。
+    if (kind === 'cursor' && !maker.listAvailableAgents().includes('cursor')) {
+      return {
+        switchModel: { supported: true as const },
+        availableModels: [
+          {
+            id: 'auto',
+            displayName: 'Auto',
+            contextWindow: 200_000,
+            efforts: [],
+            defaultEffort: null,
+          },
+        ],
+        hasFastMode: true,
+        effort: { supported: true as const },
+        effortLevels: [
+          { id: 'low', displayName: 'Low' },
+          { id: 'medium', displayName: 'Medium' },
+          { id: 'high', displayName: 'High' },
+          { id: 'xhigh', displayName: 'Extra High' },
+          { id: 'max', displayName: 'Max' },
+        ],
+        reasoningDisplay: ['off'],
+        permissionModes: [],
+        setPermissionModeMidSession: { supported: false as const, reason: 'not-implemented' as const },
+        planMode: { supported: true as const },
+        multimodal: {
+          text: { supported: true as const },
+          image: { supported: true as const },
+          file: { supported: false as const, reason: 'not-implemented' as const },
+        },
+        fork: { supported: false as const, reason: 'sdk-missing' as const },
+        rewind: { supported: false as const, reason: 'sdk-missing' as const },
+        abort: { supported: true as const },
+        sameTurnSteer: { supported: false as const, reason: 'not-implemented' as const },
+        memory: { supported: { supported: false as const, reason: 'sdk-missing' as const } },
+        extraDirs: { supported: false as const, reason: 'not-implemented' as const },
+        supportsSessionAgentSwitch: false,
+      };
+    }
     return {
-      ...maker.getCapabilities(requireAgentKind(agentKind)),
+      ...maker.getCapabilities(kind),
       // host 级 optional 能力；旧 desktop 缺省为 false。两个 agent 查询都带回，
-      // 手机读取当前 agent 快照即可决定是否展示切换入口。
+      // 手机读取当前 agent 快照即可决定是否展示切换入口。四家(Claude Code / Codex /
+      // Pi / Cursor)一视同仁--「能不能从这个 Agent 切走」只此一个真相源。
       supportsSessionAgentSwitch: true,
       // v2 因果能力：同引擎 no-op 返回 revision，后续 SET_MODEL 在 session 锁内 CAS。
       // 新 desktop 控制端据此与只有基础切换能力的旧 host 做安全兼容门控。
@@ -5499,8 +5555,8 @@ export function registerMakerIpc(maker: Maker, options: RegisterMakerIpcOptions)
       active?: unknown;
       markModelChoice?: unknown;
     };
-    if (p.agent !== 'claude-code' && p.agent !== 'codex' && p.agent !== 'pi') {
-      throwIpcError('INVALID_PARAMS', 'agent must be claude-code|codex|pi');
+    if (p.agent !== 'claude-code' && p.agent !== 'codex' && p.agent !== 'cursor' && p.agent !== 'pi') {
+      throwIpcError('INVALID_PARAMS', 'agent must be claude-code|codex|cursor|pi');
     }
     if (p.providerId !== undefined && typeof p.providerId !== 'string') {
       throwIpcError('INVALID_PARAMS', 'providerId must be string');
@@ -5570,8 +5626,8 @@ export function registerMakerIpc(maker: Maker, options: RegisterMakerIpcOptions)
     if (typeof p.sessionId !== 'string' || !p.sessionId) {
       throwIpcError('INVALID_PARAMS', 'sessionId required');
     }
-    if (p.agent !== 'claude-code' && p.agent !== 'codex' && p.agent !== 'pi') {
-      throwIpcError('INVALID_PARAMS', 'agent must be claude-code|codex|pi');
+    if (p.agent !== 'claude-code' && p.agent !== 'codex' && p.agent !== 'cursor' && p.agent !== 'pi') {
+      throwIpcError('INVALID_PARAMS', 'agent must be claude-code|codex|cursor|pi');
     }
     if (typeof p.providerId !== 'string' || !p.providerId) {
       throwIpcError('INVALID_PARAMS', 'providerId required');
@@ -5610,7 +5666,7 @@ export function registerMakerIpc(maker: Maker, options: RegisterMakerIpcOptions)
     if (
       typeof p.sessionId !== 'string' ||
       !p.sessionId ||
-      (p.agent !== 'claude-code' && p.agent !== 'codex' && p.agent !== 'pi') ||
+      (p.agent !== 'claude-code' && p.agent !== 'codex' && p.agent !== 'cursor' && p.agent !== 'pi') ||
       typeof p.providerId !== 'string' ||
       !p.providerId ||
       typeof p.model !== 'string' ||
@@ -6611,18 +6667,24 @@ export function registerMakerIpc(maker: Maker, options: RegisterMakerIpcOptions)
     }
 
     await ensureRemoteHostReady(remoteHostIdToEnsure);
-    const ensureAgentKind: 'claude-code' | 'codex' | 'pi' | null =
+    const ensureAgentKind: AgentKind | null =
       session?.agentKind === 'codex' ||
       session?.agentKind === 'claude-code' ||
+      session?.agentKind === 'cursor' ||
       session?.agentKind === 'pi'
         ? session.agentKind
         : createOpts && typeof createOpts === 'object'
           ? (() => {
               const ak = (createOpts as { agentKind?: unknown }).agentKind;
-              return ak === 'codex' || ak === 'claude-code' || ak === 'pi' ? ak : null;
+              return ak === 'codex' || ak === 'claude-code' || ak === 'cursor' || ak === 'pi' ? ak : null;
             })()
           : null;
     if (!ensureAgentKind) return;
+
+    // Cursor 一期不做 remote-ssh（ADR）。
+    if (ensureAgentKind === 'cursor') {
+      throwIpcError('UNSUPPORTED_CAPABILITY', 'Cursor sessions do not support remote SSH');
+    }
 
     // claude-code 远端走 cc-mgr.mjs daemon。首次 /context 也必须像 send 一样
     // 触发 cc-manager 安装/升级, 否则 query/getContextUsage 可能因旧 bundle 不存在而失败。
@@ -8815,8 +8877,7 @@ export function registerMakerIpc(maker: Maker, options: RegisterMakerIpcOptions)
         providerId?: unknown;
         workerPermissionMode?: unknown;
       };
-      const workerAgent: AgentKind =
-        body.workerAgent === 'codex' ? 'codex' : body.workerAgent === 'pi' ? 'pi' : 'claude-code';
+      const workerAgent = normalizeOrcaWorkerAgent(body.workerAgent);
       const delegateTask = typeof body.delegateTask === 'string' ? body.delegateTask : undefined;
       if (
         body.workerPermissionMode !== undefined &&
@@ -8989,12 +9050,7 @@ export function registerMakerIpc(maker: Maker, options: RegisterMakerIpcOptions)
     if (typeof b.label !== 'string') throwIpcError('INVALID_PARAMS', 'label required');
     const label = normalizeOrcaWorkerLabel(b.label);
     if (!label.ok) throwIpcError('INVALID_PARAMS', label.message);
-    const agent =
-      b.agent === 'codex'
-        ? ('codex' as const)
-        : b.agent === 'pi'
-          ? ('pi' as const)
-          : ('claude-code' as const);
+    const agent = normalizeOrcaWorkerAgent(b.agent);
     const model = typeof b.model === 'string' && b.model.length > 0 ? b.model : undefined;
     if (
       b.workerPermissionMode !== undefined &&
@@ -9251,8 +9307,8 @@ export function registerMakerIpc(maker: Maker, options: RegisterMakerIpcOptions)
       if (!leadRow) return null;
       return {
         id: leadRow.id,
-        // 走转换正本:pi lead 不能被压成 claude-code,否则 input.agent===lead.agentKind
-        // 判等失效,pi-lead 建 pi-worker 会走错默认分支(见 orcaWorkerCreationService)。
+        // 走转换正本:pi/cursor lead 不能被压成 claude-code,否则 input.agent===lead.agentKind
+        // 判等失效,pi/cursor-lead 建同型 worker 会走错默认分支(见 orcaWorkerCreationService)。
         agentKind: dbToMakerAgentKind(leadRow.agentKind),
         workspaceKind: leadRow.workspaceKind,
         workingDir: leadRow.workingDir,
@@ -9698,12 +9754,12 @@ export function registerMakerIpc(maker: Maker, options: RegisterMakerIpcOptions)
     },
     listAvailableModels: async ({ agent }) => {
       try {
-        const agents: AgentKind[] = agent ? [agent] : ['codex', 'claude-code', 'pi'];
+        const agents: AgentKind[] = agent ? [agent] : ['codex', 'claude-code', 'cursor', 'pi'];
         const result: Record<string, Array<{ id: string; label: string }>> = {};
         for (const a of agents) {
           const caps = maker.getCapabilities(a);
-          // key 必须区分 pi,否则 pi 模型会被塞进 claude_code 键与 CC 模型混淆。
-          const key = a === 'codex' ? 'codex' : a === 'pi' ? 'pi' : 'claude_code';
+          // key 必须区分 pi/cursor,否则与 claude_code 键混淆。
+          const key = a === 'codex' ? 'codex' : a === 'cursor' ? 'cursor' : a === 'pi' ? 'pi' : 'claude_code';
           result[key] = caps.availableModels.map((m) => ({ id: m.id, label: m.displayName }));
         }
         return { ok: true, ...result };
@@ -11286,6 +11342,7 @@ export function registerMakerIpc(maker: Maker, options: RegisterMakerIpcOptions)
     if (
       msg.createOpts.agentKind !== 'claude-code' &&
       msg.createOpts.agentKind !== 'codex' &&
+      msg.createOpts.agentKind !== 'cursor' &&
       msg.createOpts.agentKind !== 'pi'
     ) {
       throwIpcError('INVALID_PARAMS', 'queued.createOpts.agentKind invalid');
@@ -12942,7 +12999,9 @@ export function registerMakerIpc(maker: Maker, options: RegisterMakerIpcOptions)
       log.debug('set-fast-mode: pi responses bridge state updated', { sessionId, enabled });
       return;
     }
-    if (sess.agentKind !== 'codex') {
+    // cursor 与 codex 都走 live push；其它 agent（含 CC）仍 no-op。
+    // 旧逻辑只放行 codex，导致 Cursor 开关已落库但 session/set_config_option(fast) 从不下发。
+    if (sess.agentKind !== 'codex' && sess.agentKind !== 'cursor') {
       log.debug('set-fast-mode: agent does not implement fast mode, no-op', {
         sessionId,
         agentKind: sess.agentKind,
@@ -12956,6 +13015,7 @@ export function registerMakerIpc(maker: Maker, options: RegisterMakerIpcOptions)
     }
     await sess.setFastMode(enabled);
   });
+
 
   // renderer → main 单向镜像「模型显示/隐藏」override(整张快照,fire-and-forget,不落盘)。
   // main 缓存供 IM /model 与 device-link provider:list 复用同一套可见性过滤。值实变时
@@ -13477,30 +13537,76 @@ export function registerMakerIpc(maker: Maker, options: RegisterMakerIpcOptions)
   log.info('maker:* IPC handlers registered');
 }
 
-async function broadcastCodexImageAsToolResult(
+/** sessionId → 已成功/已失败广播过的 imagegen toolCallId（幂等，防重复三联事件）。 */
+const generatedImageBroadcastIds = new Map<string, Set<string>>();
+
+function noteGeneratedImageBroadcast(sessionId: string, toolUseId: string): boolean {
+  let set = generatedImageBroadcastIds.get(sessionId);
+  if (!set) {
+    set = new Set();
+    generatedImageBroadcastIds.set(sessionId, set);
+  }
+  if (set.has(toolUseId)) return false;
+  set.add(toolUseId);
+  return true;
+}
+
+async function resolveSessionWorkingDirForMedia(sessionId: string): Promise<string | null> {
+  try {
+    const live = getMaker().getSession(sessionId);
+    if (live && typeof live.workDir === 'string' && live.workDir.trim()) {
+      return live.workDir;
+    }
+  } catch {
+    // maker 未就绪时走 DB 快照。
+  }
+  const row = await getSessionRowSnapshot(sessionId);
+  return typeof row?.workingDir === 'string' && row.workingDir.trim() ? row.workingDir : null;
+}
+
+async function broadcastGeneratedImageAsToolResult(
   sessionId: string,
   event: AgentEvent,
 ): Promise<void> {
   const data = event.data as CodexImageEventData | null;
   if (data?.kind !== 'generation') return;
+  const source = event.source === 'cursor' ? 'cursor' : 'codex';
+  const toolUseId = data.blockId || `${source}-image-${Date.now()}`;
+
+  // Cursor：同一 toolCallId 只物化/广播一次（imagegen 不可更新）。
+  if (source === 'cursor' && data.blockId && !noteGeneratedImageBroadcast(sessionId, toolUseId)) {
+    log.info('cursor generated image already broadcast; skipping duplicate', {
+      sessionId,
+      toolUseId,
+    });
+    return;
+  }
 
   try {
-    const cached = await materializeCodexImage(sessionId, data);
+    const cached =
+      source === 'cursor'
+        ? await materializeCursorImage(sessionId, data)
+        : await materializeCodexImage(sessionId, data);
     if (!cached) {
-      log.warn('codex image event missing materializable image', {
+      const reason = 'generated image missing or could not be materialized';
+      log.warn(reason, {
         sessionId,
+        source,
         blockId: data.blockId,
         hasPath: !!data.path,
         hasUrl: !!data.url,
       });
+      if (source === 'cursor') {
+        broadcastGeneratedImageFailure(sessionId, event, toolUseId, reason);
+      }
       return;
     }
 
-    const toolUseId = data.blockId || `codex-image-${Date.now()}`;
     const toolInput = {
       ...(data.revisedPrompt ? { prompt: data.revisedPrompt } : {}),
       ...(data.status ? { status: data.status } : {}),
     };
+    // Cursor 生图不把宿主机绝对路径暴露给 Renderer（媒体规则 + #50 AC）。
     const fullText = JSON.stringify({
       ok: true,
       kind: 'generation',
@@ -13509,12 +13615,12 @@ async function broadcastCodexImageAsToolResult(
       filename: cached.filename,
       ...(data.revisedPrompt ? { revised_prompt: data.revisedPrompt } : {}),
       ...(data.status ? { status: data.status } : {}),
-      ...(data.path ? { original_path: data.path } : {}),
+      ...(source === 'codex' && data.path ? { original_path: data.path } : {}),
     });
 
     broadcastSyntheticToolEvent(sessionId, {
       type: 'tool_use',
-      source: 'codex',
+      source,
       agentMeta: event.agentMeta,
       data: {
         toolUseId,
@@ -13524,7 +13630,7 @@ async function broadcastCodexImageAsToolResult(
     } satisfies AgentEvent);
     broadcastSyntheticToolEvent(sessionId, {
       type: 'tool_result_full',
-      source: 'codex',
+      source,
       agentMeta: event.agentMeta,
       data: {
         toolUseId,
@@ -13534,7 +13640,7 @@ async function broadcastCodexImageAsToolResult(
     } satisfies AgentEvent);
     broadcastSyntheticToolEvent(sessionId, {
       type: 'tool_result',
-      source: 'codex',
+      source,
       agentMeta: event.agentMeta,
       data: {
         summary: 'image generated',
@@ -13542,12 +13648,63 @@ async function broadcastCodexImageAsToolResult(
       },
     } satisfies AgentEvent);
   } catch (err) {
-    log.warn('failed to materialize codex image event', {
+    const message = err instanceof Error ? err.message : String(err);
+    log.warn('failed to materialize generated image event', {
       sessionId,
+      source,
       blockId: data?.blockId,
-      error: err instanceof Error ? err.message : String(err),
+      error: message,
     });
+    if (source === 'cursor') {
+      broadcastGeneratedImageFailure(sessionId, event, toolUseId, message);
+    }
   }
+}
+
+function broadcastGeneratedImageFailure(
+  sessionId: string,
+  event: AgentEvent,
+  toolUseId: string,
+  reason: string,
+): void {
+  const source = 'cursor' as const;
+  const data = event.data as CodexImageEventData | null;
+  broadcastSyntheticToolEvent(sessionId, {
+    type: 'tool_use',
+    source,
+    agentMeta: event.agentMeta,
+    data: {
+      toolUseId,
+      toolName: 'imagegen',
+      input: {
+        ...(data?.revisedPrompt ? { prompt: data.revisedPrompt } : {}),
+        ...(data?.status ? { status: data.status } : {}),
+      },
+    },
+  } satisfies AgentEvent);
+  broadcastSyntheticToolEvent(sessionId, {
+    type: 'tool_result_full',
+    source,
+    agentMeta: event.agentMeta,
+    data: {
+      toolUseId,
+      fullText: JSON.stringify({
+        ok: false,
+        kind: 'generation',
+        error: reason,
+      }),
+      isError: true,
+    },
+  } satisfies AgentEvent);
+  broadcastSyntheticToolEvent(sessionId, {
+    type: 'tool_result',
+    source,
+    agentMeta: event.agentMeta,
+    data: {
+      summary: reason,
+      toolUseIds: [toolUseId],
+    },
+  } satisfies AgentEvent);
 }
 
 function broadcastSyntheticToolEvent(
@@ -13565,6 +13722,20 @@ function broadcastSyntheticToolEvent(
     persistId: prepared.persistId,
     resolvedContent: prepared.resolvedContent,
   });
+}
+
+async function materializeCursorImage(
+  sessionId: string,
+  data: CodexImageEventData,
+): Promise<{ url: string; filename: string } | null> {
+  const workingDir = await resolveSessionWorkingDirForMedia(sessionId);
+  return materializeCursorGeneratedImageSource(
+    { path: data.path, url: data.url },
+    {
+      allowedRoots: defaultCursorGeneratedImageRoots(workingDir),
+      ingestBuffer: cindyChatAttachments.ingestChatImageBuffer,
+    },
+  );
 }
 
 async function materializeCodexImage(
@@ -13831,6 +14002,6 @@ function broadcastNewMakerDraftChanged(): void {
   draftChangedScheduled = true;
   setTimeout(() => {
     draftChangedScheduled = false;
-    tapWindowBroadcast(MAKER_PUSH.NEW_MAKER_DRAFT_CHANGED, getRemoteNewMakerDefaultsByVendor());
+    tapWindowBroadcast(MAKER_PUSH.NEW_MAKER_DRAFT_CHANGED, buildNewMakerDraftChangedPayload());
   }, 0);
 }

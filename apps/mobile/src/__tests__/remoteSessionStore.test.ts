@@ -2,6 +2,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { MAKER_EVENT_BATCH_CHANNEL } from '@cindy/device-link';
 import { remoteSessionStore, sessionPendingWrites } from '@/session/remoteSessionStore';
 import type { InputProjection, PendingInteraction, RemoteMessage, RemoteSession } from '@/session/types';
+import type { AgentKind } from '@cindy/maker-shared';
 
 function session(id: string, patch: Partial<RemoteSession> = {}): RemoteSession {
   return {
@@ -50,7 +51,7 @@ function pushMakerStatus(sessionId: string, data: Record<string, unknown>): void
 function pushMakerTaskUpdate(
   sessionId: string,
   taskId: string,
-  opts: { source?: 'claude-code' | 'codex' | 'pi'; status?: string; description?: string } = {},
+  opts: { source?: AgentKind; status?: string; description?: string } = {},
 ): void {
   remoteSessionStore.applyRemotePush('dev-1', 'maker:event', {
     sessionId,

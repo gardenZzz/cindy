@@ -1,3 +1,4 @@
+import type { AgentKind } from './common.js';
 /**
  * Agent 事件流类型。
  *
@@ -71,7 +72,7 @@ export interface AgentTaskUsage {
 }
 
 export interface AgentTaskUpdateEventData {
-  provider: 'claude-code' | 'codex' | 'pi';
+  provider: AgentKind;
   /** Provider task id when available; falls back to the parent tool call id. */
   taskId: string;
   /** The tool_use id that launched or controls this subagent task. */
@@ -134,7 +135,7 @@ export interface AgentEvent {
   type: AgentEventType;
   data: unknown;
   /** 事件来源标识，便于调试 */
-  source?: 'claude-code' | 'codex' | 'pi';
+  source?: AgentKind;
   /**
    * Events that finish work owned by a completed turn can still arrive after a
    * later turn has started (for example, a V1 collab child). These are still

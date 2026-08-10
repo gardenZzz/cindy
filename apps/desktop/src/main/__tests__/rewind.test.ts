@@ -24,6 +24,7 @@ import path from 'node:path';
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 
 import { enqueueGitRepoWrite } from '../git-snapshot/gitRepoWriteQueue';
+import type { AgentKind } from '@cindy/maker-core';
 
 // ── mock(必须在延迟 import 前 hoist) ─────────────────────────────────────
 
@@ -43,7 +44,7 @@ const writeWorktreeTreeForPathsMock = vi.fn();
 const gitExecMock = vi.fn();
 
 type FakeSession = {
-  agentKind: 'claude-code' | 'codex';
+  agentKind: AgentKind;
   sdkSessionId: string;
   workDir: string;
   remoteHostId: string | null;
@@ -66,7 +67,7 @@ const getSessionMock = vi.fn(() => fakeSession);
 const getSessionMetaMock = vi.fn(async () =>
   fakeSession ? { sdkSessionId: fakeSession.sdkSessionId } : null,
 );
-function useFakeSession(agentKind: 'claude-code' | 'codex') {
+function useFakeSession(agentKind: AgentKind) {
   fakeSession = {
     agentKind,
     sdkSessionId: agentKind === 'codex' ? 'codex-thread-old' : 'sdk-uuid-old',

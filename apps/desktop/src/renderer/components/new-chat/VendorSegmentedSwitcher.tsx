@@ -11,13 +11,17 @@
  *   - segment:pill,padding [6,14],fill_container,justifyContent center,gap 6
  *     · Active : Light Card #ffffff + 1px Board #d7d7d4 / Dark #3c3c3a
  *     · Inactive: 透明,文字 Stone #737373
- *   - icon: 14×14 Agent 身份 mark (Claude Code / Codex CLI)
+ *   - icon: 14×14 Agent 身份 mark (Claude Code / Codex CLI / Cursor / Pi)
  *   - 文字: Inter 14, active weight 500,inactive weight 400
  *
  * F-COLLAB (2026-05): 原本第 3 个 "协同模式" tab 已移入 ChatInput 的「+」菜单 —
  * 用户先选 Claude 走单 session,需要时再从菜单召集 Worker。删 tab 后整体回到
  * 2-tab 220 宽,与历史版本视觉对齐。
+ * T2: New Maker 可经 includeCursor 翻开 Cursor 段;runtime 未注册 / 上下文不支持的
+ * 引擎(如 Pi)经 hiddenVendors 隐藏。
  */
+
+import type { ComponentType } from 'react';
 
 import { cn } from '@/lib/utils';
 import type { MakerVendor } from '@/lib/ccAgent.types';
@@ -54,6 +58,12 @@ interface VendorSegmentedSwitcherProps {
    */
   ariaLabel?: string;
   /**
+   * T2: New Maker 在探测到本机 cursor-agent 时翻开 Cursor 段。
+   * 默认 false —— scheduler / Orca worker / IM / 会话内切换等面保持关闭。
+   * Cursor 不在 SELECTABLE_VENDORS(agentOptions) 里,由本 prop 单独注入。
+   */
+  includeCursor?: boolean;
+  /**
    * 从选择器里**隐藏**的 vendor(如 runtime 未注册的 Pi、SSH 远程草稿下的 Pi)。
    * 创建入口据 `maker:list-available-agents` 计算,避免用户创建出最终 `Agent 'pi' is not
    * registered` 的会话(codex review P2)。调用方需保证 `value` 不在此列表(或自行 coerce)。
@@ -61,9 +71,12 @@ interface VendorSegmentedSwitcherProps {
   hiddenVendors?: readonly MakerVendor[];
 }
 
-// 引擎条目(vendor / label / mark)的单一来源在 ./agentOptions —— 与 AgentSelect
-// 共用一张表,新增引擎只改那里。
-const OPTIONS = AGENT_OPTIONS;
+interface SegmentOption {
+  vendor: MakerVendor;
+  label: string;
+  Mark: ComponentType<{ size?: number; className?: string }>;
+}
+
 
 export function VendorSegmentedSwitcher({
   value,
@@ -76,14 +89,21 @@ export function VendorSegmentedSwitcher({
   visualVariant = 'default',
   reselectEmitsChange = false,
   ariaLabel,
+  includeCursor = false,
   hiddenVendors,
 }: VendorSegmentedSwitcherProps) {
   const isCreateAgentVariant = visualVariant === 'create-agent';
+  // 引擎条目(vendor / label / mark)的单一来源在 ./agentOptions —— 与 AgentSelect
+  // 共用一张表(含 cursor)。includeCursor 保留 API 兼容,不再额外注入(避免重复段)。
+  // 调用方用 hiddenVendors 控制 Cursor 是否可见。
+  void includeCursor;
+  const baseOptions: readonly SegmentOption[] = AGENT_OPTIONS;
   // 隐藏 runtime 未注册 / 当前上下文不支持的 vendor;当前选中值即便被隐藏也保留一段(调用方
   // coerce 前的过渡帧),避免 tablist 出现"无选中段"。
-  const visibleOptions = hiddenVendors && hiddenVendors.length > 0
-    ? OPTIONS.filter((opt) => opt.vendor === value || !hiddenVendors.includes(opt.vendor))
-    : OPTIONS;
+  const visibleOptions =
+    hiddenVendors && hiddenVendors.length > 0
+      ? baseOptions.filter((opt) => opt.vendor === value || !hiddenVendors.includes(opt.vendor))
+      : baseOptions;
   return (
     <div
       className={cn(

@@ -144,7 +144,14 @@ async function generateSummaryOnce(sessionId: string): Promise<void> {
     const inactiveMs = Date.now() - (session.userSendAt ?? session.updatedAt);
     const tier = pickTier({ inactiveMs, messageCount, isScheduled });
 
-    const agentKind = session.agentKind === 'codex' || session.agentKind === 'pi' ? session.agentKind : 'claude-code';
+    const agentKind =
+      session.agentKind === 'codex'
+        ? 'codex'
+        : session.agentKind === 'cursor'
+          ? 'cursor'
+          : session.agentKind === 'pi'
+            ? 'pi'
+            : 'claude-code';
     const prompt = SUMMARY_PROMPT(session.title, userMsg, assistantMsg, tier);
     // 模型走系统统一配置:优先用"轻量任务模型链"(utility-model,与起标题同源,
     // 由 getUtilityModelChainProfiles 决定),配置缺失/不可用时再回退到 agent 自带的

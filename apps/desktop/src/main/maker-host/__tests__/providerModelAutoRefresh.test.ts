@@ -172,6 +172,7 @@ describe('provider model auto-refresh coordinator', () => {
     // 理由与 startup 那条完全一致：用户点「获取模型列表」要的是这一刻的最新清单。合并到一次
     // 早于点击发起的 auto refresh，用户可能拿到几秒前的结果；那次 auto 若因凭证未就绪失败，
     // 他点了刷新却什么也没刷到。forced 请求不该被非 forced 的在途结果代表。
+
     const first = deferred();
     const refreshProvider = vi
       .fn<(providerId: 'xd' | 'anthropic' | 'openai' | 'xai') => Promise<void>>()
@@ -202,6 +203,7 @@ describe('provider model auto-refresh coordinator', () => {
     // 手动刷新照旧绕过冷却。
     await coordinator.refreshManually('xd');
     expect(refreshProvider).toHaveBeenCalledTimes(3);
+
   });
 
   it('starts fresh work after an account scope change and ignores stale failures', async () => {
@@ -362,6 +364,7 @@ describe('provider model auto-refresh coordinator', () => {
     await Promise.all([early, forced]);
     expect(refreshProvider).toHaveBeenCalledTimes(2);
   });
+
 
   it('swallows and logs automatic listing/source failures', async () => {
     const warn = vi.fn();

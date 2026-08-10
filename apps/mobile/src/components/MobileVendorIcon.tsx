@@ -3,12 +3,25 @@ import { Animated, Easing } from 'react-native';
 import { useTheme } from '@/theme';
 
 import { MobileAgentMark } from './MobileAgentMark';
+import type { AgentKind } from '@cindy/maker-shared';
+import { toMakerAgentKind } from '@/session/sessionAgentSwitch';
 
 interface MobileVendorIconProps {
   color?: string;
   running?: boolean;
   size?: number;
-  vendor: 'cc' | 'codex' | string;
+  vendor: 'cc' | 'codex' | 'cursor' | 'pi' | string;
+}
+
+function vendorAccessibilityLabel(vendor: string): string {
+  if (vendor === 'codex') return 'Codex';
+  if (vendor === 'cursor') return 'Cursor';
+  if (vendor === 'pi') return 'Pi';
+  return 'Claude Code';
+}
+
+function vendorToAgentKind(vendor: string): AgentKind {
+  return toMakerAgentKind(vendor === 'claude-code' ? 'cc' : vendor);
 }
 
 export function MobileVendorIcon({ color: colorOverride, running = false, size = 12, vendor }: MobileVendorIconProps) {
@@ -48,12 +61,12 @@ export function MobileVendorIcon({ color: colorOverride, running = false, size =
   return (
     <Animated.View
       accessible
-      accessibilityLabel={vendor === 'codex' ? 'Codex' : vendor === 'pi' ? 'Pi' : 'Claude Code'}
+      accessibilityLabel={vendorAccessibilityLabel(vendor)}
       accessibilityRole="image"
       style={{ alignItems: 'center', height: size, justifyContent: 'center', opacity, width: size }}
     >
       <MobileAgentMark
-        agentKind={vendor === 'codex' || vendor === 'pi' ? vendor : 'claude-code'}
+        agentKind={vendorToAgentKind(vendor)}
         color={color}
         size={size}
       />

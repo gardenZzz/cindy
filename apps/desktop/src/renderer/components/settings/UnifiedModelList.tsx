@@ -58,6 +58,8 @@ import type { AgentKind, CatalogModel, ProviderView } from '@cindy/model-provide
 const AGENT_LABEL: Record<AgentKind, string> = {
   'claude-code': 'Claude Code',
   codex: 'Codex',
+  // Type-slot only (#5); cursor is not registered / not shown as available.
+  cursor: 'Cursor',
   pi: 'Pi',
 };
 

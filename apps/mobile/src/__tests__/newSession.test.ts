@@ -115,6 +115,27 @@ describe('pickMostRecentSessionRuntime', () => {
     expect(runtime?.agentKind).toBe('claude-code');
   });
 
+  it('maps cursor agentKind without falling back to Claude Code', () => {
+    const runtime = pickMostRecentSessionRuntime([
+      remoteSession('c1', { agentKind: 'cursor', model: 'auto', userSendAt: '2026-05-05T00:00:00.000Z' }),
+    ]);
+    expect(runtime).toEqual({ agentKind: 'cursor', model: 'auto', effort: 'medium', providerId: null });
+    expect(sessionFromCreateResult(
+      { sessionId: 'new-cursor' },
+      {
+        agentKind: 'cursor',
+        workspaceKind: 'project',
+        model: 'auto',
+        effort: 'medium',
+        permissionMode: 'auto',
+        fastMode: false,
+        providerId: null,
+        workingDir: '/repo',
+      },
+      new Date('2026-01-01T00:00:00.000Z'),
+    ).agentKind).toBe('cursor');
+  });
+
   it('sorts by activity time = userSendAt ?? updatedAt ?? createdAt (desc)', () => {
     const runtime = pickMostRecentSessionRuntime([
       remoteSession('viaUpdated', { model: 'm-updated', userSendAt: null, updatedAt: '2026-01-03T00:00:00.000Z' }),
@@ -1105,7 +1126,7 @@ describe('new session model', () => {
 
   it('exposes Pi as a first-class agent and preserves Fast for Pi sessions', () => {
     expect(NEW_SESSION_AGENT_OPTIONS.map((option) => option.kind)).toEqual([
-      'claude-code', 'codex', 'pi',
+      'claude-code', 'codex', 'cursor', 'pi',
     ]);
     const pi = withAgentDefaults({ ...DEFAULT_NEW_SESSION_DRAFT, fastMode: true }, 'pi');
     expect(pi).toMatchObject({ agentKind: 'pi', model: 'gpt-5.4', fastMode: true });
@@ -1119,7 +1140,7 @@ describe('new session model', () => {
   it('filters the new-session agent options by the controlled device runtime-registered set', () => {
     // null(未拉到)→ fail-open,全部保留。
     expect(availableNewSessionAgentOptions(null).map((o) => o.kind)).toEqual([
-      'claude-code', 'codex', 'pi',
+      'claude-code', 'codex', 'cursor', 'pi',
     ]);
     // 被控端无 Pi(二进制缺失)→ 隐藏 Pi,避免建出 requireAgent 报 not-registered 的会话。
     expect(

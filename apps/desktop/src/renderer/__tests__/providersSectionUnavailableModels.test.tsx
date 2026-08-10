@@ -197,6 +197,17 @@ beforeEach(() => {
       scanLocalCli: vi.fn(async () => scanResult),
       refreshBuiltinProviderModels: refreshBuiltinModelsSpy,
       requestProviderModelsAutoRefresh: requestAutoRefreshSpy,
+      agent: {
+        getCursorBinaryStatus: vi.fn(async () => ({ installed: false })),
+      },
+      auth: {
+        getState: vi.fn(async () => ({ authenticated: false })),
+        triggerLogin: vi.fn(),
+        cancelLogin: vi.fn(),
+        logout: vi.fn(),
+        onStateChanged: vi.fn(() => () => undefined),
+        onLoginProgress: vi.fn(() => () => undefined),
+      },
       setProviderOrder: setProviderOrderSpy,
     },
   };

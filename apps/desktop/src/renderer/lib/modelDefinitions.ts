@@ -20,6 +20,7 @@ export interface ModelDefinition {
   vendorKey: 'cc' | 'codex' | 'pi';
   contextWindow?: number;
   supportsFastMode?: boolean;
+  supportsThinkingMode?: boolean;
   /** 目录展示排序;缺省排末尾(见 getDefaultModelForVendor)。 */
   sortOrder?: number;
   /** 选择器里默认是否可见;缺省 ⇒ 可见(见 getDefaultModelForVendor)。 */
@@ -42,6 +43,7 @@ function toLegacy(m: ModelDescriptor, vendorKey: 'cc' | 'codex' | 'pi'): ModelDe
     vendorKey,
     contextWindow: m.contextWindow,
     supportsFastMode: m.supportsFastMode,
+    supportsThinkingMode: m.supportsThinkingMode,
     sortOrder: m.sortOrder,
     defaultEnabled: m.defaultEnabled,
     newSessionDefault: m.newSessionDefault,

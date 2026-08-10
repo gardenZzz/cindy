@@ -55,6 +55,7 @@ import {
 } from '../../shared/agentInputQueue.js';
 import { CONTINUE_AFTER_ERROR_PROMPT, syntheticTriggerKind } from '../../shared/interruptedTurn.js';
 import { attachSessionReferenceMetadata } from '../../shared/sessionReferenceMetadata.js';
+import type { AgentKind } from '@cindy/maker-core';
 import {
   appendRecoveryCheckpointPrompt,
   buildRecoveryCheckpoint,
@@ -266,7 +267,7 @@ export interface AgentInputCoordinatorDeps {
    */
   reconcileTurnIdle?: (sessionId: string) => boolean;
   hasPendingInteraction: (sessionId: string) => boolean;
-  getAgentKind: (sessionId: string) => AgentInputCreateOpts['agentKind'] | null;
+  getAgentKind: (sessionId: string) => AgentKind | null;
   getSdkSessionId: (sessionId: string) => Promise<string | undefined>;
   /** Read a bounded, durable progress snapshot before a retry is re-enqueued. */
   getRecoveryContextSnapshot?: (
@@ -4707,11 +4708,12 @@ export class AgentInputCoordinator {
     state.activeTurn = null;
     state.stickyError = null;
     if (terminalEvent.type === 'error') {
+      state.error = terminalEvent.message ?? state.error;
       // 第五条终态路径:终态 error 在持久化还在进行时到达 → 被暂存,落库完成后才在这里
       // 结算。Schedule 只在候选瞬时错误上短暂保留 recovery，复用普通自动续跑；
       // 确定性错误仍由 runner 收口，不留下脱离 run 记账的人工 Retry。
       // 被按住的 error 最终没能接管(recovery 没留住 / host 拒绝接管)时,统一在本方法里
-      // 通知 host 补落 error 行 —— 出口有三个(dropped-scheduler、非 kept、拒绝接管),
+      // 通知 host 补落 error 行 -- 出口有三个(dropped-scheduler、非 kept、拒绝接管),
       // 集中在这里判比让 host 在每个 null 返回点各自记得补落更难漏(不变量 I2)。
       const deferredPersistSuppressed = terminalEvent.resumableCandidate === true;
       const schedulerItem = active.item && isSchedulerOriginItem(active.item);

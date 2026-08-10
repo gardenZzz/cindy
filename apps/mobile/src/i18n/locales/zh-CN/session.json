@@ -36,6 +36,7 @@
     "createFailedTitle": "任务创建失败",
     "createFailedDefault": "任务创建失败。",
     "createFailedNotice": "任务创建失败：{{message}}",
+    "cursorUnsupportedOnDesktop": "当前电脑端还不支持 Cursor。请升级电脑端 Cindy 后再试。",
     "backToEdit": "返回编辑",
     "retry": "重试",
     "firstMessageNotSent": "首条消息没有发出，内容已还原到输入框。",

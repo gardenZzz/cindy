@@ -329,6 +329,39 @@ describe('setSessionsStatusInDb', () => {
     );
     expect(batchBody).toContain('ownerScope,');
     expect(batchBody).toContain('mediaDb: dbClient.drizzle,');
+    expect(batchBody).toContain('removeCursorAcpConfigDir(item.sessionId, item.status)');
+    // 清理闸只认 deleted（archived 可恢复 resume）
+    expect(source).toMatch(
+      /function removeCursorAcpConfigDir[\s\S]*?if \(status !== 'deleted'\) return/,
+    );
+    expect(source).toContain('removeCursorAcpConfigDir(sid, p.status)');
+    expect(source).toContain('removeCursorAcpConfigDir(sessionId, patch.status)');
+  });
+
+  it('does not remove cursor-acp dir on archived (resume must survive restore)', async () => {
+    const { createCursorIsolatedConfigDir } = await import('@cindy/maker-core');
+    const active = createCursorIsolatedConfigDir({}, {
+      stableKey: 's-active',
+      userDataPath: h.userDataPath,
+    });
+    const archived = createCursorIsolatedConfigDir({}, {
+      stableKey: 's-archived',
+      userDataPath: h.userDataPath,
+    });
+
+    h.tx.mockResolvedValueOnce([
+      {
+        sessionId: 's-archived',
+        title: 'T',
+        workingDir: null,
+        workspaceKind: 'dialogue',
+        status: 'archived',
+      },
+    ]);
+    await setSessionsStatusInDb(['s-archived'], 'archived');
+
+    expect(fs.existsSync(archived.configDir)).toBe(true);
+    expect(fs.existsSync(active.configDir)).toBe(true);
   });
 });
 

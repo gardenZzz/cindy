@@ -731,6 +731,7 @@ export function useCCAgentChat(
     await makerChatStore.resetFastMode(sessionId);
   }, [sessionId]);
 
+
   const setPlanMode = useCallback(
     async (enabled: boolean) => {
       if (!sessionId) return;

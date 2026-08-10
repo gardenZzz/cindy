@@ -237,6 +237,13 @@ vi.mock('@/state/modelVisibilityPrefs', () => ({
 
 vi.mock('@/state/providerModelMemory', () => ({
   useProviderModelMemoryVersion: () => 0,
+  modelMemorySourceId: (agent: string, sourceId: string | null | undefined) =>
+    sourceId ? `${agent}:${sourceId}` : agent,
+  getProviderModelEffort: () => undefined,
+  getProviderModelFast: () => undefined,
+  setProviderModelEffort: () => undefined,
+  setProviderModelFast: () => undefined,
+  setProviderModelChoice: () => undefined,
 }));
 
 vi.mock('@/state/deviceLinkModelMirror', () => ({

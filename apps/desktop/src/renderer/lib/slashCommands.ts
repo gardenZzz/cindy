@@ -276,6 +276,7 @@ export async function loadAllCommands(
   const skillParams = {
     ...(workingDir ? { workingDir } : {}),
     ...(opts?.forceReload !== undefined ? { forceReload: opts.forceReload } : {}),
+    // Cursor：磁盘 skill + 会话 ACP available_commands_update 合并结果。
     ...(opts?.sessionId ? { sessionId: opts.sessionId } : {}),
   };
   const skillP: Promise<SkillRes> = shouldLoadSkills

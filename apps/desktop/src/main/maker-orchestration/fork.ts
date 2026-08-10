@@ -60,7 +60,9 @@ function normalizePositiveInt(value: unknown): number {
 
 const messageRowid = sql<number>`rowid`;
 
-type DbAgentKind = 'cc' | 'codex' | 'pi';
+// 与 shared/agentKindConversion 同源;fork 自身不支持 cursor 源会话,但 normalize
+// 返回的 union 含 cursor,本地类型必须覆盖以免赋值失败。
+type DbAgentKind = 'cc' | 'codex' | 'cursor' | 'pi';
 
 interface MessagePosition {
   createdAt: number;

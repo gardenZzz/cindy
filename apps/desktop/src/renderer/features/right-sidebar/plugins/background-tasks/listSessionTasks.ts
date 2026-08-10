@@ -23,6 +23,7 @@ import {
   subagentSpawnResultIndicatesRunning,
 } from '@cindy/maker-shared/agent-task';
 
+import type { AgentKind } from '@cindy/maker-core';
 import type { Message } from '@/lib/ccAgent.types';
 import type { AgentTaskStatus, AgentTaskUpdate } from '@/lib/makerChatStore';
 
@@ -34,7 +35,7 @@ export interface SessionTaskItem {
   /** 标题链取不到任何来源时为 ''(UI 层负责 i18n 兜底)。 */
   title: string;
   status: AgentTaskStatus;
-  provider: 'claude-code' | 'codex' | 'pi';
+  provider: AgentKind;
   update?: AgentTaskUpdate;
   toolCallClientId?: string;
   toolUseId?: string;

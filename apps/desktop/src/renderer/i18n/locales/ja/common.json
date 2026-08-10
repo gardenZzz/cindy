@@ -1630,6 +1630,70 @@
         "hintLoggedIn": "{{cli}} はこのデバイスでログイン済みです。認証してすぐに接続できます",
         "hintInstalled": "このデバイスに {{cli}} がインストールされています"
       },
+      "cursor": {
+        "title": "Cursor",
+        "installedDescription": "このデバイスに cursor-agent がインストールされています。利用可能なら Cursor をオプションの Agent として使えます。",
+        "installedSignedOutDescription": "cursor-agent はインストール済みですが、Cursor にログインしていません。セッションを作成するにはログインしてください。",
+        "loggedInDescription": "Cursor にログイン済み（{{identity}}）。新しいセッションはこのログイン状態を使います。",
+        "loggedInUnknown": "ログイン中のアカウント",
+        "loginPendingDescription": "ブラウザでの Cursor ログインを待っています。下のリンクを開くかコピーしてください。Cindy はブラウザを自動では開きません。",
+        "missingDescription": "公式の cursor-agent をインストールすると、Cindy で Cursor を使えます。任意です。未インストールでも他の機能には影響しません。",
+        "installedPill": "インストール済み",
+        "loggedInPill": "ログイン済み",
+        "signedOutPill": "未ログイン",
+        "installCta": "インストール",
+        "installing": "インストール中…",
+        "loginCta": "ログイン",
+        "loggingIn": "ログイン中…",
+        "logoutCta": "ログアウト",
+        "cancelLogin": "ログインをキャンセル",
+        "openLoginUrl": "ログインページを開く",
+        "copyLoginUrl": "リンクをコピー",
+        "loginUrlHint": "ブラウザで認可を完了してから戻ってください。リンクには使い捨て認証情報が含まれます。共有しないでください。",
+        "loginUrlCopied": "ログインリンクをコピーしました",
+        "loginUrlCopyFailed": "ログインリンクをコピーできませんでした",
+        "loginSuccess": "Cursor にログインしました",
+        "loginFailed": "Cursor へのログインに失敗しました",
+        "logoutSuccess": "Cursor からログアウトしました",
+        "logoutFailed": "Cursor からのログアウトに失敗しました",
+        "logoutConfirmTitle": "Cursor からログアウトしますか？",
+        "logoutConfirmDescription": "このデバイスの cursor-agent ログイン状態（Cursor CLI が管理）をクリアします。Cursor セッションを作成するには再ログインが必要です。",
+        "logoutConfirm": "ログアウト",
+        "authRequiredTitle": "Cursor へのログインが必要です",
+        "authRequiredDescription": "セッションを作成する前に、設定 → モデルプロバイダーで Cursor にログインしてください。",
+        "optionalHint": "Cursor ACP",
+        "refreshAria": "Cursor のインストール状態を再確認",
+        "confirmTitle": "Cursor をインストールしますか？",
+        "confirmDescription": "確認後、Cindy はこの公式インストールコマンドを実行します：\n\n{{command}}\n\n確認するまで何も実行されません。",
+        "confirmInstall": "インストール",
+        "confirmCancel": "キャンセル",
+        "installSuccess": "Cursor をインストールしました",
+        "installFailed": "Cursor をインストールできませんでした",
+        "installNotDetected": "インストールは完了しましたが、cursor-agent が見つかりません。更新するか、ターミナルからインストールしてください。",
+        "unsupportedPlatform": "公式の cursor-agent インストーラーは macOS と Linux のみをサポートします。",
+        "models": {
+          "emptyState": "Cursor のモデルカタログがまだありません。「モデルを更新」で取得してください（Cursor ログインが必要）。",
+          "refreshCta": "モデルを更新",
+          "refreshing": "検出 {{done}} / {{total}}",
+          "refreshUnavailableInstalled": "先に cursor-agent をインストール",
+          "refreshUnavailableAuth": "先に Cursor にログイン",
+          "autoHint": "フォールバック",
+          "autoAlwaysOn": "常時表示",
+          "effortHint_one": "推理強度 {{count}} 段階",
+          "effortHint_other": "推理強度 {{count}} 段階",
+          "cancelRefresh": "更新をキャンセル",
+          "refreshFailed": "モデルの更新に失敗しました。後でもう一度お試しください。"
+        },
+        "groups": {
+          "cursor": "Cursor",
+          "anthropic": "Anthropic",
+          "openai": "OpenAI",
+          "google": "Google",
+          "xai": "xAI",
+          "domestic": "中国国内",
+          "other": "その他"
+        }
+      },
       "wizard": {
         "title": "プロバイダーを追加",
         "titleWith": "追加 · {{name}}",
@@ -5408,7 +5472,8 @@
       "inlineSecretStoreFailed": "認証情報の保存に失敗しました",
       "targetNotFound": "対象プラグインがアンインストールされたか現在利用不可です",
       "targetDisabled": "対象プラグインが無効化されています",
-      "targetDisabledInWorkdir": "ユーザーが現在のワーキングディレクトリでこのプラグインを無効にしています。リトライしないでください。"
+      "targetDisabledInWorkdir": "ユーザーが現在のワーキングディレクトリでこのプラグインを無効にしています。リトライしないでください。",
+      "targetToolNotFound": "対象プラグインはこのツールを提供していません"
     },
     "createAgent": {
       "quickStart": "クイックスタート",
@@ -5506,6 +5571,7 @@
         "agent": {
           "claudeCode": "Claude Code",
           "codex": "Codex",
+          "cursor": "Cursor",
           "pi": "Pi",
           "pending": "次回：{{agent}}"
         }
@@ -5585,6 +5651,20 @@
           "bypassPermissions": {
             "label": "フルアクセス",
             "description": "追加確認なしで任意のファイル編集とネットワークコマンド実行を許可します。最もリスクが高いため、信頼できるタスクでのみ使用してください。"
+          }
+        },
+        "cursor": {
+          "ask": {
+            "label": "デフォルト権限",
+            "description": "承認が必要なツールは実行前に確認します。権限プロンプトは Cindy クライアント側で処理します。"
+          },
+          "auto": {
+            "label": "自動レビュー",
+            "description": "読み取り・検索・思考系ツールは自動許可し、編集・実行など高リスクなツールは確認します。"
+          },
+          "bypassPermissions": {
+            "label": "フルアクセス",
+            "description": "ツール呼び出しを確認なしで許可します。最もリスクが高いため、信頼できるタスクでのみ使用してください。Cursor のサンドボックス設定は変更しません。"
           }
         },
         "pi": {
@@ -6006,6 +6086,7 @@
       "provider": {
         "claude": "Claude Code",
         "codex": "Codex",
+        "cursor": "Cursor",
         "pi": "Pi",
         "workflow": "Workflow",
         "shell": "バックグラウンドコマンド"
@@ -6752,6 +6833,9 @@
       "waiting": "少々お待ちください…",
       "working": "作業中…",
       "running": "実行中…",
+      "starting": "起動中…",
+      "cancelled": "キャンセルしました",
+      "error": "実行に失敗しました",
       "turnStart": "{{name}} さん、対応中です…",
       "issueTip": "{{name}} さん、/issue でフィードバックや提案をお寄せください",
       "runningTool": "{{tool}} を実行中…"
@@ -6956,7 +7040,8 @@
       "filterVendor": {
         "all": "すべて",
         "cc": "Claude",
-        "codex": "Codex"
+        "codex": "Codex",
+        "cursor": "Cursor"
       },
       "filterGroupBy": {
         "project": "プロジェクト",

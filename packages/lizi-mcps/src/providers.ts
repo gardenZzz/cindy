@@ -393,7 +393,14 @@ export function createLiziMcpProviders(
         type: 'sdk',
         name: 'cindy_orca',
         instance: createOrcaMcpServer(opts.orca!, {
-          agentKind: ctx.agentKind === 'codex' ? 'codex' : ctx.agentKind === 'pi' ? 'pi' : 'claude-code',
+          agentKind:
+            ctx.agentKind === 'codex'
+              ? 'codex'
+              : ctx.agentKind === 'cursor'
+                ? 'cursor'
+                : ctx.agentKind === 'pi'
+                  ? 'pi'
+                  : 'claude-code',
           workingDir: ctx.workingDir,
           ...(ctx.getSessionContext ? { getSessionContext: ctx.getSessionContext } : {}),
           sessionId: ctx.sessionId,

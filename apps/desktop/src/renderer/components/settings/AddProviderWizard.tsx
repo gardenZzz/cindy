@@ -73,8 +73,11 @@ type PresetBaseUrls = Partial<Record<AgentKind, string>>;
 const AGENT_LABEL: Record<AgentKind, string> = {
   'claude-code': 'Claude Code',
   codex: 'Codex',
+  // Type-slot only (#5); cursor is not registered / not shown as available.
+  cursor: 'Cursor',
   pi: 'Pi',
 };
+
 
 function presetRuntimeBaseUrl(
   preset: ProviderPreset,

@@ -17,6 +17,7 @@ export interface SessionMeta {
   effort?: Effort;
   permissionMode?: PermissionMode;
   fastMode?: boolean;
+  /** Cursor thinking 开关；缺省/非 cursor 为 false。 */
   /** Persist the host-owned Review purpose atomically with session creation. */
   reviewMode?: true;
   createdAt: number;

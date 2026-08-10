@@ -37,6 +37,7 @@ import {
   type SubagentModelSettings,
 } from '../../../shared/subagentModelSettings';
 
+
 const settingsDir = '/tmp/cindy-subagent-model-test';
 const settingsFile = path.join(settingsDir, 'subagent-model-settings.json');
 
@@ -65,6 +66,7 @@ describe('subagent model settings store', () => {
         codexAllowNestedSubagents: false,
       }),
     );
+
   });
 
   it('persists only the configured Claude model', () => {
@@ -76,12 +78,14 @@ describe('subagent model settings store', () => {
     expect(readSubagentModelSettings()).toEqual(
       withDefaults({ claudeCode: 'claude-haiku-4-5-20251001' }),
     );
+
   });
 
   it('persists (model, providerId) written in one patch', () => {
     writeSubagentModelSettingsPatch({
       claudeCode: 'claude-opus-5',
       claudeCodeProviderId: 'anthropic',
+
     });
 
     expect(JSON.parse(fs.readFileSync(settingsFile, 'utf-8'))).toEqual({
@@ -194,11 +198,13 @@ describe('subagent model settings store', () => {
     expect(__testing.normalize({ codexEffort: 'high' })).toEqual(
       withDefaults({ codexEffort: 'high' }),
     );
+
   });
 
   it('drops an orphan on-disk providerId whose model is unspecified', () => {
     // 外部手改文件留下的孤儿来源:磁盘直读同样执行配对不变量,不让 isCustomized 误报。
     expect(__testing.normalize({ claudeCodeProviderId: 'anthropic' })).toEqual(withDefaults());
+
   });
 
   it('self-heals an orphan on-disk providerId key on the settings-state read path', () => {
@@ -253,6 +259,7 @@ describe('subagent model settings store', () => {
       reconcileSubagentModelSettingsPatch({ codex: null, claudeCode: 'claude-opus-5' }, current),
     ).toEqual({
       codex: null,
+
       codexProviderId: null,
       claudeCode: 'claude-opus-5',
     });
@@ -261,6 +268,7 @@ describe('subagent model settings store', () => {
       reconcileSubagentModelSettingsPatch({ claudeCodeProviderId: 'anthropic' }, current),
     ).toEqual({
       claudeCodeProviderId: 'anthropic',
+
     });
   });
 

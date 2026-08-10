@@ -9,7 +9,7 @@ import {
 const STORAGE_KEY = 'workerCreationPrefs';
 const CHANGE_EVENT = 'cindy:worker-creation-prefs-changed';
 
-export type WorkerAgentKind = 'codex' | 'claude-code' | 'pi';
+export type WorkerAgentKind = 'codex' | 'claude-code' | 'cursor' | 'pi';
 
 export interface WorkerAgentPrefs {
   model: string;
@@ -23,6 +23,7 @@ export interface WorkerCreationPrefs {
   lastAgent: WorkerAgentKind;
   codex: WorkerAgentPrefs;
   'claude-code': WorkerAgentPrefs;
+  cursor: WorkerAgentPrefs;
   pi: WorkerAgentPrefs;
   /** 新 Worker 的默认权限；UI 与 Orca tool 共用。 */
   workerPermissionMode: OrcaWorkerPermissionMode;
@@ -32,6 +33,8 @@ export const DEFAULT_WORKER_CREATION_PREFS: WorkerCreationPrefs = {
   lastAgent: 'codex',
   codex: { model: 'codex/gpt-5.5', effort: 'high', fast: false, providerId: null },
   'claude-code': { model: 'claude-opus-4-7', effort: 'high', fast: false, providerId: null },
+  // cursor 的模型目录来自 ACP session/new，'auto' 是产品级默认档；无供应商维度。
+  cursor: { model: 'auto', effort: 'high', fast: false, providerId: null },
   // pi worker 默认模型与 orcaWorkerCreationService.resolveWorkerConfig 的 pi 分支一致。
   pi: { model: 'claude-sonnet-4-6', effort: 'high', fast: false, providerId: null },
   workerPermissionMode: DEFAULT_ORCA_WORKER_PERMISSION_MODE,
@@ -42,6 +45,7 @@ function defaultPrefs(): WorkerCreationPrefs {
     ...DEFAULT_WORKER_CREATION_PREFS,
     codex: { ...DEFAULT_WORKER_CREATION_PREFS.codex },
     'claude-code': { ...DEFAULT_WORKER_CREATION_PREFS['claude-code'] },
+    cursor: { ...DEFAULT_WORKER_CREATION_PREFS.cursor },
     pi: { ...DEFAULT_WORKER_CREATION_PREFS.pi },
   };
 }
@@ -68,11 +72,14 @@ export function readWorkerCreationPrefs(): WorkerCreationPrefs {
       lastAgent:
         parsed.lastAgent === 'claude-code'
           ? 'claude-code'
-          : parsed.lastAgent === 'pi'
-            ? 'pi'
-            : 'codex',
+          : parsed.lastAgent === 'cursor'
+            ? 'cursor'
+            : parsed.lastAgent === 'pi'
+              ? 'pi'
+              : 'codex',
       codex: agentPrefs('codex'),
       'claude-code': agentPrefs('claude-code'),
+      cursor: agentPrefs('cursor'),
       pi: agentPrefs('pi'),
       workerPermissionMode: resolveOrcaWorkerPermissionMode(parsed.workerPermissionMode),
     };

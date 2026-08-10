@@ -77,6 +77,11 @@ export interface ListAgentSkillsOptions {
   /** Omit to list only agent-global skills without a project scope. */
   workingDir?: string;
   forceReload?: boolean;
+  /**
+   * Cindy business session id. Cursor 在磁盘扫盘结果之上，再合并该会话的 ACP
+   * available_commands_update（无 sessionId 时只返回磁盘 skill）。
+   */
+  sessionId?: string;
 }
 
 export interface ListAgentSkillsResult {

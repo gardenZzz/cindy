@@ -52,7 +52,7 @@ export async function readOrcaWorkerProviderRoutingContext(deps: {
             modelRegistry,
             provider.id,
             model.id,
-            agent === 'pi' ? undefined : agent,
+            agent === 'pi' || agent === 'cursor' ? undefined : agent,
           );
           return matched ? [[model.id, matched.entry.id]] : [];
         }),
@@ -81,6 +81,7 @@ export async function readOrcaWorkerProviderRoutingContext(deps: {
     availability: {
       'claude-code': availabilityFor('claude-code'),
       codex: availabilityFor('codex'),
+      cursor: [],
       pi: availabilityFor('pi'),
     },
     resolveDefaultProviderIdForModel: (agent, model) =>

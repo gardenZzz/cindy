@@ -31,8 +31,8 @@ export interface CindyMobileIconSpec {
 export const cindyMobileIconSpecs: readonly CindyMobileIconSpec[] = [
   {
     slot: 'sessionLeadingGlyph',
-    currentAsset: 'MobileVendorIcon Claude/Codex glyph',
-    targetAsset: 'MobileVendorIcon Claude/Codex glyph',
+    currentAsset: 'MobileVendorIcon Claude/Codex/Cursor glyph',
+    targetAsset: 'MobileVendorIcon Claude/Codex/Cursor glyph',
     status: 'wired',
     colorToken: 'textTertiary / statusAccent',
     figmaNode: '301:854 / 301:881 / 301:1077 / 301:1096',

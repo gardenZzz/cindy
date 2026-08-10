@@ -284,3 +284,12 @@ export const desktopCodexRuntimeConfig: AgentRuntimeConfig = {
     return readMakerMemoryEnabled();
   },
 };
+
+/**
+ * Cursor ACP 运行时配置。
+ * 必须注入 userDataPath：隔离 CURSOR_CONFIG_DIR 落在 `<userData>/cursor-acp/`，
+ * 供跨进程 session/load；maker-core 零 Electron 依赖，不能自己猜路径。
+ */
+export const desktopCursorRuntimeConfig: AgentRuntimeConfig = {
+  userDataPath: app.getPath('userData'),
+};

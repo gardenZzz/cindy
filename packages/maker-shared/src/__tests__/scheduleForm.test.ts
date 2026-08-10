@@ -243,6 +243,14 @@ describe('mobile schedule form model', () => {
     expect(buildMobileScheduleInput({ ...claude, name: 'Claude', prompt: 'run' })).not.toHaveProperty('fastMode');
   });
 
+  it('defaults cursor schedules to auto when switching agent kind', () => {
+    const draft = updateDraftAgentKind(createMobileScheduleDraft(null), 'cursor');
+    expect(buildMobileScheduleInput({ ...draft, name: 'Cursor', prompt: 'run' })).toMatchObject({
+      agentKind: 'cursor',
+      model: 'auto',
+    });
+  });
+
   it('supports Pi automations: blank default model (host-resolved) and explicit fast mode', () => {
     // Pi 模型来自动态 BYOM 目录:切到 Pi 时 model 留空 → 序列化省略 → host 解析默认。
     const draft = updateDraftAgentKind(createMobileScheduleDraft(null), 'pi');

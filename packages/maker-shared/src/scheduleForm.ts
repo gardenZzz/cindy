@@ -72,6 +72,8 @@ const DEFAULT_CRON = '0 9 * * *';
 const DEFAULT_TIMEZONE = 'Asia/Shanghai';
 const DEFAULT_CLAUDE_MODEL = 'claude-sonnet-4-6';
 const DEFAULT_CODEX_MODEL = 'gpt-5.5';
+/** Cursor 产品面 Auto；与 desktop model-defaults / CURSOR_PRODUCT_AUTO_MODEL_ID 对齐。 */
+const DEFAULT_CURSOR_MODEL = 'auto';
 
 export function createMobileScheduleDraft(
   schedule?: RemoteSchedule | null,
@@ -507,7 +509,8 @@ function hasTemplateParam(params: Record<string, string>, key: string): boolean 
 
 function defaultModelFor(agentKind: RemoteScheduleAgentKind): string {
   if (agentKind === 'codex') return DEFAULT_CODEX_MODEL;
-  // Pi 模型来自动态 BYOM 供应商目录,没有固定默认 id;留空 → 序列化时省略 → host 解析
+  if (agentKind === 'cursor') return DEFAULT_CURSOR_MODEL;
+  // Pi 模型来自动态 BYOM 供应商目录,没有固定默认 id;留空 -> 序列化时省略 -> host 解析
   // 该 Pi agent 的当前默认模型(用户仍可在自由文本模型框里显式指定)。
   if (agentKind === 'pi') return '';
   return DEFAULT_CLAUDE_MODEL;

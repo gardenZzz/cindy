@@ -14,15 +14,15 @@ import { useEffect, useState } from 'react';
 
 import { createLogger } from '@/lib/logger';
 import type { Effort, PermissionMode } from '@/lib/userPreferences.types';
+import type { AgentKind } from '@cindy/maker-core';
 
+export type { AgentKind };
 const log = createLogger('useAgentCapabilities');
-
-export type AgentKind = 'claude-code' | 'codex' | 'pi';
 
 // capability 生命周期(预取 / 驱逐通知 / 本地快照刷新 / 启动预载)必须覆盖全部 agent，
 // 少一个就会让该 agent 的远程会话在断链或 provider revision 后收不到 loading 事件、
 // 也不再被重新预取，界面永久停在旧模型/能力快照(codex review)。新增 agent 只改这里。
-const ALL_AGENT_KINDS = ['claude-code', 'codex', 'pi'] as const;
+const ALL_AGENT_KINDS = ['claude-code', 'codex', 'cursor', 'pi'] as const;
 
 // renderer 视角: id 全部是不透明 string, 渲染只读 displayName。
 // effort 的合法 id 集合 = capabilities.effortLevels 上每个项的 id。
@@ -43,6 +43,7 @@ export interface ModelDescriptor {
   effortDisplayNames?: Partial<Record<Effort, string>>;
   defaultEffort: Effort | null;
   supportsFastMode?: boolean;
+  supportsThinkingMode?: boolean;
   /** 目录展示排序权重;缺省排末尾。 */
   sortOrder?: number;
   /**
@@ -586,6 +587,7 @@ export function beginLocalCapabilitiesRefresh(): number {
 
 /**
  * 读取本地 agent 能力快照；核心 agent 失败向上抛，只有明确的 Pi 未注册结果才不阻断 provider 目录。
+ * cursor 可能未注册(二进制未装)—— getCapabilities 回空壳，仍一并拉取以便选择器有 Auto 兜底。
  *
  * Pi 的 CLI 是 best-effort 下载的目录分发，开发机或网络受限时可能暂时缺失。
  * 明确未注册时不能让 `maker:get-capabilities('pi')` 的单点失败把 Claude/Codex

@@ -121,8 +121,11 @@ function mergeNewSessionDefaultMarker(
   next: ModelDescriptor,
   agent: AgentKind,
 ): ModelDescriptor {
-  const marker = agent === 'pi' ? 'claude-code' : agent;
+  // cursor 不在 XD 目录里（登录制 agent，无 Cindy provider 条目），没有区域默认标记可并。
+  const marker: 'claude-code' | 'codex' | null =
+    agent === 'codex' ? 'codex' : agent === 'cursor' ? null : 'claude-code';
   if (
+    marker === null ||
     next.newSessionDefault?.includes(marker) !== true ||
     first.newSessionDefault?.includes(marker) === true
   ) {

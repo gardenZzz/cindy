@@ -151,6 +151,22 @@ function capabilitiesForSession(
   };
 }
 
+/**
+ * 立即重试一次。用于启动期元数据回写 (sdkSessionId / cursor 降级后的 model):
+ * 这些都是**一次性事件**驱动的写入, 失败后没有「下一条同类事件」可以依赖,
+ * 不重试就等于永久丢掉 resume 能力或让界面一直显示错的模型。
+ *
+ * ponytail: 只重一次、不退避 —— 目标是吃掉 sqlite busy 这类瞬时失败,
+ * 真正的持久故障该让它报出来, 不靠无限重试掩盖。
+ */
+async function retryOnce<T>(op: () => Promise<T>): Promise<T> {
+  try {
+    return await op();
+  } catch {
+    return await op();
+  }
+}
+
 function canonicalPiRuntimePath(value: string): string {
   try {
     return fs.realpathSync(value);
@@ -362,6 +378,16 @@ export class Maker {
     }
   }
 
+  /** 等指定会话完成后台 bootstrap（#3 标题错峰用）。 */
+  async waitForSessionBootstrap(id: string): Promise<boolean> {
+    const active = this.activeSessions.get(id);
+    if (active) {
+      await active.waitForBootstrapReady();
+      return true;
+    }
+    return false;
+  }
+
   /** 执行一次真实 session startup；带 id 的并发去重由 createSession 统一负责。 */
   private async createSessionOnce(opts: CreateSessionOptions): Promise<Session> {
     const agent = this.requireAgent(opts.agentKind);
@@ -442,13 +468,21 @@ export class Maker {
         sessionId: id,
         sessionInstanceId,
         // 强制由 Maker 注入持久化 CAS，不能信任外部 CreateSessionOptions 自带回调。
-        // Claude adapter 只在精确识别 invalid-resume 时调用；Codex 不消费该字段。
+        // Claude adapter 只在精确识别 invalid-resume 时调用；Cursor 只在 session/load
+        // 判定 resume 失效时调用（cursor/index.ts）；Codex 不消费该字段。
+        //
         // 对所有 claude-code 会话装配(不止 resume):全新会话也可能在首个 turn 崩溃前
         // 就把 SDK 回填、已落库的 sdk_session_id 变成幽灵 id(见 claude-code/index.ts
         // 的 fresh-session self-reference 恢复),需要同一把 CAS 才能把它清掉,否则下一次
         // send 会 resume 同一个不存在的会话反复失败。
+        //
+        // Cursor 没有 Claude 那种 fresh-session self-reference 恢复，消费点仅 resume
+        // 失效。但仍对**所有** cursor 会话注入（不只 resume）：否则生产路径拿不到
+        // 回调，invalid-resume 会无 CAS 地 fresh create，随后 Maker 的普通 update 会
+        // 无条件覆盖并发 actor 已写入的有效 sdk id。注入对全新 cursor 会话无害
+        // （未触发 resume 失败时不会调用）。
         onInvalidResumeSession:
-          opts.agentKind === 'claude-code'
+          opts.agentKind === 'claude-code' || opts.agentKind === 'cursor'
             ? (expectedSdkSessionId) =>
                 this.invalidateAndClearSdkSessionId(id, expectedSdkSessionId)
             : undefined,
@@ -488,7 +522,8 @@ export class Maker {
       elapsedMs: Date.now() - startedAt,
     });
 
-    // 落地元数据 —— storage 已有同 id 的 row 时跳过 insert, 走 update 把 sdkSessionId 写回
+    // 落地业务元数据。SDK session id 与 Cursor 初始模型回退都由下面的事件 listener
+    // 回写，不能在 startSession 返回时同步读取 handle（Cursor 冷启动会让这两个值尚未就绪）。
     let meta: SessionMeta;
     try {
       const existingRow = opts.id ? await this.storage.get(opts.id) : null;
@@ -567,9 +602,23 @@ export class Maker {
       remoteHostId: meta.remoteHostId ?? null,
     });
 
-    // 当 SDK 回填 sdkSessionId 时持久化
+    // 当 SDK 回填 sdkSessionId 或 Cursor 初始模型回退时持久化。默认重放 startupEvents，
+    // 这样 handle 返回前产生的事件与 events() 中晚到的事件走同一条幂等路径。
+    // 闸门只进不退。曾经试过「写失败就把闸门放回去, 等下一条同类事件重试」, 那是错的:
+    // session_id 与 initial_model_unavailable 都是**一次性事件**, 失败后根本没有下一条可等;
+    // 而且回滚存的是「上一个收到的值」而非「上一个落库成功的值」, 事件 A→B→A 时会错误地
+    // 滚掉后一个 A 设下的闸门。可靠性改由写入处的有界重试负责 (retryOnce)。
+    //
+    // 闸门初值刻意留 undefined, 不拿 meta.sdkSessionId 预填: resume 成功时 SDK 重推同一个
+    // id 的那次写入是 invalid-resume CAS 排序的承重结构 (CAS 必须等它落定, 否则晚到的写
+    // 会把已清空的 id 又写回来)。claude-code / codex 的 resume 本来就每次照写, cursor 走
+    // 这条路只是与它们对齐, 不是回归。
+    let lastSdkSessionId: string | undefined;
+    let cursorModelFallbackHandled = false;
     session.onEvent((evt) => {
       if (evt.type === 'session_id' && typeof evt.data === 'string' && evt.data) {
+        if (evt.data === lastSdkSessionId) return;
+        lastSdkSessionId = evt.data;
         if (opts.agentKind === 'codex' && isClaimableCodexThreadId(evt.data)) {
           try {
             if (codexThreadClaim) {
@@ -595,6 +644,20 @@ export class Maker {
         void this.persistSdkSessionId(meta.id, evt.data).catch((e) => {
           this.logger.warn('failed to persist sdkSessionId', { error: String(e) });
         });
+      }
+      if (
+        opts.agentKind === 'cursor' &&
+        evt.type === 'error' &&
+        (evt.data as { reason?: unknown } | undefined)?.reason === 'initial_model_unavailable' &&
+        !cursorModelFallbackHandled
+      ) {
+        cursorModelFallbackHandled = true;
+        const activeModel = session.model;
+        if (meta.model !== activeModel) {
+          void retryOnce(() => this.storage.update(meta.id, { model: activeModel })).catch((e) => {
+            this.logger.warn('failed to persist cursor fallback model', { error: String(e) });
+          });
+        }
       }
     });
 
@@ -682,7 +745,14 @@ export class Maker {
         });
         return;
       }
-      await this.storage.update(sessionId, { sdkSessionId });
+      // resume 时 SDK 会重推同一个 session_id 事件; 库内已是该 id 就跳过 update,
+      // 否则无条件写入会把 updatedAt 顶到当前时间, 让侧边栏按 updatedAt 排序的
+      // 会话仅因"打开续跑"就窜到顶部 (#46)。判等放在队列操作内: 同 session 持久化
+      // 单通道串行, get 与 update 之间无同 session 操作插队, CAS 也走同一队列排在之后。
+      if ((await this.storage.get(sessionId))?.sdkSessionId === sdkSessionId) {
+        return;
+      }
+      await retryOnce(() => this.storage.update(sessionId, { sdkSessionId }));
     });
   }
 

@@ -1,3 +1,4 @@
+import type { AgentKind } from './common.js';
 import type { PiRuntimeCapabilityStatus } from './pi-runtime-capabilities.js';
 
 /**
@@ -26,7 +27,7 @@ export interface AgentCustomizationFile {
 
 export interface AgentCustomization {
   /** 来自哪个 agent。等价于 AgentKind, 但避开循环依赖故用宽松 string。 */
-  engine: 'claude-code' | 'codex' | 'pi';
+  engine: AgentKind;
 
   /**
    * Engine-specific 词汇:

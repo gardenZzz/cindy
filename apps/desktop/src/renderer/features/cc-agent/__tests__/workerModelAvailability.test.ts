@@ -3,6 +3,7 @@ import { describe, expect, it } from 'vitest';
 
 import type { AgentCapabilities, ModelDescriptor } from '@/hooks/useAgentCapabilities';
 import { selectWorkerModels } from '../workerModelAvailability';
+import type { AgentKind } from '@cindy/maker-core';
 
 const model = (id: string): ModelDescriptor => ({
   id,
@@ -18,7 +19,7 @@ const capabilities = (models: ModelDescriptor[]): AgentCapabilities =>
 const provider = (
   id: string,
   connected: boolean,
-  agent: 'claude-code' | 'codex',
+  agent: AgentKind,
   models: ModelDescriptor[],
 ): ProviderView =>
   ({

@@ -14,6 +14,7 @@
  * 上层既有的 extractIpcError / decodeRemoteErrorMessage 继续解码,IPC 错误协议免改。
  */
 
+import type { AgentKind } from '@cindy/maker-core';
 import {
   getSessionDeviceId,
   remoteProjectsStore,
@@ -209,7 +210,7 @@ export function makerApiForDevice(deviceId: string): RoutableMaker {
 /** Mutation 前按明确 deviceId 重新读取被控端能力，避免复用可能过期的 renderer cache。 */
 export function agentCapabilitiesForDevice(
   deviceId: string,
-  agentKind: 'claude-code' | 'codex' | 'pi',
+  agentKind: AgentKind,
 ): Promise<{ supportsOrcaWorkerPermissionMode?: boolean }> {
   return invokeRemote(deviceId, 'maker:get-capabilities', [agentKind]) as Promise<{
     supportsOrcaWorkerPermissionMode?: boolean;

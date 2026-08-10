@@ -2,7 +2,7 @@
  * 原生应用菜单四语标签的术语门禁。
  *
  * 为什么需要单独一个测试:`scripts/check-i18n-glossary.mjs` 只读 renderer 的 locale
- * JSON,扫不到这份手写 TS catalog。引入术语表那轮它就整个漏掉了——zh-CN 的 `issues`
+ * JSON,扫不到这份手写 TS catalog。引入术语表那轮它就整个漏掉了--zh-CN 的 `issues`
  * 还写着「议题」(Issue 的禁用译法),三语的 `settings` / `checkForUpdates` 还带着
  * ASCII 三点省略号,而这是 macOS 上常驻屏幕顶端的菜单栏,比大多数界面文案更显眼。
  *

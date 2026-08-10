@@ -24,7 +24,7 @@ import {
   setDiscoveredCodexModels,
 } from '../active-catalog.js';
 
-function openaiIds(agent: 'claude-code' | 'codex' | 'pi'): string[] {
+function openaiIds(agent: AgentKind): string[] {
   const openai = getActiveCatalog().providers.find((p) => p.id === 'openai');
   return (openai?.models[agent] ?? []).map((m) => m.id);
 }

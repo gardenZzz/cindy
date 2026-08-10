@@ -79,6 +79,26 @@ import { EMPTY_SESSION_STATE, handleStreamEvent, makerChatStore } from '@/lib/ma
 import type { SessionChatState } from '@/lib/makerChatStore';
 
 describe('makerChatStore agent task updates', () => {
+  it('keeps cursor provider instead of collapsing to claude-code', () => {
+    const next = handleStreamEvent(
+      { ...EMPTY_SESSION_STATE, messages: [], taskUpdates: new Map() },
+      {
+        sessionId: 's-cursor',
+        type: 'agent_task_update',
+        source: 'cursor',
+        data: {
+          provider: 'cursor',
+          taskId: 'ag-1',
+          parentToolUseId: 'call_1',
+          status: 'completed',
+          title: 'Explore',
+        },
+      } as CCAgentStreamEvent,
+    );
+    expect(next.taskUpdates?.get('ag-1')?.provider).toBe('cursor');
+    expect(next.taskUpdates?.get('call_1')?.provider).toBe('cursor');
+  });
+
   it('preserves Pi as the task provider for explicit and source-derived updates', () => {
     const explicit = handleStreamEvent(
       { ...EMPTY_SESSION_STATE, messages: [], taskUpdates: new Map() },

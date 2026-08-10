@@ -9,6 +9,7 @@ import { z } from 'zod';
 import type { XdtHelperToolRegistry } from '../lizi_xdtHelperToolRegistry.js';
 import type { ControlResult } from '../lizi_xdtHelperMcpServer.js';
 import { okPayload, errorPayload } from './_payload.js';
+import type { AgentKind } from '@cindy/maker-core';
 
 export interface ModelDescriptor {
   id: string;
@@ -41,24 +42,26 @@ function tagTier(models: ModelDescriptor[] | undefined): TaggedModel[] | undefin
 
 export interface ListAvailableModelsDeps {
   listAvailableModels: (params: {
-    agent?: 'claude-code' | 'codex' | 'pi';
+    agent?: AgentKind;
   }) => Promise<ControlResult<{
     codex?: ModelDescriptor[];
     claude_code?: ModelDescriptor[];
+    cursor?: ModelDescriptor[];
     pi?: ModelDescriptor[];
   }>>;
 }
 
 const DESCRIPTION = [
   '列出每个 agent 当前 host 支持的 model id 清单, 用于 create_worker 前确认 model 名拼写。',
-  'Codex 和 Claude Code 支持的 model 完全不同, 不可跨用。',
+  'Codex / Claude Code / Cursor 支持的 model 完全不同, 不可跨用。',
   '',
   '参数:',
-  '- agent: 可选, codex 或 claude-code; 不传返两者',
+  '- agent: 可选, codex / claude-code / cursor; 不传返三者',
   '',
   '返回值:',
   '- codex: Codex agent 的可用 model 列表 [{id, label, tier}]',
   '- claude_code: Claude Code agent 的可用 model 列表 [{id, label, tier}]',
+  '- cursor: Cursor agent 的可用 model 列表 [{id, label, tier}]; Cursor 走自己的登录态, 没有供应商维度, 默认档是 "auto"',
   '',
   'tier 字段 (用于精准选型, 不要靠 label 推断):',
   "- tier='budget': codex/ 前缀的 gateway 折扣路由 (如 codex/gpt-5.5)",
@@ -79,7 +82,7 @@ export function registerListAvailableModelsTool(
     description: DESCRIPTION,
     inputShape: {
       agent: z
-        .enum(['codex', 'claude-code', 'pi'])
+        .enum(['codex', 'claude-code', 'cursor', 'pi'])
         .optional()
         .describe('可选, 只查某一 agent 的 model 列表; 不传返三者'),
     },
@@ -94,6 +97,7 @@ export function registerListAvailableModelsTool(
       return okPayload({
         codex: tagTier(result.codex),
         claude_code: tagTier(result.claude_code),
+        cursor: tagTier(result.cursor),
         pi: tagTier(result.pi),
       });
     },

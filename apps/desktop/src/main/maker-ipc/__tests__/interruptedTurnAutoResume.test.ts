@@ -1,5 +1,7 @@
 import { describe, expect, it, vi } from 'vitest';
 
+import { CURSOR_STREAM_DISCONNECT_REASON } from '@cindy/maker-core';
+
 import {
   INTERRUPTED_TURN_MAX_CONSECUTIVE_ATTEMPTS,
   INTERRUPTED_TURN_MAX_EPISODE_ATTEMPTS,
@@ -53,6 +55,21 @@ describe('isInterruptedTurnError', () => {
       isInterruptedTurnError({
         reason: 'upstream-overload',
         message: 'The upstream declined this request.',
+      }),
+    ).toBe(true);
+  });
+
+  it('accepts the cursor stream disconnect reason (Cursor 上游断流错误)', () => {
+    expect(
+      isInterruptedTurnError({
+        reason: CURSOR_STREAM_DISCONNECT_REASON,
+        message:
+          'RetriableError: [canceled] http/2 stream closed with error code CANCEL (0x8)',
+      }),
+    ).toBe(true);
+    expect(
+      isInterruptedTurnError({
+        reason: CURSOR_STREAM_DISCONNECT_REASON,
       }),
     ).toBe(true);
   });

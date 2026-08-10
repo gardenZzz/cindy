@@ -128,6 +128,9 @@ describe('NewMakerDraftRoute CREATE AGENT visual contract', () => {
     ]) {
       expect(chatInputBlock).toContain(invariant);
     }
+    // vendorKey 必须接在 draft.vendor 上(normalizeDbAgentKind 覆盖 cc/codex/cursor/pi);
+    // 接到别的源时必须失败。
+    expect(chatInputBlock).toContain('vendorKey={normalizeDbAgentKind(draft.vendor)}');
   });
 
   it('uses the R2 quick-start icon mapping and avoids page-level shadows', () => {

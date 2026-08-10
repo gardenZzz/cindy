@@ -31,6 +31,7 @@ import { useSessionReferences } from '../hooks/useSessionReferences';
 import { cronToConfig, summarizeConfig } from '../lib/cronCodexPreset';
 import { basenameOf, describeDestination, humanizeAgentKind } from '../lib/formatters';
 import { groupRunsForHistory } from '../lib/runHistoryGrouping';
+import { sessionAgentKindToScheduleAgentKind } from '../lib/scheduleFormLogic';
 
 import { RunHistoryCard } from './RunHistoryCard';
 
@@ -77,7 +78,7 @@ export function RunHistoryPane({
   // ScheduleRun 没存 agentKind，但每条 run 关联一个 session（run.sessionId），
   // session 上有 agentKind。这里拉 'all' 桶（含 archived）建 sessionId → AgentKind 映射，
   // session 已被删 / 桶未加载完 时 fallback 到 schedule 当前 agentKind。
-  // Session.agentKind 是 'cc'|'codex'，scheduler 侧是 'claude-code'|'codex'，需要映射。
+  // Session.agentKind 是 'cc'|'codex'|'cursor'，scheduler 侧是 AgentKind，需要映射。
   const { sessions: allSessions } = useCCSessions({ includeArchived: 'all' });
   const runSessionIds = useMemo(
     () => runs.flatMap((run) => (run.sessionId ? [run.sessionId] : [])),
@@ -87,7 +88,7 @@ export function RunHistoryPane({
   const sessionAgentMap = useMemo(() => {
     const m = new Map<string, AgentKind>();
     for (const sess of allSessions) {
-      m.set(sess.id, sess.agentKind === 'cc' ? 'claude-code' : sess.agentKind === 'pi' ? 'pi' : 'codex');
+      m.set(sess.id, sessionAgentKindToScheduleAgentKind(sess.agentKind));
     }
     return m;
   }, [allSessions]);
@@ -97,7 +98,7 @@ export function RunHistoryPane({
       const referenceAgent = sessionReferences.get(run.sessionId)?.agentKind;
       return (
         sessionAgentMap.get(run.sessionId) ||
-        (referenceAgent === 'cc' ? 'claude-code' : referenceAgent) ||
+        (referenceAgent ? sessionAgentKindToScheduleAgentKind(referenceAgent) : undefined) ||
         s.agentKind
       );
     },

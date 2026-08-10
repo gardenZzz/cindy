@@ -227,6 +227,36 @@ describe('orcaTeamStore', () => {
     ]);
   });
 
+  it('preserves cursor agentKind for listWorkersByLead and getWorkerLink', async () => {
+    const { listWorkersByLead, getWorkerLink } = await import('../orcaTeamStore.js');
+    const client = createTestDbClient();
+    setCurrentDbClient(client, 'test-user');
+
+    await seedOrcaWorkers(client, {
+      leadAgentKind: 'cursor',
+      workerAgentKinds: ['cursor', 'cc'],
+    });
+
+    await expect(listWorkersByLead('lead-session-1')).resolves.toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          id: 'worker-1',
+          session: expect.objectContaining({ agentKind: 'cursor' }),
+        }),
+        expect.objectContaining({
+          id: 'worker-2',
+          session: expect.objectContaining({ agentKind: 'claude-code' }),
+        }),
+      ]),
+    );
+
+    await expect(
+      getWorkerLink({ workerId: 'worker-1', workerSessionId: 'worker-session-1' }),
+    ).resolves.toMatchObject({
+      leadSession: { agentKind: 'cursor' },
+    });
+  });
+
   function createTestDbClient(): DbClient {
     const dbHandle = new Database(':memory:');
     rawDb = dbHandle;
@@ -317,19 +347,27 @@ describe('orcaTeamStore', () => {
   }
 });
 
-async function seedOrcaWorkers(client: DbClient): Promise<void> {
+async function seedOrcaWorkers(
+  client: DbClient,
+  opts?: {
+    leadAgentKind?: string;
+    workerAgentKinds?: [string, string];
+  },
+): Promise<void> {
   const now = Date.now();
+  const leadAgentKind = opts?.leadAgentKind ?? 'codex';
+  const workerAgentKinds = opts?.workerAgentKinds ?? (['codex', 'pi'] as [string, string]);
   await client.exec(
     'INSERT INTO sessions (id, title, agent_kind, orca_role, provider_id, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?)',
-    ['lead-session-1', 'Lead', 'codex', 'lead', 'openai', now, now],
+    ['lead-session-1', 'Lead', leadAgentKind, 'lead', 'openai', now, now],
   );
   await client.exec(
     'INSERT INTO sessions (id, title, agent_kind, orca_role, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)',
-    ['worker-session-1', 'Worker 1', 'codex', 'worker', now, now],
+    ['worker-session-1', 'Worker 1', workerAgentKinds[0], 'worker', now, now],
   );
   await client.exec(
     'INSERT INTO sessions (id, title, agent_kind, orca_role, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)',
-    ['worker-session-2', 'Worker 2', 'pi', 'worker', now, now],
+    ['worker-session-2', 'Worker 2', workerAgentKinds[1], 'worker', now, now],
   );
   await client.exec(
     'INSERT INTO orca_teams (id, lead_session_id, status, created_at, updated_at) VALUES (?, ?, ?, ?, ?)',

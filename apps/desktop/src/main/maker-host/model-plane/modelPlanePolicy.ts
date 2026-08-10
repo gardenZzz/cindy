@@ -71,7 +71,10 @@ export function isRegistryTombstoneForConsumer(
   if (!registry || !policy) return false;
 
   let registryAgent: RootAgentKind | null;
-  if (agent === 'pi') {
+  if (agent === 'cursor') {
+    // Cursor 模型来自 ACP capabilities,不进 registry roots/bridges。
+    registryAgent = null;
+  } else if (agent === 'pi') {
     registryAgent = providerId === 'openai' ? 'codex' : 'claude-code';
   } else if (policy.roots.includes(agent) || policy.membershipGatedBridges.includes(agent)) {
     registryAgent = agent;

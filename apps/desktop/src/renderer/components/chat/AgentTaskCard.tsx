@@ -258,6 +258,8 @@ export function AgentTaskCard({ toolCall, update, result, subagentModel, session
       ? t('chat.agentTask.provider.shell')
       : provider === 'codex'
         ? t('chat.agentTask.provider.codex')
+        : provider === 'cursor'
+          ? t('chat.agentTask.provider.cursor')
         : provider === 'pi'
           ? t('chat.agentTask.provider.pi')
           : t('chat.agentTask.provider.claude');

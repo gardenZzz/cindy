@@ -43,6 +43,7 @@ import { WINDOW_NO_DRAG_STYLE } from '@/components/layout/windowDrag';
 import { MorphPopover } from '@/components/ui/morph-popover';
 import { AnthropicMark } from '@/components/icons/AnthropicMark';
 import { OpenAIMark } from '@/components/icons/OpenAIMark';
+import { CursorMark } from '@/components/icons/CursorMark';
 import { XDIncMark } from '@/components/icons/XDIncMark';
 import { hasProviderLogo, ProviderLogoMark } from '@/components/icons/ProviderLogoMark';
 import { FastModeToggle } from './FastModeToggle';
@@ -82,7 +83,7 @@ import {
   isSubscriptionDirectModel,
 } from '../../../shared/subscriptionModels';
 import { isModelEnabled, useModelVisibilityVersion } from '@/state/modelVisibilityPrefs';
-import { useProviderModelMemoryVersion } from '@/state/providerModelMemory';
+import { modelMemorySourceId, useProviderModelMemoryVersion } from '@/state/providerModelMemory';
 import { useDeviceLinkModelMirrorVersion } from '@/state/deviceLinkModelMirror';
 import {
   connectedProvidersForAgent,
@@ -422,6 +423,7 @@ interface RowModel {
   defaultEffort: Effort | null;
   effortDisplayNames?: Partial<Record<string, string>>;
   supportsFastMode?: boolean;
+  supportsThinkingMode?: boolean;
   /** 模型级 Codex bridge 协议；仅同一 Provider 内混合原生/桥接模型时存在。 */
   codexCompatibilityWireProtocol?: 'openai-chat' | 'anthropic-messages';
   /** 展示图标 id(AI Gateway / 目录设定,SectionModel.icon);flat 列表的 ModelDescriptor 无此字段。 */
@@ -503,8 +505,16 @@ function RemoteModelLoadNotice({
   );
 }
 
+/** trigger 上的 Agent 身份名。少一个 vendor 就会把它显示成别家引擎,故按 key 全列。 */
+const AGENT_IDENTITY_LABEL_KEY: Record<'cc' | 'codex' | 'cursor' | 'pi', string> = {
+  cc: 'newChat.modelSelector.trigger.agent.claudeCode',
+  codex: 'newChat.modelSelector.trigger.agent.codex',
+  cursor: 'newChat.modelSelector.trigger.agent.cursor',
+  pi: 'newChat.modelSelector.trigger.agent.pi',
+};
+
 export interface ModelSelectorAgentIdentity {
-  vendorKey: 'cc' | 'codex' | 'pi';
+  vendorKey: 'cc' | 'codex' | 'cursor' | 'pi';
   /**
    * current = 已由会话/runtime 元数据确认的当前 Agent；
    * pending = 已登记、将在下一条消息应用的切换目标。
@@ -516,8 +526,8 @@ export function resolveModelSelectorAgentIdentity(
   runtimeAgentKind: AgentKind | null | undefined,
   pendingTarget: AgentKind | null | undefined,
 ): ModelSelectorAgentIdentity | undefined {
-  const toVendorKey = (kind: AgentKind): 'cc' | 'codex' | 'pi' =>
-    kind === 'codex' ? 'codex' : kind === 'pi' ? 'pi' : 'cc';
+  const toVendorKey = (kind: AgentKind): 'cc' | 'codex' | 'cursor' | 'pi' =>
+    kind === 'codex' ? 'codex' : kind === 'cursor' ? 'cursor' : kind === 'pi' ? 'pi' : 'cc';
   if (pendingTarget) {
     return {
       vendorKey: toVendorKey(pendingTarget),
@@ -566,7 +576,7 @@ interface ModelSelectorProps {
   /** 非选中模型行的 effort/fast 全局预设读写器(按本机 / 被控设备隔离)。 */
   modelMemory?: ModelMemoryAccessors;
   /** When provided, only models with this vendorKey are shown in the dropdown. */
-  vendorKey?: 'cc' | 'codex' | 'pi';
+  vendorKey?: 'cc' | 'codex' | 'cursor' | 'pi';
   /**
    * 已创建会话的 trigger 同时展示 Agent 与模型，避免 Claude Code 使用 OpenAI 模型时
    * 只看来源图标而误判成 Codex。必须由权威 session/runtime 身份或明确切换 intent 提供，
@@ -644,11 +654,11 @@ interface ModelSelectorProps {
    * device-link / SSH 远程不传(v1 不支持切换)。
    */
   agentSwitch?: {
-    currentVendor: 'cc' | 'codex' | 'pi';
+    currentVendor: 'cc' | 'codex' | 'cursor' | 'pi';
     /** 进入非当前 Agent 浏览态前确认；false 时保持原分段，什么都不改。 */
     confirmBrowseSwitch?: () => Promise<boolean>;
     onSwitch: (
-      targetAgentKind: 'claude-code' | 'codex' | 'pi',
+      targetAgentKind: AgentKind,
       modelId: string,
       providerId: string | null,
     ) => void | Promise<void>;
@@ -663,7 +673,7 @@ interface ModelSelectorContentProps {
   fastMode?: boolean;
   onFastModeChange?: (enabled: boolean) => void | Promise<void>;
   modelMemory?: ModelMemoryAccessors;
-  vendorKey?: 'cc' | 'codex' | 'pi';
+  vendorKey?: 'cc' | 'codex' | 'cursor' | 'pi';
   /** device-link 远程会话所属被控端 id(列被控端模型)。 */
   deviceId?: string;
   /** SSH 远程会话隐藏订阅直连模型(语义同 ModelSelectorProps 同名字段)。 */
@@ -714,10 +724,10 @@ interface ModelSelectorContentProps {
   fluidWidth?: boolean;
   /** 语义同 ModelSelectorProps.agentSwitch(显式两步引擎切换)。 */
   agentSwitch?: {
-    currentVendor: 'cc' | 'codex' | 'pi';
+    currentVendor: 'cc' | 'codex' | 'cursor' | 'pi';
     confirmBrowseSwitch?: () => Promise<boolean>;
     onSwitch: (
-      targetAgentKind: 'claude-code' | 'codex' | 'pi',
+      targetAgentKind: AgentKind,
       modelId: string,
       providerId: string | null,
     ) => void | Promise<void>;
@@ -738,9 +748,10 @@ interface ModelSelectorContentProps {
   interactionDisabled?: boolean;
 }
 
-function vendorKeyToAgentKind(v?: 'cc' | 'codex' | 'pi'): AgentKind | null {
+function vendorKeyToAgentKind(v?: 'cc' | 'codex' | 'cursor' | 'pi'): AgentKind | null {
   if (v === 'cc') return 'claude-code';
   if (v === 'codex') return 'codex';
+  if (v === 'cursor') return 'cursor';
   if (v === 'pi') return 'pi';
   return null;
 }
@@ -865,11 +876,11 @@ function ModelSelectorContentView({
   const modelTagDensity = modelTagDensityForWidth(paneWidth ?? (fluidWidth ? null : 320));
   // session-agent-switch:两步式引擎切换的浏览态。browseVendor 初始 = 会话当前引擎;
   // 切到另一家 tab 只是「浏览目标引擎的模型」,选中模型行才真正触发切换事务。
-  const [browseVendor, setBrowseVendor] = useState<'cc' | 'codex' | 'pi'>(
-    agentSwitch?.currentVendor ?? vendorKey ?? 'cc',
+  const [browseVendor, setBrowseVendor] = useState<'cc' | 'codex' | 'cursor' | 'pi'>(
+    agentSwitch?.currentVendor ?? (vendorKey === 'codex' ? 'codex' : vendorKey === 'cursor' ? 'cursor' : vendorKey === 'pi' ? 'pi' : 'cc'),
   );
   const browseSwitchPendingRef = useRef(false);
-  const handleBrowseVendorChange = async (next: 'cc' | 'codex' | 'pi') => {
+  const handleBrowseVendorChange = async (next: 'cc' | 'codex' | 'cursor' | 'pi') => {
     if (interactionDisabled || next === browseVendor || browseSwitchPendingRef.current) return;
     // 返回当前引擎（含已有意图时浏览原引擎准备撤销）不需要确认；只有从
     // currentVendor 进入另一 Agent 浏览态才调用上层风险确认。确认前绝不翻分段。
@@ -892,9 +903,15 @@ function ModelSelectorContentView({
     ? vendorKeyToAgentKind(browseVendor)
     : vendorKeyToAgentKind(vendorKey);
   const browseTargetLabel =
-    browseVendor === 'codex' ? 'Codex' : browseVendor === 'pi' ? 'Pi' : 'Claude Code';
+    browseVendor === 'codex'
+      ? 'Codex'
+      : browseVendor === 'cursor'
+        ? 'Cursor'
+        : browseVendor === 'pi'
+          ? 'Pi'
+          : 'Claude Code';
   const enqueueAgentSwitch = (
-    targetAgentKind: 'claude-code' | 'codex' | 'pi',
+    targetAgentKind: AgentKind,
     targetModelId: string,
     targetProviderId: string | null,
   ) => {
@@ -904,9 +921,10 @@ function ModelSelectorContentView({
     // 错误地串在一起，并在回调尚未启动时留下可发送窗口。
     void agentSwitch.onSwitch(targetAgentKind, targetModelId, targetProviderId);
   };
-  // 同时拉三个 agent —— vendorKey 不传时把三边模型一起展示。hooks 必须按固定顺序调用。
+  // 同时拉多个 agent —— vendorKey 不传时把多方模型一起展示。hooks 必须按固定顺序调用。
   const cc = useAgentCapabilities('claude-code', deviceId);
   const codex = useAgentCapabilities('codex', deviceId);
+  const cursor = useAgentCapabilities('cursor', deviceId);
   const pi = useAgentCapabilities('pi', deviceId);
   // 本机折扣 GPT 仍按本机 API key gate；device-link 必须只看被控端 provider 状态。
   // 旧被控端不支持 provider:list 时按远端 capabilities 退化，不得误用控制端 key。
@@ -1047,6 +1065,7 @@ function ModelSelectorContentView({
         providers,
         deviceCcModels: cc.capabilities?.availableModels ?? [],
         deviceCodexModels: codex.capabilities?.availableModels ?? [],
+        deviceCursorModels: cursor.capabilities?.availableModels ?? [],
         devicePiModels: pi.capabilities?.availableModels ?? [],
         excludeSubscriptionDirect,
         excludeChatBridgedCodex,
@@ -1057,6 +1076,7 @@ function ModelSelectorContentView({
       providers,
       cc.capabilities,
       codex.capabilities,
+      cursor.capabilities,
       pi.capabilities,
       excludeSubscriptionDirect,
       excludeChatBridgedCodex,
@@ -1088,11 +1108,13 @@ function ModelSelectorContentView({
         ? (cc.capabilities?.effortLevels ?? [])
         : currentAgentKind === 'codex'
           ? (codex.capabilities?.effortLevels ?? [])
-          : currentAgentKind === 'pi'
-            ? (pi.capabilities?.effortLevels ?? [])
-            : [];
+          : currentAgentKind === 'cursor'
+            ? (cursor.capabilities?.effortLevels ?? [])
+            : currentAgentKind === 'pi'
+              ? (pi.capabilities?.effortLevels ?? [])
+              : [];
     return new Map(levels.map((e) => [e.id, e.displayName]));
-  }, [currentAgentKind, cc.capabilities, codex.capabilities, pi.capabilities]);
+  }, [currentAgentKind, cc.capabilities, codex.capabilities, cursor.capabilities, pi.capabilities]);
   // 档名多语言:i18n 词表(effortLevels.*) → 模型级 effortDisplayNames →
   // capabilities displayName(未知档兜底) → 原 id。
   const effortLabelFor = (m: RowModel, e: Effort) => modelEffortLabel(t, m, e, effortMeta.get(e));
@@ -1101,9 +1123,10 @@ function ModelSelectorContentView({
   const hasFastModeCap = useMemo(() => {
     if (currentAgentKind === 'claude-code') return !!cc.capabilities?.hasFastMode;
     if (currentAgentKind === 'codex') return !!codex.capabilities?.hasFastMode;
+    if (currentAgentKind === 'cursor') return !!cursor.capabilities?.hasFastMode;
     if (currentAgentKind === 'pi') return !!pi.capabilities?.hasFastMode;
     return false;
-  }, [currentAgentKind, cc.capabilities, codex.capabilities, pi.capabilities]);
+  }, [currentAgentKind, cc.capabilities, codex.capabilities, cursor.capabilities, pi.capabilities]);
   // ── 来源(供应商)栏 ──────────────────────────────────────────────────────
   // 本机 + device-link 远程会话都支持来源分段:providers 已按 deviceId 切到被控端目录,
   // 远程切来源经隧道 set-model(providerId)生效(见 ChatInput.handleProviderChange 的远程分支)。
@@ -1167,9 +1190,13 @@ function ModelSelectorContentView({
   // 可能指向 suspended 来源(实际路由口径),connected 里查不到会误判 Fast 不可用。
   const fastEditable = (providerId: string | null, m: RowModel): boolean => {
     if (!onFastModeChange || !hasFastModeCap || !currentAgentKind) return false;
+    // Cursor 无 Cindy provider；以目录 descriptors.supportsFastMode 为准。
+    if (currentAgentKind === 'cursor') return m.supportsFastMode === true;
     const provider = providers.find((p) => p.id === (providerId ?? activeSourceId));
     return modelSupportsFastMode(provider, m.id, currentAgentKind);
   };
+
+  // Thinking 已去掉可选 UI（spec #14）：Cursor 有 thinking option 时由 runtime 强制开。
 
   // ── 模型单价 ─────────────────────────────────────────────────────────────
   // XD 实际报价与非 XD Catalog 参考价是两份独立快照。这里只按行来源选择快照，
@@ -1215,6 +1242,8 @@ function ModelSelectorContentView({
         : t('newChat.modelSelector.subscriptionDirectDisabled.generic');
   };
   const modelDisabledOf = (provider: ProviderView | null, id: string): boolean => {
+    // Cursor 订阅直连，不经 Cindy provider 连接态门控。
+    if (currentAgentKind === 'cursor') return false;
     if (!deviceId) {
       if (subscriptionDirectDisabledReason(id)) return true;
       // codex/ 的本机 key gate 只属于 XD 网关折扣路由。自定义(user)供应商目录里的
@@ -1336,10 +1365,26 @@ function ModelSelectorContentView({
     // 浏览目标引擎态的 flat 兜底(目标引擎 0 已连接来源时 sections 为 null)同样
     // 只列已连接来源提供的模型,与分段口径一致——未连接来源的模型切过去后来源
     // 解析不到(trigger 无 icon)、发送必失败。非浏览态保持历史行为不变。
+    // Cursor 无 Cindy provider 目录:sourcesForModel 恒空,若仍按来源过滤会把
+    // capabilities 列表滤成「没有匹配的模型」(切到 Cursor tab 空态)。跳过该过滤,
+    // 下面 cursor 分支按 isModelEnabled 收口可见集。
     const base =
-      browsing && agentKind
+      browsing && agentKind && agentKind !== 'cursor'
         ? visibleModels.filter((m) => sourcesForModel(providers, m.id, agentKind).length > 0)
         : visibleModels;
+    // Cursor 无 Cindy provider 目录；capabilities 列表即最终可见集。
+    // 可见性 override 仍要过滤:设置页关掉的模型不进选择器(spec #21 / #26)。
+    // 当前会话正用着的模型即使被关也保留(与其它 agent 准入口径一致:按 id 查已选
+    // 元数据不参与过滤)。device-link 远程 cursor 段维持 fail-open(本票范围外)。
+    if (currentAgentKind === 'cursor') {
+      const cursorVisible = deviceId
+        ? base
+        : base.filter((m) => m.id === modelId || isModelEnabled('cursor', 'cursor', m));
+      if (!q) return cursorVisible;
+      return cursorVisible.filter(
+        (m) => m.displayName.toLowerCase().includes(q) || m.id.toLowerCase().includes(q),
+      );
+    }
     // 本地 flat 入口（子代理模型、Worker 等）没有 provider sections 帮忙过滤，必须显式复用
     // 会话选择器 / IM `/model` 的同一套「已连接来源 × 用户可见模型」规则。否则设置页里
     // 已忽略或仅由断开来源提供的目录项仍会被列出来，选中后没有可用路由。
@@ -1383,6 +1428,7 @@ function ModelSelectorContentView({
     query,
     browsing,
     agentKind,
+    currentAgentKind,
     providers,
     deviceId,
     isCurrentModelHidden,
@@ -1397,13 +1443,19 @@ function ModelSelectorContentView({
   const isSelectedRow = (providerId: string | null, id: string): boolean =>
     !browsing && id === modelId && (providerId === null || providerId === activeSourceId);
 
+  // 记忆槽来源:与路由来源分离。Cursor 无 Cindy provider(行 providerId 恒 null),经合成槽
+  // 仍能按 (agent, model) 读写全局预设;其它 agent 的 flat 行仍无记忆(返回 null)。
+  const memorySourceOf = (providerId: string | null): string | null =>
+    modelMemorySourceId(currentAgentKind, providerId);
+
   // 行内 Fast 闪电:选中行 → 调用方 fastMode(会话 = live;首页草稿 = 全局预设派生);其余行 → (agent,model) 全局预设(本机 =
   // providerModelMemory / 远程 = 被控端镜像),并由 fastEditable 按当前来源 capability 过滤。
   const fastOnOf = (providerId: string | null, m: RowModel): boolean => {
     if (!fastEditable(providerId, m)) return false;
     if (isSelectedRow(providerId, m.id)) return fastMode;
-    if (!currentAgentKind || !providerId) return false;
-    return modelMemory?.getFast(currentAgentKind, providerId, m.id) ?? false;
+    const memoryId = memorySourceOf(providerId);
+    if (!currentAgentKind || !memoryId) return false;
+    return modelMemory?.getFast(currentAgentKind, memoryId, m.id) ?? false;
   };
 
   // 某 (供应商, 模型) 行当前要展示的 effort(选中 → 调用方值;否则全局模型预设 → 模型默认)。
@@ -1413,9 +1465,10 @@ function ModelSelectorContentView({
     if (isSelectedRow(providerId, m.id)) {
       return m.efforts.includes(effort) ? effort : (m.defaultEffort ?? m.efforts[0]);
     }
+    const memoryId = memorySourceOf(providerId);
     const pe =
-      currentAgentKind && providerId
-        ? modelMemory?.getEffort(currentAgentKind, providerId, m.id)
+      currentAgentKind && memoryId
+        ? modelMemory?.getEffort(currentAgentKind, memoryId, m.id)
         : undefined;
     const cand = pe ?? m.defaultEffort ?? undefined;
     return cand && m.efforts.includes(cand) ? cand : (m.defaultEffort ?? m.efforts[0] ?? null);
@@ -1476,7 +1529,7 @@ function ModelSelectorContentView({
     // trigger 来源 icon / 路由立即正确(null = flat 退化行,交给默认路由)。
     if (browsing && agentSwitch) {
       enqueueAgentSwitch(
-        browseVendor === 'codex' ? 'codex' : browseVendor === 'pi' ? 'pi' : 'claude-code',
+        vendorKeyToAgentKind(browseVendor) ?? 'claude-code',
         id,
         providerId,
       );
@@ -1563,13 +1616,15 @@ function ModelSelectorContentView({
     editing.modelId === modelId &&
     (editing.providerId === null || editing.providerId === activeSourceId);
   const editingProviderId = editing?.providerId ?? null;
+  // 记忆槽 = 真实来源,或 Cursor 的合成槽(cursor 无 Cindy provider 维度)。
+  const editingMemorySourceId = memorySourceOf(editingProviderId);
   // 当前行可编辑配置的边界:选中行写实时状态;非选中供应商行可把 effort 与
   // provider/model 一次性交给调用方。若调用方另传 modelMemory,同时允许编辑该模型的
   // 全局 effort/Fast 预设。flat 非选中行没有来源 capability / 原子选择上下文,仍只展示信息。
   const inactiveProviderCanSelectEffort =
     !editingIsActive && !!editingProviderId && !!onProviderChange;
   const inactiveProviderHasMemory =
-    !editingIsActive && !!modelMemory && !!currentAgentKind && !!editingProviderId;
+    !editingIsActive && !!modelMemory && !!currentAgentKind && !!editingMemorySourceId;
   const canConfigure =
     !interactionDisabled &&
     configurationEnabled &&
@@ -1589,8 +1644,8 @@ function ModelSelectorContentView({
   const editFastValue: boolean = editingModel
     ? editingIsActive
       ? fastMode
-      : ((currentAgentKind && editingProviderId
-          ? modelMemory?.getFast(currentAgentKind, editingProviderId, editingModel.id)
+      : ((currentAgentKind && editingMemorySourceId
+          ? modelMemory?.getFast(currentAgentKind, editingMemorySourceId, editingModel.id)
           : undefined) ?? false)
     : false;
 
@@ -1599,11 +1654,11 @@ function ModelSelectorContentView({
     if (editingIsActive) {
       onEffortChange(e);
     } else {
-      // 非选中行:若入口提供模型记忆则同步预设；无论是否有记忆,都把本次明确点击的
-      // effort 直接交给选择事务,一次落定 model/provider/effort。Scheduler / 设置页因此
-      // 无需为了显示同一张配置卡而伪造或复制一套 effort 状态。
-      if (currentAgentKind && editing.providerId) {
-        modelMemory?.setEffort(currentAgentKind, editing.providerId, editingModel.id, e);
+      // 非选中行:若入口提供模型记忆则同步预设(来源用记忆槽,Cursor 走合成槽);无论是否
+      // 有记忆,都把本次明确点击的 effort 直接交给选择事务,一次落定 model/provider/effort。
+      // Scheduler / 设置页因此无需为了显示同一张配置卡而伪造或复制一套 effort 状态。
+      if (currentAgentKind && editingMemorySourceId) {
+        modelMemory?.setEffort(currentAgentKind, editingMemorySourceId, editingModel.id, e);
       }
       bump();
       // 配置点击同时选中模型，但保留模型选择窗口，方便继续比较和调整。
@@ -1617,10 +1672,9 @@ function ModelSelectorContentView({
       // ChatInput 同步草稿默认;这里不能预写 modelMemory,否则 device-link 远程失败会污染被控端草稿。
       void onFastModeChange?.(enabled);
     } else {
-      // 非选中行:先写模型级全局预设,再选中这行。模型切换恢复 Fast 时会读到本次点击值。
-      // 来源参数用于 capability / device-link 写穿路由。
-      if (currentAgentKind && editing.providerId) {
-        modelMemory?.setFast(currentAgentKind, editing.providerId, editingModel.id, enabled);
+      // 非选中行:只写该设备的模型级全局预设;来源参数用于 capability / device-link 写穿路由。
+      if (currentAgentKind && editingMemorySourceId) {
+        modelMemory?.setFast(currentAgentKind, editingMemorySourceId, editingModel.id, enabled);
       }
       // 配置点击同时选中模型，但保留模型选择窗口，方便继续比较和调整。
       handleRowSelect(editing.providerId, editingModel.id, false);
@@ -1960,7 +2014,7 @@ function ModelSelectorContentView({
             )}
           >
             <span className="flex min-w-0 flex-1 items-center gap-2.5">
-              {provider && (
+              {provider ? (
                 <ModelIconMark
                   icon={model.icon}
                   providerId={provider.id}
@@ -1971,7 +2025,14 @@ function ModelSelectorContentView({
                   withMargin={false}
                   dense
                 />
-              )}
+              ) : currentAgentKind === 'cursor' ? (
+                // Cursor 无 Cindy provider 目录；flat 列表用 CursorMark 作身份前缀。
+                // 未知 agent 不猜图标（保持无前缀 = 历史客户端视觉）。
+                <CursorMark
+                  size={12.3}
+                  className="shrink-0 text-[var(--text-secondary)]"
+                />
+              ) : null}
               <span className="flex min-w-0 flex-1 items-center gap-1.5">
                 <span className="flex min-w-0 flex-1 items-center gap-1.5">
                   <span className="truncate text-14 font-medium leading-5 text-[var(--model-item-text)]">
@@ -2050,8 +2111,10 @@ function ModelSelectorContentView({
 
   // 0 个可连来源:整张引导卡取代列表(仅 providers 加载完成后判,避免拉取期闪空态)。
   // device-link 远程会话不显示该引导(控制端无法替被控端连来源)→ 退化为扁平兜底列表。
+  // Cursor 无 Cindy provider，直接走 capabilities 扁平列表，永不进此空态。
   const emptyState =
     sourcesEnabled &&
+    currentAgentKind !== 'cursor' &&
     !deviceId &&
     currentAgentKind &&
     !providersLoading &&
@@ -2433,6 +2496,7 @@ export function ModelSelector({
   const agentKind = vendorKeyToAgentKind(vendorKey);
   const cc = useAgentCapabilities('claude-code', deviceId);
   const codex = useAgentCapabilities('codex', deviceId);
+  const cursor = useAgentCapabilities('cursor', deviceId);
   const pi = useAgentCapabilities('pi', deviceId);
   const gatewayPricing = useGatewayModelPricing();
   const referencePricing = useReferenceModelPricing();
@@ -2459,6 +2523,7 @@ export function ModelSelector({
         providers,
         deviceCcModels: cc.capabilities?.availableModels ?? [],
         deviceCodexModels: codex.capabilities?.availableModels ?? [],
+        deviceCursorModels: cursor.capabilities?.availableModels ?? [],
         devicePiModels: pi.capabilities?.availableModels ?? [],
         excludeSubscriptionDirect,
         excludeChatBridgedCodex,
@@ -2469,6 +2534,7 @@ export function ModelSelector({
       providers,
       cc.capabilities,
       codex.capabilities,
+      cursor.capabilities,
       pi.capabilities,
       excludeSubscriptionDirect,
       excludeChatBridgedCodex,
@@ -2491,11 +2557,7 @@ export function ModelSelector({
       t('newChat.modelSelector.trigger.placeholder'));
   const agentName =
     agentIdentity && !fallbackOption?.active
-      ? agentIdentity.vendorKey === 'cc'
-        ? t('newChat.modelSelector.trigger.agent.claudeCode')
-        : agentIdentity.vendorKey === 'pi'
-          ? t('newChat.modelSelector.trigger.agent.pi')
-          : t('newChat.modelSelector.trigger.agent.codex')
+      ? t(AGENT_IDENTITY_LABEL_KEY[agentIdentity.vendorKey])
       : null;
   const agentIdentityLabel =
     agentName && agentIdentity?.state === 'pending'
@@ -2534,9 +2596,11 @@ export function ModelSelector({
         ? (cc.capabilities?.effortLevels ?? [])
         : currentAgentKind === 'codex'
           ? (codex.capabilities?.effortLevels ?? [])
-          : [];
+          : currentAgentKind === 'cursor'
+            ? (cursor.capabilities?.effortLevels ?? [])
+            : [];
     return new Map(levels.map((e) => [e.id, e.displayName]));
-  }, [currentAgentKind, cc.capabilities, codex.capabilities]);
+  }, [currentAgentKind, cc.capabilities, codex.capabilities, cursor.capabilities]);
   // 档名多语言(与列表侧 effortLabelFor 同序):i18n 词表 → 模型级覆盖 → capabilities 英文名 → id。
   const labelOf = (e: Effort) => modelEffortLabel(t, currentModel, e, effortMeta.get(e));
 
@@ -2549,19 +2613,16 @@ export function ModelSelector({
   // 此模型”的供应商作兜底。
   const activeSourceId = useMemo<string | null>(
     () =>
-      currentAgentKind
-        ? (actualRoute ? actualSourceIdForModel : effectiveSourceIdForModel)(
-            providers,
-            currentProviderId,
-            modelId,
-            currentAgentKind,
-          )
+      currentAgentKind && currentAgentKind !== 'cursor'
+        ? (actualRoute ? actualSourceIdForModel : effectiveSourceIdForModel)(providers, currentProviderId, modelId, currentAgentKind)
         : null,
     [providers, currentAgentKind, currentProviderId, modelId, actualRoute],
   );
   // 空態:当前模型一个已连接来源都没有 → trigger 改「连接来源」CTA。
   // device-link 远程会话不走此 CTA(控制端无法替被控端连来源;hasConnectedSource 是本机口径)。
+  // Cursor 无 Cindy provider 连接态，永不进此 CTA。
   const noSource =
+    currentAgentKind !== 'cursor' &&
     !!onProviderChange &&
     !!onNavigateToProviders &&
     !deviceId &&
@@ -2791,8 +2852,9 @@ export function ModelSelector({
             <CircleAlert size={dense ? 12 : 13} className="shrink-0 text-[var(--error-fg)]" />
           )}
           {/* 图标统一规则:模型条目 icon(AI Gateway / 目录设定)优先,缺省回落
-                  当前真正路由的来源标(activeSourceId)——客户端不按 model id 猜厂牌。 */}
-          {activeSourceId && (
+                  当前真正路由的来源标(activeSourceId)——客户端不按 model id 猜厂牌。
+                  Cursor 无供应商来源:用 CursorMark 作身份前缀。 */}
+          {activeSourceId ? (
             <ModelIconMark
               icon={triggerModelIcon}
               providerId={activeSourceId}
@@ -2803,7 +2865,17 @@ export function ModelSelector({
                 isCreateAgentVariant ? 'text-[var(--create-agent-control-icon)]' : undefined
               }
             />
-          )}
+          ) : currentAgentKind === 'cursor' || agentIdentity?.vendorKey === 'cursor' ? (
+            <CursorMark
+              size={isCreateAgentVariant ? 11 : 13}
+              className={cn(
+                'mr-0.5 shrink-0',
+                isCreateAgentVariant
+                  ? 'text-[var(--create-agent-control-icon)]'
+                  : 'text-[var(--text-primary)]',
+              )}
+            />
+          ) : null}
           {agentIdentityPrefix}
           <span
             className={cn(

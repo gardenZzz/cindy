@@ -6,6 +6,8 @@
  *     「已连接 / 已添加」后出现;底部「＋ 添加供应商」打开三步向导。未连接的内置
  *     渠道不再常驻占行 —— 入口在向导目录里,另有「检测建议」组:本机装了
  *     Claude Code / Codex CLI 时置一条建议行,点击直达该渠道的授权步。
+ *     内置行之后是 Cursor 伪行(常驻,见 CursorDetail 头注释:它不是目录里的可路由
+ *     供应商,只是把本机 cursor-agent 的安装/登录收进同一个列表)。
  *   - 右栏:选中供应商的详情 = 鉴权头部(复用既有各 Row 的连接/断开/授权逻辑,
  *     **不发明新的连接 IPC**)+ 统一模型可见性列表(UnifiedModelList:并集 +
  *     单开关同写双 agent,「分别调整」兜底,见该组件头注释)。
@@ -36,11 +38,14 @@ import {
 
 import { cn } from '@/lib/utils';
 import { useProviders } from '@/hooks/useProviders';
+import { useAgentCapabilities } from '@/hooks/useAgentCapabilities';
 import { isChatGptConnectionConnected, useCodexAuth } from '@/hooks/useCodexAuth';
 import { useApiKey } from '@/hooks/useApiKey';
 import { useModelAccessStatus } from '@/hooks/useModelAccessStatus';
 import { useModelAccessCreditUsage } from '@/hooks/useModelAccessCreditUsage';
 import { useReducedMotion } from '@/hooks/useReducedMotion';
+import { getCursorAvailability, setCursorAvailability } from '@/state/cursorAvailability';
+import { setCursorAuthState } from '@/state/cursorAuthState';
 import { useConfirmDialog } from '@/components/ui/confirm-dialog-provider';
 import { useSignInToCindy } from '@/hooks/useSignInToCindy';
 import { useProviderOAuthDeviceCode } from '@/hooks/useProviderOAuthDeviceCode';
@@ -67,6 +72,7 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
+import { extractIpcError } from '@/utils/ipcError';
 import { BILLING_CURRENCY, formatBillingAmount } from '@/features/billing/money';
 import { canAccessBillingSettings } from './billingVisibility';
 import { resolveXdAssetModuleState } from './providerAssetModule';
@@ -75,7 +81,9 @@ import { AddProviderWizard, type WizardEntry } from './AddProviderWizard';
 import { OAuthDeviceCodeCard } from './OAuthDeviceCodeCard';
 import { SettingsTextInput } from './SettingsTextInput';
 import { buildUnionRows, UnifiedModelList } from './UnifiedModelList';
+import { CursorModelList } from './CursorModelList';
 import { AnthropicMark } from '@/components/icons/AnthropicMark';
+import { CursorMark } from '@/components/icons/CursorMark';
 import { OpenAIMark } from '@/components/icons/OpenAIMark';
 import { XDIncMark } from '@/components/icons/XDIncMark';
 import { hasProviderLogo, ProviderLogoMark } from '@/components/icons/ProviderLogoMark';
@@ -260,17 +268,20 @@ function RowIconButton({
   icon,
   label,
   onClick,
+  disabled,
 }: {
   icon: ReactNode;
   label: string;
   onClick: () => void;
+  disabled?: boolean;
 }) {
   return (
     <button
       type="button"
       onClick={onClick}
+      disabled={disabled}
       aria-label={label}
-      className="flex h-7 w-7 items-center justify-center rounded-full transition-colors hover:bg-[var(--surface-hover)]"
+      className="flex h-7 w-7 items-center justify-center rounded-full transition-colors hover:bg-[var(--surface-hover)] disabled:opacity-50"
       style={{ color: 'var(--text-tertiary)' }}
     >
       {icon}
@@ -291,6 +302,7 @@ function DetailHeader({
   provider,
   detail,
   badge,
+  modelCount: modelCountOverride,
   menuItems,
   menuFooter,
   assetModule,
@@ -302,6 +314,8 @@ function DetailHeader({
   provider?: ProviderView;
   detail?: ReactNode;
   badge?: ReactNode;
+  /** 非 ProviderView 渠道(如 Cursor)直接给数,跳过 buildUnionRows 推导。 */
+  modelCount?: number | null;
   /** 供应商专属的低频动作，置于共用「···」菜单顶部（不另开第二个溢出菜单）。 */
   menuItems?: ReactNode;
   /** 菜单末尾的只读信息行（如脱敏 key），自带一条分隔线。 */
@@ -315,8 +329,13 @@ function DetailHeader({
   const { t } = useTranslation();
   const hasModels = !!provider && providerHasModels(provider);
   const modelCount = useMemo(
-    () => (hasModels && provider ? buildUnionRows(provider).length : null),
-    [hasModels, provider],
+    () =>
+      modelCountOverride !== undefined
+        ? modelCountOverride
+        : hasModels && provider
+          ? buildUnionRows(provider).length
+          : null,
+    [modelCountOverride, hasModels, provider],
   );
   const subscriptionProduct =
     provider?.access?.kind === 'subscription' ? provider.access.product : null;
@@ -1474,6 +1493,513 @@ function CustomProviderHeader({
 }
 
 // ---------------------------------------------------------------------------
+// Cursor —— 设置页伪行:本机 cursor-agent 探测 + 登录态。
+//
+// Cursor **不是** model-providers 目录里的可路由供应商(ADR 0001:走 ACP 本机
+// CLI),所以它没有 ProviderView:详情只讲「装没装、登没登」,不给停用/逐模型可见性/
+// 刷新内置模型这些只对真实供应商成立的动作(DetailHeader 不传 provider 即为此)。
+// 未装:官方安装引导(确认后才 IPC 执行)。登录用 NO_OPEN_BROWSER 取 URL,由用户自愿
+// 「打开」或「复制」——不强制拉起浏览器。凭证只由 cursor CLI / Keychain 管理,这里
+// 不读写任何凭证材料。
+// ---------------------------------------------------------------------------
+
+/** 左栏伪行的选中 id。与 agentKind 对齐,且不与内置 provider id 冲突。 */
+const CURSOR_ROW_ID = 'cursor';
+
+/** 与 main 侧 CURSOR_AGENT_INSTALL_COMMAND 展示口径一致(确认框文案插值用)。 */
+const CURSOR_INSTALL_COMMAND_DISPLAY = 'curl -fsSL https://cursor.com/install | bash';
+
+type CursorProbeState = { kind: 'loading' } | { kind: 'installed' } | { kind: 'missing' };
+
+type CursorAuthView =
+  | { kind: 'loading' }
+  | { kind: 'authenticated'; identity?: string }
+  | { kind: 'unauthenticated' }
+  | { kind: 'login-pending'; loginUrl: string | null };
+
+const LOGIN_URL_RE = /https:\/\/[^\s<>"']+/i;
+
+function extractLoginUrl(detail: string): string | null {
+  const match = detail.match(LOGIN_URL_RE);
+  if (!match) return null;
+  return match[0].replace(/[.,;:!?)]+$/, '');
+}
+
+function CursorRow({ selected, onSelect }: { selected: boolean; onSelect: () => void }) {
+  const { t } = useTranslation();
+  // 与 CursorModelList 同源(useAgentCapabilities 有模块级缓存,多处挂载只拉一次);
+  // 未探测过时 availableModels 为空 → 计数为 0,按「无可报数」不显示,对齐 ListRow 的 null 语义。
+  const { capabilities } = useAgentCapabilities('cursor');
+  const modelCount = capabilities?.availableModels.length ?? null;
+  return (
+    <button
+      type="button"
+      onClick={onSelect}
+      aria-current={selected}
+      aria-label={t('settings.providers.cursor.title')}
+      className={cn(
+        'flex w-full items-center gap-2.5 rounded-lg px-2.5 py-2 text-left transition-colors',
+        !selected && 'hover:bg-[var(--surface-hover)]',
+      )}
+      style={selected ? { backgroundColor: 'var(--surface-chip)' } : undefined}
+    >
+      <div
+        className="flex h-7 w-7 shrink-0 items-center justify-center rounded-md"
+        style={{
+          backgroundColor: 'var(--settings-integration-avatar-bg)',
+          border: '1px solid var(--settings-integration-avatar-border)',
+          color: 'var(--settings-integration-avatar-icon)',
+        }}
+      >
+        <CursorMark size={14} />
+      </div>
+      <span
+        className="min-w-0 flex-1 truncate text-13 font-medium"
+        style={{ color: 'var(--settings-section-title)' }}
+      >
+        {t('settings.providers.cursor.title')}
+      </span>
+      {modelCount !== null && modelCount > 0 && (
+        <span className="shrink-0 text-11 tabular-nums" style={{ color: 'var(--text-tertiary)' }}>
+          {t('settings.providers.models.modelCount', { count: modelCount })}
+        </span>
+      )}
+      {/* ponytail: 圆点恒绿,不按探测态着色 —— 探测状态在详情层,row 层为一个圆点
+          铺一条状态线不值;装没装/登没登点进详情一眼看到(2026-07-31 用户定稿)。 */}
+      <span
+        className="h-1.5 w-1.5 shrink-0 rounded-full"
+        style={{ backgroundColor: 'var(--remote-status-ready)' }}
+      />
+    </button>
+  );
+}
+
+function CursorDetail() {
+  const { t } = useTranslation();
+  const { confirm } = useConfirmDialog();
+  const [probe, setProbe] = useState<CursorProbeState>({ kind: 'loading' });
+  const [auth, setAuth] = useState<CursorAuthView>({ kind: 'loading' });
+  const [installing, setInstalling] = useState(false);
+  const [authBusy, setAuthBusy] = useState(false);
+  // 刷新模型编排态(spec #21 / #28):进度 / 取消 / 进行中互斥。
+  const [refreshState, setRefreshState] = useState<{
+    running: boolean;
+    done: number;
+    total: number;
+  }>({ running: false, done: 0, total: 0 });
+  const platform = window.electronAPI.platform;
+  const installSupported = platform === 'darwin' || platform === 'linux';
+  // 详情头计数 chip:与 CursorModelList 同源(hook 有模块级缓存);未探测过(=0)不显示,
+  // 对齐 ProviderView 渠道 modelCount===null 不渲染 chip 的语义。Auto 是合成兜底行,不计。
+  const { capabilities: cursorCaps } = useAgentCapabilities('cursor');
+  const cursorModelCount = (cursorCaps?.availableModels.length ?? 0) > 0
+    ? cursorCaps!.availableModels.length
+    : null;
+
+  const refreshAuth = useCallback(async () => {
+    const authApi = window.electronAPI?.maker?.auth;
+    if (!authApi?.getState) {
+      setCursorAuthState(false);
+      setAuth({ kind: 'unauthenticated' });
+      return;
+    }
+    try {
+      const state = await authApi.getState(CURSOR_ROW_ID);
+      setCursorAuthState(state.authenticated);
+      setAuth(
+        state.authenticated
+          ? { kind: 'authenticated', identity: state.identity }
+          : { kind: 'unauthenticated' },
+      );
+    } catch {
+      // Agent 未注册(极少见:探测说已装但 Maker 未挂 Cursor)→ 按未登录降级。
+      setCursorAuthState(false);
+      setAuth({ kind: 'unauthenticated' });
+    }
+  }, []);
+
+  const handleRefreshModels = useCallback(async () => {
+    if (refreshState.running) return;
+    const api = window.electronAPI?.maker?.agent;
+    if (!api?.refreshCursorModels) return;
+    setRefreshState({ running: true, done: 0, total: 0 });
+    try {
+      const result = await api.refreshCursorModels();
+      if (!result.started) {
+        // 进行中互斥:再点无效(按钮本就禁用,此路径极少见)。
+        setRefreshState((prev) => ({ ...prev, running: true }));
+      }
+    } catch (err) {
+      setRefreshState({ running: false, done: 0, total: 0 });
+      const ipc = extractIpcError(err);
+      if (ipc?.code === 'UNSUPPORTED_CAPABILITY') {
+        toast.error(t('settings.providers.cursor.models.refreshUnavailableInstalled'));
+      } else {
+        toast.error(t('settings.providers.cursor.models.refreshFailed'));
+      }
+    }
+  }, [refreshState.running, t]);
+
+  const handleCancelRefresh = useCallback(async () => {
+    try {
+      await window.electronAPI?.maker?.agent?.cancelCursorModelRefresh?.();
+    } catch {
+      /* ignore */
+    }
+  }, []);
+
+  useEffect(() => {
+    const api = window.electronAPI?.maker?.agent;
+    if (!api?.onCursorModelRefreshProgress) return;
+    const off = api.onCursorModelRefreshProgress((progress) => {
+      setRefreshState({
+        running: progress.running,
+        done: progress.done,
+        total: progress.total,
+      });
+      if (!progress.running && progress.done === 0 && progress.total === 0) {
+        // 结束收口:不 toast(成功 / 取消 / 失败由目录变更 / 日志侧呈现)。
+      }
+    });
+    return () => off();
+  }, []);
+
+  const refresh = useCallback(
+    async (opts: { force?: boolean } = {}) => {
+      setProbe({ kind: 'loading' });
+      try {
+        // 读缓存还是强制重探：组件挂载/切换时读取已有缓存，用户显式点击「刷新/重新检查」传 force: true 强制重探
+        const status = { installed: await getCursorAvailability(opts.force ? { refresh: true } : {}) };
+        if (status.installed) {
+          setProbe({ kind: 'installed' });
+          await refreshAuth();
+        } else {
+          setProbe({ kind: 'missing' });
+          setAuth({ kind: 'loading' });
+        }
+      } catch {
+        // 探测失败按未安装降级展示引导,不弹全局错误(Cursor 可选)。
+        setProbe({ kind: 'missing' });
+      }
+    },
+    [refreshAuth],
+  );
+
+  useEffect(() => {
+    void refresh();
+  }, [refresh]);
+
+  useEffect(() => {
+    const authApi = window.electronAPI?.maker?.auth;
+    if (!authApi?.onStateChanged || !authApi?.onLoginProgress) return;
+    const offState = authApi.onStateChanged((payload) => {
+      if (payload.agentKind !== CURSOR_ROW_ID) return;
+      setCursorAuthState(payload.authenticated);
+      setAuth(
+        payload.authenticated
+          ? { kind: 'authenticated', identity: payload.identity }
+          : { kind: 'unauthenticated' },
+      );
+      setAuthBusy(false);
+    });
+    const offProgress = authApi.onLoginProgress((progress) => {
+      if (progress.agentKind !== CURSOR_ROW_ID) return;
+      const detail =
+        typeof (progress as { detail?: unknown }).detail === 'string'
+          ? (progress as { detail: string }).detail
+          : typeof (progress as { phase?: unknown }).phase === 'string'
+            ? (progress as { phase: string }).phase
+            : '';
+      const url = extractLoginUrl(detail);
+      setAuth((prev) => ({
+        kind: 'login-pending',
+        loginUrl: url ?? (prev.kind === 'login-pending' ? prev.loginUrl : null),
+      }));
+    });
+    return () => {
+      offState();
+      offProgress();
+    };
+  }, []);
+
+  const handleInstall = useCallback(async () => {
+    if (installing) return;
+    if (!installSupported) {
+      toast.error(t('settings.providers.cursor.unsupportedPlatform'));
+      return;
+    }
+    const ok = await confirm({
+      title: t('settings.providers.cursor.confirmTitle'),
+      description: t('settings.providers.cursor.confirmDescription', {
+        command: CURSOR_INSTALL_COMMAND_DISPLAY,
+      }),
+      confirmText: t('settings.providers.cursor.confirmInstall'),
+      cancelText: t('settings.providers.cursor.confirmCancel'),
+      autoFocusConfirm: false,
+    });
+    if (!ok) return;
+
+    setInstalling(true);
+    try {
+      const result = await window.electronAPI.maker.agent.installCursorAgent();
+      // 已知结果直写全局缓存:装完立刻让 New Maker / worker 面板露出 Cursor 段,不等重探。
+      setCursorAvailability(result.installed);
+      if (result.installed) {
+        setProbe({ kind: 'installed' });
+        toast.success(t('settings.providers.cursor.installSuccess'));
+        await refreshAuth();
+      } else {
+        setProbe({ kind: 'missing' });
+        toast.error(t('settings.providers.cursor.installNotDetected'));
+      }
+    } catch (err) {
+      const ipc = extractIpcError(err);
+      if (ipc?.code === 'UNSUPPORTED_CAPABILITY') {
+        toast.error(t('settings.providers.cursor.unsupportedPlatform'));
+      } else {
+        toast.error(t('settings.providers.cursor.installFailed'));
+      }
+      setProbe({ kind: 'missing' });
+    } finally {
+      setInstalling(false);
+    }
+  }, [confirm, installSupported, installing, refreshAuth, t]);
+
+  const handleLogin = useCallback(async () => {
+    if (authBusy) return;
+    setAuthBusy(true);
+    setAuth({ kind: 'login-pending', loginUrl: null });
+    try {
+      const state = await window.electronAPI.maker.auth.triggerLogin(CURSOR_ROW_ID);
+      if (state.authenticated) {
+        setAuth({ kind: 'authenticated', identity: state.identity });
+        toast.success(t('settings.providers.cursor.loginSuccess'));
+        // 登录成功后自动探一次目录(spec #21 / #29);人就在设置页,看得到进度。
+        void handleRefreshModels();
+      } else {
+        setAuth({ kind: 'unauthenticated' });
+        if (state.errorReason !== 'login_cancelled') {
+          toast.error(t('settings.providers.cursor.loginFailed'));
+        }
+      }
+    } catch {
+      setAuth({ kind: 'unauthenticated' });
+      toast.error(t('settings.providers.cursor.loginFailed'));
+    } finally {
+      setAuthBusy(false);
+    }
+  }, [authBusy, handleRefreshModels, t]);
+
+  const handleCancelLogin = useCallback(async () => {
+    try {
+      await window.electronAPI.maker.auth.cancelLogin(CURSOR_ROW_ID);
+    } catch {
+      /* ignore */
+    }
+    setAuthBusy(false);
+    setAuth({ kind: 'unauthenticated' });
+  }, []);
+
+  const handleLogout = useCallback(async () => {
+    const ok = await confirm({
+      title: t('settings.providers.cursor.logoutConfirmTitle'),
+      description: t('settings.providers.cursor.logoutConfirmDescription'),
+      confirmText: t('settings.providers.cursor.logoutConfirm'),
+      cancelText: t('settings.providers.cursor.confirmCancel'),
+    });
+    if (!ok) return;
+    setAuthBusy(true);
+    try {
+      await window.electronAPI.maker.auth.logout(CURSOR_ROW_ID);
+      setAuth({ kind: 'unauthenticated' });
+      toast.success(t('settings.providers.cursor.logoutSuccess'));
+    } catch {
+      toast.error(t('settings.providers.cursor.logoutFailed'));
+    } finally {
+      setAuthBusy(false);
+    }
+  }, [confirm, t]);
+
+  const loginUrl = auth.kind === 'login-pending' ? auth.loginUrl : null;
+
+  const handleCopyLoginUrl = useCallback(async () => {
+    if (!loginUrl) return;
+    try {
+      await navigator.clipboard.writeText(loginUrl);
+      toast.success(t('settings.providers.cursor.loginUrlCopied'));
+    } catch {
+      toast.error(t('settings.providers.cursor.loginUrlCopyFailed'));
+    }
+  }, [loginUrl, t]);
+
+  const handleOpenLoginUrl = useCallback(() => {
+    if (!loginUrl) return;
+    void window.electronAPI.openExternal(loginUrl);
+  }, [loginUrl]);
+
+  const installedDescription =
+    auth.kind === 'authenticated'
+      ? t('settings.providers.cursor.loggedInDescription', {
+          identity: auth.identity ?? t('settings.providers.cursor.loggedInUnknown'),
+        })
+      : auth.kind === 'login-pending'
+        ? t('settings.providers.cursor.loginPendingDescription')
+        : t('settings.providers.cursor.installedSignedOutDescription');
+
+  const action =
+    probe.kind === 'missing' && installSupported ? (
+      <PillButton
+        label={t(
+          installing ? 'settings.providers.cursor.installing' : 'settings.providers.cursor.installCta',
+        )}
+        onClick={() => void handleInstall()}
+        disabled={installing}
+      />
+    ) : probe.kind === 'installed' && auth.kind === 'authenticated' ? (
+      <PillButton
+        label={t('settings.providers.cursor.logoutCta')}
+        onClick={() => void handleLogout()}
+        disabled={authBusy}
+      />
+    ) : probe.kind === 'installed' && auth.kind !== 'loading' ? (
+      <PillButton
+        label={t(
+          auth.kind === 'login-pending'
+            ? 'settings.providers.cursor.loggingIn'
+            : 'settings.providers.cursor.loginCta',
+        )}
+        onClick={() => void handleLogin()}
+        disabled={authBusy}
+      />
+    ) : null;
+
+  const badgeLabel =
+    probe.kind !== 'installed'
+      ? null
+      : auth.kind === 'authenticated'
+        ? t('settings.providers.cursor.loggedInPill')
+        : auth.kind === 'loading'
+          ? t('settings.providers.cursor.installedPill')
+          : t('settings.providers.cursor.signedOutPill');
+
+  // 状态正文放详情区(不塞 header 副标题:那行是 truncate 单行,长句会被截断)。
+  const body =
+    probe.kind === 'loading' ? null : (
+      <div className="flex flex-col gap-2 pl-12">
+        <span className="text-13 leading-relaxed" style={{ color: 'var(--settings-section-desc)' }}>
+          {probe.kind === 'installed'
+            ? installedDescription
+            : t('settings.providers.cursor.missingDescription')}
+        </span>
+
+        {probe.kind === 'missing' &&
+          (installSupported ? (
+            <code
+              className={cn(
+                'block overflow-x-auto rounded-lg px-3 py-2',
+                'border border-[var(--settings-theme-card-border)]',
+                'bg-[var(--surface-chip)]',
+                'font-mono text-12 text-[var(--text-secondary)]',
+              )}
+            >
+              {CURSOR_INSTALL_COMMAND_DISPLAY}
+            </code>
+          ) : (
+            <span className="text-12 leading-relaxed" style={{ color: 'var(--text-tertiary)' }}>
+              {t('settings.providers.cursor.unsupportedPlatform')}
+            </span>
+          ))}
+
+        {loginUrl && (
+          <>
+            <code
+              className={cn(
+                'block overflow-x-auto rounded-lg px-3 py-2',
+                'border border-[var(--settings-theme-card-border)]',
+                'bg-[var(--surface-chip)]',
+                'font-mono text-12 text-[var(--text-secondary)]',
+              )}
+            >
+              {loginUrl}
+            </code>
+            <div className="flex flex-wrap items-center gap-2">
+              <PillButton
+                label={t('settings.providers.cursor.openLoginUrl')}
+                onClick={handleOpenLoginUrl}
+              />
+              <PillButton
+                label={t('settings.providers.cursor.copyLoginUrl')}
+                onClick={() => void handleCopyLoginUrl()}
+              />
+              <PillButton
+                label={t('settings.providers.cursor.cancelLogin')}
+                onClick={() => void handleCancelLogin()}
+              />
+            </div>
+            <span className="text-12" style={{ color: 'var(--text-tertiary)' }}>
+              {t('settings.providers.cursor.loginUrlHint')}
+            </span>
+          </>
+        )}
+
+        {/* 模型清单 + 显示开关（spec #21 / #26）移出 detail:UnifiedModelList 同款
+            通栏工具行(px-5 自带内边距),塞 pl-12 缩进里会和正常供应商版式错位;
+            改由下方 DetailHeader 之外通栏渲染,对齐其它供应商的分隔线 + 全宽列表。 */}
+
+      </div>
+    );
+
+  return (
+    <>
+      <DetailHeader
+        icon={<CursorMark size={18} />}
+        title={t('settings.providers.cursor.title')}
+        subtitle={t('settings.providers.cursor.optionalHint')}
+        badge={badgeLabel ? <CustomTag label={badgeLabel} /> : undefined}
+        modelCount={cursorModelCount}
+        trailing={
+          <div className="flex shrink-0 items-center gap-2.5">
+            {action}
+            <RowIconButton
+              icon={
+                <RefreshCw
+                  size={14}
+                  className={probe.kind === 'loading' || installing ? 'animate-spin' : undefined}
+                />
+              }
+              label={t('settings.providers.cursor.refreshAria')}
+              onClick={() => void refresh({ force: true })}
+              disabled={probe.kind === 'loading' || installing || authBusy}
+            />
+          </div>
+        }
+        detail={body}
+      />
+      {/* 已安装且不在登录流程时才列;探测编排由 #28 接线。 */}
+      {probe.kind === 'installed' && !loginUrl && (
+        <>
+          <div
+            className="border-t"
+            style={{ borderColor: 'var(--settings-theme-card-border)' }}
+          />
+          <CursorModelList
+            onRefresh={() => void handleRefreshModels()}
+            onCancel={() => void handleCancelRefresh()}
+            refresh={{
+              running: refreshState.running,
+              done: refreshState.done,
+              total: refreshState.total,
+              unavailableReason:
+                auth.kind !== 'authenticated' ? 'not-authenticated' : null,
+            }}
+          />
+        </>
+      )}
+    </>
+  );
+}
+
+// ---------------------------------------------------------------------------
 // 左栏列表
 // ---------------------------------------------------------------------------
 
@@ -1975,6 +2501,9 @@ export function ProvidersSection() {
       } else if (connect === 'xd') {
         // 无账号会话目录不含 xd → 落到登录引导行(不能当 preset 交给向导)。
         setSelectedId(CINDY_SIGNIN_ID);
+      } else if (connect === CURSOR_ROW_ID && !byId.has(CURSOR_ROW_ID)) {
+        // Cursor 不在目录里,但左栏有伪行 —— 直接选中,别当 preset 丢进向导。
+        setSelectedId(CURSOR_ROW_ID);
       } else if (target && target.source === 'builtin') {
         setWizard({ entry: { kind: 'builtin', providerId: connect } });
       } else {
@@ -1995,6 +2524,11 @@ export function ProvidersSection() {
   const cindySigninActive =
     showCindySignin &&
     (selectedId === CINDY_SIGNIN_ID || (selectedId == null && listProviders.length === 0));
+
+  // Cursor 伪行常驻(未装也在:装了才出现会让列表跳动)。目录里若真出现同 id 的
+  // 供应商,以真供应商为准 —— 伪行让位,避免两行同时选中。
+  const showCursorRow = !byId.has(CURSOR_ROW_ID);
+  const cursorActive = showCursorRow && selectedId === CURSOR_ROW_ID;
 
   // 选中项:默认第一行;所选供应商被删除/消失时回退第一行(不留空详情)。
   const effectiveSelected = useMemo(() => {
@@ -2199,7 +2733,7 @@ export function ProvidersSection() {
                 renderItem={(provider, index) => (
                   <ListRow
                     provider={provider}
-                    selected={!cindySigninActive && effectiveSelected?.id === provider.id}
+                    selected={!cindySigninActive && !cursorActive && effectiveSelected?.id === provider.id}
                     reconnectRequired={provider.id === 'openai' && openaiReconnectRequired}
                     onSelect={() => setSelectedId(provider.id)}
                     position={index + 1}
@@ -2217,6 +2751,12 @@ export function ProvidersSection() {
               <span className="sr-only" aria-live="polite" aria-atomic="true">
                 {orderAnnouncement}
               </span>
+              {showCursorRow && (
+                <CursorRow
+                  selected={cursorActive}
+                  onSelect={() => setSelectedId(CURSOR_ROW_ID)}
+                />
+              )}
               {suggestions.length > 0 && (
                 <>
                   <span
@@ -2307,6 +2847,8 @@ export function ProvidersSection() {
                   onClick={() => void signInToCindy()}
                 />
               </div>
+            ) : cursorActive ? (
+              <CursorDetail />
             ) : effectiveSelected ? (
               <>
                 {renderDetailHeader(effectiveSelected)}

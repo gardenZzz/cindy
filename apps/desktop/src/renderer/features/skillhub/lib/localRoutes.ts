@@ -1,6 +1,8 @@
+import type { AgentKind } from '@cindy/maker-core';
+
 interface LocalSkillRouteEntry {
   id: string;
-  engine: 'claude-code' | 'codex' | 'pi';
+  engine: AgentKind;
   kind: SkillhubKind;
   scope: SkillhubScope;
   name: string;

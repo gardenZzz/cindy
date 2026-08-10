@@ -39,6 +39,7 @@ import {
   parsePreRunHookTimeoutMs,
   resolveScheduleGenerationProviderId,
   resolveScheduleModelEfforts,
+  shouldFollowBoundSessionGenerationRoute,
   usesBoundSessionGenerationModel,
 } from '../lib/scheduleFormLogic';
 import type { RunMode, ScheduleFormState } from '../hooks/useScheduleForm';
@@ -431,16 +432,6 @@ export function ScheduleFormDialog({
     return form.model ? list.find((m) => m.id === form.model) : undefined;
   }, [caps.capabilities, form.model]);
 
-  const currentModelEfforts = useMemo(() => {
-    return resolveScheduleModelEfforts({
-      providers,
-      providerId: form.providerId,
-      model: form.model,
-      agentKind: form.agentKind,
-      fallbackEfforts: currentModel?.efforts,
-    });
-  }, [currentModel, form.agentKind, form.model, form.providerId, providers]);
-
   // form.model 为空时回填默认模型（三级回退,所见即所存）。
   // 覆盖历史遗留的空 model 任务（编辑打开时回填）；若不回填,提交后落库是
   // 空字符串,runner 走自己 hardcode 的兜底 —— 两边一旦漂移就会出现
@@ -453,9 +444,26 @@ export function ScheduleFormDialog({
     if (!form.model) setField('model', getScheduleDefaultModel(form.agentKind));
   }, [form.model, form.agentKind, form.targetSessionId, setField]);
 
+  // 档位失配自动清除必须按 (生效来源, 模型) 判定。扁平 capabilities 在 Pi + 自定义 API
+  // 同 id 时给的是跨来源交集(可能为空),据它清理会把 CLIProxyAPI 这类来源上明明支持的
+  // 档位一律清成「默认」—— 面板里挑得动、chip 却永远显示默认(见 resolveScheduleModelEfforts)。
+  const currentModelEfforts = useMemo(
+    () =>
+      resolveScheduleModelEfforts({
+        providers,
+        providerId: form.providerId,
+        model: form.model || currentModel?.id || '',
+        agentKind: form.agentKind,
+        fallback: currentModel
+          ? { efforts: currentModel.efforts, defaultEffort: currentModel.defaultEffort }
+          : undefined,
+      }),
+    [providers, form.providerId, form.model, form.agentKind, currentModel],
+  );
+
   useEffect(() => {
-    if (!currentModelEfforts || !form.effort) return;
-    const allowed = currentModelEfforts as readonly string[];
+    if (!currentModelEfforts.known || !form.effort) return;
+    const allowed = currentModelEfforts.efforts as readonly string[];
     if (!allowed.includes(form.effort)) setField('effort', '');
   }, [currentModelEfforts, form.effort, setField]);
 

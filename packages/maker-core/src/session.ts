@@ -59,6 +59,13 @@ export interface PermissionModeState {
 }
 
 export type SessionEventListener = (event: AgentEvent) => void;
+export interface SessionEventSubscriptionOptions {
+  /**
+   * 是否接收 Agent 在 Session/host listeners 挂载前产生的启动期事件。
+   * Maker 的元数据持久化 listener 与 host listeners 默认都接收。
+   */
+  replayStartupEvents?: boolean;
+}
 export type SessionStatusListener = (status: SessionStatus) => void;
 export type InteractionRequestListener = (req: InteractionRequest) => Promise<InteractionDecision>;
 
@@ -311,6 +318,8 @@ export class Session {
   /** Host-owned logical turn leases that outlive a vendor's transient idle edge. */
   private readonly hostTurnLeases = new Set<Promise<void>>();
   private readonly eventListeners = new Set<SessionEventListener>();
+  /** 保留到首个 turn 开始，确保同一次 host wiring 的多个 listener 都能收到。 */
+  private retainedStartupEvents: AgentEvent[];
   private readonly statusListeners = new Set<SessionStatusListener>();
   private interactionListener: InteractionRequestListener | null = null;
   private turnLifecycleObserver: SessionTurnLifecycleObserver | null = null;
@@ -372,6 +381,7 @@ export class Session {
     this.agentKind = opts.agentKind;
     this.workDir = opts.workDir;
     this.handle = opts.handle;
+    this.retainedStartupEvents = (opts.handle.startupEvents ?? []).map(redactEventForListeners);
     this.capabilities = opts.capabilities;
     this.remoteHostId = opts.remoteHostId ?? null;
     this.logger = opts.logger.child(`s:${this.id}`);
@@ -544,6 +554,9 @@ export class Session {
         return { accepted: false, reason: 'cancelled-before-dispatch' };
       }
       turnDispatched = true;
+      // host 必须先挂 listener 才会发 turn；首个 turn 已接受后，启动告警不再向更晚的
+      // 临时订阅者重复回放。失败/取消的 send 不会提前消费它。
+      this.retainedStartupEvents = [];
       // turn 真正开始跑 → 起 stall 看门狗。后续每个事件都会重置它，done / 终态
       // error 会清掉它（见 armTurnStallWatchdog）。
       this.armTurnStallWatchdog();
@@ -785,6 +798,11 @@ export class Session {
     return this.status;
   }
 
+  /** 等后台启动型 agent 完成 initialize + session/new；同步启动型 agent 立即返回。 */
+  async waitForBootstrapReady(): Promise<void> {
+    await this.handle.bootstrapReady;
+  }
+
   /**
    * 底层 agent handle 的会话 id —— cc = SDK session id(也是出站请求的 `x-claude-code-session-id`
    * header 值);SDK 尚未回填时为 '<pending>'。只读、不触发任何行为,供 host 把 loopback proxy
@@ -980,6 +998,7 @@ export class Session {
     await this.handle.setFastMode(enabled);
   }
 
+
   /** 运行时开关计划模式（capability 见 Capabilities.planMode）。 */
   async setPlanMode(enabled: boolean): Promise<void> {
     this.ensureActive();
@@ -1057,6 +1076,7 @@ export class Session {
   getFastMode(): boolean | null {
     return this.handle.getFastMode?.() ?? null;
   }
+
 
   /**
    * 运行时合并 vendorOptions (浅合并到内部 closure)。
@@ -1160,8 +1180,20 @@ export class Session {
 
   // ── 订阅 ─────────────────────────────────────────────────────────────────
 
-  onEvent(listener: SessionEventListener): () => void {
+  onEvent(
+    listener: SessionEventListener,
+    opts?: SessionEventSubscriptionOptions,
+  ): () => void {
     this.eventListeners.add(listener);
+    if (opts?.replayStartupEvents !== false) {
+      for (const event of this.retainedStartupEvents) {
+        try {
+          listener(event);
+        } catch (e) {
+          this.logger.error('startup event listener threw', { error: String(e) });
+        }
+      }
+    }
     this.startEventLoopIfNeeded();
     return () => this.eventListeners.delete(listener);
   }
@@ -1262,15 +1294,20 @@ export class Session {
         this.armTerminalErrorDrain(this.turnGeneration);
       }
     } else if (
-      this.agentKind === 'codex' &&
+      (this.agentKind === 'codex' || this.agentKind === 'cursor') &&
       isCurrentGeneration &&
       event.type === 'status' &&
       (event.data as { isRunning?: unknown } | null | undefined)?.isRunning === false &&
       this.terminalErrorDrainGeneration === this.turnGeneration
     ) {
-      // Codex closes a terminal error with an idle status rather than a done
-      // event. That status drains the provider tail, but it is not itself a
-      // generation boundary for ordinary status events.
+      // Codex and Cursor (ACP) close a terminal error with an idle status rather
+      // than a done event — `translateAcpError` pushes error + status(idle) and
+      // nothing else. Without this the drain always times out and kills a healthy
+      // ACP session 250ms after any terminal error, which in turn supersedes the
+      // interrupted-turn auto-resume that was just scheduled for it. That status
+      // drains the provider tail, but it is not itself a generation boundary for
+      // ordinary status events. Claude keeps queueing a done after the idle
+      // status, so it stays out (see session.origin.test.ts).
       this.clearTerminalErrorDrain();
     }
     const listenerEvent = redactEventForListeners(event);

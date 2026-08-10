@@ -33,6 +33,7 @@ import type { MobileSystemCardType } from '@/session/systemCard';
 import type { InputProjection, PendingInteraction, RemoteMessage, RemoteSession } from '@/session/types';
 import { compareMessageOrder } from '@/session/messagePaging';
 import { normalizeRemoteMoney } from '@/session/remoteMoney';
+import type { AgentKind } from '@cindy/maker-shared';
 
 interface DeviceShard {
   deviceId: string;
@@ -1243,7 +1244,7 @@ function sweepStaleTaskUpdates(sessionId: string): boolean {
 function recallParkedTaskUpdates(
   sessionId: string,
   data: unknown,
-  source: 'claude-code' | 'codex' | 'pi' | undefined,
+  source: AgentKind | undefined,
   prevMap: ReadonlyMap<string, AgentTaskUpdate> | undefined,
 ): ReadonlyMap<string, AgentTaskUpdate> | undefined {
   const parkedMap = sessionParkedTaskUpdates.get(sessionId);
@@ -2532,7 +2533,7 @@ export const remoteSessionStore = {
     }
     if (type === 'agent_task_update') {
       const rawSource = readString(event, 'source');
-      const source = rawSource === 'codex' || rawSource === 'claude-code' || rawSource === 'pi'
+      const source = rawSource === 'codex' || rawSource === 'claude-code' || rawSource === 'cursor' || rawSource === 'pi'
         ? rawSource
         : undefined;
       const next = applyAgentTaskUpdateEvent(

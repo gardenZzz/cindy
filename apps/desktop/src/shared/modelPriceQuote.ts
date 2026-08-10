@@ -210,7 +210,10 @@ export function providerReferencePriceQuote(
   // 路由)在此按 agent 无关的参考价解析 —— pi 一律降级为 undefined 传给协议函数。
   const resolved = resolveModelReferencePrice(registry, providerId, modelId, {
     ...options,
-    agent: options.agent === 'pi' ? undefined : options.agent,
+    // 参考价 registry 的 agent 维度只有 claude-code / codex;Pi(动态 BYOM,按 provider/模型
+    // 路由)与 Cursor(模型来自 ACP capabilities)都不走 registry per-agent 参考价 -- 一律
+    // 降级为 undefined 传给协议函数。
+    agent: options.agent === 'pi' || options.agent === 'cursor' ? undefined : options.agent,
   });
   if (!resolved) return undefined;
   const day = referencePriceCalendarDate(options.at);

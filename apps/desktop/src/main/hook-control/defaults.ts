@@ -146,7 +146,7 @@ export function resolveHookSessionConfig(
   //    (如 Claude 的 acceptEdits / plan 在 Codex 上不存在)时若回落 bypassPermissions,
   //    等于用户选了更严的档反而被静默放宽成完全访问 —— 而这是无人值守的 IM 派发链路,
   //    没有人在旁边确认。capabilities 的 permissionModes 一律按**从严到宽**声明
-  //    (claude-code: ask/acceptEdits/auto/bypassPermissions; codex: ask/auto/
+  //    (claude-code: ask/acceptEdits/auto/bypassPermissions; codex/cursor: ask/auto/
   //    bypassPermissions), 故取 [0] 即最严档。
   //    只有「从未填过显式档」才走 bypass 历史默认, 该行为保持不变。
   let permissionMode = 'bypassPermissions';
