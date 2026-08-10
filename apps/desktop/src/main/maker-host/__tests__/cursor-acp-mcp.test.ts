@@ -145,6 +145,25 @@ describe('buildCursorAcpMcpServers', () => {
     });
   });
 
+  it('stamps root caller provenance so worker bridge tools are not fail-closed', async () => {
+    const { bridge, registered } = fakeBridge();
+    await buildCursorAcpMcpServers(
+      {
+        sessionId: 'w-1',
+        workingDir: '/repo',
+        vendorOptions: { orcaRole: 'worker', orcaWorkerId: 'worker-1' },
+      },
+      { ensureBridgeStarted: STARTED(bridge) },
+    );
+    // Cursor 无 per-call root/descendant 信号（subagent 与主循环共用同一条 MCP
+    // 连接），只能无条件盖 root；漏盖会让 send_to_lead 恒回
+    // CALLER_PROVENANCE_REQUIRED。
+    expect(registered.get('w-1')).toMatchObject({
+      mcpCallerKind: 'root',
+      mcpCallerAttested: true,
+    });
+  });
+
   it('filters project-disabled servers and freezes disabled snapshot on ctx', async () => {
     const { bridge, registered } = fakeBridge();
     const out = await buildCursorAcpMcpServers(

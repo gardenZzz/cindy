@@ -166,6 +166,20 @@ export async function buildCursorAcpMcpServers(
     // 创建方显式声明的 vendorOptions 优先：worker 首次创建时 DB 的 orca 标记
     // 发生在 bootstrap 之后，现场查库会拿到空角色把 worker 工具 fail-closed。
     vendorOptions,
+    // caller provenance：不盖章 = orca_worker_bridge 的 authorizeSendToLeadCaller
+    // 一律回 CALLER_PROVENANCE_REQUIRED，Cursor worker 永远回报不了 Lead。
+    //
+    // 只能盖 root：Cursor 的 subagent 与主循环共用同一个 ACP session 和同一条
+    // MCP 连接，实测两者的 tools/call 除参数外完全一致（同 Mcp-Session-Id、同
+    // `?session=` URL、都无 `params._meta`），子 agent 那次调用在 ACP 侧连
+    // tool_call 都不发。没有任何 per-call 信号能分出 descendant。
+    //
+    // 代价（有意接受）：Codex 靠 `params._meta.threadId` 撑起的
+    // NESTED_AGENT_NOT_ALLOWED 机制防线在 Cursor 上不存在，「子 agent 不得越级
+    // 直报 Lead」只由 SEND_TO_LEAD_TOOL_DESCRIPTION 做 prompt 级约束。Cursor 若
+    // 将来给 tool call 带上 thread / agent provenance，这里应改成按它分型。
+    mcpCallerKind: 'root' as const,
+    mcpCallerAttested: true,
   };
   started.bridge.registerSessionCtx(sessionId, ctx);
   try {
