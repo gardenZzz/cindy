@@ -216,11 +216,14 @@ describe('create_workers tool', () => {
   });
 
   it('skips the suffix from a read-only snapshot without calling host for it', async () => {
-    const getWorkerLimitSnapshot = vi.fn<NonNullable<CreateWorkerDeps['getWorkerLimitSnapshot']>>(async () => ({
-      workerHardLimit: 5,
-      occupiedSlots: 2,
-      remainingSlots: 3,
-    }));
+    // 批前 2/5，建满 3 个之后是 5/5：批前一次、收尾一次，收尾那次才是最终容量真相。
+    const snapshots = [
+      { workerHardLimit: 5, occupiedSlots: 2, remainingSlots: 3 },
+      { workerHardLimit: 5, occupiedSlots: 5, remainingSlots: 0 },
+    ];
+    const getWorkerLimitSnapshot = vi.fn<NonNullable<CreateWorkerDeps['getWorkerLimitSnapshot']>>(
+      async () => snapshots.shift() ?? { workerHardLimit: 5, occupiedSlots: 5, remainingSlots: 0 },
+    );
     const createWorker = vi.fn<CreateWorkerDeps['createWorker']>(async ({ label }) => {
       const index = Number(label.split('_')[1]);
       return {
@@ -238,7 +241,7 @@ describe('create_workers tool', () => {
       workers: Array.from({ length: 5 }, (_, index) => worker(index + 1)),
     }));
 
-    expect(getWorkerLimitSnapshot).toHaveBeenCalledTimes(1);
+    expect(getWorkerLimitSnapshot).toHaveBeenCalledTimes(2);
     expect(createWorker).toHaveBeenCalledTimes(3);
     expect(createWorker.mock.calls.map(([params]) => params.label)).toEqual([
       'worker_1', 'worker_2', 'worker_3',
@@ -327,6 +330,88 @@ describe('create_workers tool', () => {
     expect(getWorkerLimitSnapshot).toHaveBeenCalledTimes(1);
     expect(withFailedSnapshot).toEqual(withoutSnapshot);
     expect(createWithFailedSnapshot).toHaveBeenCalledTimes(5);
+  });
+
+  it('accepts a zero-slot snapshot after the hard limit is lowered below the worker count', async () => {
+    // 设置页允许在已有 Worker 的情况下把 hard limit 调低，host 的
+    // remainingSlots = max(0, hardLimit - occupied) 于是给出 3/5/0 这种
+    // occupied > hardLimit 的合法快照。把它判成不自洽会白白回退首项探测、
+    // 多调一次 host 并把首项记成 failed，而不是按零余量整批 skipped。
+    const createWorker = vi.fn<CreateWorkerDeps['createWorker']>();
+    const getWorkerLimitSnapshot = vi.fn<NonNullable<CreateWorkerDeps['getWorkerLimitSnapshot']>>(
+      async () => ({ workerHardLimit: 3, occupiedSlots: 5, remainingSlots: 0 }),
+    );
+    const registry = setup(createWorker, getWorkerLimitSnapshot);
+
+    const result = parse(await registry.call('create_workers', {
+      workers: [worker(1), worker(2)],
+    }));
+
+    expect(createWorker).not.toHaveBeenCalled();
+    expect(result).toMatchObject({
+      attempted_count: 0,
+      success_count: 0,
+      failure_count: 0,
+      skipped_count: 2,
+      stop_reason: 'WORKER_LIMIT_HARD_EXCEEDED',
+    });
+    expect(result.results.every((entry: { status: string; error_code: string }) => (
+      entry.status === 'skipped' && entry.error_code === 'WORKER_LIMIT_HARD_EXCEEDED'
+    ))).toBe(true);
+  });
+
+  it('re-reads the snapshot after the pool drains so released reservations are not reported as occupied', async () => {
+    // 并发下每个成功结果带回的 limit 是它拿到 reservation 那一刻的占用；其中一项之后
+    // 失败释放了名额时，沿用在途最大值会把容量报成比实际更满。收尾快照才是真相。
+    const outcomes: CreateWorkerControlResult[] = [
+      created(5, 8),
+      created(6, 8),
+      { ok: false as const, errorCode: 'DUPLICATE_LABEL' as const, message: 'duplicate label' },
+    ];
+    const createWorker = vi.fn<CreateWorkerDeps['createWorker']>(async () => outcomes.shift()!);
+    // 批前 2/8 占用；在途结果最大报到 6；第三项失败释放后，收尾真相是 4。
+    const snapshots = [
+      { workerHardLimit: 8, occupiedSlots: 2, remainingSlots: 6 },
+      { workerHardLimit: 8, occupiedSlots: 4, remainingSlots: 4 },
+    ];
+    const getWorkerLimitSnapshot = vi.fn<NonNullable<CreateWorkerDeps['getWorkerLimitSnapshot']>>(
+      async () => snapshots.shift() ?? { workerHardLimit: 8, occupiedSlots: 4, remainingSlots: 4 },
+    );
+    const registry = setup(createWorker, getWorkerLimitSnapshot);
+
+    const result = parse(await registry.call('create_workers', {
+      workers: [worker(1), worker(2), worker(3)],
+    }));
+
+    // 批前一次 + 收尾一次。
+    expect(getWorkerLimitSnapshot).toHaveBeenCalledTimes(2);
+    // 沿用在途最大值会得到 occupied 6 / remaining 2，那是被释放前的旧真相。
+    expect(result.limit).toMatchObject({ occupied_slots: 4, remaining_slots: 4 });
+  });
+
+  it('keeps the capacity suffix labelled by capacity even when the prefix hits HOST_NOT_READY', async () => {
+    // 容量后缀是调用 host 之前就由快照切定的分区；被前缀里的 HOST_NOT_READY 改写成
+    // 「主进程未就绪」的话，用户等服务恢复后重试这些项仍会因名额不足再失败一次，
+    // 而且拿不到提限/归档建议。
+    const createWorker = vi.fn<CreateWorkerDeps['createWorker']>(async () => hostNotReadyFailure());
+    const getWorkerLimitSnapshot = vi.fn<NonNullable<CreateWorkerDeps['getWorkerLimitSnapshot']>>(
+      async () => ({ workerHardLimit: 8, occupiedSlots: 6, remainingSlots: 2 }),
+    );
+    const registry = setup(createWorker, getWorkerLimitSnapshot);
+
+    // HOST_NOT_READY 走 errorPayload，业务字段在 data 下。
+    const { data } = parse(await registry.call('create_workers', {
+      workers: [worker(1), worker(2), worker(3), worker(4)],
+    }));
+
+    const codes = data.results.map((entry: { error_code?: string }) => entry.error_code);
+    // 前 2 项在可创建前缀内，真调用了 host 并拿回 HOST_NOT_READY；后 2 项是容量后缀。
+    expect(codes.slice(2)).toEqual(['WORKER_LIMIT_HARD_EXCEEDED', 'WORKER_LIMIT_HARD_EXCEEDED']);
+    expect(data.stop_reason).toBe('HOST_NOT_READY');
+    // 两类原因并存时，建议必须都给。
+    expect(data.suggestions.some((s: string) => s.includes('hard limit'))).toBe(true);
+    expect(data.suggestions.some((s: string) => s.includes('就绪'))).toBe(true);
+    expect(data.user_report).toContain('名额不足');
   });
 
   it('keeps real per-item outcomes when a non-limit failure occurs between successes', async () => {
