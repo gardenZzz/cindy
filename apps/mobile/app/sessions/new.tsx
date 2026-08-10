@@ -1828,8 +1828,10 @@ export default function NewRemoteSessionScreen() {
         if (cancelled) return;
         setAvailableAgentKinds(
           new Set(
-            (Array.isArray(agents) ? agents : []).filter(
-              (a): a is NewSessionAgentKind => a === 'claude-code' || a === 'codex' || a === 'pi',
+            // 收敛到 NEW_SESSION_AGENT_OPTIONS 这一份正本：写死枚举会在新增 runtime
+            // 时漏项，被控端明明报了该 agent 也会被这里过滤掉（Cursor 就漏过一次）。
+            (Array.isArray(agents) ? agents : []).filter((a): a is NewSessionAgentKind =>
+              NEW_SESSION_AGENT_OPTIONS.some((option) => option.kind === a),
             ),
           ),
         );
