@@ -262,6 +262,50 @@ describe('create_workers tool', () => {
     ))).toBe(true);
   });
 
+  // 回退路径靠首项带回的 limit 切分，首项普通失败就拿不到快照；只读快照必须与
+  // 任何一次创建的成败无关，否则超限后缀又会被放进并发池。
+  it('keeps the snapshot suffix skipped even when the first worker fails for an unrelated reason', async () => {
+    const getWorkerLimitSnapshot = vi.fn<NonNullable<CreateWorkerDeps['getWorkerLimitSnapshot']>>(async () => ({
+      workerHardLimit: 5,
+      occupiedSlots: 2,
+      remainingSlots: 3,
+    }));
+    const createWorker = vi.fn<CreateWorkerDeps['createWorker']>(async ({ label }) => {
+      if (label === 'worker_1') {
+        return {
+          ok: false as const,
+          errorCode: 'DUPLICATE_LABEL' as const,
+          message: 'label already used',
+        } satisfies CreateWorkerControlResult;
+      }
+      return created(Number(label.split('_')[1]), 5);
+    });
+    const registry = setup(createWorker, getWorkerLimitSnapshot);
+
+    const result = parse(await registry.call('create_workers', {
+      workers: Array.from({ length: 5 }, (_, index) => worker(index + 1)),
+    }));
+
+    expect(createWorker).toHaveBeenCalledTimes(3);
+    expect(createWorker.mock.calls.map(([params]) => params.label)).toEqual([
+      'worker_1', 'worker_2', 'worker_3',
+    ]);
+    expect(result).toMatchObject({
+      request_count: 5,
+      attempted_count: 3,
+      success_count: 2,
+      failure_count: 1,
+      skipped_count: 2,
+      not_created_count: 3,
+      stopped_early: true,
+      stop_reason: 'WORKER_LIMIT_HARD_EXCEEDED',
+    });
+    expect(result.results.map((entry: { status: string }) => entry.status)).toEqual([
+      'failed', 'created', 'created', 'skipped', 'skipped',
+    ]);
+    expect(result.results[0]).toMatchObject({ error_code: 'DUPLICATE_LABEL' });
+  });
+
   it('falls back to the首项探测 path when the read-only snapshot fails', async () => {
     const workers = Array.from({ length: 5 }, (_, index) => worker(index + 1));
     const createWithoutSnapshot = vi.fn<CreateWorkerDeps['createWorker']>(async ({ label }) => (
