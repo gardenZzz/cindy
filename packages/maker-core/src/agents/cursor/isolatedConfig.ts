@@ -22,10 +22,10 @@
  *   （见 credentials-and-local-storage.md）。
  */
 
-import { mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { join, relative, resolve, sep } from 'node:path';
-import { createHash } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
 
 export interface CursorIsolatedConfig {
   configDir: string;
@@ -33,6 +33,22 @@ export interface CursorIsolatedConfig {
   env: NodeJS.ProcessEnv;
   /** close 时调用。稳定目录下为 no-op（保留 acp-sessions 供 resume）。 */
   dispose: () => void;
+}
+
+/**
+ * 预写进 cli-config 的模型档位。上游把「当前模型 + 每模型参数」记在同一个
+ * cli-config.json 里，预写命中后 `session/new` 直接回目标档位，省掉建会话后的
+ * `set_config_option` 往返（实测单次 ~3s）。
+ *
+ * 不写推理强度：它的 configOption id 因模型家族而异（`effort` / `reasoning`），
+ * 猜错或两个都写会让上游整条参数回落成默认值（实测 grok-4.5 回落 low）。留给
+ * 合并写保住的上游自有记录 + 会话内比对补发。
+ */
+export interface CursorModelSeed {
+  /** ACP model id（`auto` 需先经 toCursorAcpModelId 映射成 `default`）。 */
+  modelId: string;
+  /** configOption id → 取值，如 `{ fast: 'false' }`。 */
+  parameters?: Readonly<Record<string, string>>;
 }
 
 /** 读取用户全局 cli-config 的 network 段；测试可注入以隔离真实用户目录。 */
@@ -52,6 +68,8 @@ export interface CreateCursorIsolatedConfigOptions {
   userDataPath: string;
   /** 可选的 network 来源；未注入时不继承用户配置，使用内置默认值。 */
   networkConfigReader?: CursorNetworkConfigReader;
+  /** 可选的模型档位预写；省掉建会话后的 set_config_option 往返。 */
+  modelSeed?: CursorModelSeed;
 }
 
 function safeDirSegment(key: string): string {
@@ -100,9 +118,91 @@ export function readUserNetworkConfigFromEnv(baseEnv: NodeJS.ProcessEnv): unknow
   }
 }
 
-function writeIsolatedCliConfig(configDir: string, network: unknown): void {
-  const cliConfig = {
+function isPlainRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
+/** 目录里已有的 cli-config；缺失 / 损坏 / 非对象一律 {}（回落成整写）。 */
+function readExistingCliConfig(configDir: string): Record<string, unknown> {
+  try {
+    const raw: unknown = JSON.parse(readFileSync(join(configDir, 'cli-config.json'), 'utf8'));
+    return isPlainRecord(raw) ? raw : {};
+  } catch {
+    return {};
+  }
+}
+
+/**
+ * 同目录 tmp + rename。上游 cursor-agent 也这么写这个文件（`~/.cursor` 下能看到
+ * `cli-config.json.<pid>.<uuid>.tmp`）；非原子写会让它读到写了一半的配置。
+ */
+function writeFileAtomic(filePath: string, contents: string): void {
+  const tmpPath = `${filePath}.${process.pid}.${randomUUID()}.tmp`;
+  try {
+    writeFileSync(tmpPath, contents);
+    renameSync(tmpPath, filePath);
+  } catch {
+    rmSync(tmpPath, { force: true });
+    // Windows 上目标被占时 rename 会 EPERM：回落直写，代价只是极窄的撕裂读窗口。
+    writeFileSync(filePath, contents);
+  }
+}
+
+/** 同一模型下按 configOption id 合并：只覆盖要预写的项，保留上游记住的其余档位。 */
+function mergeModelParameters(
+  existing: unknown,
+  parameters: Readonly<Record<string, string>>,
+): Array<{ id: string; value: string }> {
+  const merged = new Map<string, string>();
+  if (Array.isArray(existing)) {
+    for (const entry of existing) {
+      if (!isPlainRecord(entry)) continue;
+      const { id, value } = entry;
+      if (typeof id === 'string' && typeof value === 'string') merged.set(id, value);
+    }
+  }
+  for (const [id, value] of Object.entries(parameters)) merged.set(id, value);
+  return [...merged].map(([id, value]) => ({ id, value }));
+}
+
+function applyModelSeed(
+  target: Record<string, unknown>,
+  existing: Record<string, unknown>,
+  seed: CursorModelSeed,
+): void {
+  const existingParams = isPlainRecord(existing.modelParameters) ? existing.modelParameters : {};
+  const parameters = mergeModelParameters(
+    existingParams[seed.modelId],
+    seed.parameters ?? {},
+  );
+  target.model = {
+    modelId: seed.modelId,
+    displayModelId: seed.modelId,
+    displayName: seed.modelId,
+    displayNameShort: seed.modelId,
+    aliases: [],
+    maxMode: false,
+  };
+  target.hasChangedDefaultModel = true;
+  target.modelParameters = { ...existingParams, [seed.modelId]: parameters };
+  target.selectedModel = { modelId: seed.modelId, parameters };
+}
+
+/**
+ * 合并写：保留上游自己记在这个文件里的状态（模型档位、auth / 隐私缓存），只把
+ * Cindy 必须钉住的键整棵子树覆盖回去。整写会让每次起会话都退回全冷状态。
+ */
+function writeIsolatedCliConfig(
+  configDir: string,
+  network: unknown,
+  modelSeed?: CursorModelSeed,
+): void {
+  const existing = readExistingCliConfig(configDir);
+  const cliConfig: Record<string, unknown> = {
     version: 1,
+    ...existing,
+    // 以下四键整棵子树覆盖，不做深合并 —— permissions 深合并会让上游写进来的
+    // always-allow 授权跨重启存活，那是权限边界变化而不只是性能问题。
     permissions: { allow: [] as string[], deny: [] as string[] },
     // 强制走 allowlist，使 session/request_permission 到达 Cindy。
     approvalMode: 'allowlist',
@@ -114,7 +214,8 @@ function writeIsolatedCliConfig(configDir: string, network: unknown): void {
     editor: { vimMode: false },
     network: network ?? { useHttp1ForAgent: false },
   };
-  writeFileSync(join(configDir, 'cli-config.json'), `${JSON.stringify(cliConfig, null, 2)}\n`);
+  if (modelSeed) applyModelSeed(cliConfig, existing, modelSeed);
+  writeFileAtomic(join(configDir, 'cli-config.json'), `${JSON.stringify(cliConfig, null, 2)}\n`);
 }
 
 /** Resolve the sticky config dir for a Cindy business session id. */
@@ -151,7 +252,7 @@ export function createCursorIsolatedConfigDir(
   const configDir = join(root, safeDirSegment(opts.stableKey ?? `ephemeral-${Date.now()}`));
   mkdirSync(configDir, { recursive: true });
   const network = opts.networkConfigReader?.(baseEnv);
-  writeIsolatedCliConfig(configDir, network);
+  writeIsolatedCliConfig(configDir, network, opts.modelSeed);
 
   return {
     configDir,

@@ -495,8 +495,8 @@ async function withBootedSession(
   }) => Promise<void>,
   startOpts: Record<string, unknown> = {},
   models?: { currentModelId: string; availableModels: Array<{ modelId: string; name: string }> },
+  transport: FakeTransport = new FakeTransport(),
 ): Promise<void> {
-  const transport = new FakeTransport();
   const { agent, handle, userDataPath } = await bootWithTransport(transport, startOpts, models);
   try {
     await waitForBootstrapReady(handle);
@@ -762,7 +762,9 @@ describe('CursorAgent lifecycle (FakeTransport)', () => {
   it('applies the last pre-ready model, effort, fast, and plan selections after bootstrap', async () => {
     const transport = new FakeTransport();
     transport.deferInitializeResponse = true;
-    transport.sessionConfigOptions = pipelineOptions();
+    // 每个 option 的 currentValue 都与最后一次 pre-ready 选择有落差 —— 「已相等就
+    // 不下发」之后，只有存在落差的档位才会出现在 wire 上。
+    transport.sessionConfigOptions = [effortOption('medium'), fastOption('false'), thinkingOption()];
     const { agent, handle, userDataPath } = await bootWithTransport(
       transport,
       {},
@@ -1473,6 +1475,76 @@ describe('CursorAgent lifecycle (FakeTransport)', () => {
         rmSync(booted.userDataPath, { recursive: true, force: true });
       }
     }
+  });
+
+  // ── 初始档位「已相等就不下发」──────────────────────────────────────
+  // cli-config 预写命中 / resume 目录已记住时，session/new 回包就是目标档位；
+  // 再发一轮 set_config_option 是纯浪费（实测单次 ~3s）。
+
+  /** 回包已是目标档位的模型目录（currentModelId 即用户所选）。 */
+  function settledModels() {
+    return {
+      currentModelId: 'claude-opus-5',
+      availableModels: [
+        { modelId: 'default', name: 'Auto' },
+        { modelId: 'claude-opus-5', name: 'Opus 5' },
+      ],
+    };
+  }
+
+  it('sends no set_config_option when session/new already reports the desired config', async () => {
+    const transport = new FakeTransport();
+    transport.sessionConfigOptions = [
+      effortOption('high'),
+      fastOption('false'),
+      thinkingOption('true'),
+    ];
+    await withBootedSession(
+      async ({ transport: t }) => {
+        expect(t.findAllRequests(Method.SessionSetConfigOption)).toEqual([]);
+      },
+      { model: 'claude-opus-5', effort: 'high', fastMode: false },
+      settledModels(),
+      transport,
+    );
+  });
+
+  it('sends only the mismatched option when the rest already match', async () => {
+    const transport = new FakeTransport();
+    transport.sessionConfigOptions = [
+      effortOption('medium'),
+      fastOption('false'),
+      thinkingOption('true'),
+    ];
+    await withBootedSession(
+      async ({ transport: t }) => {
+        const sent = t
+          .findAllRequests(Method.SessionSetConfigOption)
+          .map((msg) => (msg as { params: { configId: string } }).params.configId);
+        expect(sent).toEqual(['effort']);
+      },
+      { model: 'claude-opus-5', effort: 'high', fastMode: false },
+      settledModels(),
+      transport,
+    );
+  });
+
+  it('still refreshes the model when the snapshot lacks an option the caller wants set', async () => {
+    const transport = new FakeTransport();
+    // fast option 缺席：直接进档位下发会踩「没有 fast option 只 warn 不发」的分支，
+    // 用户请求的 Fast 就永远落不到 ACP，所以必须退回同模型 refresh。
+    transport.sessionConfigOptions = [effortOption('high'), thinkingOption('true')];
+    await withBootedSession(
+      async ({ transport: t }) => {
+        const sent = t
+          .findAllRequests(Method.SessionSetConfigOption)
+          .map((msg) => (msg as { params: { configId: string } }).params.configId);
+        expect(sent).toContain('model');
+      },
+      { model: 'claude-opus-5', effort: 'high', fastMode: false },
+      settledModels(),
+      transport,
+    );
   });
 
   it('issues set_config_option(fast,true) when createSession fastMode=true and model exposes fast', async () => {

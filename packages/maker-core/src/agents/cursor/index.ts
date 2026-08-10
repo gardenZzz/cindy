@@ -91,6 +91,7 @@ import { scanCursorCustomizations } from './customization-scanner.js';
 import {
   createCursorIsolatedConfigDir,
   readUserNetworkConfigFromEnv,
+  type CursorModelSeed,
 } from './isolatedConfig.js';
 import { isCursorResumeSessionNotFound } from './invalidResume.js';
 import {
@@ -811,6 +812,8 @@ export class CursorAgent extends BaseAgent {
     let sessionMs = 0;
     let sessionMethod: 'session/new' | 'session/load' = 'session/new';
     let initialConfigMs = 0;
+    /** 初始档位实际发出的 set_config_option 次数；0 = 预写 / 目录记录全命中。 */
+    let initialConfigRequests = 0;
     const sessionAllowKeys = new Set<string>();
     /** 本会话冻入的 MCP server 名（prepareAcpMcpServers 快照），供审批归属。 */
     const registeredMcpServerNames = new Set<string>();
@@ -841,6 +844,32 @@ export class CursorAgent extends BaseAgent {
       for (const ev of events) eventQueue.push(ev);
     };
 
+    /**
+     * 跟随 ACP 当前模型（不下发 set_config_option）：用户没选 / 种子默认 auto 且非
+     * 显式选择时成立。预写与初始下发共用这一判据 —— 预写若绕过它，等于替用户钦点
+     * 模型，还会盖掉上游自己记住的 sticky 模型。
+     */
+    const shouldFollowAcpCurrentModel = (): boolean => {
+      const modelRaw = typeof opts.model === 'string' ? opts.model.trim() : '';
+      const modelExplicit = opts.vendorOptions?.cursorModelExplicit === true;
+      return (
+        opts.vendorOptions?.followAcpCurrentModel === true ||
+        (!modelSelectionChanged &&
+          (!modelRaw || (!modelExplicit && desiredModel === CURSOR_AUTO_MODEL.id)))
+      );
+    };
+
+    /** 实际预写进 cli-config 的 ACP model id；供「预写没生效」的判据用。 */
+    let seededAcpModelId: string | undefined;
+    const buildModelSeed = (): CursorModelSeed | undefined => {
+      if (shouldFollowAcpCurrentModel()) return undefined;
+      const parameters: Record<string, string> = {};
+      // 只预写取值空间固定的档位：fast 恒 true/false，effort 的 id 与拼写随模型变。
+      if (desiredFastMode !== undefined) parameters.fast = desiredFastMode ? 'true' : 'false';
+      seededAcpModelId = toCursorAcpModelId(desiredModel);
+      return { modelId: seededAcpModelId, parameters };
+    };
+
     const getIsolatedConfig = (): ReturnType<typeof createCursorIsolatedConfigDir> => {
       if (isolated) return isolated;
       const userDataPath = this.deps.runtimeConfig.userDataPath;
@@ -851,6 +880,7 @@ export class CursorAgent extends BaseAgent {
         stableKey: opts.sessionId,
         userDataPath,
         networkConfigReader: this.deps.networkConfigReader ?? readUserNetworkConfigFromEnv,
+        modelSeed: buildModelSeed(),
       });
       return isolated;
     };
@@ -1796,23 +1826,45 @@ export class CursorAgent extends BaseAgent {
         options: option.options.map((choice) => ({ ...choice })),
       }));
 
+    /**
+     * 同模型时能否直接进入档位下发：desired 要设的档位，回包必须已暴露对应
+     * option。缺一就退回同模型 refresh —— 否则会踩下面「没有 fast option 就只
+     * warn 不发」的分支，比每次 refresh 更糟。
+     */
+    const hasCompleteOptionSnapshot = (options: readonly AcpConfigOption[]): boolean => {
+      if (desiredEffort !== undefined && !findCursorEffortOption(options)) return false;
+      if (desiredFastMode !== undefined && !options.some((o) => o.id === 'fast')) return false;
+      return true;
+    };
+
     const applyInitialModelConfig = async () => {
-      const modelRaw = typeof opts.model === 'string' ? opts.model.trim() : '';
-      const modelExplicit = opts.vendorOptions?.cursorModelExplicit === true;
       // 未选择 / 空白 model / 显式 follow：采用 ACP current，不发 set_config_option。
       // 种子默认 `auto`（New Maker 未碰 picker）也走 follow；显式选 Auto 需
       // vendorOptions.cursorModelExplicit === true（#8 / review P1）。
-      const followAcpCurrent =
-        opts.vendorOptions?.followAcpCurrentModel === true ||
-        (!modelSelectionChanged && (!modelRaw || (!modelExplicit && desiredModel === CURSOR_AUTO_MODEL.id)));
+      const followAcpCurrent = shouldFollowAcpCurrentModel();
 
       if (!followAcpCurrent) {
         // 模型设不上不得毁掉整个会话：codex / claude 起会话都不校验模型，且同函数
         // 下面的 effort / fast / thinking 失败也只 warn。抛出去会让该 session 每次
         // 重建都在同一处失败（Orca lead 尤其致命：worker 汇报永远投不进来）。
         const switching = desiredModel !== mutableModel;
-        if (switching || desiredModel !== CURSOR_AUTO_MODEL.id) {
+        if (
+          switching &&
+          sessionMethod === 'session/new' &&
+          seededAcpModelId === toCursorAcpModelId(desiredModel)
+        ) {
+          // 预写在回包里没生效 = 上游配置 schema 漂了。行为上仍由下面的下发兜住，
+          // 但省往返的收益已经没了，留一条可检索的痕迹。
+          log.warn('cursor model preseed did not take', {
+            desiredModel,
+            currentModel: mutableModel,
+          });
+        }
+        // 同模型 refresh 只在快照缺档位时才做：预写命中后 session/new 已带齐
+        // model / effort / fast，再发一次纯属白付一个往返。
+        if (switching || (desiredModel !== CURSOR_AUTO_MODEL.id && !hasCompleteOptionSnapshot(latestConfigOptions))) {
           try {
+            initialConfigRequests += 1;
             const options = await setConfigOption('model', toCursorAcpModelId(desiredModel));
             if (switching) mutableModel = desiredModel;
             applyConfigSessionState(options);
@@ -1838,6 +1890,9 @@ export class CursorAgent extends BaseAgent {
       // All initial option decisions must use the same post-model snapshot. The
       // responses below are full snapshots and may arrive out of order.
       const baseOptions = cloneConfigOptions(latestConfigOptions);
+      // 档位可能一条都不用下发（预写命中 / resume 目录已记住），那时下面的合并块
+      // 不会跑；会话状态得先按快照对齐，否则 effort / fast 停在 opts 的初值。
+      applyConfigSessionState(baseOptions);
       type InitialConfigRequest = {
         kind: 'effort' | 'fast' | 'thinking';
         configId: string;
@@ -1850,7 +1905,9 @@ export class CursorAgent extends BaseAgent {
         initialEffortOpt && desiredEffort
           ? toCursorConfigEffortValue(initialEffortOpt, desiredEffort)
           : null;
-      if (initialEffortOpt && initialEffortValue) {
+      // 已经是目标值就不发。effort 的取值拼写按模型自报（xhigh / extra-high），
+      // 故比对必须在 toCursorConfigEffortValue 映射后的空间做。
+      if (initialEffortOpt && initialEffortValue && initialEffortOpt.currentValue !== initialEffortValue) {
         requests.push({
           kind: 'effort',
           configId: initialEffortOpt.id,
@@ -1858,12 +1915,16 @@ export class CursorAgent extends BaseAgent {
         });
       }
 
-      if (desiredFastMode !== undefined && baseOptions.some((o) => o.id === 'fast')) {
-        requests.push({
-          kind: 'fast',
-          configId: 'fast',
-          value: desiredFastMode ? 'true' : 'false',
-        });
+      const fastOption = baseOptions.find((o) => o.id === 'fast');
+      if (desiredFastMode !== undefined && fastOption) {
+        const desiredFastValue = desiredFastMode ? 'true' : 'false';
+        if (fastOption.currentValue !== desiredFastValue) {
+          requests.push({
+            kind: 'fast',
+            configId: 'fast',
+            value: desiredFastValue,
+          });
+        }
       } else if (desiredFastMode !== undefined) {
         // 初始 Fast 被请求但目标模型当前未暴露 fast option -> 跳过下发。
         // 隔离 config dir 下 session/new 的当前模型常是 `default`(Auto)，其
@@ -1878,7 +1939,9 @@ export class CursorAgent extends BaseAgent {
         });
       }
 
-      if (baseOptions.some((o) => o.id === 'thinking')) {
+      // 恒开语义不变：只跳过「已经是 true」，报 false 照发（不信任 false 方向）。
+      const thinkingOption = baseOptions.find((o) => o.id === 'thinking');
+      if (thinkingOption && thinkingOption.currentValue !== 'true') {
         requests.push({
           kind: 'thinking',
           configId: 'thinking',
@@ -1886,6 +1949,7 @@ export class CursorAgent extends BaseAgent {
         });
       }
 
+      initialConfigRequests += requests.length;
       let settleSequence = 0;
       const settleOrder = new Map<number, number>();
       const results = await Promise.allSettled(
@@ -2278,6 +2342,7 @@ export class CursorAgent extends BaseAgent {
           sessionMs,
           sessionMethod,
           initialConfigMs,
+          initialConfigRequests,
           permissionMode: mutablePermissionMode,
           planMode: mutablePlanMode,
           listedModels: this.listedModels.length,
