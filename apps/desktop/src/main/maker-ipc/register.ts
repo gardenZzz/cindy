@@ -603,7 +603,6 @@ import {
 import {
   createOrcaWorkerCreationService,
   normalizeOrcaWorkerLabel,
-  providerRouteRequiresExplicitSelection,
   type OrcaWorkerLimitSnapshot,
 } from './orcaWorkerCreationService.js';
 import {

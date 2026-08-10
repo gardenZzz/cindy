@@ -177,9 +177,19 @@ function moreRecentLimit(
 function isWorkerLimitSnapshot(value: unknown): value is WorkerLimitSnapshot {
   if (!value || typeof value !== 'object') return false;
   const snapshot = value as Partial<WorkerLimitSnapshot>;
-  return Number.isFinite(snapshot.workerHardLimit)
-    && Number.isFinite(snapshot.occupiedSlots)
-    && Number.isFinite(snapshot.remainingSlots);
+  const { workerHardLimit, occupiedSlots, remainingSlots } = snapshot;
+  if (!Number.isFinite(workerHardLimit)
+    || !Number.isFinite(occupiedSlots)
+    || !Number.isFinite(remainingSlots)) {
+    return false;
+  }
+  // 只认自洽的快照：负数或 occupied + remaining 超过 hard limit 都说明对端算错了。
+  // 负 remainingSlots 会把整批误判成 hard-limit skipped，虚高值又会放行本该跳过的
+  // 后缀 —— 这两种都比「回退首项探测」更糟，所以宁可判不合法。
+  return workerHardLimit! >= 0
+    && occupiedSlots! >= 0
+    && remainingSlots! >= 0
+    && occupiedSlots! + remainingSlots! <= workerHardLimit!;
 }
 
 export function registerCreateWorkersTool(
@@ -264,6 +274,11 @@ export function registerCreateWorkersTool(
       if (usedReadOnlySnapshot) {
         nextIndex = 0;
         const remainingSlots = Math.max(0, Math.floor(limit!.remainingSlots));
+        // 已知取舍：前缀按快照一次切死，不做动态回填。前缀内某项因 DUPLICATE_LABEL /
+        // NO_PROVIDER_FOR_AGENT 这类「还没占到 reservation 就失败」的原因挂掉时，那个
+        // 名额不会补给后缀，后缀仍按超限 skipped。宁可少建也不多建：回填要在并发里
+        // 重新判定名额归属，而 hard limit 的最终裁决在 main 侧原子 reservation，
+        // 工具侧再算一次只会引入两套判据。用户按逐项结果重试即可拿到那个名额。
         eligibleEnd = Math.min(workers.length, remainingSlots);
         if (eligibleEnd < workers.length) {
           // 这是只读快照判定出的虚拟 hard-limit 边界，不对应任何失败项。
@@ -308,10 +323,15 @@ export function registerCreateWorkersTool(
         await Promise.all(Array.from({ length: workerCount }, () => runNext()));
       }
 
-      if (hostNotReadyIndex !== undefined) {
-        stopReason = 'HOST_NOT_READY';
-      } else if (hardLimitIndex !== undefined) {
-        stopReason = 'WORKER_LIMIT_HARD_EXCEEDED';
+      // 停止原因取「请求顺序里更早的那个」，不能让在途的后发失败盖掉先发的边界：
+      // 并发下 index=2 先报 hard limit、index=5 后报 HOST_NOT_READY 时若取后者，
+      // 调度器早已按 index=2 停发的 3/4 两项既没结果也不满足 skip 条件，会被误报成
+      // INTERNAL；容量快照与 suggestions 也会跟着丢。
+      const earliestStop = stopIndex();
+      if (Number.isFinite(earliestStop)) {
+        stopReason = earliestStop === hostNotReadyIndex
+          ? 'HOST_NOT_READY'
+          : 'WORKER_LIMIT_HARD_EXCEEDED';
       }
 
       const skipReason = stopReason;
