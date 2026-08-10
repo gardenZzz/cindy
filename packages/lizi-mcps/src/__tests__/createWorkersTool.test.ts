@@ -413,7 +413,11 @@ describe('create_workers tool', () => {
     // 两类原因并存时，建议必须都给。
     expect(data.suggestions.some((s: string) => s.includes('hard limit'))).toBe(true);
     expect(data.suggestions.some((s: string) => s.includes('就绪'))).toBe(true);
-    expect(data.user_report).toContain('名额不足');
+    // stop_reason 是主进程未就绪，那条排在前面；名额那条也必须出现。
+    expect(data.user_report).toContain('主进程协同服务尚未就绪');
+    expect(data.user_report).toContain('hard limit');
+    expect(data.user_report.indexOf('主进程协同服务尚未就绪'))
+      .toBeLessThan(data.user_report.indexOf('hard limit'));
   });
 
   it('keeps host-not-ready in the report even when the batch stops on the earlier capacity boundary', async () => {
@@ -442,6 +446,10 @@ describe('create_workers tool', () => {
     ]);
     expect(result.suggestions.some((s: string) => s.includes('hard limit'))).toBe(true);
     expect(result.suggestions.some((s: string) => s.includes('就绪'))).toBe(true);
+    // user_report 是要求 Lead 逐字转告的字段，两类原因都得写进去，漏哪条用户就只会
+    // 被引导去调名额、或只会被引导去等服务。
+    expect(result.user_report).toContain('hard limit');
+    expect(result.user_report).toContain('主进程协同服务尚未就绪');
   });
 
   it('keeps real per-item outcomes when a non-limit failure occurs between successes', async () => {

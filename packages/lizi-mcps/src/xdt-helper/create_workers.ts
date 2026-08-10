@@ -102,8 +102,10 @@ function buildUserReport(params: {
   failureCount: number;
   skippedCount: number;
   stopReason: BatchStopReason | undefined;
-  /** 批次里存在按名额切掉的后缀；可与 stopReason 同时成立，两者原因不同。 */
+  /** 批次里存在按名额切掉/失败的项；可与 hostNotReady 同时成立，两者原因不同。 */
   capacityLimited: boolean;
+  /** 批次里存在主进程未就绪的项。 */
+  hostNotReady: boolean;
   limit: WorkerLimitSnapshot | undefined;
 }): string {
   const notCreatedCount = params.failureCount + params.skippedCount;
@@ -111,18 +113,16 @@ function buildUserReport(params: {
   const capacityTail = params.limit
     ? `当前 hard limit 为 ${params.limit.workerHardLimit}，已占用 ${params.limit.occupiedSlots} 个槽位。可在协同设置中提高 hard limit、复用已有 Worker，或归档不再需要的 Worker 后分批执行剩余任务。`
     : '';
-  if (params.stopReason === 'WORKER_LIMIT_HARD_EXCEEDED' && params.limit) {
-    return `${base}；${capacityTail}`;
-  }
-  if (params.stopReason === 'HOST_NOT_READY') {
-    const hostTail = `${base}；${BRAND_NAME} 主进程协同服务尚未就绪，请等待服务就绪后只重试未创建项。`;
-    // 主进程未就绪与名额不足可以同时成立：只说前者，用户等服务恢复后重试超限后缀
-    // 仍会失败，还拿不到提限/归档的出路。
-    return params.capacityLimited && capacityTail
-      ? `${hostTail}其中还有一部分是名额不足被跳过的，${capacityTail}`
-      : hostTail;
-  }
-  return `${base}。请按逐项结果核对每个 Worker 的真实终态。`;
+  const hostTail = `${BRAND_NAME} 主进程协同服务尚未就绪，请等待服务就绪后只重试未创建项。`;
+  // 两类原因可以同时成立，且**两边都要写进 user_report**：工具描述要求 Lead 逐字转告
+  // 这个字段，漏掉哪一条，用户就会只被引导去调名额或只被引导去等服务。
+  const tails: string[] = [];
+  if (params.capacityLimited && capacityTail) tails.push(capacityTail);
+  if (params.hostNotReady) tails.push(hostTail);
+  if (tails.length === 0) return `${base}。请按逐项结果核对每个 Worker 的真实终态。`;
+  // 批次级停止原因对应的那条排在前面，另一条紧随其后。
+  if (params.stopReason === 'HOST_NOT_READY') tails.reverse();
+  return `${base}；${tails.join('另有一部分是因为：')}`;
 }
 
 function workerCreateParams(leadSessionId: string, worker: CreateWorkerSpec) {
@@ -425,6 +425,7 @@ export function registerCreateWorkersTool(
         skippedCount,
         stopReason,
         capacityLimited,
+        hostNotReady,
         limit,
       });
       const payload = {
