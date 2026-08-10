@@ -2866,9 +2866,6 @@ export function CCAgentSessionView({
         };
       }
 
-      // 断线缓存的远程 session 可打开查看,但不可继续发送。返回 false 让 ChatInput 保留草稿。
-      if (remoteSessionUnavailable) return false;
-
       // ① 本机会话维持既有 readiness gate。device-link 已建任务不把视图生命周期内
       // 的认证弹窗/导航闭包塞进 outbox：弱网时先建立稳定 clientId 的本地乐观消息，
       // 重连后由被控端 enqueue / steer 路径做权威校验。这样离开任务后旧 outbox 也不会
