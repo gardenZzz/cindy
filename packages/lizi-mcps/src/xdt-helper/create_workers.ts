@@ -1,8 +1,8 @@
 /**
  * xdt-helper/create_workers.ts —— 确定性批量创建 Orca workers。
  *
- * 批次先用首项探测 host 返回的名额快照，再按剩余名额切分可创建前缀与超限后缀；
- * 可创建前缀受并发上限约束，结果仍按请求顺序汇总逐项终态。
+ * 批次优先读取 host 的只读名额快照，再按剩余名额切分可创建前缀与超限后缀；
+ * 旧 host 没有快照 dep 时回退首项探测，可创建前缀始终受并发上限约束。
  */
 
 import { BRAND_NAME } from '@cindy/maker-shared/branding';
@@ -40,7 +40,7 @@ const workersSchema = z
 const DESCRIPTION = [
   '在当前 workflow 内批量创建 2-32 个 Orca worker session。',
   '用户一次要求创建多个 Worker 时必须使用本工具，不要并行或连续多次调用 create_worker。',
-  '本工具先根据名额快照切分可创建前缀与超限后缀，在可创建前缀内有界并发并按请求顺序返回真实逐项终态；超限后缀标记 skipped，不调用 host。',
+  '本工具优先根据只读名额快照切分可创建前缀与超限后缀；旧 host 无快照时先探测首项，再在可创建前缀内有界并发并按请求顺序返回真实逐项终态；超限后缀标记 skipped，不调用 host。',
   '结果包含 request_count / attempted_count / success_count / failure_count / skipped_count / not_created_count、hard limit 快照、确定生成的 user_report，以及每个 label 对应的 worker/session 或失败原因。success/failure/skipped 是互斥分区。',
   '工具返回后必须向用户逐字转告 user_report 并补充逐项结果；达到 hard limit 时同时转告 suggestions 中的调整设置、复用 Worker 或分批执行方案。',
   'create_workers 建的是持久、UI 可见的 Orca workers，不是一次性 subagent。',
@@ -174,6 +174,14 @@ function moreRecentLimit(
   return current;
 }
 
+function isWorkerLimitSnapshot(value: unknown): value is WorkerLimitSnapshot {
+  if (!value || typeof value !== 'object') return false;
+  const snapshot = value as Partial<WorkerLimitSnapshot>;
+  return Number.isFinite(snapshot.workerHardLimit)
+    && Number.isFinite(snapshot.occupiedSlots)
+    && Number.isFinite(snapshot.remainingSlots);
+}
+
 export function registerCreateWorkersTool(
   registry: XdtHelperToolRegistry,
   deps: CreateWorkerDeps,
@@ -209,6 +217,7 @@ export function registerCreateWorkersTool(
       let hostNotReadyIndex: number | undefined;
       let hardLimitIndex: number | undefined;
       let nextIndex = 1;
+      let usedReadOnlySnapshot = false;
 
       const stopIndex = () => Math.min(
         hostNotReadyIndex ?? Number.POSITIVE_INFINITY,
@@ -238,28 +247,51 @@ export function registerCreateWorkersTool(
         }
       };
 
-      // 当前 host 没有独立的只读名额查询 seam，因此首项既是兼容性探测，也是实际创建；
-      // 一旦拿到 limit，后续调用才按剩余槽位切前缀，保证超限后缀不会触碰 host。
-      await invoke(0);
-      if (indexedResults[0]?.status === 'failed' && hostNotReadyIndex === 0) {
-        stopReason = 'HOST_NOT_READY';
-      } else if (hardLimitIndex === 0) {
-        stopReason = 'WORKER_LIMIT_HARD_EXCEEDED';
-      }
-
       let eligibleEnd = workers.length;
-      if (stopReason === undefined && limit) {
-        const remainingSlots = Number.isFinite(limit.remainingSlots)
-          ? Math.max(0, Math.floor(limit.remainingSlots))
-          : workers.length;
-        eligibleEnd = Math.min(workers.length, 1 + remainingSlots);
-        if (eligibleEnd < workers.length) {
-          hardLimitIndex = eligibleEnd - 1;
+      if (deps.getWorkerLimitSnapshot) {
+        try {
+          const snapshot = await deps.getWorkerLimitSnapshot(ctx.sessionId!);
+          if (!isWorkerLimitSnapshot(snapshot)) {
+            throw new Error('invalid worker limit snapshot');
+          }
+          limit = snapshot;
+          usedReadOnlySnapshot = true;
+        } catch {
+          // 只读快照不可用时回退首项探测，不能让容量查询故障阻断创建。
         }
       }
 
-      // 没有 limit 的旧 host 继续走有界并发；host 一旦返回硬限或未就绪，调度器停止
-      // 发起尚未入飞的后续调用，已入飞的调用仍结算真实终态。
+      if (usedReadOnlySnapshot) {
+        nextIndex = 0;
+        const remainingSlots = Math.max(0, Math.floor(limit!.remainingSlots));
+        eligibleEnd = Math.min(workers.length, remainingSlots);
+        if (eligibleEnd < workers.length) {
+          // 这是只读快照判定出的虚拟 hard-limit 边界，不对应任何失败项。
+          hardLimitIndex = eligibleEnd - 1;
+        }
+      } else {
+        // 没有独立的只读名额查询时，首项既是兼容性探测，也是实际创建；
+        // 一旦拿到 limit，后续调用才按剩余槽位切前缀，保证超限后缀不会触碰 host。
+        await invoke(0);
+        if (indexedResults[0]?.status === 'failed' && hostNotReadyIndex === 0) {
+          stopReason = 'HOST_NOT_READY';
+        } else if (hardLimitIndex === 0) {
+          stopReason = 'WORKER_LIMIT_HARD_EXCEEDED';
+        }
+
+        if (stopReason === undefined && limit) {
+          const remainingSlots = Number.isFinite(limit.remainingSlots)
+            ? Math.max(0, Math.floor(limit.remainingSlots))
+            : workers.length;
+          eligibleEnd = Math.min(workers.length, 1 + remainingSlots);
+          if (eligibleEnd < workers.length) {
+            hardLimitIndex = eligibleEnd - 1;
+          }
+        }
+      }
+
+      // 两种名额路径都进入同一个有界并发池；host 一旦返回硬限或未就绪，
+      // 调度器停止发起尚未入飞的后续调用，已入飞的调用仍结算真实终态。
       const runNext = async (): Promise<void> => {
         while (nextIndex < eligibleEnd) {
           const index = nextIndex;

@@ -26,9 +26,16 @@ function worker(index: number): CreateWorkerSpec {
   };
 }
 
-function setup(createWorker: CreateWorkerDeps['createWorker']) {
+function setup(
+  createWorker: CreateWorkerDeps['createWorker'],
+  getWorkerLimitSnapshot?: CreateWorkerDeps['getWorkerLimitSnapshot'],
+) {
   const registry = new XdtHelperToolRegistry();
-  registerCreateWorkersTool(registry, { sessionId: 'lead-1', createWorker });
+  registerCreateWorkersTool(registry, {
+    sessionId: 'lead-1',
+    createWorker,
+    ...(getWorkerLimitSnapshot ? { getWorkerLimitSnapshot } : {}),
+  });
   return registry;
 }
 
@@ -169,6 +176,113 @@ describe('create_workers tool', () => {
       not_created_count: 1,
       limit: { hard_limit: 8, occupied_slots: 8, remaining_slots: 0 },
     });
+  });
+
+  it('uses a read-only snapshot before entering the pool so the first worker is concurrent', async () => {
+    const gate = deferred<void>();
+    const getWorkerLimitSnapshot = vi.fn<NonNullable<CreateWorkerDeps['getWorkerLimitSnapshot']>>(async () => ({
+      workerHardLimit: 8,
+      occupiedSlots: 0,
+      remainingSlots: 8,
+    }));
+    let inFlight = 0;
+    let maxInFlight = 0;
+    const createWorker = vi.fn<CreateWorkerDeps['createWorker']>(async ({ label }) => {
+      const index = Number(label.split('_')[1]);
+      inFlight += 1;
+      maxInFlight = Math.max(maxInFlight, inFlight);
+      await gate.promise;
+      inFlight -= 1;
+      return created(index, 8);
+    });
+    const registry = setup(createWorker, getWorkerLimitSnapshot);
+    const request = registry.call('create_workers', {
+      workers: Array.from({ length: 5 }, (_, index) => worker(index + 1)),
+    });
+
+    await vi.waitFor(() => expect(createWorker).toHaveBeenCalledTimes(4));
+    expect(getWorkerLimitSnapshot).toHaveBeenCalledTimes(1);
+    expect(maxInFlight).toBeGreaterThan(1);
+    expect(maxInFlight).toBeLessThanOrEqual(4);
+    gate.resolve();
+
+    const result = parse(await request);
+    expect(result).toMatchObject({
+      attempted_count: 5,
+      success_count: 5,
+      failure_count: 0,
+      skipped_count: 0,
+    });
+  });
+
+  it('skips the suffix from a read-only snapshot without calling host for it', async () => {
+    const getWorkerLimitSnapshot = vi.fn<NonNullable<CreateWorkerDeps['getWorkerLimitSnapshot']>>(async () => ({
+      workerHardLimit: 5,
+      occupiedSlots: 2,
+      remainingSlots: 3,
+    }));
+    const createWorker = vi.fn<CreateWorkerDeps['createWorker']>(async ({ label }) => {
+      const index = Number(label.split('_')[1]);
+      return {
+        ...created(index, 5),
+        limit: {
+          workerHardLimit: 5,
+          occupiedSlots: index + 2,
+          remainingSlots: 3 - index,
+        },
+      };
+    });
+    const registry = setup(createWorker, getWorkerLimitSnapshot);
+
+    const result = parse(await registry.call('create_workers', {
+      workers: Array.from({ length: 5 }, (_, index) => worker(index + 1)),
+    }));
+
+    expect(getWorkerLimitSnapshot).toHaveBeenCalledTimes(1);
+    expect(createWorker).toHaveBeenCalledTimes(3);
+    expect(createWorker.mock.calls.map(([params]) => params.label)).toEqual([
+      'worker_1', 'worker_2', 'worker_3',
+    ]);
+    expect(result).toMatchObject({
+      request_count: 5,
+      attempted_count: 3,
+      success_count: 3,
+      failure_count: 0,
+      skipped_count: 2,
+      not_created_count: 2,
+      stopped_early: true,
+      stop_reason: 'WORKER_LIMIT_HARD_EXCEEDED',
+      limit: { hard_limit: 5, occupied_slots: 5, remaining_slots: 0 },
+    });
+    expect(result.results.map((entry: { status: string }) => entry.status)).toEqual([
+      'created', 'created', 'created', 'skipped', 'skipped',
+    ]);
+    expect(result.results.slice(3).every((entry: { error_code: string }) => (
+      entry.error_code === 'WORKER_LIMIT_HARD_EXCEEDED'
+    ))).toBe(true);
+  });
+
+  it('falls back to the首项探测 path when the read-only snapshot fails', async () => {
+    const workers = Array.from({ length: 5 }, (_, index) => worker(index + 1));
+    const createWithoutSnapshot = vi.fn<CreateWorkerDeps['createWorker']>(async ({ label }) => (
+      created(Number(label.split('_')[1]), 8)
+    ));
+    const withoutSnapshot = parse(await setup(createWithoutSnapshot).call('create_workers', { workers }));
+
+    const getWorkerLimitSnapshot = vi.fn<NonNullable<CreateWorkerDeps['getWorkerLimitSnapshot']>>(async () => {
+      throw new Error('snapshot unavailable');
+    });
+    const createWithFailedSnapshot = vi.fn<CreateWorkerDeps['createWorker']>(async ({ label }) => (
+      created(Number(label.split('_')[1]), 8)
+    ));
+    const withFailedSnapshot = parse(await setup(
+      createWithFailedSnapshot,
+      getWorkerLimitSnapshot,
+    ).call('create_workers', { workers }));
+
+    expect(getWorkerLimitSnapshot).toHaveBeenCalledTimes(1);
+    expect(withFailedSnapshot).toEqual(withoutSnapshot);
+    expect(createWithFailedSnapshot).toHaveBeenCalledTimes(5);
   });
 
   it('keeps real per-item outcomes when a non-limit failure occurs between successes', async () => {

@@ -59,6 +59,7 @@ import {
 import type { ControlResult, ControlWorkerAgent } from '../types.js';
 import { resolveLiziMcpSessionContext } from '../session-context.js';
 import { errorPayload, okPayload } from '../xdt-helper/_payload.js';
+import type { WorkerLimitSnapshot } from '../xdt-helper/create_worker.js';
 
 // ── Host deps ──────────────────────────────────────────────────────────────
 
@@ -101,6 +102,8 @@ export interface OrcaMcpDeps {
       'INVALID_PARAMS' | 'NOT_FOUND' | 'WORKER_LIMIT_HARD_EXCEEDED' | 'DUPLICATE_LABEL' | 'WORKER_CREATION_IN_PROGRESS' | 'BUDGET_MODEL_REQUIRES_API_MODE' | 'NO_PROVIDER_FOR_AGENT' | 'PROVIDER_ROUTE_UNAVAILABLE'
     >
   >;
+  /** 可选的只读名额快照；缺失或失败时批量工具回退首项探测。 */
+  getWorkerLimitSnapshot?: (params: { leadSessionId: string }) => Promise<WorkerLimitSnapshot>;
   /** 列出当前 workflow 所有 worker。 */
   listWorkers: (params: { leadSessionId: string }) => Promise<
     ControlResult<{ workers: WorkerSummary[] }>
