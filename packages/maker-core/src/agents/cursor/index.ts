@@ -454,19 +454,30 @@ function resolveCreateTransport(
 const MODEL_PROBE_TIMEOUT_MS = 20_000;
 
 /**
- * 让一次探测 RPC 与「用户取消」和有界超时赛跑。
+ * 建会话链路（`initialize` / `session/new` / `session/load`）单条 RPC 的上限。
  *
- * 只在循环顶部查 `signal.aborted` 是不够的:`client.request` 既不认 signal 也
- * 没有自带超时,对端卡住时这一轮 await 永不返回 —— IPC 那边虽然立刻回了
- * `cancelled: true`,刷新状态却永久停在 running,后续刷新还会因全局 inflight
- * 全部 no-op。
- *
- * 放弃后底层 RPC 仍挂在对端,但我们不再等它:`discoverModelOptions` 的 finally
- * 会 close client + dispose 隔离配置目录,连着把它收掉。
+ * 取值偏宽:冷启动的 `cursor-agent` 要装载配置与索引,慢机器上十几秒是正常的;
+ * 这条线只用来兜住「对端永远不回包」,不是性能阈值。
  */
-async function raceModelProbe<T>(
+const BOOTSTRAP_RPC_TIMEOUT_MS = 60_000;
+
+/**
+ * 让一次 ACP RPC 与「取消」和有界超时赛跑。
+ *
+ * `client.request` / `client.initialize` 既不认 signal 也没有自带超时,对端卡住时
+ * 这一次 await 永不返回。两处后果都是「永远出不了终态」:
+ *
+ * - 模型探测:只在循环顶部查 `signal.aborted` 不够,IPC 立刻回了 `cancelled: true`,
+ *   刷新状态却永久停在 running,后续刷新还会因全局 inflight 全部 no-op;
+ * - 会话 bootstrap:首条消息已经 accepted 并显示 `Starting...`,却既不成功也不报错,
+ *   直到用户手动停止任务。
+ *
+ * 放弃后底层 RPC 仍挂在对端,但我们不再等它:两处调用方的 finally / catch 都会
+ * close client(bootstrap 还会 dispose 隔离配置目录),连着把它收掉。
+ */
+async function raceAcpRequest<T>(
   work: Promise<T>,
-  opts: { signal?: AbortSignal; timeoutMs: number },
+  opts: { signal?: AbortSignal; timeoutMs: number; label: string },
 ): Promise<T> {
   let timer: NodeJS.Timeout | undefined;
   let onAbort: (() => void) | undefined;
@@ -476,16 +487,16 @@ async function raceModelProbe<T>(
       work,
       new Promise<never>((_resolve, reject) => {
         timer = setTimeout(
-          () => reject(new Error(`cursor model probe timed out after ${opts.timeoutMs}ms`)),
+          () => reject(new Error(`cursor ${opts.label} timed out after ${opts.timeoutMs}ms`)),
           opts.timeoutMs,
         );
         timer.unref?.();
         if (!signal) return;
         if (signal.aborted) {
-          reject(new Error('cursor model probe aborted'));
+          reject(new Error(`cursor ${opts.label} aborted`));
           return;
         }
-        onAbort = () => reject(new Error('cursor model probe aborted'));
+        onAbort = () => reject(new Error(`cursor ${opts.label} aborted`));
         signal.addEventListener('abort', onAbort, { once: true });
       }),
     ]);
@@ -675,13 +686,17 @@ export class CursorAgent extends BaseAgent {
       for (const model of this.listedModels) {
         if (opts.signal?.aborted) break;
         try {
-          const result = await raceModelProbe(
+          const result = await raceAcpRequest(
             client.request<SetConfigOptionResult>(Method.SessionSetConfigOption, {
               sessionId,
               configId: 'model',
               value: toCursorAcpModelId(model.id),
             }),
-            { ...(opts.signal ? { signal: opts.signal } : {}), timeoutMs: MODEL_PROBE_TIMEOUT_MS },
+            {
+              ...(opts.signal ? { signal: opts.signal } : {}),
+              timeoutMs: MODEL_PROBE_TIMEOUT_MS,
+              label: 'model probe',
+            },
           );
           enrichCursorModelFromConfigOptions(
             this.listedModels,
@@ -1345,6 +1360,8 @@ export class CursorAgent extends BaseAgent {
                   toolName,
                   input: toolInput,
                   kind: typeof toolCall.kind === 'string' ? toolCall.kind : null,
+                  // 分类器据此判定目标是否在工作区内：不给根它只能按路径形状保守裁决。
+                  workspaceRoot: opts.workingDir,
                 }),
               ),
               AUTO_PERMISSION_CLASSIFIER_TIMEOUT_MS,
@@ -2147,10 +2164,17 @@ export class CursorAgent extends BaseAgent {
       const startedAt = Date.now();
       let created: NewSessionResponse;
       try {
-        created = await client.request<NewSessionResponse>(Method.SessionNew, {
-          cwd: opts.workingDir,
-          mcpServers,
-        });
+        created = await raceAcpRequest(
+          client.request<NewSessionResponse>(Method.SessionNew, {
+            cwd: opts.workingDir,
+            mcpServers,
+          }),
+          {
+            signal: bootstrapAbortController.signal,
+            timeoutMs: BOOTSTRAP_RPC_TIMEOUT_MS,
+            label: 'session/new',
+          },
+        );
       } finally {
         sessionMs = Date.now() - startedAt;
         sessionMethod = 'session/new';
@@ -2264,18 +2288,27 @@ export class CursorAgent extends BaseAgent {
 
         const spawnInitializeStartedAt = Date.now();
         client.start();
-        const initResult = await client.initialize({
-          protocolVersion: ACP_PROTOCOL_VERSION,
-          clientCapabilities: {
-            fs: { readTextFile: false, writeTextFile: false },
-            _meta: { parameterizedModelPicker: true },
+        // 版本不兼容 / 内部死锁的 cursor-agent 可能起来了却不回 initialize。没有这条
+        // 上限,bootstrap 永远进不了终态,而首条消息已经 accepted 并显示 Starting...。
+        const initResult = await raceAcpRequest(
+          client.initialize({
+            protocolVersion: ACP_PROTOCOL_VERSION,
+            clientCapabilities: {
+              fs: { readTextFile: false, writeTextFile: false },
+              _meta: { parameterizedModelPicker: true },
+            },
+            clientInfo: {
+              name: 'cindy',
+              title: 'Cindy',
+              version: '0.0.0',
+            },
+          }),
+          {
+            signal: bootstrapAbortController.signal,
+            timeoutMs: BOOTSTRAP_RPC_TIMEOUT_MS,
+            label: 'initialize',
           },
-          clientInfo: {
-            name: 'cindy',
-            title: 'Cindy',
-            version: '0.0.0',
-          },
-        });
+        );
         spawnInitializeMs = Date.now() - spawnInitializeStartedAt;
         assertBootstrapActive();
 
@@ -2312,11 +2345,18 @@ export class CursorAgent extends BaseAgent {
             const loadStartedAt = Date.now();
             let loaded: LoadSessionResponse;
             try {
-              loaded = await client.request<LoadSessionResponse>(Method.SessionLoad, {
-                cwd: opts.workingDir,
-                sessionId: resumeId,
-                mcpServers,
-              });
+              loaded = await raceAcpRequest(
+                client.request<LoadSessionResponse>(Method.SessionLoad, {
+                  cwd: opts.workingDir,
+                  sessionId: resumeId,
+                  mcpServers,
+                }),
+                {
+                  signal: bootstrapAbortController.signal,
+                  timeoutMs: BOOTSTRAP_RPC_TIMEOUT_MS,
+                  label: 'session/load',
+                },
+              );
             } finally {
               sessionMs = Date.now() - loadStartedAt;
               sessionMethod = 'session/load';

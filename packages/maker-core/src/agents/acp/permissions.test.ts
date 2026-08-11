@@ -4,6 +4,7 @@ import {
   ACP_AUTO_ALLOW_KINDS,
   classifyAcpAutoPermission,
   findPermissionOption,
+  isOutsideAutoPermissionWorkspace,
   isSensitiveAutoPermissionPath,
   sessionAllowKeyFromToolCall,
   toInteractionRequest,
@@ -145,5 +146,98 @@ describe('classifyAcpAutoPermission (path-aware Auto classifier)', () => {
     expect(isSensitiveAutoPermissionPath('~/.ssh/id_rsa')).toBe(true);
     expect(isSensitiveAutoPermissionPath('/home/u/.gnupg/secring.gpg')).toBe(true);
     expect(isSensitiveAutoPermissionPath('src/app.ts')).toBe(false);
+  });
+
+  it('asks for a recursive search rooted outside the workspace', () => {
+    // 攻击形状:父目录本身不命中任何敏感正则,但递归搜索会读遍其中的 .ssh / .aws,
+    // 而 Cursor 的隔离配置关掉了 sandbox。字面量匹配挡不住,必须看包含关系。
+    expect(
+      classifyAcpAutoPermission({
+        toolName: 'search',
+        input: { path: '/Users/alice' },
+        kind: 'search',
+        workspaceRoot: '/Users/alice/proj',
+      }),
+    ).toBe('ask');
+    // 同一形状的 read 一样挡:input 不可靠区分「读一个文件」和「读一棵子树」。
+    expect(
+      classifyAcpAutoPermission({
+        toolName: 'read',
+        input: { path: '/Users/alice/other-repo/notes.md' },
+        kind: 'read',
+        workspaceRoot: '/Users/alice/proj',
+      }),
+    ).toBe('ask');
+    // 相对路径的回溯段同样是越界。
+    expect(
+      classifyAcpAutoPermission({
+        toolName: 'search',
+        input: { path: '../../..' },
+        kind: 'search',
+        workspaceRoot: '/Users/alice/proj',
+      }),
+    ).toBe('ask');
+  });
+
+  it('still allows in-workspace reads and searches when the root is known', () => {
+    expect(
+      classifyAcpAutoPermission({
+        toolName: 'search',
+        input: { path: '/Users/alice/proj/src' },
+        kind: 'search',
+        workspaceRoot: '/Users/alice/proj',
+      }),
+    ).toBe('allow');
+    expect(
+      classifyAcpAutoPermission({
+        toolName: 'read',
+        input: { path: 'src/index.ts' },
+        kind: 'read',
+        workspaceRoot: '/Users/alice/proj',
+      }),
+    ).toBe('allow');
+    // 工作区根自身。
+    expect(
+      classifyAcpAutoPermission({
+        toolName: 'search',
+        input: { path: '/Users/alice/proj' },
+        kind: 'search',
+        workspaceRoot: '/Users/alice/proj',
+      }),
+    ).toBe('allow');
+  });
+
+  it('fails closed on absolute / ~ / .. paths when the workspace root is not wired', () => {
+    // 宿主漏传 workspaceRoot 时无法判定包含关系,失败方向必须是多问一次。
+    expect(
+      classifyAcpAutoPermission({
+        toolName: 'search',
+        input: { path: '/Users/alice' },
+        kind: 'search',
+      }),
+    ).toBe('ask');
+    expect(
+      classifyAcpAutoPermission({
+        toolName: 'search',
+        input: { path: '~/projects' },
+        kind: 'search',
+      }),
+    ).toBe('ask');
+    expect(
+      classifyAcpAutoPermission({
+        toolName: 'read',
+        input: { path: '../secrets/notes.md' },
+        kind: 'read',
+      }),
+    ).toBe('ask');
+  });
+
+  it('classifies workspace containment directly', () => {
+    expect(isOutsideAutoPermissionWorkspace('/Users/alice', '/Users/alice/proj')).toBe(true);
+    expect(isOutsideAutoPermissionWorkspace('/Users/alice/proj/src', '/Users/alice/proj')).toBe(false);
+    expect(isOutsideAutoPermissionWorkspace('src/a.ts', '/Users/alice/proj')).toBe(false);
+    expect(isOutsideAutoPermissionWorkspace('~/x', '/Users/alice/proj')).toBe(true);
+    // 前缀相同但不是子目录:proj-secrets 不在 proj 里。
+    expect(isOutsideAutoPermissionWorkspace('/Users/alice/proj-secrets', '/Users/alice/proj')).toBe(true);
   });
 });
