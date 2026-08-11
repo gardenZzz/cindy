@@ -226,7 +226,7 @@ export default function AutomationsScreen() {
     })
       .then((agents) => {
         if (cancelled) return;
-        setCursorAvailable(Array.isArray(agents) && agents.includes('cursor'));
+        setCursorAvailable(Array.isArray(agents) && agents.some((a) => a === 'cursor'));
       })
       .catch(() => {
         /* fail-open：拉取失败保持 null（不过滤），兜底仍是被控端 requireAgent。 */

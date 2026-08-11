@@ -262,7 +262,7 @@ describe('Cursor permission policy outcomes (client strategy)', () => {
     expect(req.kind).toBe('permission');
     if (req.kind === 'permission') {
       expect(req.suggestions).toEqual([
-        { destination: 'session', sessionAllowKey: 'execute:rm' },
+        { destination: 'session', sessionAllowKey: 'execute:rm -rf /' },
       ]);
     }
   });
