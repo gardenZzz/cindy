@@ -38,6 +38,11 @@ export interface AgentAuthGateInput {
 /** 判定某 agent 在被控端是否有已连接来源;不确定时回 'unknown'(调用方不拦截)。 */
 export function agentAuthGateVerdict(input: AgentAuthGateInput): AgentAuthGateVerdict {
   if (input.loading || input.error !== null || input.providers.length === 0) return 'unknown';
+  // Cursor 的鉴权在 cursor-agent CLI 自己那边，不经 Cindy 的供应商目录：内置与自定义
+  // ProviderView 都不会声明 cursor runtime，走通用判定必然 0 条、判成 unauthenticated，
+  // 于是手机上的 Cursor 新建在目录正常就绪时反而被拦死。按本门禁「不确定时回 unknown、
+  // 调用方不拦截」的既定语义放行，真正不可用时由被控端 fail-closed 拒绝。
+  if (input.agentKind === 'cursor') return 'unknown';
   return connectedProvidersForAgent(input.providers, input.agentKind, {
     includeSuspended: input.existingSessionRoute === true,
   }).length > 0
