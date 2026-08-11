@@ -1,3 +1,5 @@
+import type { AgentKind } from '@cindy/maker-core';
+
 import type {
   AndroidMcpDeps,
   IOSSimulatorMcpDeps,
@@ -30,6 +32,28 @@ import { createComputerMcpServer } from './computer/index.js';
 import { createAndroidMcpServer } from './android/index.js';
 import { createIOSSimulatorMcpServer } from './ios-simulator/index.js';
 import { resolveLiziMcpSessionContext } from './session-context.js';
+
+/**
+ * `LiziMcpSessionContext.agentKind` 是宽松 string(各 harness bridge 自己填),
+ * 而 MCP server 的 deps 要的是 `AgentKind`。以前每个 server 各写一串三元收窄,
+ * 结果新增 harness 时总有人漏改 —— 漏掉的那种会在工具里冒充 claude-code,
+ * 依赖 `get_current_session_id` 的 agent_kind 选后续 Agent 的 Skill 就走错分支
+ * (codex review 发现 cursor 在 cindy_helper / cindy_scheduler 被漏掉)。
+ *
+ * 用 Record 而不是数组:少一种就编译不过,新增 AgentKind 时这里必须一起改。
+ */
+const MCP_AGENT_KINDS: Record<AgentKind, true> = {
+  'claude-code': true,
+  codex: true,
+  cursor: true,
+  pi: true,
+};
+
+function toMcpAgentKind(agentKind: string): AgentKind {
+  return Object.prototype.hasOwnProperty.call(MCP_AGENT_KINDS, agentKind)
+    ? (agentKind as AgentKind)
+    : 'claude-code';
+}
 
 export interface CreateLiziMcpProvidersOptions {
   /**
@@ -330,7 +354,7 @@ export function createLiziMcpProviders(
         type: 'sdk',
         name: 'cindy_scheduler',
         instance: createSchedulerMcpServer(opts.scheduler!, {
-          agentKind: ctx.agentKind === 'codex' ? 'codex' : ctx.agentKind === 'pi' ? 'pi' : 'claude-code',
+          agentKind: toMcpAgentKind(ctx.agentKind),
           workingDir: ctx.workingDir,
           ...(ctx.getSessionContext ? { getSessionContext: ctx.getSessionContext } : {}),
           sessionId: ctx.sessionId,
@@ -370,7 +394,7 @@ export function createLiziMcpProviders(
         type: 'sdk',
         name: 'cindy_helper',
         instance: createXdtHelperMcpServer(opts.xdtHelper!, {
-          agentKind: ctx.agentKind === 'codex' ? 'codex' : ctx.agentKind === 'pi' ? 'pi' : 'claude-code',
+          agentKind: toMcpAgentKind(ctx.agentKind),
           workingDir: ctx.workingDir,
           ...(ctx.getSessionContext ? { getSessionContext: ctx.getSessionContext } : {}),
           sessionId: ctx.sessionId,
@@ -393,14 +417,7 @@ export function createLiziMcpProviders(
         type: 'sdk',
         name: 'cindy_orca',
         instance: createOrcaMcpServer(opts.orca!, {
-          agentKind:
-            ctx.agentKind === 'codex'
-              ? 'codex'
-              : ctx.agentKind === 'cursor'
-                ? 'cursor'
-                : ctx.agentKind === 'pi'
-                  ? 'pi'
-                  : 'claude-code',
+          agentKind: toMcpAgentKind(ctx.agentKind),
           workingDir: ctx.workingDir,
           ...(ctx.getSessionContext ? { getSessionContext: ctx.getSessionContext } : {}),
           sessionId: ctx.sessionId,
