@@ -477,11 +477,22 @@ const BOOTSTRAP_RPC_TIMEOUT_MS = 60_000;
  */
 async function raceAcpRequest<T>(
   work: Promise<T>,
-  opts: { signal?: AbortSignal; timeoutMs: number; label: string },
+  opts: {
+    signal?: AbortSignal;
+    timeoutMs: number;
+    label: string;
+    /**
+     * 取消时抛出的文案。bootstrap 传既有的 `assertBootstrapActive` 同一句 ——
+     * 现在 signal 会直接切断在途 RPC，比原来「等 RPC 回来再发现已取消」更早，
+     * 但用户与日志看到的终态文案不该因此改变。
+     */
+    abortMessage?: string;
+  },
 ): Promise<T> {
   let timer: NodeJS.Timeout | undefined;
   let onAbort: (() => void) | undefined;
   const { signal } = opts;
+  const abortError = () => new Error(opts.abortMessage ?? `cursor ${opts.label} aborted`);
   try {
     return await Promise.race([
       work,
@@ -493,10 +504,10 @@ async function raceAcpRequest<T>(
         timer.unref?.();
         if (!signal) return;
         if (signal.aborted) {
-          reject(new Error(`cursor ${opts.label} aborted`));
+          reject(abortError());
           return;
         }
-        onAbort = () => reject(new Error(`cursor ${opts.label} aborted`));
+        onAbort = () => reject(abortError());
         signal.addEventListener('abort', onAbort, { once: true });
       }),
     ]);
@@ -2173,6 +2184,7 @@ export class CursorAgent extends BaseAgent {
             signal: bootstrapAbortController.signal,
             timeoutMs: BOOTSTRAP_RPC_TIMEOUT_MS,
             label: 'session/new',
+            abortMessage: 'Cursor session bootstrap cancelled',
           },
         );
       } finally {
@@ -2307,6 +2319,7 @@ export class CursorAgent extends BaseAgent {
             signal: bootstrapAbortController.signal,
             timeoutMs: BOOTSTRAP_RPC_TIMEOUT_MS,
             label: 'initialize',
+            abortMessage: 'Cursor session bootstrap cancelled',
           },
         );
         spawnInitializeMs = Date.now() - spawnInitializeStartedAt;
@@ -2355,6 +2368,7 @@ export class CursorAgent extends BaseAgent {
                   signal: bootstrapAbortController.signal,
                   timeoutMs: BOOTSTRAP_RPC_TIMEOUT_MS,
                   label: 'session/load',
+                  abortMessage: 'Cursor session bootstrap cancelled',
                 },
               );
             } finally {
