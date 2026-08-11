@@ -135,7 +135,7 @@ describe('createProviderUpstreamErrorObserver', () => {
     expect(events[0]?.errorType).toBeUndefined();
   });
 
-  it('errorType 钳制到惯例形态：凭证形 / 超长 / 带空格的任意串一律缺省', () => {
+  it('errorType 走 fail-closed 白名单：未知 / 凭证形 / 非惯例形态一律缺省', () => {
     const events: ProviderUpstreamErrorEvent[] = [];
     setProviderUpstreamErrorBroadcaster((e) => events.push(e));
     let t = 1_000;
@@ -146,19 +146,31 @@ describe('createProviderUpstreamErrorObserver', () => {
     });
     // 每轮推进时钟 > 30s 节流窗，保证每条都被广播。
     // 凭证前缀守卫：动态拼接，避免安全门把测试占位符误判为真实凭证。
-    const credShaped = ['sk', 'live', '1234567890abcdef'].join('-');
-    const badTypes = [credShaped, 'a'.repeat(80), 'has space', 'Quote"injection'];
+    const credShapes = [
+      ['sk', 'live', '1234567890abcdef'].join('-'),
+      ['sk', 'live', '1234567890abcdef'].join('_'),
+      ['pk', 'test', '1234567890abcdef'].join('.'),
+      ['ak', 'live', '1234567890abcdef'].join('_'),
+      ['ghp', 'abcdefghijklmnopqrstuvwxyz0123456789'].join('_'),
+      'bearer_abc123',
+    ];
+    // 未知 / 非白名单形态（含点分 —— 不在已知枚举内，fail-closed 省略）。
+    const badTypes = [...credShapes, 'unknown_new_error_type', 'agent.router_api_error', 'a'.repeat(80), 'has space'];
     for (const bad of badTypes) {
       drive(observer, ctx({ status: 400 }), Buffer.from(JSON.stringify({ error: { type: bad } })));
       t += 31_000;
     }
-    // 点分 snake_case 是合法形态，应保留。
+    // 白名单内的合法类型应保留。
     drive(
       observer,
       ctx({ status: 400 }),
-      Buffer.from('{"error":{"type":"agent.router_api_error"}}'),
+      Buffer.from('{"error":{"type":"agent_router_api_error"}}'),
     );
-    expect(events.map((e) => e.errorType)).toEqual([undefined, undefined, undefined, undefined, 'agent.router_api_error']);
+    // 10 个 bad（6 凭证 + 4 非白名单）全部省略，最后一个合法值保留。
+    expect(events.map((e) => e.errorType)).toEqual([
+      ...Array.from({ length: 10 }, () => undefined),
+      'agent_router_api_error',
+    ]);
   });
 
   it('同 (providerId, code) 30s 内节流；不同 code / 不同 provider 不压制', () => {
@@ -267,7 +279,7 @@ describe('reportProviderUpstreamError (localHandler 桥接路径)', () => {
       agent: 'codex',
       providerId: 'p1',
       status: 400,
-      bodyText: '{"error":{"type":"first_type"}}',
+      bodyText: '{"error":{"type":"api_error"}}',
       now: () => t,
     });
     t += 1_000;
@@ -275,10 +287,10 @@ describe('reportProviderUpstreamError (localHandler 桥接路径)', () => {
       agent: 'codex',
       providerId: 'p1',
       status: 400,
-      bodyText: '{"error":{"type":"second_type"}}',
+      bodyText: '{"error":{"type":"timeout_error"}}',
       now: () => t,
     });
     expect(events).toHaveLength(1);
-    expect(events[0]?.errorType).toBe('first_type');
+    expect(events[0]?.errorType).toBe('api_error');
   });
 });

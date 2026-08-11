@@ -129,13 +129,42 @@ export function decodeUpstreamErrorBody(buf: Buffer, encoding: string | undefine
  * 片段（与 proxy 包 extractErrorType 同口径）。
  * 非 JSON / 字段缺失 / 类型不符一律 undefined，调用方直接省略该字段。
  *
- * errorType 是上游（不可信输入）直接进 renderer 的诊断字段：这里把它钳制到
- * 惯例形态（snake_case / kebab-case / 点分小写）并限长 64。带空格 / 引号 /
- * 非 ASCII 的任意串与凭证形前缀（sk-/pk-/rk-/Bearer —— 上游把 key 塞进
- * type 字段的异常情况）一并跳过，这类值不属于错误类型（Greptile 4/5 建议，
- * 非阻塞）。
+ * errorType 是上游（不可信输入）直接进 renderer 的诊断字段，采用 **fail-closed
+ * 白名单**（chatgpt-codex-connector P1）：只接受已知的服务端错误分类枚举值，未知 /
+ * 可疑值一律省略。枚举覆盖 Anthropic / OpenAI / litellm 与常见兼容网关的标准
+ * `error.type`，以及 #2333 的核心诊断信号 `agent_router_api_error`（中转层自身
+ * 路由拒绝，非官方 API 错误）。
+ *
+ * 选白名单而非黑名单 / 启发式的原因：凭证形态无法用前缀或熵穷尽——`ghp_...`、
+ * `sk_ant_...`、任意纯字母不透明 token 都能伪装成「小写 snake_case」。而 errorType
+ * 是增强诊断字段，对未知值保守省略只少一个展示细节，不损失主流程；这正是
+ * `credentials-and-local-storage.md`「日志 / 错误不得包含凭证明文」硬约束要求的。
  */
-const ERROR_TYPE_RE = /^(?!(?:sk|pk|rk)-|bearer)[a-z0-9][a-z0-9._-]{0,63}$/;
+const KNOWN_ERROR_TYPES = new Set([
+  // Anthropic / OpenAI / litellm 标准错误类型
+  'invalid_request_error',
+  'authentication_error',
+  'permission_error',
+  'not_found_error',
+  'request_too_large',
+  'rate_limit_error',
+  'api_error',
+  'overloaded_error',
+  'timeout_error',
+  'invalid_argument',
+  'content_policy_violation',
+  'context_length_exceeded',
+  'insufficient_quota',
+  'model_not_found',
+  'server_error',
+  'connection_error',
+  'bad_gateway',
+  'service_unavailable',
+  'unsupported_feature',
+  // 中转层自身路由拒绝（#2333 核心诊断信号，非官方 API 错误）
+  'agent_router_api_error',
+  'upstream_error',
+]);
 
 function extractErrorTypeFromBody(bodyText: string): string | undefined {
   const trimmed = bodyText.trim();
@@ -148,7 +177,7 @@ function extractErrorTypeFromBody(bodyText: string): string | undefined {
     const err = root.error ?? root;
     if (typeof err !== 'object' || err === null || Array.isArray(err)) return undefined;
     const t = (err as Record<string, unknown>).type;
-    if (typeof t === 'string' && ERROR_TYPE_RE.test(t)) return t;
+    if (typeof t === 'string' && KNOWN_ERROR_TYPES.has(t)) return t;
   } catch {
     /* 截断 / 非 JSON：忽略 */
   }
