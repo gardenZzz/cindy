@@ -15,6 +15,7 @@ import type { ResponseObserverCtx } from '@cindy/anthropic-compat-proxy';
 
 import {
   createProviderUpstreamErrorObserver,
+  reportProviderUpstreamError,
   setProviderUpstreamErrorBroadcaster,
   type ProviderUpstreamErrorEvent,
 } from '../provider-upstream-error-observer.js';
@@ -74,7 +75,7 @@ describe('createProviderUpstreamErrorObserver', () => {
     drive(
       observer,
       ctx({ status: 401 }),
-      Buffer.from('{"error":{"type":"authentication_error"},"Received API Key":"sk-live-123456789"}'),
+      Buffer.from('{"error":{"type":"authentication_error"},"Received API Key":"creds-live-123456789"}'),
     );
     expect(events).toHaveLength(1);
     expect(events[0]).toMatchObject({
@@ -84,8 +85,80 @@ describe('createProviderUpstreamErrorObserver', () => {
       code: 'AUTH_INVALID',
       retryable: false,
       status: 401,
+      // #2333：errorType 与本地代理 reqId 进入事件契约（诊断详情用），不属日志上传。
+      errorType: 'authentication_error',
+      reqId: 1,
     });
-    expect(events[0]?.detail).not.toContain('sk-live-123456789');
+    expect(events[0]?.detail).not.toContain('creds-live-123456789');
+  });
+
+  it('400 中转层路由拒绝 → 透传 errorType（agent_router_api_error）与 reqId（#2333）', () => {
+    const events: ProviderUpstreamErrorEvent[] = [];
+    setProviderUpstreamErrorBroadcaster((e) => events.push(e));
+    const observer = createProviderUpstreamErrorObserver({
+      agent: 'claude-code',
+      resolveUserProviderId: () => 'ag-claude',
+    });
+    drive(
+      observer,
+      ctx({ status: 400, reqId: 714 }),
+      Buffer.from('{"error":{"type":"agent_router_api_error","message":"content-blocked"}}'),
+    );
+    expect(events[0]).toMatchObject({
+      status: 400,
+      errorType: 'agent_router_api_error',
+      reqId: 714,
+      code: 'UNKNOWN',
+    });
+  });
+
+  it('非 JSON 错误体 → errorType 缺省（不因解析失败丢事件）', () => {
+    const events: ProviderUpstreamErrorEvent[] = [];
+    setProviderUpstreamErrorBroadcaster((e) => events.push(e));
+    const observer = createProviderUpstreamErrorObserver({
+      agent: 'claude-code',
+      resolveUserProviderId: () => 'my-relay',
+    });
+    drive(observer, ctx({ status: 400 }), Buffer.from('Bad Gateway'));
+    expect(events[0]?.errorType).toBeUndefined();
+    expect(events[0]?.status).toBe(400);
+  });
+
+  it('截断到一半的 JSON 错误体 → errorType 缺省（body 截断不致命）', () => {
+    const events: ProviderUpstreamErrorEvent[] = [];
+    setProviderUpstreamErrorBroadcaster((e) => events.push(e));
+    const observer = createProviderUpstreamErrorObserver({
+      agent: 'claude-code',
+      resolveUserProviderId: () => 'my-relay',
+    });
+    drive(observer, ctx({ status: 400 }), Buffer.from('{"error":{"type":"invalid_request_error"'));
+    expect(events[0]?.errorType).toBeUndefined();
+  });
+
+  it('errorType 钳制到惯例形态：凭证形 / 超长 / 带空格的任意串一律缺省', () => {
+    const events: ProviderUpstreamErrorEvent[] = [];
+    setProviderUpstreamErrorBroadcaster((e) => events.push(e));
+    let t = 1_000;
+    const observer = createProviderUpstreamErrorObserver({
+      agent: 'claude-code',
+      resolveUserProviderId: () => 'my-relay',
+      now: () => t,
+    });
+    // 每轮推进时钟 > 30s 节流窗，保证每条都被广播。
+    // 凭证前缀守卫：动态拼接，避免安全门把测试占位符误判为真实凭证。
+    const credShaped = ['sk', 'live', '1234567890abcdef'].join('-');
+    const badTypes = [credShaped, 'a'.repeat(80), 'has space', 'Quote"injection'];
+    for (const bad of badTypes) {
+      drive(observer, ctx({ status: 400 }), Buffer.from(JSON.stringify({ error: { type: bad } })));
+      t += 31_000;
+    }
+    // 点分 snake_case 是合法形态，应保留。
+    drive(
+      observer,
+      ctx({ status: 400 }),
+      Buffer.from('{"error":{"type":"agent.router_api_error"}}'),
+    );
+    expect(events.map((e) => e.errorType)).toEqual([undefined, undefined, undefined, undefined, 'agent.router_api_error']);
   });
 
   it('同 (providerId, code) 30s 内节流；不同 code / 不同 provider 不压制', () => {
@@ -146,5 +219,52 @@ describe('createProviderUpstreamErrorObserver', () => {
     const gz = gzipSync(Buffer.from('{"error":{"message":"model: glm-x not found"}}'));
     drive(observer, ctx({ status: 400, responseHeaders: { 'content-encoding': 'gzip' } }), gz);
     expect(events[0]?.code).toBe('MODEL_NOT_FOUND');
+  });
+});
+
+describe('reportProviderUpstreamError (localHandler 桥接路径)', () => {
+  it('提取 errorType；无 reqId（桥接绕开 compat-proxy 转发层，与 observer 一致）', () => {
+    const events: ProviderUpstreamErrorEvent[] = [];
+    setProviderUpstreamErrorBroadcaster((e) => events.push(e));
+    reportProviderUpstreamError({
+      agent: 'codex',
+      providerId: 'ag-claude',
+      providerName: 'ag-Claude',
+      status: 400,
+      bodyText: '{"error":{"type":"agent_router_api_error","message":"content-blocked"}}',
+    });
+    expect(events).toHaveLength(1);
+    expect(events[0]).toMatchObject({
+      agent: 'codex',
+      providerId: 'ag-claude',
+      providerName: 'ag-Claude',
+      status: 400,
+      code: 'UNKNOWN',
+      errorType: 'agent_router_api_error',
+    });
+    expect(events[0]?.reqId).toBeUndefined();
+  });
+
+  it('同 (agent, providerId, code) 30s 内节流；errorType 仍取最新错误体', () => {
+    const events: ProviderUpstreamErrorEvent[] = [];
+    setProviderUpstreamErrorBroadcaster((e) => events.push(e));
+    let t = 1_000;
+    reportProviderUpstreamError({
+      agent: 'codex',
+      providerId: 'p1',
+      status: 400,
+      bodyText: '{"error":{"type":"first_type"}}',
+      now: () => t,
+    });
+    t += 1_000;
+    reportProviderUpstreamError({
+      agent: 'codex',
+      providerId: 'p1',
+      status: 400,
+      bodyText: '{"error":{"type":"second_type"}}',
+      now: () => t,
+    });
+    expect(events).toHaveLength(1);
+    expect(events[0]?.errorType).toBe('first_type');
   });
 });

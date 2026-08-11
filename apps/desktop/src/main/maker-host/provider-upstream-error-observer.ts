@@ -37,6 +37,17 @@ export interface ProviderUpstreamErrorEvent {
   status: number;
   /** 上游原始信息摘要（renderer 详情展开用；主文案走 providerError.* i18n）。 */
   detail?: string;
+  /**
+   * 上游 JSON 错误体中的 `error.type`（低风险字段，不含 message —— message 可能
+   * 回显请求字段 / prompt 片段）。用于区分「中转层自身路由拒绝」与官方 400（#2333）。
+   */
+  errorType?: string;
+  /**
+   * 本地代理层请求序号（见 anthropic-compat-proxy ResponseObserverCtx.reqId）。
+   * 供用户对照 `cc-proxy.log` / `agent-*.ndjson` 拉出完整往返；与上游 request ID 无关。
+   * 仅 observer 路径（请求经 compat-proxy 转发）有；localHandler 桥接路径无此值。
+   */
+  reqId?: number;
 }
 
 /** 错误体累积上限（分类只看前几 KB）。 */
@@ -88,6 +99,8 @@ export function reportProviderUpstreamError(params: {
     retryable: cls.retryable,
     status: params.status,
     detail: cls.detail,
+    // localHandler 桥接路径绕开 compat-proxy 转发层，无本地 reqId（与 observer 一致）。
+    errorType: extractErrorTypeFromBody(params.bodyText),
   });
 }
 
@@ -104,6 +117,38 @@ export function decodeUpstreamErrorBody(buf: Buffer, encoding: string | undefine
     /* 解压失败回退原文（截断文本对 pattern 匹配仍可能有效） */
   }
   return buf.toString('utf-8');
+}
+
+/**
+ * 从上游错误体提取低风险 `error.type`（Anthropic / OpenAI / litellm 共享
+ * `{ "error": { "type": "...", ... } }` 形态）。只取 type 字符串，不取 message ——
+ * message 常回显请求字段值，会泄漏 prompt 片段（与 proxy 包 extractErrorType 同口径）。
+ * 非 JSON / 字段缺失 / 类型不符一律 undefined，调用方直接省略该字段。
+ *
+ * errorType 是上游（不可信输入）直接进 renderer 的诊断字段：这里把它钳制到
+ * 惯例形态（snake_case / kebab-case / 点分小写）并限长 64。带空格 / 引号 /
+ * 非 ASCII 的任意串与凭证形前缀（sk-/pk-/rk-/Bearer —— 上游把 key 塞进
+ * type 字段的异常情况）一并跳过，这类值不属于错误类型（Greptile 4/5 建议，
+ * 非阻塞）。
+ */
+const ERROR_TYPE_RE = /^(?!(?:sk|pk|rk)-|bearer)[a-z0-9][a-z0-9._-]{0,63}$/;
+
+function extractErrorTypeFromBody(bodyText: string): string | undefined {
+  const trimmed = bodyText.trim();
+  if (!trimmed.startsWith('{')) return undefined;
+  try {
+    const parsed: unknown = JSON.parse(trimmed);
+    if (typeof parsed === 'object' && parsed !== null && !Array.isArray(parsed)) {
+      const err = (parsed as Record<string, unknown>).error;
+      if (typeof err === 'object' && err !== null && !Array.isArray(err)) {
+        const t = (err as Record<string, unknown>).type;
+        if (typeof t === 'string' && ERROR_TYPE_RE.test(t)) return t;
+      }
+    }
+  } catch {
+    /* 截断 / 非 JSON：忽略 */
+  }
+  return undefined;
 }
 
 export interface ProviderUpstreamErrorObserverOptions {
@@ -167,6 +212,8 @@ export function createProviderUpstreamErrorObserver(
           retryable: cls.retryable,
           status: ctx.status,
           detail: cls.detail ? redactSensitiveText(cls.detail) : undefined,
+          errorType: extractErrorTypeFromBody(bodyText),
+          reqId: ctx.reqId,
         });
       },
       // 上游流错误：本次观察放弃即可（连接层问题由 proxy 主路径处理与记日志）。
