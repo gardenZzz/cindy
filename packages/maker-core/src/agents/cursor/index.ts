@@ -450,6 +450,51 @@ function resolveCreateTransport(
     });
 }
 
+/** 单个模型的 `session/set_config_option` 探测上限。整轮时长 ≈ 模型数 × 本值。 */
+const MODEL_PROBE_TIMEOUT_MS = 20_000;
+
+/**
+ * 让一次探测 RPC 与「用户取消」和有界超时赛跑。
+ *
+ * 只在循环顶部查 `signal.aborted` 是不够的:`client.request` 既不认 signal 也
+ * 没有自带超时,对端卡住时这一轮 await 永不返回 —— IPC 那边虽然立刻回了
+ * `cancelled: true`,刷新状态却永久停在 running,后续刷新还会因全局 inflight
+ * 全部 no-op。
+ *
+ * 放弃后底层 RPC 仍挂在对端,但我们不再等它:`discoverModelOptions` 的 finally
+ * 会 close client + dispose 隔离配置目录,连着把它收掉。
+ */
+async function raceModelProbe<T>(
+  work: Promise<T>,
+  opts: { signal?: AbortSignal; timeoutMs: number },
+): Promise<T> {
+  let timer: NodeJS.Timeout | undefined;
+  let onAbort: (() => void) | undefined;
+  const { signal } = opts;
+  try {
+    return await Promise.race([
+      work,
+      new Promise<never>((_resolve, reject) => {
+        timer = setTimeout(
+          () => reject(new Error(`cursor model probe timed out after ${opts.timeoutMs}ms`)),
+          opts.timeoutMs,
+        );
+        timer.unref?.();
+        if (!signal) return;
+        if (signal.aborted) {
+          reject(new Error('cursor model probe aborted'));
+          return;
+        }
+        onAbort = () => reject(new Error('cursor model probe aborted'));
+        signal.addEventListener('abort', onAbort, { once: true });
+      }),
+    ]);
+  } finally {
+    if (timer) clearTimeout(timer);
+    if (onAbort) signal?.removeEventListener('abort', onAbort);
+  }
+}
+
 export class CursorAgent extends BaseAgent {
   readonly kind = 'cursor' as const;
   readonly capabilities: Capabilities;
@@ -630,9 +675,13 @@ export class CursorAgent extends BaseAgent {
       for (const model of this.listedModels) {
         if (opts.signal?.aborted) break;
         try {
-          const result = await client.request<SetConfigOptionResult>(
-            Method.SessionSetConfigOption,
-            { sessionId, configId: 'model', value: toCursorAcpModelId(model.id) },
+          const result = await raceModelProbe(
+            client.request<SetConfigOptionResult>(Method.SessionSetConfigOption, {
+              sessionId,
+              configId: 'model',
+              value: toCursorAcpModelId(model.id),
+            }),
+            { ...(opts.signal ? { signal: opts.signal } : {}), timeoutMs: MODEL_PROBE_TIMEOUT_MS },
           );
           enrichCursorModelFromConfigOptions(
             this.listedModels,
@@ -640,6 +689,8 @@ export class CursorAgent extends BaseAgent {
             parseAcpConfigOptions(result?.configOptions),
           );
         } catch (err) {
+          // 取消是用户意图，不是探测失败：立刻收尾，别再报一条 warn 也别走完进度。
+          if (opts.signal?.aborted) break;
           // 单个模型探测失败不该毁掉整轮：该模型保持「无档位」，其余照常。
           log.warn('discovery model probe failed', {
             model: model.id,
@@ -2165,6 +2216,18 @@ export class CursorAgent extends BaseAgent {
 
       try {
         assertBootstrapActive();
+        // 未授权不产生任何副作用 —— 放在 MCP 准备、隔离配置目录与 spawn 之前。
+        // Renderer 的发送门禁挡不住这条路径:定时任务 / Orca Worker / 会话恢复
+        // 都直接调 startSession,用户也可能在建会话与后台 bootstrap 之间登出。
+        // 语义见 base-agent 的 AgentNotAuthenticatedError 约定。
+        const authState = await this.deps.auth.getState();
+        assertBootstrapActive();
+        if (!authState.authenticated) {
+          throw new AgentNotAuthenticatedError(
+            'cursor',
+            `cursor not authenticated: ${authState.errorReason ?? 'no_credentials'}`,
+          );
+        }
         if (this.deps.prepareAcpMcpServers) {
           try {
             const prepared = await this.deps.prepareAcpMcpServers({
@@ -2379,7 +2442,15 @@ export class CursorAgent extends BaseAgent {
         turnInFlight = false;
         lastFinalizedGeneration = turnGeneration;
         closed = true;
-        pushAll(translateAcpError(err, translateCtx));
+        // 未授权是可操作的终态:打上 reason 让上层按「去设置里登录」引导,
+        // 而不是把它混进泛化的 ACP 失败里靠文案猜。
+        pushAll(
+          translateAcpError(
+            err,
+            translateCtx,
+            err instanceof AgentNotAuthenticatedError ? { reason: 'not_authenticated' } : undefined,
+          ),
+        );
         rejectBootstrapReady(err);
         await cleanupResources(`CursorAgentSession bootstrap failed: ${err.message}`);
         liveSessionClosers.delete(closeSession);
