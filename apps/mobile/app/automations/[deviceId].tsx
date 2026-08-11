@@ -1316,6 +1316,13 @@ function ScheduleFormCard({
             testID="automations.form.agentCodex"
           />
           <SegmentButton
+            active={draft.agentKind === 'cursor'}
+            disabled={busy || hasRealBinding}
+            label="Cursor"
+            onPress={() => onChange(updateDraftAgentKind(draft, 'cursor'))}
+            testID="automations.form.agentCursor"
+          />
+          <SegmentButton
             active={draft.agentKind === 'pi'}
             disabled={busy || hasRealBinding}
             label="Pi"
@@ -1331,7 +1338,7 @@ function ScheduleFormCard({
           autoCapitalize="none"
           editable={!busy}
           onChangeText={(value) => setField('model', value)}
-          placeholder={hasRealBinding ? t('devices.automations.form.modelPlaceholderBound') : draft.agentKind === 'codex' ? 'gpt-5.5' : draft.agentKind === 'pi' ? t('devices.automations.form.modelPlaceholderPiDefault') : 'claude-sonnet-4-6'}
+          placeholder={hasRealBinding ? t('devices.automations.form.modelPlaceholderBound') : draft.agentKind === 'codex' ? 'gpt-5.5' : draft.agentKind === 'cursor' ? 'auto' : draft.agentKind === 'pi' ? t('devices.automations.form.modelPlaceholderPiDefault') : 'claude-sonnet-4-6'}
           placeholderTextColor={colors.textTertiary}
           style={styles.input}
           testID="automations.form.modelInput"
@@ -1353,7 +1360,8 @@ function ScheduleFormCard({
         />
       </View>
 
-      {(draft.agentKind === 'codex' || draft.agentKind === 'pi') && !hideWorkspaceFields ? (
+      {(draft.agentKind === 'codex' || draft.agentKind === 'cursor' || draft.agentKind === 'pi')
+        && !hideWorkspaceFields ? (
         <ToggleRow
           active={draft.fastMode}
           disabled={busy}

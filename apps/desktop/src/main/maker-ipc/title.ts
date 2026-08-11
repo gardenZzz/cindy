@@ -142,8 +142,9 @@ async function generateCursorSessionTitle(
       model: CURSOR_ONESHOT_DEFAULT_MODEL,
       timeoutMs: TITLE_TIMEOUT_MS_CURSOR,
     });
-    const title = text.trim().slice(0, 40);
-    return title || null;
+    // 与其它 provider 通路同一把尺子：裸 trim+slice 会把多行、`Title:` 前缀、角色标签、
+    // Markdown 与指令复述原样落进自动标题，重新生成标题走的也是这套校验。
+    return validateTitleOutput(text, CURSOR_TITLE_MAX_CHARS);
   } catch (err) {
     log.debug('cursor title oneShot failed (swallowed)', {
       error: err instanceof Error ? err.message : String(err),
@@ -154,6 +155,13 @@ async function generateCursorSessionTitle(
 
 /** Cursor headless 起标题超时（略宽于 HTTP 通路，CLI 冷启动更慢）。 */
 const TITLE_TIMEOUT_MS_CURSOR = 30_000;
+
+/**
+ * 与共享自动标题通路（`title-one-shot.ts` 的 `TITLE_OUTPUT_MAX_CHARS`）取同一上限。
+ * 原先这里是裸 `slice(0, 40)`：既没有校验，超长时又是**截断**而非判为不合格，
+ * 与其它 provider 的口径两处都不一致。
+ */
+const CURSOR_TITLE_MAX_CHARS = 256;
 
 /** regenerate 的依赖注入面——单测用内存实现替换 DB / LLM 调用。 */
 export interface RegenerateTitleDeps {
