@@ -1204,19 +1204,20 @@ export class CursorAgent extends BaseAgent {
           if (entry.settled) continue;
           entry.settled = true;
           pendingExtensions.delete(requestId);
-          if (entry.kind === 'ask_user_question') {
-            entry.resolve({ outcome: { outcome: 'cancelled' } });
-          } else {
-            entry.resolve({
-              outcome:
-                resolveAs === 'allow'
-                  ? { outcome: 'accepted' }
-                  : { outcome: 'cancelled' },
-            });
-          }
+          // 扩展类待决（plan_review / ask_user_question）**一律取消，绝不批准**。
+          //
+          // 唯二会传 `resolveAs='allow'` 的调用方是权限档切换与退出计划模式；把它们
+          // 当成「同意这份计划」是偷换了用户动作 —— 他改的是文件/命令权限档，或者只是
+          // 退出计划模式，从没看过、更没批准过这份计划，而 accepted 会让 agent 直接照着
+          // 干。计划批准必须是用户在计划卡上的显式一次决定。
+          //
+          // 取消不会丢东西：这一轮仍在等，agent 收到 cancelled 后按既有路径收口。
+          entry.resolve({ outcome: { outcome: 'cancelled' } });
           eventQueue.push({
             type: 'interaction_dismissed',
-            data: { requestId, reason, resolvedAs: resolveAs },
+            // resolvedAs 报**实际**结果，不报调用方的意图：否则日志会显示
+            // 「allow」而 agent 实际收到 cancelled。
+            data: { requestId, reason, resolvedAs: 'deny' },
             source: 'cursor',
           });
         }

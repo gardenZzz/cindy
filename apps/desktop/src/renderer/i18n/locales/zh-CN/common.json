@@ -1663,7 +1663,7 @@
         "confirmDescription": "确认后，Cindy 将在本机执行官方安装命令：\n\n{{command}}\n\n未确认前不会执行任何安装。",
         "confirmInstall": "安装",
         "confirmCancel": "取消",
-        "installSuccess": "Cursor 已安装",
+        "installSuccess": "Cursor 已安装。重启 Cindy 后即可在新建任务时选择 Cursor。",
         "installFailed": "无法安装 Cursor",
         "installNotDetected": "安装已结束，但仍未检测到 cursor-agent。请刷新，或在终端自行安装。",
         "unsupportedPlatform": "官方 cursor-agent 安装程序仅支持 macOS 与 Linux。",

@@ -1668,7 +1668,7 @@
         "confirmDescription": "Cindy will run this official install command on your machine:\n\n{{command}}\n\nNothing runs until you confirm.",
         "confirmInstall": "Install",
         "confirmCancel": "Cancel",
-        "installSuccess": "Cursor installed",
+        "installSuccess": "Cursor installed. Restart Cindy to pick Cursor when starting a task.",
         "installFailed": "Couldn't install Cursor",
         "installNotDetected": "Install finished, but cursor-agent wasn't found. Try refreshing, or install from a terminal.",
         "unsupportedPlatform": "The official cursor-agent installer supports macOS and Linux only.",
