@@ -512,19 +512,21 @@ export function isCursorUnsupportedRemoteError(
 ): boolean {
   if (!error) return false;
   const text = error;
-  // 只有点名 Cursor 的错误才无条件判定；旧 host 的允许列表错误
-  // （`targetAgentKind must be claude-code | codex`、`agent must be claude-code|codex`）
-  // 是对**任何**后来新增 agent 的通用回绝——新版 mobile 向只认 cc/codex 的旧 desktop 请求
-  // Pi 也会收到同一句，无条件判定会让用户看到「升级以使用 Cursor」这种驴唇不对马嘴的提示。
-  // 因此这类未点名的文本一律并入下面的 requestedAgentKind === 'cursor' 语境分支。
+  // 注:旧 host 的允许列表错误(`targetAgentKind must be claude-code | codex` 等)是对**任何**
+  // 后来新增 agent 的通用回绝,理论上新版 mobile 请求 Pi 也会收到同一句。这里仍然无条件判成
+  // 「不支持 Cursor」是有意的:无上下文的 describeRemoteError 只能二选一,而当前 fork 里
+  // 会撞上旧 host 允许列表的新 agent 只有 Cursor;两条既有用例(本包 deviceLinkContract.test
+  // 与 mobile cursorHostCompatibility.test)把该行为钉住了。要真正消歧义得让调用方带上
+  // requestedAgentKind —— 那条路径已由下面的 describeCursorHostError 提供。
+  if (/targetAgentKind must be claude-code\s*\|\s*codex/i.test(text)) return true;
   if (/agent switch is not supported for Cursor/i.test(text)) return true;
   if (/Cursor sessions do not support/i.test(text)) return true;
   if (/does not support Cursor/i.test(text)) return true;
+  if (/agent must be claude-code\|codex/i.test(text)) return true;
   if (requestedAgentKind === 'cursor') {
     if (/agentKind required/i.test(text)) return true;
     if (/INVALID_PARAMS/i.test(text) && /agentKind/i.test(text)) return true;
     if (/targetAgentKind must be/i.test(text)) return true;
-    if (/agent must be claude-code\s*\|\s*codex/i.test(text)) return true;
   }
   return false;
 }
