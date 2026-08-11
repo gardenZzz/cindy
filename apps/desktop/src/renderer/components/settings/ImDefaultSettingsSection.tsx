@@ -339,6 +339,10 @@ export function ImDefaultSettingsSection({
           {/* 与新建对话工具条同一个引擎下拉(AgentSelect, #1350): 手写三选一分段在
               窄列里三等分 + truncate, 引擎一多就挤; 且未选中项置灰看着像不可用。 */}
           <AgentSelect
+            // IM 渠道配置不含 cursor（ImDefaultAgentKind 只有三值，两套 bot 路径也没接）。
+            // 不藏的话用户能选中 Cursor，但 agentKindOfVendor 会把它落成 codex —— 选一个
+            // 存另一个。与 HookWorkspacePrefsEditor 同一处置。
+            hiddenVendors={['cursor'] as const}
             value={vendorKeyFor(settings.agentKind)}
             // 字段形态: 与右侧模型选择器同高同宽规格, 面板绑 trigger 宽度
             // (DESIGN.md §4 Select & Dropdown 宽度铁则)。

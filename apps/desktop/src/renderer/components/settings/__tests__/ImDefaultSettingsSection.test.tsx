@@ -59,8 +59,16 @@ vi.mock('@/hooks/useProviders', () => ({
   useProviders: () => ({ providers: [] }),
 }));
 
+/** 捕获传给引擎下拉的 props —— 用来断言 Cursor 没被暴露给 IM 默认配置。 */
+const agentSelectMock = vi.hoisted(() => ({
+  props: [] as Array<Record<string, unknown>>,
+}));
+
 vi.mock('@/components/new-chat/AgentSelect', () => ({
-  AgentSelect: () => null,
+  AgentSelect: (props: Record<string, unknown>) => {
+    agentSelectMock.props.push(props);
+    return null;
+  },
 }));
 
 vi.mock('@/components/new-chat/ModelSelector', () => ({
@@ -237,5 +245,14 @@ describe('ImDefaultSettingsSection Pi channel warning', () => {
     expect(
       screen.queryByText('settings.imBot.defaults.agentUnsupportedOnChannelHint'),
     ).toBeNull();
+  });
+
+  it('hides Cursor from the engine picker (IM cannot store it)', async () => {
+    // ImDefaultAgentKind 只有 claude-code / codex / pi，agentKindOfVendor 会把
+    // cursor 落成 codex —— 不藏就是「选一个存另一个」。
+    agentSelectMock.props.length = 0;
+    const view = render(<ImDefaultSettingsSection channel="telegram" />);
+    await view.findByText('settings.imBot.defaults.agentLabel');
+    expect(agentSelectMock.props.at(-1)?.hiddenVendors).toContain('cursor');
   });
 });

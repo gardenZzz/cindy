@@ -136,6 +136,7 @@ import {
   formatCursorInvalidResumeCasConflictMessage,
   formatCursorInitialModelFailedMessage,
   formatCursorInvalidResumeMessage,
+  formatCursorPlanModeUnavailableMessage,
   formatCursorToolIdleMessage,
   resolveCursorToolIdleMs,
   type ToolIdleWatchdog,
@@ -656,20 +657,29 @@ export class CursorAgent extends BaseAgent {
       onTransportError: (err) => log.warn('discovery transport error', { message: err.message }),
     });
     client.start();
+    // 这两条与逐模型探测同样要赛跑:它们卡住的话取消同样打不断,
+    // `startCursorModelRefresh` 的全局 inflight 永不清空，后续刷新全部 no-op。
+    const raceDiscovery = { ...(opts.signal ? { signal: opts.signal } : {}) };
     try {
-      await client.initialize({
-        protocolVersion: ACP_PROTOCOL_VERSION,
-        clientCapabilities: {
-          fs: { readTextFile: false, writeTextFile: false },
-          // 不声明就拿不到参数化 picker：模型 id 会带死参数、effort 选项整个消失。
-          _meta: { parameterizedModelPicker: true },
-        },
-        clientInfo: { name: 'cindy', title: 'Cindy', version: '0.0.0' },
-      });
-      const created = await client.request<NewSessionResponse>(Method.SessionNew, {
-        cwd: opts.workingDir,
-        mcpServers: [],
-      });
+      await raceAcpRequest(
+        client.initialize({
+          protocolVersion: ACP_PROTOCOL_VERSION,
+          clientCapabilities: {
+            fs: { readTextFile: false, writeTextFile: false },
+            // 不声明就拿不到参数化 picker：模型 id 会带死参数、effort 选项整个消失。
+            _meta: { parameterizedModelPicker: true },
+          },
+          clientInfo: { name: 'cindy', title: 'Cindy', version: '0.0.0' },
+        }),
+        { ...raceDiscovery, timeoutMs: BOOTSTRAP_RPC_TIMEOUT_MS, label: 'discovery initialize' },
+      );
+      const created = await raceAcpRequest(
+        client.request<NewSessionResponse>(Method.SessionNew, {
+          cwd: opts.workingDir,
+          mcpServers: [],
+        }),
+        { ...raceDiscovery, timeoutMs: BOOTSTRAP_RPC_TIMEOUT_MS, label: 'discovery session/new' },
+      );
       const parsed = parseCursorModelsState(created?.models);
       if (!parsed) {
         log.warn('discovery got no models; keeping previous listing');
@@ -2213,9 +2223,33 @@ export class CursorAgent extends BaseAgent {
         try {
           await applyAcpSessionMode('plan');
         } catch (e) {
-          log.warn('session/set_mode(plan) before queued prompt failed', {
-            message: e instanceof Error ? e.message : String(e),
+          // 同 send 路径：武装了 Plan 就不能降级按普通模式发。这里已经脱离 send 的
+          // 调用栈（bootstrap 完成后的 fire-and-forget 派发），只能以终态错误收口。
+          const reason = e instanceof Error ? e.message : String(e);
+          log.warn('session/set_mode(plan) before queued prompt failed; dropping the turn', {
+            message: reason,
           });
+          if (pending.token === turnGeneration && lastFinalizedGeneration !== pending.token) {
+            turnInFlight = false;
+            lastFinalizedGeneration = pending.token;
+          }
+          // 武装态还给用户：这条排队消息没发出去，Plan 勾选不该白白熄灭。
+          if (!mutablePlanMode) {
+            mutablePlanMode = true;
+            eventQueue.push({
+              type: 'plan_mode_changed',
+              data: { enabled: true },
+              source: 'cursor',
+            });
+          }
+          pushAll(
+            translateAcpError(
+              new Error(formatCursorPlanModeUnavailableMessage(reason)),
+              translateCtx,
+              { reason: 'plan_mode_unavailable' },
+            ),
+          );
+          return;
         }
       }
       if (
@@ -2554,9 +2588,12 @@ export class CursorAgent extends BaseAgent {
 
         // 武装态一次性消耗（与 Claude/Codex 同语义）：勾选熄灭，ACP sticky plan 保留到 create_plan 批准。
         const requestedPlanTurn = sendOpts?.planMode ?? mutablePlanMode;
+        /** 本次是否消耗了 UI 武装态；发送失败时要还回去。 */
+        let consumedArmedPlan = false;
         if (requestedPlanTurn) {
           if (mutablePlanMode && sendOpts?.planMode !== false) {
             mutablePlanMode = false;
+            consumedArmedPlan = true;
             eventQueue.push({
               type: 'plan_mode_changed',
               data: { enabled: false },
@@ -2567,9 +2604,25 @@ export class CursorAgent extends BaseAgent {
             try {
               await applyAcpSessionMode('plan');
             } catch (e) {
-              log.warn('session/set_mode(plan) before prompt failed', {
-                message: e instanceof Error ? e.message : String(e),
+              // 用户显式要的是「先给一份可复核的计划」。切不过去就**不能**降级按普通
+              // agent 模式发出去——那等于直接改文件 / 执行命令。失败必须可见。
+              const reason = e instanceof Error ? e.message : String(e);
+              log.warn('session/set_mode(plan) before prompt failed; refusing to send', {
+                message: reason,
               });
+              if (consumedArmedPlan) {
+                // 这一轮没发出去，武装态还给用户：能重试，也能显式关掉计划模式再发。
+                mutablePlanMode = true;
+                eventQueue.push({
+                  type: 'plan_mode_changed',
+                  data: { enabled: true },
+                  source: 'cursor',
+                });
+              }
+              if (token === turnGeneration && lastFinalizedGeneration !== token) {
+                turnInFlight = false;
+              }
+              throw new Error(formatCursorPlanModeUnavailableMessage(reason));
             }
           }
         }

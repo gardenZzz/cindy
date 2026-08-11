@@ -128,3 +128,16 @@ export function formatCursorInitialModelFailedMessage(
 export function formatCursorInvalidResumeCasConflictMessage(): string {
   return 'Cursor 会话无法恢复，且会话 ID 已被并发更新，未自动覆盖。请重试。';
 }
+
+/**
+ * 用户显式武装了计划模式，但 `session/set_mode(plan)` 失败。
+ *
+ * 这条**必须**中止本次发送：降级按普通 agent 模式发出去，会把「先给我一份可复核的
+ * 计划」变成直接改文件 / 执行命令 —— 用户看到的是自己要的计划没来、活已经干完了。
+ */
+export function formatCursorPlanModeUnavailableMessage(reason: string): string {
+  return (
+    `未能进入计划模式（${reason}），已取消本次发送 —— ` +
+    `不会按普通模式直接执行。可重试；若当前 Cursor 版本不支持计划模式，请关闭计划模式后再发送。`
+  );
+}

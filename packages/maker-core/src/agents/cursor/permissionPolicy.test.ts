@@ -250,7 +250,8 @@ describe('Cursor permission policy outcomes (client strategy)', () => {
       title: '`rm -rf /`',
       rawInput: { command: 'rm -rf /' },
     };
-    expect(sessionAllowKeyFromToolCall(toolCall)).toBe('execute:rm');
+    // 完整命令行：按 argv0 归并的话，批准过任意一条 `rm` 就等于给 `rm -rf /` 发了通行证。
+    expect(sessionAllowKeyFromToolCall(toolCall)).toBe('execute:rm -rf /');
     const req = toInteractionRequest({
       requestId: 'r1',
       params: { sessionId: 's', toolCall, options: OPTIONS },

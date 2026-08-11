@@ -221,14 +221,23 @@ export function toolInputFromAcpToolCall(
 
 /**
  * 会话级「不再问」指纹。优先稳定字段（command / path），否则 kind+title。
+ *
+ * **execute 必须带上完整命令行，不能只取 argv0。** 原来按 argv0 归并（对齐 Cursor
+ * allowlist 的 `Shell(uname)` 粒度）会让一次无害批准变成一张长期通行证：批准
+ * `python check.py` 落下 `execute:python` 后，后续 `python -c '<任意代码>'` 会被
+ * `sessionAllowKeys` 直接放行，而用户从没看到过这条明显不同的命令 —— 他批准的是
+ * 一条命令，拿到的却是一个解释器。
+ *
+ * 代价是「本会话不再问」变窄：参数不同就要再确认一次。对一个权限门来说这是正确的
+ * 失败方向 —— 宁可多问，不可拿旧批准盖新命令。
  */
 export function sessionAllowKeyFromToolCall(toolCall: Partial<ToolCallUpdate>): string {
   const kind = typeof toolCall.kind === 'string' ? toolCall.kind : 'other';
   const input = toolInputFromAcpToolCall(toolCall);
   if (typeof input.command === 'string' && input.command.trim()) {
-    // 与 Cursor allowlist `Shell(uname)` 同粒度：取 argv0
-    const argv0 = input.command.trim().split(/\s+/)[0] ?? input.command.trim();
-    return `execute:${argv0}`;
+    // 只归一化空白（跨平台换行 / 缩进不该产生不同指纹），语义部分一字不改。
+    const normalized = input.command.trim().replace(/\s+/g, ' ');
+    return `execute:${normalized}`;
   }
   if (typeof input.path === 'string' && input.path.trim()) {
     return `${kind}:${input.path.trim()}`;
