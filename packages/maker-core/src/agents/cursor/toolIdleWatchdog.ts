@@ -130,6 +130,19 @@ export function formatCursorInvalidResumeCasConflictMessage(): string {
 }
 
 /**
+ * 请求了 Fast，但当前模型没暴露 fast 档位（Auto/default 的 `session/new` 常如此）。
+ *
+ * 不能只打 warn 了事：保存的自动化与 UI 都还显示 Fast 已开启，用户会以为任务在
+ * 加速跑。这条把「没兑现」如实说出来，与模型切换失败同一处置。
+ */
+export function formatCursorFastModeUnavailableMessage(model: string): string {
+  return (
+    `当前模型 ${model} 未提供 Fast 档位，本次会话的 Fast 未生效。` +
+    `在模型选择器里选一个具体模型（而不是 Auto）后重开会话可用 Fast。`
+  );
+}
+
+/**
  * 用户显式武装了计划模式，但 `session/set_mode(plan)` 失败。
  *
  * 这条**必须**中止本次发送：降级按普通 agent 模式发出去，会把「先给我一份可复核的

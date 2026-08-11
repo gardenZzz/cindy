@@ -134,6 +134,7 @@ import type {
 import {
   createToolIdleWatchdog,
   formatCursorInvalidResumeCasConflictMessage,
+  formatCursorFastModeUnavailableMessage,
   formatCursorInitialModelFailedMessage,
   formatCursorInvalidResumeMessage,
   formatCursorPlanModeUnavailableMessage,
@@ -2015,17 +2016,29 @@ export class CursorAgent extends BaseAgent {
           });
         }
       } else if (desiredFastMode !== undefined) {
-        // 初始 Fast 被请求但目标模型当前未暴露 fast option -> 跳过下发。
+        // 初始 Fast 被请求但目标模型当前未暴露 fast option -> 无法下发。
         // 隔离 config dir 下 session/new 的当前模型常是 `default`(Auto)，其
         // configOptions 不含 fast/effort/thinking，需先 set_config_option('model',…)
-        // 才出现；走 followAcpCurrent 时此分支恒成立，Fast 永远不下发。打 warn
-        // 留痕，不再静默（与 thinking 的「有 option 才发」语义不同：thinking 非可选
-        // 恒开，fast 是用户可拨开关，被跳过意味着 UI 与 ACP 不一致）。
+        // 才出现；走 followAcpCurrent 时此分支恒成立，Fast 永远不下发。
         log.warn('cursor initial setFastMode skipped: no fast option exposed', {
           model: mutableModel,
           fastMode: desiredFastMode,
           followAcpCurrent,
         });
+        // 只有「用户明确要开 Fast 却没开成」才提示 —— 关 Fast 没开成无行为差异。
+        // 光打 warn 不够：保存的自动化与 UI 都还显示 Fast 已开启，用户会以为在加速跑。
+        // 与初始模型切换失败同一处置（非终态 error，不打断会话）。
+        if (desiredFastMode === true) {
+          eventQueue.push({
+            type: 'error',
+            data: {
+              message: formatCursorFastModeUnavailableMessage(mutableModel),
+              isTerminal: false,
+              reason: 'fast_mode_unavailable',
+            },
+            source: 'cursor',
+          });
+        }
       }
 
       // 恒开语义不变：只跳过「已经是 true」，报 false 照发（不信任 false 方向）。
