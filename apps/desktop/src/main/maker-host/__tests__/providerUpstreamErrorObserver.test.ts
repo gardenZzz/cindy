@@ -245,6 +245,20 @@ describe('reportProviderUpstreamError (localHandler 桥接路径)', () => {
     expect(events[0]?.reqId).toBeUndefined();
   });
 
+  it('接受 responses-chat bridge 解包后的 streamed error（{type} 无 error 包装）', () => {
+    const events: ProviderUpstreamErrorEvent[] = [];
+    setProviderUpstreamErrorBroadcaster((e) => events.push(e));
+    reportProviderUpstreamError({
+      agent: 'codex',
+      providerId: 'my-relay',
+      status: 502,
+      // bridge 在 SSE 200 流内把 event.error 解包后 JSON.stringify 传给回调。
+      bodyText: '{"type":"upstream_error","message":"boom","status":502}',
+    });
+    expect(events[0]?.errorType).toBe('upstream_error');
+    expect(events[0]?.status).toBe(502);
+  });
+
   it('同 (agent, providerId, code) 30s 内节流；errorType 仍取最新错误体', () => {
     const events: ProviderUpstreamErrorEvent[] = [];
     setProviderUpstreamErrorBroadcaster((e) => events.push(e));

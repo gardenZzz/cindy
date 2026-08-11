@@ -120,9 +120,13 @@ export function decodeUpstreamErrorBody(buf: Buffer, encoding: string | undefine
 }
 
 /**
- * 从上游错误体提取低风险 `error.type`（Anthropic / OpenAI / litellm 共享
- * `{ "error": { "type": "...", ... } }` 形态）。只取 type 字符串，不取 message ——
- * message 常回显请求字段值，会泄漏 prompt 片段（与 proxy 包 extractErrorType 同口径）。
+ * 从上游错误体提取低风险 `error.type`。支持两种形态：
+ *  1. Anthropic / OpenAI / litellm 标准：`{ "error": { "type": "...", ... } }`
+ *  2. responses-chat bridge 解包后的 streamed error：`{ "type": "...", ... }`
+ *     （bridge 在 SSE 200 流内的错误帧里把 event.error 解包后 `JSON.stringify`
+ *     传给回调，见 responses-chat-bridge handler.ts）
+ * 只取 type 字符串，不取 message —— message 常回显请求字段值，会泄漏 prompt
+ * 片段（与 proxy 包 extractErrorType 同口径）。
  * 非 JSON / 字段缺失 / 类型不符一律 undefined，调用方直接省略该字段。
  *
  * errorType 是上游（不可信输入）直接进 renderer 的诊断字段：这里把它钳制到
@@ -138,13 +142,13 @@ function extractErrorTypeFromBody(bodyText: string): string | undefined {
   if (!trimmed.startsWith('{')) return undefined;
   try {
     const parsed: unknown = JSON.parse(trimmed);
-    if (typeof parsed === 'object' && parsed !== null && !Array.isArray(parsed)) {
-      const err = (parsed as Record<string, unknown>).error;
-      if (typeof err === 'object' && err !== null && !Array.isArray(err)) {
-        const t = (err as Record<string, unknown>).type;
-        if (typeof t === 'string' && ERROR_TYPE_RE.test(t)) return t;
-      }
-    }
+    if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed)) return undefined;
+    const root = parsed as Record<string, unknown>;
+    // 标准包裹形态 { error: { type } }，其次 bridge 解包形态 { type }。
+    const err = root.error ?? root;
+    if (typeof err !== 'object' || err === null || Array.isArray(err)) return undefined;
+    const t = (err as Record<string, unknown>).type;
+    if (typeof t === 'string' && ERROR_TYPE_RE.test(t)) return t;
   } catch {
     /* 截断 / 非 JSON：忽略 */
   }
