@@ -13515,7 +13515,14 @@ function getAgentSwitchIntentRev(sessionId: string): number {
 function normalizeAgentSwitchIntent(value: unknown): AgentSwitchIntentRecord | null {
   if (!value || typeof value !== 'object' || Array.isArray(value)) return null;
   const item = value as Record<string, unknown>;
-  if (item.targetAgentKind !== 'claude-code' && item.targetAgentKind !== 'codex') return null;
+  // 恢复路径的运行时校验要与 noteAgentSwitchIntent 能保存的目标同集合：漏掉 cursor 时，
+  // Main 返回的 Cursor pending intent 会被归一成 null，选择器恢复显示旧 Agent，
+  // 而下一条消息仍按 Main 保留的意图切到 Cursor —— 界面与实际路由对不上。
+  if (
+    item.targetAgentKind !== 'claude-code'
+    && item.targetAgentKind !== 'codex'
+    && item.targetAgentKind !== 'cursor'
+  ) return null;
   if (typeof item.model !== 'string' || item.model.length === 0) return null;
   // providerId 缺失按 null(与 main projectPendingAgentSwitchIntent 的 `?? null` 对齐);
   // 只有出现非 string / 非空值的脏值才判非法,避免协议演进时静默丢掉合法意图。
