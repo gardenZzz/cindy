@@ -2271,7 +2271,7 @@ function ModelSelectorContentView({
             : { maxHeight: `${constrainedListMaxHeight}px` }
         }
         role="listbox"
-        aria-label="Model list"
+        aria-label={t('newChat.modelSelector.modelListAria')}
         onScroll={() => {
           if (suppressScrollDismissRef.current) {
             suppressScrollDismissRef.current = false;
