@@ -259,7 +259,7 @@ describe('reportProviderUpstreamError (localHandler 桥接路径)', () => {
     expect(events[0]?.status).toBe(502);
   });
 
-  it('同 (agent, providerId, code) 30s 内节流；errorType 仍取最新错误体', () => {
+  it('同 (agent, providerId, code) 30s 内节流；节流期间保留首次已广播事件', () => {
     const events: ProviderUpstreamErrorEvent[] = [];
     setProviderUpstreamErrorBroadcaster((e) => events.push(e));
     let t = 1_000;
