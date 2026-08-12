@@ -1787,6 +1787,8 @@ interface ElectronAPI {
     } | null>;
     /** 子窗口根组件挂载握手。 */
     ready: () => Promise<void>;
+    /** 子窗口确认当前 deferred 命令已消费(推进 main 桶头)。 */
+    ackCommand: () => Promise<void>;
     /** 主窗把命令转发给子窗口(必要时 main 先开窗)。 */
     /** main 原子裁决 attached / routed / queued / stale-context。 */
     sendCommand: (

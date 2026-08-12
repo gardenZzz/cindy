@@ -151,6 +151,8 @@ describe('orca 远程路由接线不变式', () => {
     const layout = read('components/layout/SidebarWindowLayout.tsx');
     // 串行消费入口:enqueueSidebarCommand 保证 close→ensure 等顺序 intent 不并发
     expect(layout).toContain('enqueueSidebarCommand(cmd)');
+    // detached deferred 桶头需 ack 后才推进；关窗不丢未确认尾部 intent
+    expect(layout).toContain('ackCommand()');
     const executor = read('features/right-sidebar/lib/executeSidebarCommand.ts');
     expect(executor).toContain("command.type === 'open-web-browser'");
     expect(executor).toContain("command.type === 'open-file-browser'");

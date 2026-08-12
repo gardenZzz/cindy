@@ -84,6 +84,12 @@ export class RsbWindowController {
   private lastContext: RsbWindowContext | null = null;
   /** allowOpen=false 时每个 host session 保留一组有序 intent（登记类命令不被后到命令顶掉）。 */
   private deferredCommands = new Map<string, RsbWindowCommand[]>();
+  /**
+   * detached 桶头在途交付标记：只在 renderer ack 后才 shift 桶头。
+   * 关窗 / session 切换时清标记但不丢桶，未确认的 intent 可在下次 flush 重发
+   * （Codex P1：确认消费前不得删除整桶）。
+   */
+  private detachedDeliverySessionId: string | null = null;
   private closeWaiters: Array<() => void> = [];
 
   constructor(private readonly deps: RsbWindowControllerDeps) {}
@@ -151,6 +157,8 @@ export class RsbWindowController {
       this.open({ userInitiated: true });
     } else {
       // queued 调用方早已返回；attach 时必须把 ownership 显式交回主 renderer。
+      // 丢弃 detached 在途标记：剩余桶（含未 ack 桶头）整组转交主窗。
+      this.detachedDeliverySessionId = null;
       this.flushDeferredCommandsToAttachedHost();
       this.close();
     }
@@ -199,9 +207,14 @@ export class RsbWindowController {
     this.lastContext = ctx;
     if (!ctx.available || !ctx.sessionId) {
       this.deferredCommands.clear();
+      this.detachedDeliverySessionId = null;
     } else if (previousSessionId !== ctx.sessionId) {
       for (const sessionId of this.deferredCommands.keys()) {
         if (sessionId !== ctx.sessionId) this.deferredCommands.delete(sessionId);
+      }
+      // 旧 session 的在途交付作废；桶已按 session 清掉，标记也必须对齐。
+      if (this.detachedDeliverySessionId !== ctx.sessionId) {
+        this.detachedDeliverySessionId = null;
       }
     }
     if (this.winRef && !this.winRef.isDestroyed() && !this.closing) {
@@ -331,7 +344,10 @@ export class RsbWindowController {
     bucket.push(command);
   }
 
-  /** 取当前 context session 的整桶 deferred intent,按序全部交给 send。 */
+  /**
+   * attached 路径：主 renderer 常驻，整桶按序一次下发即可。
+   * detached 不得走这里（见 flushDeferredCommandsToDetachedHost 的单条 + ack）。
+   */
   private drainCurrentSessionDeferred(send: (command: RsbWindowCommand) => void): void {
     const sessionId = this.lastContext?.available ? this.lastContext.sessionId : null;
     if (!sessionId) return;
@@ -341,6 +357,11 @@ export class RsbWindowController {
     for (const command of bucket) send(command);
   }
 
+  /**
+   * detached 路径：一次只下发桶头，ack 前保留整桶（含桶头）。
+   * 关窗销毁 BrowserWindow 时未 ack 的尾部 intent 仍在 main 桶内，可再次 flush
+   * （Codex P1：串行消费者未启动的尾部不得随窗口永久丢失）。
+   */
   private flushDeferredCommandsToDetachedHost(): void {
     if (
       !this.deps.settings.read().detached ||
@@ -351,9 +372,30 @@ export class RsbWindowController {
     ) {
       return;
     }
-    this.drainCurrentSessionDeferred((command) => {
-      this.deps.sendToWindow(this.winRef!, this.deps.commandChannel, command);
-    });
+    if (this.detachedDeliverySessionId !== null) return;
+    const sessionId = this.lastContext?.available ? this.lastContext.sessionId : null;
+    if (!sessionId) return;
+    const bucket = this.deferredCommands.get(sessionId);
+    if (!bucket || bucket.length === 0) return;
+    const command = bucket[0];
+    this.detachedDeliverySessionId = sessionId;
+    this.deps.sendToWindow(this.winRef, this.deps.commandChannel, command);
+  }
+
+  /**
+   * 子窗口 renderer 确认当前 deferred 命令已消费后推进桶头并继续下一条。
+   * 无在途交付时 no-op（直播 routeCommand 单条命令也会触发 ack，安全忽略）。
+   */
+  ackDetachedDeferredCommand(): void {
+    const sessionId = this.detachedDeliverySessionId;
+    if (sessionId === null) return;
+    const bucket = this.deferredCommands.get(sessionId);
+    if (bucket && bucket.length > 0) {
+      bucket.shift();
+      if (bucket.length === 0) this.deferredCommands.delete(sessionId);
+    }
+    this.detachedDeliverySessionId = null;
+    this.flushDeferredCommandsToDetachedHost();
   }
 
   private flushDeferredCommandsToAttachedHost(): void {
@@ -402,6 +444,8 @@ export class RsbWindowController {
     this.winRef = null;
     this.ready = false;
     this.closing = false;
+    // 未 ack 的桶头/尾部仍在 deferredCommands；仅清在途标记，下次 open+ready 重发。
+    this.detachedDeliverySessionId = null;
     const closeWaiters = this.closeWaiters.splice(0);
     closeWaiters.forEach((resolve) => resolve());
     // 悬着的 ready 等待全部失败(窗口没等到挂载就没了)

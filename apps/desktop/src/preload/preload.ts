@@ -1517,6 +1517,8 @@ contextBridge.exposeInMainWorld('electronAPI', {
     } | null> => ipcRenderer.invoke('maker:rsb-window:get-context'),
     /** 子窗口根组件挂载握手(main 侧 ensureOpen 等它)。 */
     ready: (): Promise<void> => ipcRenderer.invoke('maker:rsb-window:ready'),
+    /** 子窗口确认当前 deferred 命令已消费(推进 main 桶头)。 */
+    ackCommand: (): Promise<void> => ipcRenderer.invoke('maker:rsb-window:ack-command'),
     /** 主窗请求 main 原子裁决命令宿主；必要时 main 开窗、排队或取消 stale intent。 */
     sendCommand: (request: RsbWindowCommandRouteRequest): Promise<RsbWindowCommandRouteResult> =>
       ipcRenderer.invoke('maker:rsb-window:send-command', request),

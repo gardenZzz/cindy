@@ -637,6 +637,11 @@ describe('setContext / routeCommand', () => {
 
     h.controller.open();
     h.controller.markReady();
+    // detached 一次只下发桶头，ack 后才推进下一条
+    expect(h.sends.filter((entry) => entry.channel === 'cmd-channel')).toEqual([
+      { channel: 'cmd-channel', payload: subagents },
+    ]);
+    h.controller.ackDetachedDeferredCommand();
     expect(h.sends.filter((entry) => entry.channel === 'cmd-channel')).toEqual([
       { channel: 'cmd-channel', payload: subagents },
       { channel: 'cmd-channel', payload: closeWorkers },
@@ -681,7 +686,12 @@ describe('setContext / routeCommand', () => {
 
     h.controller.open();
     h.controller.markReady();
-    expect(h.sends.map((entry) => entry.payload)).toEqual([register, { type: 'close-orca-workers-tab', sessionId: 's1' }]);
+    expect(h.sends.map((entry) => entry.payload)).toEqual([register]);
+    h.controller.ackDetachedDeferredCommand();
+    expect(h.sends.map((entry) => entry.payload)).toEqual([
+      register,
+      { type: 'close-orca-workers-tab', sessionId: 's1' },
+    ]);
   });
 
   it('连续等价的 subagent 静默登记只保留一条,避免队列无限堆积(#2491 Codex P2)', async () => {
@@ -770,6 +780,10 @@ describe('setContext / routeCommand', () => {
     h.controller.markReady();
     expect(h.sends.filter((entry) => entry.channel === 'cmd-channel')).toEqual([
       { channel: 'cmd-channel', payload: focused },
+    ]);
+    h.controller.ackDetachedDeferredCommand();
+    expect(h.sends.filter((entry) => entry.channel === 'cmd-channel')).toEqual([
+      { channel: 'cmd-channel', payload: focused },
       { channel: 'cmd-channel', payload: registerOnly },
     ]);
   });
@@ -840,7 +854,83 @@ describe('setContext / routeCommand', () => {
     h.controller.markReady();
     expect(h.sends.filter((entry) => entry.channel === 'cmd-channel')).toEqual([
       { channel: 'cmd-channel', payload: { type: 'close-orca-workers-tab', sessionId: 's1' } },
+    ]);
+    h.controller.ackDetachedDeferredCommand();
+    expect(h.sends.filter((entry) => entry.channel === 'cmd-channel')).toEqual([
+      { channel: 'cmd-channel', payload: { type: 'close-orca-workers-tab', sessionId: 's1' } },
       { channel: 'cmd-channel', payload: genericEnsure },
+    ]);
+  });
+
+  it('关窗销毁时未 ack 的尾部 intent 保留,重开后可继续交付(Codex P1)', async () => {
+    const h = makeHarness({ detached: true }, { asyncClose: true });
+    h.controller.setContext(ctx);
+    const closeWorkers = { type: 'close-orca-workers-tab' as const, sessionId: 's1' };
+    const genericEnsure = {
+      type: 'ensure-orca-workers-tab' as const,
+      sessionId: 's1',
+      focusTab: false,
+    };
+    await h.controller.routeCommand({ command: closeWorkers, allowOpen: false });
+    await h.controller.routeCommand({ command: genericEnsure, allowOpen: false });
+
+    h.controller.open();
+    h.controller.markReady();
+    // 仅下发桶头 close；ensure 仍在 main 桶内
+    expect(h.sends.filter((entry) => entry.channel === 'cmd-channel')).toEqual([
+      { channel: 'cmd-channel', payload: closeWorkers },
+    ]);
+
+    // 首条尚未 ack 时关窗销毁 BrowserWindow：在途标记清除，整桶保留
+    h.controller.close();
+    h.windows[0].emitClosed();
+    expect(h.sends.filter((entry) => entry.channel === 'cmd-channel')).toEqual([
+      { channel: 'cmd-channel', payload: closeWorkers },
+    ]);
+
+    // 重开 + ready：从桶头 close 重新交付，ack 后才到 ensure
+    h.controller.open();
+    h.controller.markReady();
+    const cmds = () => h.sends.filter((entry) => entry.channel === 'cmd-channel');
+    expect(cmds().map((e) => e.payload)).toEqual([closeWorkers, closeWorkers]);
+    h.controller.ackDetachedDeferredCommand();
+    expect(cmds().map((e) => e.payload)).toEqual([closeWorkers, closeWorkers, genericEnsure]);
+    h.controller.ackDetachedDeferredCommand();
+    // 桶空后再 ack 是 no-op
+    h.controller.ackDetachedDeferredCommand();
+    expect(cmds().map((e) => e.payload)).toEqual([closeWorkers, closeWorkers, genericEnsure]);
+  });
+
+  it('ack 推进后关窗,剩余尾部 intent 仍可在重开后交付(Codex P1)', async () => {
+    const h = makeHarness({ detached: true }, { asyncClose: true });
+    h.controller.setContext(ctx);
+    const closeWorkers = { type: 'close-orca-workers-tab' as const, sessionId: 's1' };
+    const genericEnsure = {
+      type: 'ensure-orca-workers-tab' as const,
+      sessionId: 's1',
+      focusTab: false,
+    };
+    await h.controller.routeCommand({ command: closeWorkers, allowOpen: false });
+    await h.controller.routeCommand({ command: genericEnsure, allowOpen: false });
+
+    h.controller.open();
+    h.controller.markReady();
+    h.controller.ackDetachedDeferredCommand(); // close 完成，ensure 在途
+    expect(h.sends.filter((e) => e.channel === 'cmd-channel').map((e) => e.payload)).toEqual([
+      closeWorkers,
+      genericEnsure,
+    ]);
+
+    h.controller.close();
+    h.windows[0].emitClosed();
+
+    h.controller.open();
+    h.controller.markReady();
+    // ensure 未 ack，重开后应再次下发 ensure（不再重发已 ack 的 close）
+    expect(h.sends.filter((e) => e.channel === 'cmd-channel').map((e) => e.payload)).toEqual([
+      closeWorkers,
+      genericEnsure,
+      genericEnsure,
     ]);
   });
 

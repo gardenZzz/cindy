@@ -290,6 +290,16 @@ export function registerRsbWindowIpc(opts: {
     controller.markReady();
   });
 
+  ipcMain.handle(MAKER_INVOKE.RSB_WINDOW_ACK_COMMAND, (event) => {
+    // 仅子窗口可确认 detached deferred 消费；主窗误调忽略。
+    const sidebarWc = controller.getSidebarWebContents();
+    if (!sidebarWc || event.sender !== sidebarWc) {
+      log.warn('RSB_WINDOW_ACK_COMMAND from non-sidebar sender, ignored');
+      return;
+    }
+    controller.ackDetachedDeferredCommand();
+  });
+
   ipcMain.handle(MAKER_INVOKE.RSB_WINDOW_SEND_COMMAND, async (event, payload: unknown) => {
     // 参数错误无论 sender 身份都按 IPC 契约抛 INVALID_PARAMS。
     const request = parseCommandRouteRequest(payload);

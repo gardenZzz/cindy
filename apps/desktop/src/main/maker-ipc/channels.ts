@@ -663,6 +663,7 @@ export const MAKER_INVOKE = {
    *  - SET_DETACHED(boolean): 落盘偏好;true 附带开窗,false 附带关窗;返回新 state
    *  - GET_CONTEXT: 子窗口 mount 时拉主窗上报的 { sessionId, workdir, remoteHostId, deviceLinkDeviceId, available }
    *  - READY: 子窗口根组件挂载握手(resolve main 侧 ensureOpen 等待)
+   *  - ACK_COMMAND: 子窗口确认当前 deferred 命令已消费(推进桶头)
    *  - SEND_COMMAND: 主窗把命令(如 open-terminal 快捷键)转发给子窗口,必要时先开窗
    */
   RSB_WINDOW_GET_STATE: 'maker:rsb-window:get-state',
@@ -671,6 +672,11 @@ export const MAKER_INVOKE = {
   RSB_WINDOW_SET_DETACHED: 'maker:rsb-window:set-detached',
   RSB_WINDOW_GET_CONTEXT: 'maker:rsb-window:get-context',
   RSB_WINDOW_READY: 'maker:rsb-window:ready',
+  /**
+   * 子窗口确认当前 deferred 命令已消费（串行 enqueue 完成）。
+   * main 仅在有在途 detached 交付时推进桶头；直播 route 命令的 ack 被忽略。
+   */
+  RSB_WINDOW_ACK_COMMAND: 'maker:rsb-window:ack-command',
   RSB_WINDOW_SEND_COMMAND: 'maker:rsb-window:send-command',
   /**
    * 插件停靠面板独立窗口(ghost panel window)——每 ghostId 一扇窗。

@@ -112,7 +112,15 @@ export function SidebarWindowLayout() {
   //   renderer 的 store 消费;远程会话走 memory-only,不能靠主窗 store/SQLite 同步。
   useEffect(() => {
     return window.electronAPI.rightSidebarWindow.onCommand((cmd) => {
-      void enqueueSidebarCommand(cmd).catch((err) => log.warn('sidebar command failed', err));
+      // 串行消费完成后 ack：main 才 shift 桶头并下发下一条 deferred intent。
+      // 直播 route 命令的 ack 在 main 侧无在途交付时 no-op。
+      void enqueueSidebarCommand(cmd)
+        .catch((err) => log.warn('sidebar command failed', err))
+        .finally(() => {
+          void window.electronAPI.rightSidebarWindow.ackCommand().catch((err) => {
+            log.warn('sidebar command ack failed', err);
+          });
+        });
     });
   }, []);
 
