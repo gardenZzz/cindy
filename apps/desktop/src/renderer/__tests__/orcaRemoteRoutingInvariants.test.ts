@@ -149,7 +149,8 @@ describe('orca 远程路由接线不变式', () => {
 
   it('detached 子窗口消费 browser/file/orca intent,主窗口 helper 不直接写子窗宿主 store', () => {
     const layout = read('components/layout/SidebarWindowLayout.tsx');
-    expect(layout).toContain('executeSidebarCommand(cmd)');
+    // 串行消费入口:enqueueSidebarCommand 保证 close→ensure 等顺序 intent 不并发
+    expect(layout).toContain('enqueueSidebarCommand(cmd)');
     const executor = read('features/right-sidebar/lib/executeSidebarCommand.ts');
     expect(executor).toContain("command.type === 'open-web-browser'");
     expect(executor).toContain("command.type === 'open-file-browser'");

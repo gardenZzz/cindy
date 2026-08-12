@@ -25,7 +25,7 @@ import {
   closeOrcaWorkersTabAfterTeamEnd,
   ensureOrcaWorkersTab,
 } from '../../plugins/orca-workers/actions';
-import { executeSidebarCommand } from '../executeSidebarCommand';
+import { enqueueSidebarCommand, executeSidebarCommand } from '../executeSidebarCommand';
 import {
   openDirInSidebarFileBrowser,
   openExternalFileInSidebarFileBrowser,
@@ -104,5 +104,30 @@ describe('executeSidebarCommand', () => {
       revealSidebar: true,
       userInitiated: false,
     });
+  });
+
+  it('enqueueSidebarCommand 串行执行:后入命令等前一条完成后再开始(Codex P2)', async () => {
+    const order: string[] = [];
+    const close = closeOrcaWorkersTabAfterTeamEnd as ReturnType<typeof vi.fn>;
+    const ensure = ensureOrcaWorkersTab as ReturnType<typeof vi.fn>;
+    close.mockImplementation(async () => {
+      order.push('close-start');
+      await new Promise((r) => setTimeout(r, 10));
+      order.push('close-end');
+    });
+    ensure.mockImplementation(async () => {
+      order.push('ensure-start');
+    });
+
+    const p1 = enqueueSidebarCommand({ type: 'close-orca-workers-tab', sessionId: 's1' });
+    const p2 = enqueueSidebarCommand({
+      type: 'ensure-orca-workers-tab',
+      sessionId: 's1',
+      focusTab: false,
+    });
+
+    await Promise.all([p1, p2]);
+    // 严格串行:ensure 必须在 close 完成后才开始,不能交错
+    expect(order).toEqual(['close-start', 'close-end', 'ensure-start']);
   });
 });

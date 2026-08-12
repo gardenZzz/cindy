@@ -31,7 +31,7 @@ import { PanelRight } from 'lucide-react';
 import { RightSidebarShell } from '@/features/right-sidebar/RightSidebarShell';
 import { useDeviceLinkRemoteProjects } from '@/features/device-link/useDeviceLinkRemoteProjects';
 import { onRequestRightSidebarVisibility } from '@/features/right-sidebar/lib/sidebarCommands';
-import { executeSidebarCommand } from '@/features/right-sidebar/lib/executeSidebarCommand';
+import { enqueueSidebarCommand } from '@/features/right-sidebar/lib/executeSidebarCommand';
 import {
   closeTab,
   getBucket,
@@ -112,7 +112,7 @@ export function SidebarWindowLayout() {
   //   renderer 的 store 消费;远程会话走 memory-only,不能靠主窗 store/SQLite 同步。
   useEffect(() => {
     return window.electronAPI.rightSidebarWindow.onCommand((cmd) => {
-      void executeSidebarCommand(cmd).catch((err) => log.warn('sidebar command failed', err));
+      void enqueueSidebarCommand(cmd).catch((err) => log.warn('sidebar command failed', err));
     });
   }, []);
 

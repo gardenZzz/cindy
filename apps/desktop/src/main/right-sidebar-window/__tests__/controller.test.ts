@@ -626,4 +626,239 @@ describe('setContext / routeCommand', () => {
     h.controller.markReady();
     expect(h.sends.at(-1)).toEqual({ channel: 'cmd-channel', payload: explicit });
   });
+
+  it('同 session 两条不同 passive 命令入队后按序全部 flush(#2409)', async () => {
+    const h = makeHarness({ detached: true });
+    h.controller.setContext(ctx);
+    const subagents = { type: 'open-subagents-tab' as const, sessionId: 's1' };
+    const closeWorkers = { type: 'close-orca-workers-tab' as const, sessionId: 's1' };
+    await h.controller.routeCommand({ command: subagents, allowOpen: false });
+    await h.controller.routeCommand({ command: closeWorkers, allowOpen: false });
+
+    h.controller.open();
+    h.controller.markReady();
+    expect(h.sends.filter((entry) => entry.channel === 'cmd-channel')).toEqual([
+      { channel: 'cmd-channel', payload: subagents },
+      { channel: 'cmd-channel', payload: closeWorkers },
+    ]);
+  });
+
+  it('同 session 两条不同 passive 命令在切回 attached 时按序转交主 renderer(#2409)', async () => {
+    const h = makeHarness({ detached: true });
+    h.controller.setContext(ctx);
+    const subagents = { type: 'open-subagents-tab' as const, sessionId: 's1' };
+    const closeWorkers = { type: 'close-orca-workers-tab' as const, sessionId: 's1' };
+    await h.controller.routeCommand({ command: subagents, allowOpen: false });
+    await h.controller.routeCommand({ command: closeWorkers, allowOpen: false });
+
+    h.controller.setDetached(false);
+    expect(h.sends.filter((entry) => entry.channel === 'cmd-channel')).toEqual([
+      { channel: 'cmd-channel', payload: subagents },
+      { channel: 'cmd-channel', payload: closeWorkers },
+    ]);
+    expect(h.sendTargets.filter((_, i) => h.sends[i]?.channel === 'cmd-channel')).toEqual([
+      h.mainWin.webContents.id,
+      h.mainWin.webContents.id,
+    ]);
+  });
+
+  it('subagent 登记入队后再入队另一条 passive 命令,登记不被覆盖(#2409)', async () => {
+    const h = makeHarness({ detached: true });
+    h.controller.setContext(ctx);
+    const register = {
+      type: 'open-subagents-tab' as const,
+      sessionId: 's1',
+      focusRunId: 'run-1',
+      focusProvider: null,
+      focusTab: false,
+      revealSidebar: false,
+    };
+    await h.controller.routeCommand({ command: register, allowOpen: false });
+    await h.controller.routeCommand({
+      command: { type: 'close-orca-workers-tab', sessionId: 's1' },
+      allowOpen: false,
+    });
+
+    h.controller.open();
+    h.controller.markReady();
+    expect(h.sends.map((entry) => entry.payload)).toEqual([register, { type: 'close-orca-workers-tab', sessionId: 's1' }]);
+  });
+
+  it('连续等价的 subagent 静默登记只保留一条,避免队列无限堆积(#2491 Codex P2)', async () => {
+    const h = makeHarness({ detached: true });
+    h.controller.setContext(ctx);
+    // 生产路径 openSubagentsTab 用 `?? null` 写 focus 字段,IPC 保留 null
+    const registerBase = {
+      type: 'open-subagents-tab' as const,
+      sessionId: 's1',
+      focusRunId: null,
+      focusProvider: null,
+      focusTab: false,
+      revealSidebar: false,
+    };
+    const registerOnly = (over: Partial<typeof registerBase> = {}) => ({
+      ...registerBase,
+      sessionId: 's1',
+      ...over,
+    });
+    // 连续 5 次静默登记(模拟 detached 关窗期间多次 agent_task_update)
+    for (let i = 0; i < 5; i++) {
+      await h.controller.routeCommand({ command: registerOnly(), allowOpen: false });
+    }
+
+    h.controller.open();
+    h.controller.markReady();
+    expect(h.sends.filter((entry) => entry.channel === 'cmd-channel')).toEqual([
+      { channel: 'cmd-channel', payload: registerBase },
+    ]);
+  });
+
+  it('null 与 undefined 的静默登记互相去重(生产 null / 遗留 undefined 等价)', async () => {
+    const h = makeHarness({ detached: true });
+    h.controller.setContext(ctx);
+    const withNull = {
+      type: 'open-subagents-tab' as const,
+      sessionId: 's1',
+      focusRunId: null,
+      focusProvider: null,
+      focusTab: false,
+      revealSidebar: false,
+    };
+    const withUndefined = {
+      type: 'open-subagents-tab' as const,
+      sessionId: 's1',
+      focusRunId: undefined,
+      focusProvider: undefined,
+      focusTab: false,
+      revealSidebar: false,
+    };
+    await h.controller.routeCommand({ command: withNull, allowOpen: false });
+    await h.controller.routeCommand({ command: withUndefined, allowOpen: false });
+    await h.controller.routeCommand({ command: withNull, allowOpen: false });
+
+    h.controller.open();
+    h.controller.markReady();
+    expect(h.sends.filter((entry) => entry.channel === 'cmd-channel')).toEqual([
+      { channel: 'cmd-channel', payload: withNull },
+    ]);
+  });
+
+  it('带 focus 的 subagent 登记不与其后静默登记合并,静默登记也不覆盖带 focus 登记(#2491 Codex P2)', async () => {
+    const h = makeHarness({ detached: true });
+    h.controller.setContext(ctx);
+    const focused = {
+      type: 'open-subagents-tab' as const,
+      sessionId: 's1',
+      focusRunId: 'run-1',
+      focusProvider: null,
+      focusTab: false,
+      revealSidebar: false,
+    };
+    await h.controller.routeCommand({ command: focused, allowOpen: false });
+    // 带 focus 的登记之后又来一条静默登记:两者语义不同,都应保留
+    const registerOnly = {
+      type: 'open-subagents-tab' as const,
+      sessionId: 's1',
+      focusRunId: null,
+      focusProvider: null,
+      focusTab: false,
+      revealSidebar: false,
+    };
+    await h.controller.routeCommand({ command: registerOnly, allowOpen: false });
+
+    h.controller.open();
+    h.controller.markReady();
+    expect(h.sends.filter((entry) => entry.channel === 'cmd-channel')).toEqual([
+      { channel: 'cmd-channel', payload: focused },
+      { channel: 'cmd-channel', payload: registerOnly },
+    ]);
+  });
+
+  it('ensure 定位意图 last-write-wins:后到显式 ensure 替换尾部 ensure(#2409)', async () => {
+    const h = makeHarness({ detached: true });
+    h.controller.setContext(ctx);
+    const first = {
+      type: 'ensure-orca-workers-tab' as const,
+      sessionId: 's1',
+      focusWorkerSessionId: 'w1',
+      focusTab: false,
+    };
+    const second = {
+      type: 'ensure-orca-workers-tab' as const,
+      sessionId: 's1',
+      focusWorkerSessionId: 'w2',
+      focusTab: false,
+    };
+    await h.controller.routeCommand({ command: first, allowOpen: false });
+    await h.controller.routeCommand({ command: second, allowOpen: false });
+
+    h.controller.open();
+    h.controller.markReady();
+    // Orca 页签单例,worker focus 只能有一个落点:后到的显式 intent 胜出(与旧 set 语义一致)。
+    expect(h.sends.filter((entry) => entry.channel === 'cmd-channel')).toEqual([
+      { channel: 'cmd-channel', payload: second },
+    ]);
+  });
+
+  it('带定位的 ensure 吸收尾部 generic ensure,generic 不追加(#2409)', async () => {
+    const h = makeHarness({ detached: true });
+    h.controller.setContext(ctx);
+    await h.controller.routeCommand({
+      command: { type: 'ensure-orca-workers-tab', sessionId: 's1', focusTab: false },
+      allowOpen: false,
+    });
+    const focused = {
+      type: 'ensure-orca-workers-tab' as const,
+      sessionId: 's1',
+      focusWorkerSessionId: 'w1',
+      focusTab: false,
+    };
+    await h.controller.routeCommand({ command: focused, allowOpen: false });
+
+    h.controller.open();
+    h.controller.markReady();
+    expect(h.sends.filter((entry) => entry.channel === 'cmd-channel')).toEqual([
+      { channel: 'cmd-channel', payload: focused },
+    ]);
+  });
+
+  it('generic ensure 不吸收尾部 close(ensure 在 close 后有真实语义,#2409)', async () => {
+    const h = makeHarness({ detached: true });
+    h.controller.setContext(ctx);
+    await h.controller.routeCommand({
+      command: { type: 'close-orca-workers-tab', sessionId: 's1' },
+      allowOpen: false,
+    });
+    const genericEnsure = {
+      type: 'ensure-orca-workers-tab' as const,
+      sessionId: 's1',
+      focusTab: false,
+    };
+    await h.controller.routeCommand({ command: genericEnsure, allowOpen: false });
+
+    h.controller.open();
+    h.controller.markReady();
+    expect(h.sends.filter((entry) => entry.channel === 'cmd-channel')).toEqual([
+      { channel: 'cmd-channel', payload: { type: 'close-orca-workers-tab', sessionId: 's1' } },
+      { channel: 'cmd-channel', payload: genericEnsure },
+    ]);
+  });
+
+  it('context 切换后旧 session 的整组 intent 全部清理(#2409)', async () => {
+    const h = makeHarness({ detached: true });
+    h.controller.setContext(ctx);
+    await h.controller.routeCommand({
+      command: { type: 'open-subagents-tab', sessionId: 's1' },
+      allowOpen: false,
+    });
+    await h.controller.routeCommand({
+      command: { type: 'close-orca-workers-tab', sessionId: 's1' },
+      allowOpen: false,
+    });
+
+    h.controller.setContext({ ...ctx, sessionId: 's2' });
+    h.controller.open();
+    h.controller.markReady();
+    expect(h.sends.filter((entry) => entry.channel === 'cmd-channel')).toEqual([]);
+  });
 });

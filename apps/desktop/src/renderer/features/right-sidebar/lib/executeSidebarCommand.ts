@@ -16,6 +16,20 @@ import { openSubagentsTab } from './openSubagentsTab';
 import { openTurnReview } from './openTurnReview';
 import { openUrlInSidebarBrowser } from './openInSidebarBrowser';
 
+// 串行消费队列(Codex P2):main 批量下发的 deferred intent 带顺序语义(如
+// `close-orca-workers-tab` 后接 generic ensure),而两个 onCommand 消费点都
+// `void executeSidebarCommand(...)` 并发启动,close 在真正删除页签前让出执行权、
+// 后到的 ensure 会看到旧页签直接返回,最终状态违背最新 intent。用单条 promise
+// 链把命令排成严格串行,保证同一 renderer 内按到达顺序逐条完成。
+let commandChain: Promise<void> = Promise.resolve();
+
+/** 排入串行消费队列;返回本条命令完成的 Promise(供调用方感知失败)。 */
+export function enqueueSidebarCommand(command: RsbWindowCommand): Promise<void> {
+  const run = commandChain.then(() => executeSidebarCommand(command));
+  commandChain = run.catch(() => undefined);
+  return run;
+}
+
 /** 在 main 已选定的当前 renderer host 中执行命令，不自行选择宿主。 */
 export async function executeSidebarCommand(command: RsbWindowCommand): Promise<void> {
   if (command.type === 'open-web-browser') {

@@ -82,8 +82,8 @@ export class RsbWindowController {
     timeout: NodeJS.Timeout;
   }> = [];
   private lastContext: RsbWindowContext | null = null;
-  /** allowOpen=false 时每个 session 只保留最终有效命令，避免 remote memory intent 丢失。 */
-  private deferredCommands = new Map<string, RsbWindowCommand>();
+  /** allowOpen=false 时每个 host session 保留一组有序 intent（登记类命令不被后到命令顶掉）。 */
+  private deferredCommands = new Map<string, RsbWindowCommand[]>();
   private closeWaiters: Array<() => void> = [];
 
   constructor(private readonly deps: RsbWindowControllerDeps) {}
@@ -283,23 +283,62 @@ export class RsbWindowController {
     // 按宿主桶排队:跨会话 open-turn-review 属于 lead 的桶,须由 lead 上下文
     // flush;按 worker sessionId 入队会在 context 保持 lead 时永远刷不出来。
     const hostSessionId = commandHostSessionId(command);
-    const previous = this.deferredCommands.get(hostSessionId);
-    if (
-      command.type === 'ensure-orca-workers-tab' &&
-      previous?.type === 'ensure-orca-workers-tab' &&
-      command.focusWorkerSessionId === undefined &&
-      command.searchJump === undefined
-    ) {
+    const bucket = this.deferredCommands.get(hostSessionId);
+    if (!bucket) {
+      if (this.deferredCommands.size >= MAX_DEFERRED_SESSIONS) {
+        const oldest = this.deferredCommands.keys().next().value as string | undefined;
+        if (oldest) this.deferredCommands.delete(oldest);
+      }
+      this.deferredCommands.set(hostSessionId, [command]);
       return;
     }
-    if (
-      !this.deferredCommands.has(hostSessionId) &&
-      this.deferredCommands.size >= MAX_DEFERRED_SESSIONS
-    ) {
-      const oldest = this.deferredCommands.keys().next().value as string | undefined;
-      if (oldest) this.deferredCommands.delete(oldest);
+    // Orca 页签单例 coalescing(#2409):只与紧邻尾部同类命令合并,其余不同语义
+    // 命令保序追加、绝不互相覆盖(登记类 intent 不被后到 passive 命令顶掉)。
+    //  - 带定位的 ensure(focus/searchJump)蕴含「打开」:最新聚焦意图覆盖尾部 ensure;
+    //  - 无定位的 generic ensure:尾部已是 ensure 时被吸收(等价重复,或该 generic
+    //    不如尾部更具体的 worker/search intent,保护具体 intent 不被抹掉);
+    //    尾部是 close 等非 ensure 命令时照常追加(ensure 在 close 后有真实语义)。
+    if (command.type === 'ensure-orca-workers-tab') {
+      const last = bucket[bucket.length - 1];
+      const isGeneric = command.focusWorkerSessionId === undefined && command.searchJump === undefined;
+      if (last?.type === 'ensure-orca-workers-tab') {
+        if (isGeneric) return;
+        bucket[bucket.length - 1] = command;
+        return;
+      }
     }
-    this.deferredCommands.set(hostSessionId, command);
+    // Subagent 静默登记是固定常量(SUBAGENT_TAB_REGISTER_ONLY:revealSidebar=false、
+    // 无 focus 参数),detached 关窗期间每次 agent_task_update 都会再次入队(历史挂载 +
+    // 实时更新,见 CCAgentSessionView)。openSubagentsTab 用 `?? null` 显式写 focus
+    // 字段,IPC 也保留 null,故 null 与 undefined 都视为「无 focus」(Codex P1)。
+    // 连续等价静默登记只保留一条,避免队列无限堆积、开窗时重复执行。
+    if (command.type === 'open-subagents-tab') {
+      const last = bucket[bucket.length - 1];
+      const isRegisterOnly =
+        command.revealSidebar === false &&
+        command.focusRunId == null &&
+        command.focusProvider == null;
+      if (
+        isRegisterOnly &&
+        last?.type === 'open-subagents-tab' &&
+        last.revealSidebar === false &&
+        last.focusRunId == null &&
+        last.focusProvider == null
+      ) {
+        return;
+      }
+    }
+    bucket.push(command);
+  }
+
+  /** 取当前 context session 的整桶 deferred intent,按序全部交给 send。 */
+  private drainCurrentSessionDeferred(send: (command: RsbWindowCommand) => void): void {
+    const sessionId = this.lastContext?.available ? this.lastContext.sessionId : null;
+    if (!sessionId) return;
+    const bucket = this.deferredCommands.get(sessionId);
+    if (!bucket || bucket.length === 0) return;
+    this.deferredCommands.delete(sessionId);
+    for (const command of bucket) send(command);
   }
 
   private flushDeferredCommandsToDetachedHost(): void {
@@ -312,24 +351,18 @@ export class RsbWindowController {
     ) {
       return;
     }
-    const sessionId = this.lastContext?.available ? this.lastContext.sessionId : null;
-    if (!sessionId) return;
-    const command = this.deferredCommands.get(sessionId);
-    if (!command) return;
-    this.deferredCommands.delete(sessionId);
-    this.deps.sendToWindow(this.winRef, this.deps.commandChannel, command);
+    this.drainCurrentSessionDeferred((command) => {
+      this.deps.sendToWindow(this.winRef!, this.deps.commandChannel, command);
+    });
   }
 
   private flushDeferredCommandsToAttachedHost(): void {
     if (this.deps.settings.read().detached) return;
-    const sessionId = this.lastContext?.available ? this.lastContext.sessionId : null;
-    if (!sessionId) return;
-    const command = this.deferredCommands.get(sessionId);
-    if (!command) return;
     const main = this.deps.getMainWindow();
     if (!main || main.isDestroyed()) return;
-    this.deferredCommands.delete(sessionId);
-    this.deps.sendToWindow(main, this.deps.commandChannel, command);
+    this.drainCurrentSessionDeferred((command) => {
+      this.deps.sendToWindow(main, this.deps.commandChannel, command);
+    });
   }
 
   private waitUntilClosed(): Promise<void> {

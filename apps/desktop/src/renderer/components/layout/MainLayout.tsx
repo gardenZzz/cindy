@@ -56,7 +56,7 @@ import {
 import { didUserCloseDetachedSidebarWindow } from '@/lib/rsbWindowTransitions';
 import { routeSidebarCommand } from '@/features/right-sidebar/lib/detachedSidebarRouting';
 import { openTerminalFromShortcut } from '@/features/right-sidebar/lib/openTerminalShortcut';
-import { executeSidebarCommand } from '@/features/right-sidebar/lib/executeSidebarCommand';
+import { enqueueSidebarCommand } from '@/features/right-sidebar/lib/executeSidebarCommand';
 import { RightSidebarDetach } from '@/components/layout/RightSidebarDetach';
 import { useSidebarResize } from '@/hooks/useSidebarResize';
 import { useSidebarCardMode } from '@/hooks/useSidebarCardMode';
@@ -883,7 +883,7 @@ export function MainLayout() {
     if (isSecondaryWindow()) return;
     return window.electronAPI.rightSidebarWindow.onCommand((command) => {
       if (command.sessionId !== rightSidebarSessionIdRef.current) return;
-      void executeSidebarCommand(command).catch((err) => {
+      void enqueueSidebarCommand(command).catch((err) => {
         applicationMenuLog.warn('execute attached sidebar command failed', err);
       });
     });
