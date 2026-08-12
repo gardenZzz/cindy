@@ -105,20 +105,22 @@ export function resolveDeviceLinkDraftDefaults(
   // 要解析哪个模型:控制端本次显式 targetModel(切模型)永远优先。初始 seed 只有在**新端明确
   // 回传未选过模型**时才采用区域目录默认；旧端缺字段时保守保留 remoteDraft.model，避免
   // 把无法识别的历史显式选择覆盖掉。每个 Agent 只接受自己的 v3 默认标记。
-  const markedDefault = agentKind
-    ? models
-        .map((model, index) => ({ model, index }))
-        .filter(
-          ({ model }) =>
-            model.defaultEnabled !== false &&
-            (model.newSessionDefault?.includes(agentKind) ?? false),
-        )
-        .sort(
-          (a, b) =>
-            (a.model.sortOrder ?? Number.MAX_SAFE_INTEGER) -
-              (b.model.sortOrder ?? Number.MAX_SAFE_INTEGER) || a.index - b.index,
-        )[0]?.model.id
-    : undefined;
+  // cursor 不在 XD 新对话默认标记里；带进去会让 includes 的参数类型对不上。
+  const markedDefault =
+    agentKind && agentKind !== 'cursor'
+      ? models
+          .map((model, index) => ({ model, index }))
+          .filter(
+            ({ model }) =>
+              model.defaultEnabled !== false &&
+              (model.newSessionDefault?.includes(agentKind) ?? false),
+          )
+          .sort(
+            (a, b) =>
+              (a.model.sortOrder ?? Number.MAX_SAFE_INTEGER) -
+                (b.model.sortOrder ?? Number.MAX_SAFE_INTEGER) || a.index - b.index,
+          )[0]?.model.id
+      : undefined;
   const wantedModelId =
     targetModel ??
     (remoteDraft?.modelChosenByUser === false && providerId === null

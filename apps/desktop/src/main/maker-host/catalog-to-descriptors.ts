@@ -83,7 +83,12 @@ function toDescriptor(
   if (m.defaultEnabled !== undefined) d.defaultEnabled = m.defaultEnabled;
   // 新对话默认种子标记要透传：渲染层 getDefaultModelForVendor 据它优先选中被标记的模型。
   // v3 可携带 Pi 自己的标记；消费端按 Agent 严格解释，不跨 Agent 借用默认策略。
-  if (m.newSessionDefault !== undefined) d.newSessionDefault = m.newSessionDefault;
+  if (m.newSessionDefault !== undefined) {
+    // CatalogModel 的 AgentKind 含 cursor；descriptor 的新对话默认只服务 XD 三档。
+    d.newSessionDefault = m.newSessionDefault.filter(
+      (kind): kind is 'claude-code' | 'codex' | 'pi' => kind !== 'cursor',
+    );
+  }
   if (m.cost !== undefined) d.cost = m.cost;
   if (m.maxOutput !== undefined) d.maxOutputTokens = m.maxOutput;
   const supportsImageInput = m.supportsImageInput
