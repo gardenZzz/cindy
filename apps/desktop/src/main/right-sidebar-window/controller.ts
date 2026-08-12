@@ -157,8 +157,9 @@ export class RsbWindowController {
       this.open({ userInitiated: true });
     } else {
       // queued 调用方早已返回；attach 时必须把 ownership 显式交回主 renderer。
-      // 丢弃 detached 在途标记：剩余桶（含未 ack 桶头）整组转交主窗。
-      this.detachedDeliverySessionId = null;
+      // 已交付未 ack 的桶头可能已在子窗执行：drop 它再 drain 剩余，避免双执行
+      // （Greptile P1）。无在途时整桶原样转交。
+      this.dropInFlightDetachedHead();
       this.flushDeferredCommandsToAttachedHost();
       this.close();
     }
@@ -288,6 +289,15 @@ export class RsbWindowController {
       return 'stale-context';
     }
 
+    // 已有 deferred 在途或同 session 桶内仍有尾部时，直播命令也入同一桶，
+    // 避免直发 B 与无参 ack 误推进未完成的 C（Codex P1）。
+    const hostSessionId = commandHostSessionId(command);
+    if (this.hasDetachedDeferredPending(hostSessionId)) {
+      this.enqueueDeferredCommand(command);
+      this.flushDeferredCommandsToDetachedHost();
+      return 'queued';
+    }
+
     this.deps.sendToWindow(this.winRef, this.deps.commandChannel, command);
     return 'routed';
   }
@@ -344,6 +354,28 @@ export class RsbWindowController {
     bucket.push(command);
   }
 
+  /** 同 host session 是否有 detached deferred 在途或桶内尾部。 */
+  private hasDetachedDeferredPending(hostSessionId: string): boolean {
+    if (this.detachedDeliverySessionId === hostSessionId) return true;
+    const bucket = this.deferredCommands.get(hostSessionId);
+    return Boolean(bucket && bucket.length > 0);
+  }
+
+  /**
+   * 丢弃已下发未 ack 的桶头并清在途标记。
+   * attach 切换时调用：子窗可能已执行该条，不得再转交主 renderer。
+   */
+  private dropInFlightDetachedHead(): void {
+    const sessionId = this.detachedDeliverySessionId;
+    if (sessionId === null) return;
+    const bucket = this.deferredCommands.get(sessionId);
+    if (bucket && bucket.length > 0) {
+      bucket.shift();
+      if (bucket.length === 0) this.deferredCommands.delete(sessionId);
+    }
+    this.detachedDeliverySessionId = null;
+  }
+
   /**
    * attached 路径：主 renderer 常驻，整桶按序一次下发即可。
    * detached 不得走这里（见 flushDeferredCommandsToDetachedHost 的单条 + ack）。
@@ -384,7 +416,7 @@ export class RsbWindowController {
 
   /**
    * 子窗口 renderer 确认当前 deferred 命令已消费后推进桶头并继续下一条。
-   * 无在途交付时 no-op（直播 routeCommand 单条命令也会触发 ack，安全忽略）。
+   * 无在途交付时 no-op（无 deferred 时的直播 route 命令也会触发 ack，安全忽略）。
    */
   ackDetachedDeferredCommand(): void {
     const sessionId = this.detachedDeliverySessionId;

@@ -862,6 +862,89 @@ describe('setContext / routeCommand', () => {
     ]);
   });
 
+  it('切回 attached 时 drop 已交付未 ack 桶头,不双执行(Greptile P1)', async () => {
+    const h = makeHarness({ detached: true });
+    h.controller.setContext(ctx);
+    const closeWorkers = { type: 'close-orca-workers-tab' as const, sessionId: 's1' };
+    const genericEnsure = {
+      type: 'ensure-orca-workers-tab' as const,
+      sessionId: 's1',
+      focusTab: false,
+    };
+    await h.controller.routeCommand({ command: closeWorkers, allowOpen: false });
+    await h.controller.routeCommand({ command: genericEnsure, allowOpen: false });
+
+    h.controller.open();
+    h.controller.markReady();
+    // 子窗已收到 close，尚未 ack
+    expect(h.sends.filter((e) => e.channel === 'cmd-channel').map((e) => e.payload)).toEqual([
+      closeWorkers,
+    ]);
+
+    h.controller.setDetached(false);
+    // close 已交付给子窗：只把剩余 ensure 转交主窗，不重发 close
+    expect(h.sends.filter((e) => e.channel === 'cmd-channel').map((e) => e.payload)).toEqual([
+      closeWorkers,
+      genericEnsure,
+    ]);
+    expect(h.sendTargets.filter((_, i) => h.sends[i]?.channel === 'cmd-channel')).toEqual([
+      h.windows[0].webContents.id, // close → 子窗
+      h.mainWin.webContents.id, // ensure → 主窗
+    ]);
+  });
+
+  it('deferred 在途时直播命令入同一桶,无参 ack 不误推进尾部(Codex P1)', async () => {
+    const h = makeHarness({ detached: true });
+    h.controller.setContext(ctx);
+    const deferredA = { type: 'close-orca-workers-tab' as const, sessionId: 's1' };
+    const deferredC = {
+      type: 'ensure-orca-workers-tab' as const,
+      sessionId: 's1',
+      focusTab: false,
+    };
+    const liveB = { type: 'open-subagents-tab' as const, sessionId: 's1' };
+
+    await h.controller.routeCommand({ command: deferredA, allowOpen: false });
+    await h.controller.routeCommand({ command: deferredC, allowOpen: false });
+    h.controller.open();
+    h.controller.markReady();
+    // A 在途
+    expect(h.sends.filter((e) => e.channel === 'cmd-channel').map((e) => e.payload)).toEqual([
+      deferredA,
+    ]);
+
+    // 直播 B：应入桶排队，不能直发
+    const result = await h.controller.routeCommand({ command: liveB, allowOpen: true });
+    expect(result).toBe('queued');
+    expect(h.sends.filter((e) => e.channel === 'cmd-channel').map((e) => e.payload)).toEqual([
+      deferredA,
+    ]);
+
+    // A ack → 下发仍在桶内的 C（B 在 C 后）
+    h.controller.ackDetachedDeferredCommand();
+    expect(h.sends.filter((e) => e.channel === 'cmd-channel').map((e) => e.payload)).toEqual([
+      deferredA,
+      deferredC,
+    ]);
+
+    // 模拟 renderer 串行：A 后若曾误把 B 当直发 ack，会把 C 误 shift；
+    // 正确路径：C 的 ack 后才到 B
+    h.controller.ackDetachedDeferredCommand();
+    expect(h.sends.filter((e) => e.channel === 'cmd-channel').map((e) => e.payload)).toEqual([
+      deferredA,
+      deferredC,
+      liveB,
+    ]);
+    h.controller.ackDetachedDeferredCommand();
+    // 桶空，再 ack no-op
+    h.controller.ackDetachedDeferredCommand();
+    expect(h.sends.filter((e) => e.channel === 'cmd-channel').map((e) => e.payload)).toEqual([
+      deferredA,
+      deferredC,
+      liveB,
+    ]);
+  });
+
   it('关窗销毁时未 ack 的尾部 intent 保留,重开后可继续交付(Codex P1)', async () => {
     const h = makeHarness({ detached: true }, { asyncClose: true });
     h.controller.setContext(ctx);
