@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { cleanup, render, screen } from '@testing-library/react';
+import { cleanup, render, screen, waitFor } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { IM_DEFAULT_SETTINGS, type ImDefaultSettingsState } from '../../../../shared/imDefaultSettings';
@@ -12,6 +12,12 @@ const capabilityMockState = vi.hoisted(() => ({
     supported: { supported: true };
     unsupportedPermissionModes: string[];
   } | null,
+  cursorAvailable: true,
+}));
+
+/** 捕获引擎下拉的 props —— 断言 Cursor 的可选性与选中回调。 */
+const agentSelectMock = vi.hoisted(() => ({
+  props: [] as Array<Record<string, unknown>>,
 }));
 
 vi.mock('react-i18next', () => ({
@@ -59,9 +65,9 @@ vi.mock('@/hooks/useProviders', () => ({
   useProviders: () => ({ providers: [] }),
 }));
 
-/** 捕获传给引擎下拉的 props —— 用来断言 Cursor 没被暴露给 IM 默认配置。 */
-const agentSelectMock = vi.hoisted(() => ({
-  props: [] as Array<Record<string, unknown>>,
+vi.mock('@/hooks/useCursorAvailable', () => ({
+  useCursorAvailable: () => capabilityMockState.cursorAvailable,
+  useCursorAvailability: () => capabilityMockState.cursorAvailable,
 }));
 
 vi.mock('@/components/new-chat/AgentSelect', () => ({
@@ -91,6 +97,7 @@ function defaults(agentKind: ImDefaultSettingsState['agentKind']): ImDefaultSett
       'claude-code': { providerId: null, model: 'claude-opus-4-8', effort: 'xhigh' },
       codex: { providerId: null, model: 'codex/gpt-5.5', effort: 'high' },
       pi: { providerId: null, model: 'claude-sonnet-5', effort: 'high' },
+      cursor: { providerId: null, model: 'auto', effort: 'high' },
     },
     isCustomized: false,
     customizedKeys: [],
@@ -103,6 +110,8 @@ describe('ImDefaultSettingsSection Pi channel warning', () => {
     capabilityMockState.loadingAgent = null;
     capabilityMockState.errorAgent = null;
     capabilityMockState.piTurnPermissionPolicy = null;
+    capabilityMockState.cursorAvailable = true;
+    agentSelectMock.props.length = 0;
     window.electronAPI = {
       maker: {
         imDefaultSettingsGet: vi.fn(async () => defaults('pi')),
@@ -230,6 +239,40 @@ describe('ImDefaultSettingsSection Pi channel warning', () => {
     ).toBeNull();
   });
 
+  it('keeps Cursor selectable and stores it verbatim instead of falling back to Codex', async () => {
+    // 历史实现是「非 cc 即 codex」的二元映射:选 Cursor 会静默存成 Codex,
+    // 用户看到的就是「选不了 Cursor」。
+    const setSpy = vi.fn(async () => defaults('cursor'));
+    window.electronAPI = {
+      maker: {
+        imDefaultSettingsGet: vi.fn(async () => defaults('claude-code')),
+        imDefaultSettingsSet: setSpy,
+      },
+    } as unknown as typeof window.electronAPI;
+    agentSelectMock.props.length = 0;
+    render(<ImDefaultSettingsSection channel="telegram" />);
+    await screen.findByText('settings.imBot.defaults.agentLabel');
+
+    const props = agentSelectMock.props.at(-1);
+    expect(props?.hiddenVendors).toBeUndefined();
+    (props?.onChange as (next: string) => void)('cursor');
+    await waitFor(() => expect(setSpy).toHaveBeenCalled());
+
+    expect(setSpy).toHaveBeenCalledWith(
+      expect.objectContaining({ agentKind: 'cursor' }),
+      'telegram',
+    );
+  });
+
+  it('hides Cursor when cursor-agent is not installed on this machine', async () => {
+    capabilityMockState.cursorAvailable = false;
+    agentSelectMock.props.length = 0;
+    render(<ImDefaultSettingsSection channel="telegram" />);
+    await screen.findByText('settings.imBot.defaults.agentLabel');
+
+    expect(agentSelectMock.props.at(-1)?.hiddenVendors).toContain('cursor');
+  });
+
   it('does not warn for Pi on conditional-policy channels (telegram / dingtalk)', async () => {
     // Telegram / 钉钉仅在群聊(event.speaker 存在)挂 turnPermissionPolicy,
     // 主人私聊 Pi 可用;设置 UI 不区分群聊/私聊,不能整体警告。
@@ -245,14 +288,5 @@ describe('ImDefaultSettingsSection Pi channel warning', () => {
     expect(
       screen.queryByText('settings.imBot.defaults.agentUnsupportedOnChannelHint'),
     ).toBeNull();
-  });
-
-  it('hides Cursor from the engine picker (IM cannot store it)', async () => {
-    // ImDefaultAgentKind 只有 claude-code / codex / pi，agentKindOfVendor 会把
-    // cursor 落成 codex —— 不藏就是「选一个存另一个」。
-    agentSelectMock.props.length = 0;
-    const view = render(<ImDefaultSettingsSection channel="telegram" />);
-    await view.findByText('settings.imBot.defaults.agentLabel');
-    expect(agentSelectMock.props.at(-1)?.hiddenVendors).toContain('cursor');
   });
 });

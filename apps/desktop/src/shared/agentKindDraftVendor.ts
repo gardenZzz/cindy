@@ -34,6 +34,14 @@ export function agentKindToDraftVendor(kind: AgentKind): DraftVendorKey {
   return 'cc';
 }
 
+/** draft / lastByVendor / cache VendorKey → maker-core AgentKind(agentKindToDraftVendor 的逆)。 */
+export function draftVendorToAgentKind(vendor: DraftVendorKey): AgentKind {
+  if (vendor === 'codex') return 'codex';
+  if (vendor === 'cursor') return 'cursor';
+  if (vendor === 'pi') return 'pi';
+  return 'claude-code';
+}
+
 /** maker-core AgentKind → NEW_MAKER_DRAFT_CHANGED push payload 槽。 */
 export function agentKindToDraftPushSlot(kind: AgentKind): DraftPushSlot {
   if (kind === 'codex') return 'codex';
