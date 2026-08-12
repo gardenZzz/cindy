@@ -472,7 +472,13 @@ async function finishDarwin({
         'CINDY_IOS_SIMULATOR_RELEASE_NATIVE_SMOKE=1 requires a Developer ID signed and notarized package',
       );
     }
-    if (hostCanExecArch(arch)) {
+    if (process.env.CINDY_SKIP_IOS_RELEASE_GATE === '1') {
+      // ponytail: 本地 CindyX 打包自用 —— 运行中的 CindyX 会占 bundle-id 单实例锁,
+      // gate 会挂死;设 CINDY_SKIP_IOS_RELEASE_GATE=1 跳过。
+      console.log(
+        '==> Skipping iOS Simulator release gate: CINDY_SKIP_IOS_RELEASE_GATE=1',
+      );
+    } else if (hostCanExecArch(arch)) {
       runIOSSimulatorReleaseGate(appPath, arch, 'untrusted');
     } else {
       // cross-architecture 例外:跳过 launch-based gate,仍做 Mach-O arch 门禁。
