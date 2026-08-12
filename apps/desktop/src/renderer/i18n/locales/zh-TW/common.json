@@ -3378,6 +3378,7 @@
         "manageAria": "管理 {{name}}",
         "agentInvoked": "Agent 自動呼叫",
         "upToDate": "已是最新",
+        "oauthAuthorizationExpired": "授權已失效，需重新連線",
         "installAria": "安裝 {{name}}"
       },
       "market": {
@@ -3803,6 +3804,7 @@
       "updateConfirm": {
         "title": "更新插件「{{name}}」？",
         "body": "版本 {{from}} → {{to}}。將替換現有版本；生效狀態與面板位置保持不變。",
+        "oauthClientChanged": "本次更新更換了 OAuth 用戶端。使用插件內建授權的已連線帳號將在更新後失效，需要重新連線。",
         "confirm": "更新",
         "cancel": "取消"
       },
@@ -6713,7 +6715,7 @@
     "remoteError": {
       "REMOTE_DAEMON_CLOSED": "遠端連線已中斷（daemon 可能正在升級或重啟）。本輪已結束 — 請重新傳送。",
       "REMOTE_LOCAL_ATTACHMENT_UNSUPPORTED": "遠端任務無法訪問本地檔案/圖片附件。請直接貼上內容。",
-      "AUTO_REVIEW_UNAVAILABLE": "自動審批暫時不可用，需要審批的操作會被拒絕。想自己確認這些操作，可以把任務切到「預設權限」。",
+      "AUTO_REVIEW_UNAVAILABLE": "自動審批暫時無法給出判斷（網路或服務波動），需要審批的操作已轉由你來確認。想少被打斷，可以把任務切到「預設權限」自行掌控。",
       "REMOTE_COMPAT_MODE_UNSUPPORTED": "遠端 Claude Code 會話無法透過本地相容 Proxy 路由(內部錯誤，請反饋)。",
       "REMOTE_GATEWAY_ENDPOINT_UNAVAILABLE": "Cindy AI 憑據尚未就緒(登入後由服務端自動下發)。請稍候重試；若持續出現，請到 設定 → 模型供應商 檢查 Cindy AI 連線狀態。",
       "DEVICE_LINK_CONTROL_DISABLED": "已關閉對該裝置的控制，訊息未傳送。",
@@ -8329,7 +8331,7 @@
     }
   },
   "commandPalette": {
-    "projectTrustRequired": "信任此專案後即可使用"
+    "projectSkillNotLoaded": "目前的 Pi 任務尚未載入此專案 Skill，新任務會自動嘗試載入"
   },
   "skillhub": {
     "home": {
@@ -9464,7 +9466,8 @@
     },
     "currentSubscription": {
       "title": "當前訂閱",
-      "purchaseBlocked": "當前已有未結束的訂閱，請先處理現有訂閱後再購買新套餐。"
+      "purchaseBlocked": "當前已有未結束的訂閱，請先處理現有訂閱後再購買新套餐。",
+      "purchaseBlockedUntilPeriodEnd": "當前套餐將於 {{date}} 結束，屆時可購買新套餐。"
     },
     "subscriptionStatus": {
       "INCOMPLETE": "等待完成支付",
