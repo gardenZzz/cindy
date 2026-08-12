@@ -168,6 +168,44 @@ describe('resolveImSessionDefaults', () => {
     expect(mocks.readImDefaultSettings).toHaveBeenCalledWith('discord');
   });
 
+  it('keeps Cursor selected even though no Cindy provider offers its models', async () => {
+    // Cursor 的模型只在 capabilities 上,供应商目录里没有它的条目。若按 provider 口径
+    // 判定可用性,会得出「一个可用模型都没有」并静默降级回渠道配置的 agent —— 用户在
+    // IM 设置里选的 Cursor 就永远落不了地。
+    mocks.getCapabilities.mockImplementation((agentKind: string) => ({
+      availableModels:
+        agentKind === 'cursor'
+          ? [
+              {
+                id: 'auto',
+                displayName: 'Auto',
+                contextWindow: 200_000,
+                efforts: [],
+                defaultEffort: null,
+              },
+            ]
+          : agentKind === 'codex'
+            ? codexModels
+            : claudeModels,
+    }));
+    mocks.readImDefaultSettings.mockReturnValue({
+      agentKind: 'cursor',
+      permissionMode: 'auto',
+      agents: {
+        'claude-code': { providerId: null, model: 'claude-opus-4-8', effort: 'xhigh' },
+        codex: { providerId: null, model: 'codex/gpt-5.5', effort: 'high' },
+        cursor: { providerId: null, model: 'auto', effort: 'high' },
+      },
+    });
+
+    await expect(resolveImSessionDefaults(config)).resolves.toMatchObject({
+      agentKind: 'cursor',
+      model: 'auto',
+      // Cursor 没有 Cindy 供应商条目,永远是隐式路由。
+      providerId: null,
+    });
+  });
+
   it('keeps a valid Codex default with its selected provider', async () => {
     mocks.readImDefaultSettings.mockReturnValue({
       agentKind: 'codex',

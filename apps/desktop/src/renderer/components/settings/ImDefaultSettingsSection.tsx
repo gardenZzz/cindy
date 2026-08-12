@@ -17,6 +17,7 @@ import { useTranslation } from 'react-i18next';
 import { AgentSelect } from '@/components/new-chat/AgentSelect';
 import { ModelSelector } from '@/components/new-chat/ModelSelector';
 import { type ModelDescriptor, useAgentCapabilities } from '@/hooks/useAgentCapabilities';
+import { useCursorAvailable } from '@/hooks/useCursorAvailable';
 import { useProviders } from '@/hooks/useProviders';
 import { deriveModelsFromProviders } from '@/lib/providerModels';
 import { toast } from '@/lib/toast';
@@ -33,21 +34,16 @@ import {
   type ImDefaultSettingsState,
   isImDefaultEffort,
 } from '../../../shared/imDefaultSettings';
+import {
+  agentKindToDraftVendor,
+  draftVendorToAgentKind,
+} from '../../../shared/agentKindDraftVendor';
 import { DefaultOverrideControls } from './DefaultOverrideControls';
 import {
   buildAgentSettingsPatch,
   mergeSettingsPatch,
   resolveAgentSwitchSettings,
 } from './imDefaultSettingsLogic';
-
-function vendorKeyFor(agentKind: ImDefaultAgentKind): 'cc' | 'codex' | 'pi' {
-  return agentKind === 'claude-code' ? 'cc' : agentKind;
-}
-
-/** AgentSelect 的 vendor → IM 默认配置的 agentKind。 */
-function agentKindOfVendor(vendor: string): ImDefaultAgentKind {
-  return vendor === 'cc' ? 'claude-code' : vendor === 'pi' ? 'pi' : 'codex';
-}
 
 export interface ImDefaultSettingsSummary {
   agentKind: ImDefaultAgentKind;
@@ -79,6 +75,10 @@ export function ImDefaultSettingsSection({
   const cc = useAgentCapabilities('claude-code');
   const codex = useAgentCapabilities('codex');
   const pi = useAgentCapabilities('pi');
+  const cursor = useAgentCapabilities('cursor');
+  // 本机没装 cursor-agent 时不列出 Cursor(fail-closed,与创建入口同口径):
+  // 选了也建不出会话。已存的 cursor 选择仍由 AgentSelect 的「当前值必显」保留。
+  const cursorAvailable = useCursorAvailable();
   const [settings, setSettings] = useState<ImDefaultSettingsState | null>(null);
   const [pending, setPending] = useState(false);
 
@@ -129,8 +129,10 @@ export function ImDefaultSettingsSection({
       pi: fromProviders.pi.length
         ? fromProviders.pi
         : (pi.capabilities?.availableModels ?? []),
+      // Cursor 没有 Cindy 供应商条目,模型清单只来自 cursor-agent 上报的能力面。
+      cursor: cursor.capabilities?.availableModels ?? [],
     };
-  }, [providers, cc.capabilities, codex.capabilities, pi.capabilities]);
+  }, [providers, cc.capabilities, codex.capabilities, pi.capabilities, cursor.capabilities]);
 
   const resolveProviderId = useCallback(
     (agentKind: ImDefaultAgentKind, modelId: string, providerId: string | null): string | null => {
@@ -217,16 +219,11 @@ export function ImDefaultSettingsSection({
 
   const activeSettings = settings.agents[settings.agentKind];
   // 按选中 Agent 的 capabilities 判断:未声明 / 声明了但 supported.supported !== true
-  // 的 Agent(如 Pi)无法在「无条件挂逐条权限确认」的渠道(个人微信)使用。不写死 Pi——
-  // 未来 Pi 补上该 capability、或新增其它不支持的 Agent 时,此处自动跟随 main 侧
-  // 的 capability 真相,不会误警告 / 漏警告。(Telegram / 钉钉仅在群聊挂 policy,
-  // 主人私聊 Pi 可用,设置 UI 不区分群聊/私聊,故不整体警告。)
-  const selectedAgentCaps =
-    settings.agentKind === 'claude-code'
-      ? cc
-      : settings.agentKind === 'codex'
-        ? codex
-        : pi;
+  // 的 Agent(如 Pi、Cursor)无法在「无条件挂逐条权限确认」的渠道(个人微信)使用。
+  // 不写死具体 Agent —— 将来它们补上该 capability、或新增其它不支持的 Agent 时,此处
+  // 自动跟随 main 侧的 capability 真相,不会误警告 / 漏警告。(Telegram / 钉钉仅在群聊
+  // 挂 policy,主人私聊可用,设置 UI 不区分群聊/私聊,故不整体警告。)
+  const selectedAgentCaps = { 'claude-code': cc, codex, pi, cursor }[settings.agentKind];
   const selectedAgentCapabilitiesReady =
     !selectedAgentCaps.loading &&
     selectedAgentCaps.error === null &&
@@ -339,14 +336,19 @@ export function ImDefaultSettingsSection({
           {/* 与新建对话工具条同一个引擎下拉(AgentSelect, #1350): 手写三选一分段在
               窄列里三等分 + truncate, 引擎一多就挤; 且未选中项置灰看着像不可用。 */}
           <AgentSelect
-            value={vendorKeyFor(settings.agentKind)}
+            value={agentKindToDraftVendor(settings.agentKind)}
             // 字段形态: 与右侧模型选择器同高同宽规格, 面板绑 trigger 宽度
             // (DESIGN.md §4 Select & Dropdown 宽度铁则)。
             triggerVariant="field"
             side="bottom"
             disabled={pending}
             ariaContext={t('settings.imBot.defaults.agentLabel')}
-            onChange={(next) => changeAgent(agentKindOfVendor(next))}
+            hiddenVendors={cursorAvailable ? undefined : (['cursor'] as const)}
+            onChange={(next) => {
+              // vendor 域含 'orca'(本选择器不列它),排除后交给唯一映射,
+              // 不再写「非 cc 即 codex」的二元兜底(那会把 Cursor 存成 Codex)。
+              if (next !== 'orca') changeAgent(draftVendorToAgentKind(next));
+            }}
           />
         </div>
 
@@ -359,7 +361,7 @@ export function ImDefaultSettingsSection({
             effort={activeSettings.effort}
             onModelChange={(modelId) => changeModel(modelId)}
             onEffortChange={changeEffort}
-            vendorKey={vendorKeyFor(settings.agentKind)}
+            vendorKey={agentKindToDraftVendor(settings.agentKind)}
             currentProviderId={activeSettings.providerId}
             onProviderChange={(providerId, modelId, reconciledEffort) => {
               changeModel(modelId ?? activeSettings.model, providerId, reconciledEffort);

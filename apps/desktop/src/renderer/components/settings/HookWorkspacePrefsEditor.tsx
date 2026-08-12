@@ -45,6 +45,7 @@ import { cn } from '@/lib/utils';
 import { toast } from '@/lib/toast';
 import { extractIpcError } from '@/utils/ipcError';
 import { useAgentCapabilities, type AgentCapabilities } from '@/hooks/useAgentCapabilities';
+import { useCursorAvailable } from '@/hooks/useCursorAvailable';
 import { ModelSelector } from '@/components/new-chat/ModelSelector';
 import { PermissionSelector } from '@/components/new-chat/PermissionSelector';
 import { AgentSelect } from '@/components/new-chat/AgentSelect';
@@ -486,8 +487,8 @@ function PrefsField({
 }
 
 /** hook prefs 的 agentKind → 选择器的 vendor key。 */
-function toVendorKey(agentKind: string | null): 'cc' | 'codex' | 'pi' {
-  return agentKind === 'codex' || agentKind === 'pi' ? agentKind : 'cc';
+function toVendorKey(agentKind: string | null): 'cc' | 'codex' | 'cursor' | 'pi' {
+  return agentKind === 'codex' || agentKind === 'pi' || agentKind === 'cursor' ? agentKind : 'cc';
 }
 
 /**
@@ -499,6 +500,7 @@ function toVendorKey(agentKind: string | null): 'cc' | 'codex' | 'pi' {
 function toAgentKind(vendor: MakerVendor): KnownAgent {
   if (vendor === 'codex') return 'codex';
   if (vendor === 'pi') return 'pi';
+  if (vendor === 'cursor') return 'cursor';
   if (vendor === 'cc') return 'claude-code';
   throw new Error(`WorkspacePrefsEditor: unsupported vendor '${vendor}' for hook prefs`);
 }
@@ -517,14 +519,17 @@ export function WorkspacePrefsEditor({
   const claudeCaps = useAgentCapabilities('claude-code');
   const codexCaps = useAgentCapabilities('codex');
   const piCaps = useAgentCapabilities('pi');
+  const cursorCaps = useAgentCapabilities('cursor');
+  const cursorAvailable = useCursorAvailable();
   const capsByAgent = useMemo(
     () =>
       ({
         'claude-code': claudeCaps.capabilities,
         codex: codexCaps.capabilities,
         pi: piCaps.capabilities,
+        cursor: cursorCaps.capabilities,
       }) as Record<KnownAgent, AgentCapabilities | null>,
-    [claudeCaps.capabilities, codexCaps.capabilities, piCaps.capabilities],
+    [claudeCaps.capabilities, codexCaps.capabilities, piCaps.capabilities, cursorCaps.capabilities],
   );
   const capsOf = useCallback(
     (agentKind: string): AgentCapabilities | null =>
@@ -578,9 +583,8 @@ export function WorkspacePrefsEditor({
           // 全部是同一个名字,行与行无法分辨(codex review)。
           ariaContext={`${t('settings.tina.prefs.agentLabel')} · ${alias}`}
           disabled={disabled}
-          // Tina / hook-control 仅支持 claude-code|codex|pi(见 defaults.AGENT_KINDS);
-          // Cursor 不进 IM 派发面,隐藏以免用户选到无法落地的引擎。
-          hiddenVendors={['cursor'] as const}
+          // 本机没装 cursor-agent 时隐藏 Cursor(fail-closed):选了也建不出会话。
+          hiddenVendors={cursorAvailable ? undefined : (['cursor'] as const)}
           // 当前值可能是**继承值**(prefs.agentKind 为 null / 过期未知值时显示解析出的
           // 默认 agent),重选它 = 钉成显式偏好 —— 与模型字段的 reselectEmitsChange 同语义;
           // 显式同值由下方 nextAgent === prefs.agentKind 去重,不产生空写。

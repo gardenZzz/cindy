@@ -7342,9 +7342,9 @@ function parseImDefaultSettingsPatch(raw: unknown): ImDefaultSettingsPatch {
     }
     const agentInput = input.agents as Record<string, unknown>;
     const agentsPatch: NonNullable<ImDefaultSettingsPatch['agents']> = {};
-    // 三个 harness 必须对称解析；漏掉 pi 会让 IM 设置页切 Pi 后改模型静默丢弃
-    // (store 本身支持 pi，见 defaultSettingsStore / IM_DEFAULT_SETTINGS.agents.pi)。
-    for (const kind of ['claude-code', 'codex', 'pi'] as const) {
+    // 四个 harness 必须对称解析；漏掉任一个都会让 IM 设置页切到它之后改模型静默丢弃
+    // (store 四个槽都在，见 defaultSettingsStore / IM_DEFAULT_SETTINGS.agents)。
+    for (const kind of ['claude-code', 'codex', 'pi', 'cursor'] as const) {
       if (kind in agentInput) {
         agentsPatch[kind] = parseImDefaultAgentSettings(kind, agentInput[kind]);
       }
