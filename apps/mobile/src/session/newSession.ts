@@ -331,9 +331,11 @@ type NewSessionDefaultModel = {
 };
 
 function isNewSessionDefaultForAgent(
-  model: NewSessionDefaultModel,
+  model: { newSessionDefault?: readonly AgentKind[] },
   agentKind: NewSessionAgentKind,
 ): boolean {
+  // cursor 不在 XD 新对话默认标记里；带进去会让 includes 的参数类型对不上。
+  if (agentKind === 'cursor') return false;
   return model.newSessionDefault?.includes(agentKind) === true;
 }
 
