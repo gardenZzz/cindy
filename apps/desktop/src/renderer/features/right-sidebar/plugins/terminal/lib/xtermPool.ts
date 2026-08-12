@@ -45,9 +45,13 @@ export interface XtermEntry {
 
 const pool = new Map<string, XtermEntry>();
 
+/** iTerm2 Default light 背景,与 RSB 外层 div 对齐。 */
+export const TERMINAL_BACKGROUND = '#f4f5f7';
+
 const DEFAULT_OPTIONS: ITerminalOptions = {
-  // Codex 同款字号 / 字体;cursorBlink 跟 iTerm 默认行为对齐。
-  fontFamily: '"SF Mono", Menlo, Monaco, "Cascadia Code", "Courier New", monospace',
+  // Nerd Font 优先,回退到系统等宽字体;cursorBlink 跟 iTerm 默认行为对齐。
+  fontFamily:
+    '"MesloLGS NF", "MesloLGM NF", "MesloLGM Nerd Font", "SF Mono", Menlo, Monaco, "Cascadia Code", "Courier New", monospace',
   fontSize: 13,
   lineHeight: 1.2,
   cursorBlink: true,
@@ -56,13 +60,29 @@ const DEFAULT_OPTIONS: ITerminalOptions = {
   scrollback: 5000,
   // 允许 OSC 8 超链接(WebLinksAddon 也会处理裸 URL)
   allowProposedApi: false,
-  // 反色风格的暗黑主题。RSB 视觉是黑底白字。
+  // iTerm2 Default light ANSI 主题,背景与 TERMINAL_BACKGROUND 一致。
   theme: {
-    background: '#1c1c1c',
-    foreground: '#e6e6e6',
-    cursor: '#e6e6e6',
-    cursorAccent: '#1c1c1c',
-    selectionBackground: '#3a4a5a',
+    background: TERMINAL_BACKGROUND,
+    foreground: '#000000',
+    cursor: '#000000',
+    cursorAccent: TERMINAL_BACKGROUND,
+    selectionBackground: '#b4d5fe',
+    black: '#000000',
+    red: '#c91b00',
+    green: '#00c200',
+    yellow: '#c7c400',
+    blue: '#0225c7',
+    magenta: '#c930c7',
+    cyan: '#00c5c7',
+    white: '#c7c7c7',
+    brightBlack: '#686868',
+    brightRed: '#ff6e67',
+    brightGreen: '#5ffa68',
+    brightYellow: '#fffc67',
+    brightBlue: '#6871ff',
+    brightMagenta: '#ff76ff',
+    brightCyan: '#5ffdff',
+    brightWhite: '#ffffff',
   },
 };
 
