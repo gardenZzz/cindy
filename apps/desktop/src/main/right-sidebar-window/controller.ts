@@ -157,9 +157,10 @@ export class RsbWindowController {
       this.open({ userInitiated: true });
     } else {
       // queued 调用方早已返回；attach 时必须把 ownership 显式交回主 renderer。
-      // 已交付未 ack 的桶头可能已在子窗执行：drop 它再 drain 剩余，避免双执行
-      // （Greptile P1）。无在途时整桶原样转交。
-      this.dropInFlightDetachedHead();
+      // 子窗即将销毁，其 store / 未完成 commandChain 一并作废：在途未 ack 桶头
+      // 也必须转交主窗（主 host），不能 drop——否则 close/open/focus 会永久丢失
+      // （Greptile P1）。仅清在途标记，整桶（含桶头）drain 给 main。
+      this.detachedDeliverySessionId = null;
       this.flushDeferredCommandsToAttachedHost();
       this.close();
     }
@@ -359,21 +360,6 @@ export class RsbWindowController {
     if (this.detachedDeliverySessionId === hostSessionId) return true;
     const bucket = this.deferredCommands.get(hostSessionId);
     return Boolean(bucket && bucket.length > 0);
-  }
-
-  /**
-   * 丢弃已下发未 ack 的桶头并清在途标记。
-   * attach 切换时调用：子窗可能已执行该条，不得再转交主 renderer。
-   */
-  private dropInFlightDetachedHead(): void {
-    const sessionId = this.detachedDeliverySessionId;
-    if (sessionId === null) return;
-    const bucket = this.deferredCommands.get(sessionId);
-    if (bucket && bucket.length > 0) {
-      bucket.shift();
-      if (bucket.length === 0) this.deferredCommands.delete(sessionId);
-    }
-    this.detachedDeliverySessionId = null;
   }
 
   /**

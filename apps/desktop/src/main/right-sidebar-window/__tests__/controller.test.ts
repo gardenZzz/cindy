@@ -862,7 +862,7 @@ describe('setContext / routeCommand', () => {
     ]);
   });
 
-  it('切回 attached 时 drop 已交付未 ack 桶头,不双执行(Greptile P1)', async () => {
+  it('切回 attached 时整桶含未 ack 桶头转交主窗,不丢 intent(Greptile P1)', async () => {
     const h = makeHarness({ detached: true });
     h.controller.setContext(ctx);
     const closeWorkers = { type: 'close-orca-workers-tab' as const, sessionId: 's1' };
@@ -876,20 +876,22 @@ describe('setContext / routeCommand', () => {
 
     h.controller.open();
     h.controller.markReady();
-    // 子窗已收到 close，尚未 ack
+    // 子窗已收到 close，尚未 ack；子窗即将销毁，其副作用不保留
     expect(h.sends.filter((e) => e.channel === 'cmd-channel').map((e) => e.payload)).toEqual([
       closeWorkers,
     ]);
 
     h.controller.setDetached(false);
-    // close 已交付给子窗：只把剩余 ensure 转交主窗，不重发 close
+    // 整桶（含未 ack 桶头 close + ensure）必须转交主 host，否则 intent 丢失
     expect(h.sends.filter((e) => e.channel === 'cmd-channel').map((e) => e.payload)).toEqual([
-      closeWorkers,
-      genericEnsure,
+      closeWorkers, // 子窗在途
+      closeWorkers, // 主窗重放
+      genericEnsure, // 主窗
     ]);
     expect(h.sendTargets.filter((_, i) => h.sends[i]?.channel === 'cmd-channel')).toEqual([
-      h.windows[0].webContents.id, // close → 子窗
-      h.mainWin.webContents.id, // ensure → 主窗
+      h.windows[0].webContents.id,
+      h.mainWin.webContents.id,
+      h.mainWin.webContents.id,
     ]);
   });
 
