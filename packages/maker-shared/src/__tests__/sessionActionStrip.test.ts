@@ -61,6 +61,20 @@ describe('shared session action strip model', () => {
     expect(overview.runtimeSubtitle).toBe('Pi · claude-sonnet-4-6 · ask');
   });
 
+  it('labels cursor sessions as Cursor in the runtime subtitle', () => {
+    // 与上一条同因:三元映射漏掉 cursor 会把 Cursor 会话副标题显示成 Claude Code。
+    const overview = buildSessionActionStrip({
+      messageCount: 1,
+      pendingCount: 0,
+      queueAvailable: false,
+      queueCount: 0,
+      queuePaused: false,
+      session: session({ agentKind: 'cursor' }),
+    });
+
+    expect(overview.runtimeSubtitle).toBe('Cursor · claude-sonnet-4-6 · ask');
+  });
+
   it('promotes pending interactions and keeps normal queue count as icon attention only', () => {
     const overview = buildSessionActionStrip({
       diffCount: 2,

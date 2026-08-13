@@ -284,12 +284,31 @@ describe('cursor/task mapping', () => {
     expect(cursorTaskStableId(parsed)).toBe('agent-9');
     expect(inferCursorTaskStatus(parsed)).toBe('completed');
     const events = cursorTaskToEvents(parsed);
+    // 首次出现就已是终态：spawn 建持久 run，紧接着 terminal 关掉它 —— 只发 spawn
+    // 的话 Subagent 工作区会永远留一条 running。
     expect(events.map((e) => e.type)).toEqual([
       'tool_use',
+      'agent_task_update',
       'agent_task_update',
       'tool_result_full',
       'tool_result',
     ]);
+    expect(events[1]).toMatchObject({
+      data: {
+        subagentObservation: {
+          kind: 'spawn',
+          // 持久身份用 toolCallId（agentId 在 start 时常缺）；agentId 只作为对端
+          // run id 与展示别名上报。
+          logicalSubagentId: 'call_126',
+          parentToolUseId: 'call_126',
+          identityAliases: ['agent-9'],
+          providerRunIds: ['agent-9'],
+        },
+      },
+    });
+    expect(events[2]).toMatchObject({
+      data: { subagentObservation: { kind: 'terminal', logicalSubagentId: 'call_126' } },
+    });
     expect(events[0]).toMatchObject({
       type: 'tool_use',
       data: { toolUseId: 'call_126', toolName: 'Task' },
@@ -334,6 +353,37 @@ describe('cursor/task mapping', () => {
     expect(second[0]).toMatchObject({
       data: { taskId: 'agent-9', parentToolUseId: 'call_126', status: 'running' },
     });
+  });
+
+  it('keeps one durable subagent identity across spawn → progress → terminal', () => {
+    // 三段用同一个 logicalSubagentId，否则持久层会把一个子任务落成多条 run。
+    // 关键点：agentId 在 start 时缺、之后才有，所以身份不能取展示用的 taskId。
+    const spawn = cursorTaskToEvents(parseCursorTaskParams(sampleStart)!);
+    const progress = cursorTaskToEvents(
+      parseCursorTaskParams({ ...sampleDone, status: 'running', durationMs: undefined })!,
+      { alreadyEmittedToolUse: true },
+    );
+    const terminal = cursorTaskToEvents(parseCursorTaskParams(sampleDone)!, {
+      alreadyEmittedToolUse: true,
+    });
+
+    const observationOf = (events: ReturnType<typeof cursorTaskToEvents>) =>
+      (events.find((e) => e.type === 'agent_task_update')?.data as {
+        subagentObservation?: { kind: string; logicalSubagentId: string };
+      }).subagentObservation;
+
+    expect(observationOf(spawn)).toMatchObject({ kind: 'spawn', logicalSubagentId: 'call_126' });
+    expect(observationOf(progress)).toMatchObject({
+      kind: 'progress',
+      logicalSubagentId: 'call_126',
+    });
+    expect(observationOf(terminal)).toMatchObject({
+      kind: 'terminal',
+      logicalSubagentId: 'call_126',
+    });
+    // providerRunIds 只由 spawn 上报（契约要求）。
+    expect(observationOf(progress)).not.toHaveProperty('providerRunIds');
+    expect(observationOf(terminal)).not.toHaveProperty('providerRunIds');
   });
 
   it('maps failed/stopped and rejects invalid payloads without throwing', () => {

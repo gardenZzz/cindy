@@ -247,6 +247,7 @@ async function getMostRecentSessionAgent(): Promise<AgentKind | null> {
     if (!row) return null;
     if (row.agentKind === 'cc' || row.agentKind === 'claude-code') return 'claude-code';
     if (row.agentKind === 'codex') return 'codex';
+    if (row.agentKind === 'cursor') return 'cursor';
     if (row.agentKind === 'pi') return 'pi';
     return null;
   } catch (err) {
@@ -263,8 +264,8 @@ export async function pickHelpAgent(
   preferredAgent: AgentKind | null,
 ): Promise<AgentKind | null> {
   const candidates: AgentKind[] = preferredAgent
-    ? [...new Set<AgentKind>([preferredAgent, 'claude-code', 'codex', 'pi'])]
-    : ['claude-code', 'codex', 'pi'];
+    ? [...new Set<AgentKind>([preferredAgent, 'claude-code', 'codex', 'cursor', 'pi'])]
+    : ['claude-code', 'codex', 'cursor', 'pi'];
   const ordered = candidates.filter((agentKind) => agentSupportsOneShot(agentKind));
   const available = new Set(maker.listAvailableAgents());
   for (const agentKind of ordered) {
@@ -290,6 +291,10 @@ function buildOneShotOptions(agentKind: AgentKind): OneShotOptions {
   // Pi 的可用模型来自动态 provider 目录(BYOM 也可能只有本地模型)，不硬编码
   // GPT id；让 Maker 按该 Pi agent 的当前能力选择默认模型。
   if (agentKind === 'pi') return { timeoutMs: 20_000 };
+  // Cursor 同理走自己的 CURSOR_ONESHOT_DEFAULT_MODEL：这里若落到下面的 codex
+  // 分支，会拿 Codex 的模型 id 去调 cursor-agent -p。maxTokens 也不传——
+  // cursor-agent -p 没有该 flag，传了只会被 agent 侧 warn 掉。
+  if (agentKind === 'cursor') return { timeoutMs: 20_000 };
   return {
     model: 'gpt-5.4-mini',
     timeoutMs: 20_000,

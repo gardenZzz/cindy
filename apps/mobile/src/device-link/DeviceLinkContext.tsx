@@ -1173,7 +1173,10 @@ async function refreshDeviceCapabilities(
 ): Promise<void> {
   const generation = getAgentCapabilitiesGeneration(deviceId);
   await Promise.allSettled(
-    (['claude-code', 'codex', 'pi'] as const).map(async (agentKind) => {
+    // 含 cursor：手机开放 Cursor 新建入口后，Desktop 刷新 Cursor 模型会广播
+    // maker:provider:changed 驱逐整台设备的 capabilities 缓存；这里漏掉 cursor 的话，
+    // 停在 Cursor 新建页的订阅永远等不到当代快照，会一直显示旧模型与旧 Fast/effort 能力。
+    (['claude-code', 'codex', 'cursor', 'pi'] as const).map(async (agentKind) => {
       const raw = await sendInvokeWithAccessHandling<unknown>(
         client,
         deviceId,

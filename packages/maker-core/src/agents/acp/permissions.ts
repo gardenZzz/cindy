@@ -7,6 +7,8 @@
  * Cindy 层 sessionAllowKeys。
  */
 
+import { isAbsolute, relative, resolve, sep } from 'node:path';
+
 import type {
   InteractionDecision,
   InteractionRequest,
@@ -41,6 +43,13 @@ export interface AutoPermissionClassifyArgs {
   input: Record<string, unknown>;
   /** ACP toolCall.kind；缺失或不在候选集 → ask。 */
   kind?: string | null;
+  /**
+   * 本会话的工作区根（agent 的 workingDir）。用于判定路径是否在工作区内。
+   *
+   * 缺失时按「无法证明在内」处理（见 {@link isOutsideAutoPermissionWorkspace}）——
+   * 宿主漏接线的失败方向必须是多问一次，不能是静默放行。
+   */
+  workspaceRoot?: string;
 }
 
 const PATH_INPUT_KEYS = [
@@ -100,11 +109,56 @@ function inputTouchesSensitivePath(input: Record<string, unknown>): boolean {
 }
 
 /**
+ * 路径是否落在会话工作区之外。
+ *
+ * 为什么只靠 {@link isSensitiveAutoPermissionPath} 不够：那是**字面量**匹配，
+ * `{ kind: 'search', path: '/Users/alice' }` 这种工作区外的父目录本身不命中任何
+ * 敏感正则，却能让一次递归搜索读遍其中的 `.ssh` / `.aws`；Cursor 的隔离配置又
+ * 明确关掉了 sandbox，没有第二道墙。判据必须从「路径长什么样」升级成
+ * 「路径在不在工作区里」。
+ *
+ * `workspaceRoot` 缺失时无法解析包含关系，只能按形状保守判断：绝对路径、未展开的
+ * `~`、以及带 `..` 回溯段的相对路径一律视为「可能在外」；普通相对路径按工作区相对
+ * 处理（这也是 Cursor 报路径的常态）。
+ */
+export function isOutsideAutoPermissionWorkspace(
+  candidate: string,
+  workspaceRoot?: string,
+): boolean {
+  const normalized = candidate.replace(/\\/g, '/');
+  // 未展开的 `~` 解析不出真实路径，证明不了它在工作区内。
+  if (normalized === '~' || normalized.startsWith('~/')) return true;
+  if (!workspaceRoot || !workspaceRoot.trim()) {
+    return isAbsolute(candidate) || normalized.split('/').includes('..');
+  }
+  const root = resolve(workspaceRoot);
+  const rel = relative(root, resolve(root, candidate));
+  if (rel === '') return false;
+  if (isAbsolute(rel)) return true;
+  return rel === '..' || rel.startsWith('../') || rel.startsWith(`..${sep}`);
+}
+
+function inputEscapesWorkspace(
+  input: Record<string, unknown>,
+  workspaceRoot?: string,
+): boolean {
+  for (const candidate of collectPathCandidates(input)) {
+    if (isOutsideAutoPermissionWorkspace(candidate, workspaceRoot)) return true;
+  }
+  return false;
+}
+
+/**
  * Cindy 侧 Auto 权限分类器（Cursor ACP 用）。
  *
  * Claude Auto 走 SDK 远程 security monitor；Codex Auto 走 Guardian。
  * Cursor 无 vendor 分类器，因此在客户端用 tool 名 + 完整 input 做保守裁决：
- * 仅 read/search/think 且未触及敏感路径时 allow，其余一律 ask。
+ * 仅 read/search/think、**目标在工作区内**且未触及敏感路径时 allow，其余一律 ask。
+ *
+ * 工作区判定对三种候选 kind 一视同仁，不只挡 search：input 并不可靠地区分
+ * 「读一个文件」和「读一棵子树」（search 可能把根写在 `path` 里，read 也可能给的是
+ * 目录），而「工作区外的读」本来就不在「工作区读是安全的」这条前提覆盖范围内。
+ * 误判的代价只是多弹一张权限卡，方向正确。
  */
 export function classifyAcpAutoPermission(
   args: AutoPermissionClassifyArgs,
@@ -114,6 +168,9 @@ export function classifyAcpAutoPermission(
     return 'ask';
   }
   if (inputTouchesSensitivePath(args.input)) {
+    return 'ask';
+  }
+  if (inputEscapesWorkspace(args.input, args.workspaceRoot)) {
     return 'ask';
   }
   return 'allow';
@@ -164,14 +221,23 @@ export function toolInputFromAcpToolCall(
 
 /**
  * 会话级「不再问」指纹。优先稳定字段（command / path），否则 kind+title。
+ *
+ * **execute 必须带上完整命令行，不能只取 argv0。** 原来按 argv0 归并（对齐 Cursor
+ * allowlist 的 `Shell(uname)` 粒度）会让一次无害批准变成一张长期通行证：批准
+ * `python check.py` 落下 `execute:python` 后，后续 `python -c '<任意代码>'` 会被
+ * `sessionAllowKeys` 直接放行，而用户从没看到过这条明显不同的命令 —— 他批准的是
+ * 一条命令，拿到的却是一个解释器。
+ *
+ * 代价是「本会话不再问」变窄：参数不同就要再确认一次。对一个权限门来说这是正确的
+ * 失败方向 —— 宁可多问，不可拿旧批准盖新命令。
  */
 export function sessionAllowKeyFromToolCall(toolCall: Partial<ToolCallUpdate>): string {
   const kind = typeof toolCall.kind === 'string' ? toolCall.kind : 'other';
   const input = toolInputFromAcpToolCall(toolCall);
   if (typeof input.command === 'string' && input.command.trim()) {
-    // 与 Cursor allowlist `Shell(uname)` 同粒度：取 argv0
-    const argv0 = input.command.trim().split(/\s+/)[0] ?? input.command.trim();
-    return `execute:${argv0}`;
+    // 只归一化空白（跨平台换行 / 缩进不该产生不同指纹），语义部分一字不改。
+    const normalized = input.command.trim().replace(/\s+/g, ' ');
+    return `execute:${normalized}`;
   }
   if (typeof input.path === 'string' && input.path.trim()) {
     return `${kind}:${input.path.trim()}`;

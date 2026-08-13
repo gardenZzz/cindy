@@ -103,6 +103,9 @@ export function describeRemoteError(error: string | null): string | null {
   }
   const recoveryCopy = localizedConnectionRecoveryCopy(error);
   if (recoveryCopy) return recoveryCopy;
+  if (isCursorUnsupportedRemoteError(error)) {
+    return i18n.t('session.screen.cursorUnsupportedOnDesktop');
+  }
   return describeRemoteErrorShared(error);
 }
 
@@ -125,4 +128,16 @@ export function describeCursorHostError(
 export function describeRemoteComposerBlockingError(error: string | null): string | null {
   if (!error || isAutoRecoveringRemoteError(error)) return null;
   return describeRemoteError(error);
+}
+
+/**
+ * 新建 / 切换 Cursor 被旧电脑端拒绝时的可读错误。
+ * `requestedAgentKind` 用于「错误原文未点名 cursor」的语境判定。
+ */
+export function describeCursorHostError(
+  error: string | null | undefined,
+  requestedAgentKind?: string | null,
+): string | null {
+  if (!isCursorUnsupportedRemoteError(error, requestedAgentKind)) return null;
+  return i18n.t('session.screen.cursorUnsupportedOnDesktop');
 }

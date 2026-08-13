@@ -12,6 +12,8 @@
 
 import { isAbsolute, relative, resolve } from 'node:path';
 
+import type { SubagentObservation } from '@cindy/maker-shared/subagent-observation';
+
 import type {
   AgentEvent,
   AgentTaskStatus,
@@ -532,12 +534,33 @@ export function cursorTaskToEvents(
       source,
     });
   }
+  // 持久化标记：`persistSubagentTaskUpdate` 只落带有效 observation 的更新，
+  // 没有它 Cursor 子任务只活在当前事件流里，刷新 / 重启就从 Subagent 工作区消失。
+  //
+  // logicalSubagentId 用 **toolCallId** 而不是展示用的 `taskId`：后者优先取
+  // agentId，而 agentId 在 start 时常常没有、done 时才有（见 cursorTaskStableId
+  // 的注释），拿它当持久身份会让同一个子任务的 spawn 与 terminal 落成两条记录。
+  // agentId 作为对端 run id 只在 spawn 上报一次（契约要求）。
+  const logicalSubagentId = params.toolCallId;
+  const agentId = params.agentId?.trim();
+  const aliases = taskId !== logicalSubagentId ? [taskId] : undefined;
+  const observation = (kind: 'spawn' | 'progress' | 'terminal'): SubagentObservation => ({
+    kind,
+    logicalSubagentId,
+    parentToolUseId: params.toolCallId,
+    ...(aliases ? { identityAliases: aliases } : {}),
+    ...(kind === 'spawn' && agentId ? { providerRunIds: [agentId] } : {}),
+  });
+  const firstEmit = !opts?.alreadyEmittedToolUse;
+  const terminal = isCursorTaskTerminalStatus(status);
   const update: AgentTaskUpdateEventData = {
     provider: 'cursor',
     taskId,
     parentToolUseId: params.toolCallId,
     status,
     title,
+    // 首次出现一律先 spawn（只有 spawn 能建持久 run）；之后按终态与否分流。
+    subagentObservation: observation(firstEmit ? 'spawn' : terminal ? 'terminal' : 'progress'),
     ...(params.prompt.trim() ? { description: params.prompt } : {}),
     ...(params.model ? { model: params.model } : {}),
     taskType: subagentType,
@@ -552,6 +575,15 @@ export function cursorTaskToEvents(
     },
   };
   events.push({ type: 'agent_task_update', data: update, source });
+  // 首次出现就已经是终态（快子任务只报一次 done）：spawn 建了 run 还得把它关掉，
+  // 否则持久层永远留一条 running。
+  if (firstEmit && terminal) {
+    events.push({
+      type: 'agent_task_update',
+      data: { ...update, subagentObservation: observation('terminal') },
+      source,
+    });
+  }
   if (status === 'completed' || status === 'failed' || status === 'stopped') {
     const isError = status === 'failed';
     const fullText =

@@ -465,6 +465,7 @@ describe('resolveRemoteModelListStatus', () => {
         agentKind: 'claude-code',
         cc: pending,
         codex: failed,
+        cursor: ready,
         pi: failed,
         providers: { loading: false, error: null },
       }),
@@ -475,10 +476,49 @@ describe('resolveRemoteModelListStatus', () => {
         agentKind: 'claude-code',
         cc: ready,
         codex: failed,
+        cursor: ready,
         pi: failed,
         providers: { loading: false, error: null },
       }),
     ).toBe('ready');
+  });
+
+  it('resolves Cursor against its own capability slot, not Pi', () => {
+    // 回归：cursor 若落进 pi 那一支，Pi 报错会把已就绪的 Cursor 选择器显示成失败，
+    // 反过来 Pi 就绪而 Cursor 未返回时又会过早 ready 并显示空列表。
+    expect(
+      resolveRemoteModelListStatus({
+        deviceId: 'dev-a',
+        agentKind: 'cursor',
+        cc: failed,
+        codex: failed,
+        cursor: ready,
+        pi: failed,
+        providers: { loading: false, error: null },
+      }),
+    ).toBe('ready');
+    expect(
+      resolveRemoteModelListStatus({
+        deviceId: 'dev-a',
+        agentKind: 'cursor',
+        cc: ready,
+        codex: ready,
+        cursor: pending,
+        pi: ready,
+        providers: { loading: false, error: null },
+      }),
+    ).toBe('loading');
+    expect(
+      resolveRemoteModelListStatus({
+        deviceId: 'dev-a',
+        agentKind: 'cursor',
+        cc: ready,
+        codex: ready,
+        cursor: failed,
+        pi: ready,
+        providers: { loading: false, error: null },
+      }),
+    ).toBe('error');
   });
 
   it('reports capability or connection failures instead of authoritative empty', () => {
@@ -488,6 +528,7 @@ describe('resolveRemoteModelListStatus', () => {
         agentKind: 'claude-code',
         cc: failed,
         codex: ready,
+        cursor: ready,
         pi: ready,
         providers: { loading: false, error: null },
       }),
@@ -498,6 +539,7 @@ describe('resolveRemoteModelListStatus', () => {
         agentKind: null,
         cc: ready,
         codex: failed,
+        cursor: ready,
         pi: ready,
         providers: { loading: false, error: null },
       }),
@@ -508,6 +550,7 @@ describe('resolveRemoteModelListStatus', () => {
         agentKind: 'claude-code',
         cc: ready,
         codex: ready,
+        cursor: ready,
         pi: ready,
         providers: { loading: false, error: 'timeout', unsupported: false },
       }),
@@ -521,6 +564,7 @@ describe('resolveRemoteModelListStatus', () => {
         agentKind: 'claude-code',
         cc: ready,
         codex: ready,
+        cursor: ready,
         pi: ready,
         providers: { loading: false, error: 'channel not allowed', unsupported: true },
       }),

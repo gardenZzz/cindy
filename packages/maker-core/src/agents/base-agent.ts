@@ -655,6 +655,8 @@ export interface AgentDeps {
     toolName: string;
     input: Record<string, unknown>;
     kind?: string | null;
+    /** 会话工作区根；分类器据此判定目标是否在工作区内。 */
+    workspaceRoot?: string;
   }) => Promise<'allow' | 'ask'>;
 
   /**

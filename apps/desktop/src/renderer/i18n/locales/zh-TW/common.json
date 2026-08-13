@@ -1762,7 +1762,7 @@
         "confirmDescription": "確認後，Cindy 將在本機執行官方安裝指令：\n\n{{command}}\n\n未確認前不會執行任何安裝。",
         "confirmInstall": "安裝",
         "confirmCancel": "取消",
-        "installSuccess": "Cursor 已安裝",
+        "installSuccess": "Cursor 已安裝。重新啟動 Cindy 後即可在新增任務時選擇 Cursor。",
         "installFailed": "無法安裝 Cursor",
         "installNotDetected": "安裝已結束，但仍未檢測到 cursor-agent。請重新整理，或在終端自行安裝。",
         "unsupportedPlatform": "官方 cursor-agent 安裝程式僅支援 macOS 與 Linux。",
@@ -4529,12 +4529,12 @@
   "ghostPanel": {
     "disableConfirm": {
       "title": "停用「{{name}}」？",
-      "body": "關閉這個面板會停用整個插件，它的面板和能力都會暫停。之後可以隨時在側邊欄「插件」裡重新開啟。",
+      "body": "關閉這個面板會停用插件並暫停其能力。你可以隨時在側邊欄「插件」中重新啟用。",
       "confirm": "停用"
     }
   },
   "ghostPanelWindow": {
-    "mergeBack": "合併回主視窗",
+    "mergeBack": "返回主視窗",
     "unavailable": "該插件面板當前不可用"
   },
   "ghostPanelBubble": {
@@ -4544,6 +4544,11 @@
   },
   "rightSidebar": {
     "ariaLabel": "右側邊欄",
+    "panelError": {
+      "title": "面板載入失敗",
+      "description": "此面板目前無法顯示，其他面板仍可繼續使用。",
+      "reload": "重新載入面板"
+    },
     "window": {
       "title": "側邊欄",
       "mergeBack": "合併回主視窗",
@@ -4574,6 +4579,7 @@
         "ghostPanel": "插件面板"
       },
       "controls": {
+        "showAria": "顯示側欄",
         "maximizeAria": "最大化側欄",
         "restoreAria": "退出最大化",
         "closeAria": "關閉側欄",

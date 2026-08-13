@@ -71,7 +71,7 @@ interface FailedWorkerResult {
 type BatchWorkerResult = CreatedWorkerResult | FailedWorkerResult;
 type BatchStopReason = 'WORKER_LIMIT_HARD_EXCEEDED' | 'HOST_NOT_READY';
 
-// 并发度上限取 4——#35 实测每个并发 cursor-agent 峰值约 320MB，4 并发共约 1.3GB、
+// 并发度上限取 4——实测每个并发 agent 进程峰值约 320MB，4 并发共约 1.3GB、
 // 每会话仅劣化 15% 并拿到 3.3× 墙钟改善；8 并发内存翻倍到 2.5GB 而吞吐只再涨 1.8×，
 // 性价比不划算。workers 上限是 32，不设限最坏情况 10GB+。
 const MAX_CONCURRENT_WORKER_CREATIONS = 4;
@@ -102,17 +102,27 @@ function buildUserReport(params: {
   failureCount: number;
   skippedCount: number;
   stopReason: BatchStopReason | undefined;
+  /** 批次里存在按名额切掉/失败的项；可与 hostNotReady 同时成立，两者原因不同。 */
+  capacityLimited: boolean;
+  /** 批次里存在主进程未就绪的项。 */
+  hostNotReady: boolean;
   limit: WorkerLimitSnapshot | undefined;
 }): string {
   const notCreatedCount = params.failureCount + params.skippedCount;
   const base = `本批请求创建 ${params.requestCount} 个 Worker，实际创建成功 ${params.successCount} 个，创建失败 ${params.failureCount} 个，未尝试 ${params.skippedCount} 个，共 ${notCreatedCount} 个未创建`;
-  if (params.stopReason === 'WORKER_LIMIT_HARD_EXCEEDED' && params.limit) {
-    return `${base}；当前 hard limit 为 ${params.limit.workerHardLimit}，已占用 ${params.limit.occupiedSlots} 个槽位。可在协同设置中提高 hard limit、复用已有 Worker，或归档不再需要的 Worker 后分批执行剩余任务。`;
-  }
-  if (params.stopReason === 'HOST_NOT_READY') {
-    return `${base}；${BRAND_NAME} 主进程协同服务尚未就绪，请等待服务就绪后只重试未创建项。`;
-  }
-  return `${base}。请按逐项结果核对每个 Worker 的真实终态。`;
+  const capacityTail = params.limit
+    ? `当前 hard limit 为 ${params.limit.workerHardLimit}，已占用 ${params.limit.occupiedSlots} 个槽位。可在协同设置中提高 hard limit、复用已有 Worker，或归档不再需要的 Worker 后分批执行剩余任务。`
+    : '';
+  const hostTail = `${BRAND_NAME} 主进程协同服务尚未就绪，请等待服务就绪后只重试未创建项。`;
+  // 两类原因可以同时成立，且**两边都要写进 user_report**：工具描述要求 Lead 逐字转告
+  // 这个字段，漏掉哪一条，用户就会只被引导去调名额或只被引导去等服务。
+  const tails: string[] = [];
+  if (params.capacityLimited && capacityTail) tails.push(capacityTail);
+  if (params.hostNotReady) tails.push(hostTail);
+  if (tails.length === 0) return `${base}。请按逐项结果核对每个 Worker 的真实终态。`;
+  // 批次级停止原因对应的那条排在前面，另一条紧随其后。
+  if (params.stopReason === 'HOST_NOT_READY') tails.reverse();
+  return `${base}；${tails.join('另有一部分是因为：')}`;
 }
 
 function workerCreateParams(leadSessionId: string, worker: CreateWorkerSpec) {
@@ -177,9 +187,20 @@ function moreRecentLimit(
 function isWorkerLimitSnapshot(value: unknown): value is WorkerLimitSnapshot {
   if (!value || typeof value !== 'object') return false;
   const snapshot = value as Partial<WorkerLimitSnapshot>;
-  return Number.isFinite(snapshot.workerHardLimit)
-    && Number.isFinite(snapshot.occupiedSlots)
-    && Number.isFinite(snapshot.remainingSlots);
+  const { workerHardLimit, occupiedSlots, remainingSlots } = snapshot;
+  if (!Number.isFinite(workerHardLimit)
+    || !Number.isFinite(occupiedSlots)
+    || !Number.isFinite(remainingSlots)) {
+    return false;
+  }
+  // 只认自洽的快照：负 remainingSlots 会把整批误判成 hard-limit skipped，虚高值又会
+  // 放行本该跳过的后缀，两种都比「回退首项探测」更糟。判据直接对齐 host 的算法
+  // （`remainingSlots = max(0, hardLimit - occupied)`），而不是写成
+  // `occupied + remaining <= hardLimit` —— 后者会把「用户把 hard limit 调到低于当前
+  // Worker 数」这种合法状态（如 3/5/0）误判成非法，于是白白回退去探测首项、多建一个。
+  return workerHardLimit! >= 0
+    && occupiedSlots! >= 0
+    && remainingSlots! === Math.max(0, workerHardLimit! - occupiedSlots!);
 }
 
 export function registerCreateWorkersTool(
@@ -264,6 +285,11 @@ export function registerCreateWorkersTool(
       if (usedReadOnlySnapshot) {
         nextIndex = 0;
         const remainingSlots = Math.max(0, Math.floor(limit!.remainingSlots));
+        // 已知取舍：前缀按快照一次切死，不做动态回填。前缀内某项因 DUPLICATE_LABEL /
+        // NO_PROVIDER_FOR_AGENT 这类「还没占到 reservation 就失败」的原因挂掉时，那个
+        // 名额不会补给后缀，后缀仍按超限 skipped。宁可少建也不多建：回填要在并发里
+        // 重新判定名额归属，而 hard limit 的最终裁决在 main 侧原子 reservation，
+        // 工具侧再算一次只会引入两套判据。用户按逐项结果重试即可拿到那个名额。
         eligibleEnd = Math.min(workers.length, remainingSlots);
         if (eligibleEnd < workers.length) {
           // 这是只读快照判定出的虚拟 hard-limit 边界，不对应任何失败项。
@@ -308,23 +334,57 @@ export function registerCreateWorkersTool(
         await Promise.all(Array.from({ length: workerCount }, () => runNext()));
       }
 
-      if (hostNotReadyIndex !== undefined) {
-        stopReason = 'HOST_NOT_READY';
-      } else if (hardLimitIndex !== undefined) {
-        stopReason = 'WORKER_LIMIT_HARD_EXCEEDED';
+      // 停止原因取「请求顺序里更早的那个」，不能让在途的后发失败盖掉先发的边界：
+      // 并发下 index=2 先报 hard limit、index=5 后报 HOST_NOT_READY 时若取后者，
+      // 调度器早已按 index=2 停发的 3/4 两项既没结果也不满足 skip 条件，会被误报成
+      // INTERNAL；容量快照与 suggestions 也会跟着丢。
+      const earliestStop = stopIndex();
+      if (Number.isFinite(earliestStop)) {
+        stopReason = earliestStop === hostNotReadyIndex
+          ? 'HOST_NOT_READY'
+          : 'WORKER_LIMIT_HARD_EXCEEDED';
       }
 
-      const skipReason = stopReason;
-      const firstStopIndex = stopReason === 'HOST_NOT_READY'
-        ? hostNotReadyIndex
-        : hardLimitIndex;
+      // 在途调用全部结算后重取一次只读快照。并发下每个成功结果带回的 limit 是它拿到
+      // reservation 那一刻的占用，其中可能包含之后又被释放的预留（bootstrap、持久化或
+      // 派发前失败）；沿用其中的最大值会把容量报成比实际更满，进而误导 Lead 去建议用户
+      // 提高上限或归档 Worker。收尾快照是只读的，失败就沿用在途结果，不影响已建好的 Worker。
+      // 只要回调存在就重取，不看批前那次成没成功：批前失败可能只是一次瞬时错误，随后
+      // 创建全程正常，这时沿用在途最大值同样会把容量报得比实际更满。重取是只读的、
+      // 已包在 try/catch 里，最坏不过多一次失败读。
+      if (deps.getWorkerLimitSnapshot) {
+        try {
+          const settled = await deps.getWorkerLimitSnapshot(ctx.sessionId!);
+          if (isWorkerLimitSnapshot(settled)) limit = settled;
+        } catch {
+          // 收尾刷新失败不改变任何已结算的终态。
+        }
+      }
+
+      // 每项的 skip 原因按区间判定，不共用一个批次级原因：容量后缀是调用 host 之前就由
+      // 快照切定的分区，不该被前缀里的 HOST_NOT_READY 改写成「主进程未就绪」——否则用户
+      // 等主进程恢复后重试这些项，仍会因为名额不够再失败一次，而且拿不到提限/归档建议。
+      const skipReasonAt = (index: number): BatchStopReason | undefined => {
+        if (index >= eligibleEnd) return 'WORKER_LIMIT_HARD_EXCEEDED';
+        // 前缀内两个边界都可能命中；取请求顺序里更早的那个，不能给某个原因固定优先级，
+        // 否则「index=1 撞名额、index=3 撞主进程」时 index>=4 会被标成主进程未就绪，
+        // 与批次级 stop_reason 自相矛盾，还会引导用户去等服务而不是释放名额。
+        const hostHit = hostNotReadyIndex !== undefined && index > hostNotReadyIndex;
+        const limitHit = hardLimitIndex !== undefined && index > hardLimitIndex;
+        if (hostHit && limitHit) {
+          return hostNotReadyIndex! < hardLimitIndex!
+            ? 'HOST_NOT_READY'
+            : 'WORKER_LIMIT_HARD_EXCEEDED';
+        }
+        if (hostHit) return 'HOST_NOT_READY';
+        if (limitHit) return 'WORKER_LIMIT_HARD_EXCEEDED';
+        return undefined;
+      };
       for (let index = 0; index < workers.length; index += 1) {
         if (indexedResults[index]) continue;
         const worker = workers[index]!;
-        const shouldSkip = firstStopIndex !== undefined
-          ? index > firstStopIndex
-          : index >= eligibleEnd;
-        if (!shouldSkip || !skipReason) {
+        const skipReason = skipReasonAt(index);
+        if (!skipReason) {
           // 理论上只有首项 host 异常且 promise 没有写入结果才会到这里；保守保留
           // 可观察终态，避免批次汇总出现空洞。
           indexedResults[index] = failureFromThrownError(
@@ -333,7 +393,6 @@ export function registerCreateWorkersTool(
           );
           continue;
         }
-        skippedCount += 1;
         indexedResults[index] = {
           ...baseResult(worker),
           status: 'skipped',
@@ -343,6 +402,16 @@ export function registerCreateWorkersTool(
             : `${BRAND_NAME} 主进程协同服务尚未就绪，未再调用 host 创建。`,
         };
       }
+      // 判据取自**全部逐项终态**，不只是 skip：并发下较晚的在途项可能真失败在
+      // HOST_NOT_READY 上，而批次级 stop_reason 取的是更早的名额边界；只看 skip 会
+      // 把「主进程未就绪」整条从 user_report 与 suggestions 里漏掉。
+      const hasErrorCode = (code: BatchStopReason) => indexedResults.some((result) => (
+        result !== undefined && 'error_code' in result && result.error_code === code
+      ));
+      const capacityLimited = hasErrorCode('WORKER_LIMIT_HARD_EXCEEDED')
+        || stopReason === 'WORKER_LIMIT_HARD_EXCEEDED';
+      const hostNotReady = hasErrorCode('HOST_NOT_READY')
+        || stopReason === 'HOST_NOT_READY';
 
       results.push(...indexedResults as BatchWorkerResult[]);
       successCount = results.filter((result) => result.status === 'created').length;
@@ -355,6 +424,8 @@ export function registerCreateWorkersTool(
         failureCount,
         skippedCount,
         stopReason,
+        capacityLimited,
+        hostNotReady,
         limit,
       });
       const payload = {
@@ -369,11 +440,12 @@ export function registerCreateWorkersTool(
         ...(limit ? { limit: toWorkerLimitPayload(limit) } : {}),
         user_report: userReport,
         results,
-        suggestions: stopReason === 'WORKER_LIMIT_HARD_EXCEEDED'
-          ? hardLimitSuggestions()
-          : stopReason === 'HOST_NOT_READY'
-            ? hostNotReadySuggestions()
-            : [],
+        // 建议按「批次里实际用到的 skip 原因」取并集，不跟着单值 stop_reason 走：
+        // 主进程未就绪与容量超限可以同时存在，只给前者会让用户以为等一等就能重试成功。
+        suggestions: [
+          ...(capacityLimited ? hardLimitSuggestions() : []),
+          ...(hostNotReady ? hostNotReadySuggestions() : []),
+        ],
       };
       if (stopReason === 'HOST_NOT_READY') {
         return errorPayload(

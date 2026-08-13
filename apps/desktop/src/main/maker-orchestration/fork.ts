@@ -101,8 +101,20 @@ interface ParsedAgentSwitchBoundary {
 function parseAgentSwitchBoundary(content: string): ParsedAgentSwitchBoundary | null {
   try {
     const parsed = JSON.parse(content) as Record<string, unknown>;
-    if (parsed.fromAgentKind !== 'cc' && parsed.fromAgentKind !== 'codex' && parsed.fromAgentKind !== 'pi') return null;
-    const toAgentKind = parsed.toAgentKind === 'cc' || parsed.toAgentKind === 'codex' || parsed.toAgentKind === 'pi'
+    // 边界元数据要认全 DbAgentKind（含 cursor），否则「Cursor → Claude Code」切换后，
+    // 对新 Claude 片段首条用户消息做编辑/Fork 时边界解析不出来，会误走 NO_PRIOR_ASSISTANT。
+    // 注意这里只是**认识**这条边界；真正以 Cursor 原生会话为 fork 源仍不支持，
+    // 由下游 fromSdkSessionId 缺失的既有分支拦截。
+    if (
+      parsed.fromAgentKind !== 'cc'
+      && parsed.fromAgentKind !== 'codex'
+      && parsed.fromAgentKind !== 'cursor'
+      && parsed.fromAgentKind !== 'pi'
+    ) return null;
+    const toAgentKind = parsed.toAgentKind === 'cc'
+      || parsed.toAgentKind === 'codex'
+      || parsed.toAgentKind === 'cursor'
+      || parsed.toAgentKind === 'pi'
       ? parsed.toAgentKind
       : undefined;
     return {
