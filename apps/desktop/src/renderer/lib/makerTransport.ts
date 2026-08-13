@@ -73,6 +73,7 @@ export interface RoutableMaker {
   // (压缩的是被控端的会话上下文,控制端本机无该 live 会话,固定调本机必 null 静默失败)。
   compactSession: FullMaker['compactSession'];
   enableOrca: FullMaker['enableOrca'];
+  dispatchOrcaUiAssignment: FullMaker['dispatchOrcaUiAssignment'];
   disableOrca: FullMaker['disableOrca'];
   input: Pick<
     FullMaker['input'],
@@ -175,6 +176,9 @@ function remoteMakerApi(deviceId: string): RoutableMaker {
         instructions === undefined ? [sessionId] : [sessionId, instructions],
       )) as FullMaker['compactSession'],
     enableOrca: t('maker:session:enable-orca') as FullMaker['enableOrca'],
+    dispatchOrcaUiAssignment: t(
+      'maker:worker:dispatch-ui-assignment',
+    ) as FullMaker['dispatchOrcaUiAssignment'],
     disableOrca: t('maker:session:disable-orca') as FullMaker['disableOrca'],
     input: {
       enqueue: t('maker:input:enqueue') as FullMaker['input']['enqueue'],
@@ -211,9 +215,13 @@ export function makerApiForDevice(deviceId: string): RoutableMaker {
 export function agentCapabilitiesForDevice(
   deviceId: string,
   agentKind: AgentKind,
-): Promise<{ supportsOrcaWorkerPermissionMode?: boolean }> {
+): Promise<{
+  supportsOrcaWorkerPermissionMode?: boolean;
+  supportsDeferredOrcaUiAssignment?: boolean;
+}> {
   return invokeRemote(deviceId, 'maker:get-capabilities', [agentKind]) as Promise<{
     supportsOrcaWorkerPermissionMode?: boolean;
+    supportsDeferredOrcaUiAssignment?: boolean;
   }>;
 }
 
