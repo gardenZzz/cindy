@@ -432,6 +432,7 @@ export function CustomProviderDialog({
   const modelPickerTriggerRef = useRef<HTMLButtonElement>(null);
   const modelFetchInFlightRef = useRef(false);
   const dialogPanelRef = useRef<HTMLDivElement>(null);
+  const overlayRef = useRef<HTMLDivElement>(null);
   // 原生 window listener 的生命周期不跟着每次 render 重绑；layout effect 只把
   // 已提交的层状态写入 ref，既避开 passive effect 延迟，也不暴露被放弃的并发 render。
   const childLayerRef = useRef(childLayer);
@@ -476,7 +477,21 @@ export function CustomProviderDialog({
       dismissTopmostLayer();
     };
     window.addEventListener('keydown', onKeyDown, { capture: true });
-    return () => window.removeEventListener('keydown', onKeyDown, true);
+    const onPointerDown = (event: PointerEvent) => {
+      if (event.button !== 0) return;
+      if (event.target !== overlayRef.current) return;
+      if (savingRef.current || runtimeFillRef.current) return;
+      // window capture 早于 Radix document capture：同一手势只结算最上层一次，
+      // 避免菜单 outside-dismiss 先把 childLayer 清掉后再误关底层表单。
+      event.preventDefault();
+      event.stopPropagation();
+      dismissTopmostLayer();
+    };
+    window.addEventListener('pointerdown', onPointerDown, { capture: true });
+    return () => {
+      window.removeEventListener('keydown', onKeyDown, true);
+      window.removeEventListener('pointerdown', onPointerDown, true);
+    };
   }, [dismissTopmostLayer]);
 
   useEffect(() => {
@@ -1517,19 +1532,8 @@ export function CustomProviderDialog({
 
   return (
     <div
+      ref={overlayRef}
       className="fixed inset-0 z-[10000] flex items-center justify-center bg-[var(--overlay-modal)]"
-      onPointerDown={(event) => {
-        // pointerdown 时先按当前层级结算，避免 Popover 的 outside-dismiss 在随后
-        // click 前把状态改成 closed，令同一次手势继续误关底层表单。
-        if (
-          event.button === 0 &&
-          event.target === event.currentTarget &&
-          !saving &&
-          !runtimeFill
-        ) {
-          dismissTopmostLayer();
-        }
-      }}
       onKeyDown={(event) => {
         if (childLayer || runtimeFill) return;
         if (event.key !== 'Tab') return;
