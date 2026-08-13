@@ -17,8 +17,8 @@ import {
   CodexAgent,
   CursorAgent,
   classifyAcpAutoPermission,
-  DEFAULT_AUTO_REVIEW_TIMEOUT_POLICY,
   configureDefaultImageResizer,
+  type AutoReviewRequest,
   type McpProvider,
 } from '@cindy/maker-core';
 import {
@@ -96,6 +96,7 @@ import {
   deriveAvailableModels,
   refreshCatalogDerivedModels,
   resolvePiRuntimeModelDescriptor,
+  resolvePiGatewayDescriptorProviderId,
   resolveVerifiedContextWindow,
 } from './catalog-to-descriptors.js';
 import { buildPiAgent } from './pi-host.js';
@@ -125,6 +126,7 @@ import { resolveRemoteClaudeRoute } from './remote-claude-route.js';
 import { claudeSubagentUsageBridge } from './claude-subagent-usage-bridge.js';
 import { notifyAutoPermissionClassifierUnavailable } from './claude-auto-permission-fallback.js';
 import { createAutoPermissionReviewer } from './auto-permission-reviewer.js';
+import { findCatalogModel, resolveAutoReviewBudget } from './auto-review-budget.js';
 import { requestUtilityText } from '../utility-model/oneShotCandidates.js';
 import { accountProviderReadinessBarrier } from './account-provider-readiness-barrier.js';
 import { hasClaudeAiOAuth } from './claude-credentials-store.js';
@@ -258,18 +260,42 @@ type RemoteCcQuery = Awaited<
 
 let _maker: Maker | null = null;
 
+/**
+ * 本次审核请求的额度。按模型能力自适应:能关思考的走紧凑档,强制思考的
+ * (以及目录里查不到的)给足思考+结论的空间 —— 固定 384 token 会让 DeepSeek
+ * 这类模型正文恒为空。详见 auto-review-budget.ts。
+ */
+function autoReviewBudgetFor(request: AutoReviewRequest) {
+  return resolveAutoReviewBudget(findCatalogModel(
+    getActiveCatalog().providers,
+    request.providerId,
+    request.agentKind,
+    request.model,
+  ));
+}
+
+let providerAccessRuntimeRefreshListener: (() => void) | null = null;
+
+/** Register the bootstrap-owned runtime reconciliation that follows provider access changes. */
+export function setProviderAccessRuntimeRefreshListener(listener: (() => void) | null): void {
+  providerAccessRuntimeRefreshListener = listener;
+}
+
 const reviewAutoPermissionAction = createAutoPermissionReviewer({
   logger: desktopMakerLogger,
+  // 重试守卫必须按同一份额度计时,否则放宽额度的那一档会被自己的守卫切断。
+  resolveRequestTimeoutMs: (request) => autoReviewBudgetFor(request).timeoutMs,
   requestText: async (request, prompt) => {
     const maker = _maker;
     if (!maker) return null;
+    const budget = autoReviewBudgetFor(request);
     const result = await requestUtilityText(maker, prompt, {
       providerId: request.providerId?.trim() || undefined,
       agentKind: request.agentKind,
       model: request.model,
-      maxTokens: 384,
-      timeoutMs: DEFAULT_AUTO_REVIEW_TIMEOUT_POLICY.requestTimeoutMs,
-      reasoningEffort: 'low',
+      maxTokens: budget.maxTokens,
+      timeoutMs: budget.timeoutMs,
+      ...(budget.reasoningEffort ? { reasoningEffort: budget.reasoningEffort } : {}),
     });
     return result.ok ? result.text : null;
   },
@@ -285,6 +311,13 @@ let _codexModelBackfill: CodexModelBackfillCoordinator | null = null;
 /** Refresh selectable model capabilities, then notify every local/remote renderer. */
 function refreshSelectableModelsAndBroadcast(payload: Record<string, unknown>): void {
   if (_maker) refreshCatalogDerivedModels(_maker, getDesktopSelectableCatalog());
+  try {
+    providerAccessRuntimeRefreshListener?.();
+  } catch (error) {
+    desktopMakerLogger.warn('provider access runtime refresh listener failed', {
+      error: error instanceof Error ? error.message : String(error),
+    });
+  }
   for (const win of BrowserWindow.getAllWindows()) {
     if (win.isDestroyed()) continue;
     try {
@@ -1709,8 +1742,15 @@ export function getMaker(): Maker {
       },
       resolvePiRuntimeModelDescriptor: (providerId, modelId) =>
         resolvePiRuntimeModelDescriptor(getDesktopSelectableCatalog(), providerId, modelId),
-      resolvePiGatewayModelDescriptor: (modelId) =>
-        resolvePiRuntimeModelDescriptor(getDesktopSelectableCatalog(), 'cindy', modelId),
+      resolvePiGatewayModelDescriptor: (providerId, modelId) => {
+        // `cindy` / null 是 Pi 的默认 gateway 路由；其 wire 由 v3 XD runtime plan
+        // 决定，因此描述符也必须锁定 XD，不能让复合 `cindy` 按目录顺序命中同 id 订阅模型。
+        return resolvePiRuntimeModelDescriptor(
+          getDesktopSelectableCatalog(),
+          resolvePiGatewayDescriptorProviderId(providerId),
+          modelId,
+        );
+      },
       mcpProviders: piMcpProviders,
       makerMemory: makerMemoryManager,
       getGhostRosterPrompt,
