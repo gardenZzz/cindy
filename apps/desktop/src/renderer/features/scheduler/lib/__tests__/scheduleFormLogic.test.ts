@@ -555,7 +555,7 @@ describe('buildScheduleInput — heartbeat 分支', () => {
 });
 
 describe('buildScheduleInput — 非 heartbeat 分支(行为锁定,不动 create 路径)', () => {
-  it('空 model/effort 不带 key', () => {
+  it('空 model/effort 不带 key（未传入目录时不发明默认档）', () => {
     const input = buildScheduleInput(makeForm());
     expect(hasKey(input, 'model')).toBe(false);
     expect(hasKey(input, 'effort')).toBe(false);

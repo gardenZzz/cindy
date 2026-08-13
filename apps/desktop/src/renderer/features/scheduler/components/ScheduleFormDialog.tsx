@@ -510,7 +510,7 @@ export function ScheduleFormDialog({
     }
     if (isProjectAutomationMode && projectWorkingDir) {
       const id = initial?.projectConfigId ?? generateProjectScheduleId();
-      const config = formToProjectConfig(form, id);
+      const config = formToProjectConfig(form, id, currentModelEfforts);
       setSubmitting(true);
       try {
         await window.electronAPI.maker.projectAutomation.upsertSchedule({
@@ -527,7 +527,7 @@ export function ScheduleFormDialog({
       }
       return;
     }
-    let input = toInput();
+    let input = toInput(currentModelEfforts);
     if (selectedTemplate && !promptDirty) {
       try {
         input = {

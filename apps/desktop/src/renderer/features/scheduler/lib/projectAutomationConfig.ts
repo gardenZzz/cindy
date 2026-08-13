@@ -1,7 +1,11 @@
 import type { Schedule } from '@cindy/maker-scheduler';
 
-import { buildPreRunHook } from './scheduleFormLogic';
-import type { ScheduleFormState } from '../hooks/useScheduleForm';
+import {
+  buildPreRunHook,
+  resolvePersistedScheduleEffort,
+  type ScheduleFormState,
+  type ScheduleModelEfforts,
+} from './scheduleFormLogic';
 import { stripTrailingPathSeparators } from '../../../../shared/pathText';
 import { PROJECT_AUTOMATION_REL_SEGMENTS } from '../../../../shared/projectAutomationPaths';
 import type { AgentKind } from '@cindy/maker-core';
@@ -76,6 +80,7 @@ export function scheduleToProjectConfig(
 export function formToProjectConfig(
   form: ScheduleFormState,
   id: string,
+  modelEfforts?: ScheduleModelEfforts,
 ): ProjectScheduleConfig {
   const cronExpr = form.cronExpr.trim();
   return {
@@ -90,7 +95,7 @@ export function formToProjectConfig(
     agentKind: form.agentKind,
     model: form.model.trim() || undefined,
     providerId: form.providerId.trim() || undefined,
-    effort: form.effort || undefined,
+    effort: resolvePersistedScheduleEffort(form, modelEfforts),
     // Codex / Cursor / Pi 都生效;只认 codex 会丢弃 Cursor/Pi 任务的 Fast。
     fastMode: (form.agentKind === 'codex' || form.agentKind === 'cursor' || form.agentKind === 'pi') && form.fastMode ? true : undefined,
     useWorktree: form.useWorktree,

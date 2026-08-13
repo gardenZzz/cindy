@@ -155,6 +155,24 @@ export function resolveScheduleModelEfforts(input: {
   };
 }
 
+/**
+ * 保存时把 chip 展示的目录默认档写成显式值。
+ * 表单已有合法档 → 原样；心跳 / 跟随会话（空 model）/ 脚本 / 目录未知 → 不写。
+ */
+export function resolvePersistedScheduleEffort(
+  form: Pick<ScheduleFormState, 'effort' | 'model' | 'executionMode' | 'targetSessionId'>,
+  modelEfforts?: ScheduleModelEfforts,
+): EffortValue | undefined {
+  if (form.effort && isEffortValue(form.effort)) return form.effort;
+  if ((form.executionMode ?? 'agent') === 'script') return undefined;
+  // 心跳空档 = 跟随会话，不能把 chip 展示档落成任务自己的值。
+  if (form.targetSessionId.trim()) return undefined;
+  if (!form.model.trim()) return undefined;
+  if (!modelEfforts?.known) return undefined;
+  const fallback = modelEfforts.defaultEffort;
+  return fallback && modelEfforts.efforts.includes(fallback) ? fallback : undefined;
+}
+
 export interface ScheduleFormState {
   name: string;
   prompt: string;
@@ -552,7 +570,10 @@ export function parseScriptTimeoutMs(sec: string): number | undefined {
   return Number.isFinite(n) && n > 0 ? Math.floor(n * 1000) : undefined;
 }
 
-export function buildScheduleInput(form: ScheduleFormState): CreateScheduleInput {
+export function buildScheduleInput(
+  form: ScheduleFormState,
+  modelEfforts?: ScheduleModelEfforts,
+): CreateScheduleInput {
   const isHeartbeat = !!form.targetSessionId.trim();
   const isScript = (form.executionMode ?? 'agent') === 'script';
   const cronExpr = form.cronExpr.trim();
@@ -597,14 +618,15 @@ export function buildScheduleInput(form: ScheduleFormState): CreateScheduleInput
     base.useWorktree = false;
     base.model = form.model.trim() || undefined;
     base.providerId = form.providerId.trim() || undefined;
-    base.effort = form.effort && isEffortValue(form.effort) ? form.effort : undefined;
+    base.effort = resolvePersistedScheduleEffort(form, modelEfforts);
     return base;
   }
   if (form.workspaceKind === 'project') base.workingDir = form.workingDir.trim();
   else base.useWorktree = false;
   if (form.model.trim()) base.model = form.model.trim();
   if (form.providerId.trim()) base.providerId = form.providerId.trim();
-  if (form.effort && isEffortValue(form.effort)) base.effort = form.effort;
+  const persistedEffort = resolvePersistedScheduleEffort(form, modelEfforts);
+  if (persistedEffort) base.effort = persistedEffort;
   // fastMode 对 Codex / Cursor / Pi 都生效;claude-code 忽略此字段。
   if (form.agentKind === 'codex' || form.agentKind === 'cursor' || form.agentKind === 'pi') base.fastMode = form.fastMode;
   return base;

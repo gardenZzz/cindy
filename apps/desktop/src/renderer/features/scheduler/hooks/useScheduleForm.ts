@@ -18,6 +18,7 @@ import {
   applyRunMode,
   buildScheduleInput,
   captureBinding,
+  type ScheduleModelEfforts,
   sessionAgentKindToScheduleAgentKind,
   PENDING_SESSION_ID,
   resolveTemplateAgentFields,
@@ -289,8 +290,9 @@ export interface UseScheduleFormResult {
    * 把表单转成 CreateScheduleInput；
    * heartbeat 模式（targetSessionId 非空）只跳过 workingDir/useWorktree
    * （runner 从 SessionMeta 取，传了也被忽略）；model/effort 照常发送。
+   * 传入当前模型档位目录时，空 effort 会写成 chip 展示的 defaultEffort。
    */
-  toInput: () => CreateScheduleInput;
+  toInput: (modelEfforts?: ScheduleModelEfforts) => CreateScheduleInput;
   /**
    * 校验 + 返回错误 i18n key + 可选 interpolation values。null = 通过。
    * 调用方负责用 t() 翻译。
@@ -428,7 +430,11 @@ export function useScheduleForm(initial: Schedule | null = null): UseScheduleFor
 
   // 核心转换在 lib/scheduleFormLogic.buildScheduleInput(纯函数,node 单测覆盖);
   // heartbeat 分支 model/effort 恒带 key(空值 undefined → update patch 清列 = 跟随会话)。
-  const toInput = useCallback((): CreateScheduleInput => buildScheduleInput(form), [form]);
+  const toInput = useCallback(
+    (modelEfforts?: ScheduleModelEfforts): CreateScheduleInput =>
+      buildScheduleInput(form, modelEfforts),
+    [form],
+  );
 
   return { form, setField, setDestination, setRunMode, selectBoundSession, applyTemplateAgentFields, reset, toInput, validate };
 }
