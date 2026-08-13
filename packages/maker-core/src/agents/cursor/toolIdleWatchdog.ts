@@ -128,3 +128,29 @@ export function formatCursorInitialModelFailedMessage(
 export function formatCursorInvalidResumeCasConflictMessage(): string {
   return 'Cursor 会话无法恢复，且会话 ID 已被并发更新，未自动覆盖。请重试。';
 }
+
+/**
+ * 请求了 Fast，但当前模型没暴露 fast 档位（Auto/default 的 `session/new` 常如此）。
+ *
+ * 不能只打 warn 了事：保存的自动化与 UI 都还显示 Fast 已开启，用户会以为任务在
+ * 加速跑。这条把「没兑现」如实说出来，与模型切换失败同一处置。
+ */
+export function formatCursorFastModeUnavailableMessage(model: string): string {
+  return (
+    `当前模型 ${model} 未提供 Fast 档位，本次会话的 Fast 未生效。` +
+    `在模型选择器里选一个具体模型（而不是 Auto）后重开会话可用 Fast。`
+  );
+}
+
+/**
+ * 用户显式武装了计划模式，但 `session/set_mode(plan)` 失败。
+ *
+ * 这条**必须**中止本次发送：降级按普通 agent 模式发出去，会把「先给我一份可复核的
+ * 计划」变成直接改文件 / 执行命令 —— 用户看到的是自己要的计划没来、活已经干完了。
+ */
+export function formatCursorPlanModeUnavailableMessage(reason: string): string {
+  return (
+    `未能进入计划模式（${reason}），已取消本次发送 —— ` +
+    `不会按普通模式直接执行。可重试；若当前 Cursor 版本不支持计划模式，请关闭计划模式后再发送。`
+  );
+}

@@ -67,6 +67,22 @@ describe('shared system card presentation model', () => {
       expect.arrayContaining([{ label: 'agent', value: 'Pi' }]),
     );
 
+    // 同款回归:Cursor 会话的 /status 也不能显示成 Claude Code。
+    const cursorStatus = formatSystemCard('status', buildSystemCardData('status', {
+      session: {
+        agentKind: 'cursor',
+        fastMode: false,
+        model: 'auto',
+        permissionMode: 'ask',
+        status: 'active',
+        title: 'Cursor Session',
+        workingDir: '/repo',
+      },
+    }));
+    expect(cursorStatus.rows).toEqual(
+      expect.arrayContaining([{ label: 'agent', value: 'Cursor' }]),
+    );
+
     const context = formatSystemCard('context', buildSystemCardData('context', {
       contextUsage: {
         totalTokens: 12000,

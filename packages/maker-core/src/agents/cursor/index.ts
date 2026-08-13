@@ -134,8 +134,10 @@ import type {
 import {
   createToolIdleWatchdog,
   formatCursorInvalidResumeCasConflictMessage,
+  formatCursorFastModeUnavailableMessage,
   formatCursorInitialModelFailedMessage,
   formatCursorInvalidResumeMessage,
+  formatCursorPlanModeUnavailableMessage,
   formatCursorToolIdleMessage,
   resolveCursorToolIdleMs,
   type ToolIdleWatchdog,
@@ -450,6 +452,73 @@ function resolveCreateTransport(
     });
 }
 
+/** 单个模型的 `session/set_config_option` 探测上限。整轮时长 ≈ 模型数 × 本值。 */
+const MODEL_PROBE_TIMEOUT_MS = 20_000;
+
+/**
+ * 建会话链路（`initialize` / `session/new` / `session/load`）单条 RPC 的上限。
+ *
+ * 取值偏宽:冷启动的 `cursor-agent` 要装载配置与索引,慢机器上十几秒是正常的;
+ * 这条线只用来兜住「对端永远不回包」,不是性能阈值。
+ */
+const BOOTSTRAP_RPC_TIMEOUT_MS = 60_000;
+
+/**
+ * 让一次 ACP RPC 与「取消」和有界超时赛跑。
+ *
+ * `client.request` / `client.initialize` 既不认 signal 也没有自带超时,对端卡住时
+ * 这一次 await 永不返回。两处后果都是「永远出不了终态」:
+ *
+ * - 模型探测:只在循环顶部查 `signal.aborted` 不够,IPC 立刻回了 `cancelled: true`,
+ *   刷新状态却永久停在 running,后续刷新还会因全局 inflight 全部 no-op;
+ * - 会话 bootstrap:首条消息已经 accepted 并显示 `Starting...`,却既不成功也不报错,
+ *   直到用户手动停止任务。
+ *
+ * 放弃后底层 RPC 仍挂在对端,但我们不再等它:两处调用方的 finally / catch 都会
+ * close client(bootstrap 还会 dispose 隔离配置目录),连着把它收掉。
+ */
+async function raceAcpRequest<T>(
+  work: Promise<T>,
+  opts: {
+    signal?: AbortSignal;
+    timeoutMs: number;
+    label: string;
+    /**
+     * 取消时抛出的文案。bootstrap 传既有的 `assertBootstrapActive` 同一句 ——
+     * 现在 signal 会直接切断在途 RPC，比原来「等 RPC 回来再发现已取消」更早，
+     * 但用户与日志看到的终态文案不该因此改变。
+     */
+    abortMessage?: string;
+  },
+): Promise<T> {
+  let timer: NodeJS.Timeout | undefined;
+  let onAbort: (() => void) | undefined;
+  const { signal } = opts;
+  const abortError = () => new Error(opts.abortMessage ?? `cursor ${opts.label} aborted`);
+  try {
+    return await Promise.race([
+      work,
+      new Promise<never>((_resolve, reject) => {
+        timer = setTimeout(
+          () => reject(new Error(`cursor ${opts.label} timed out after ${opts.timeoutMs}ms`)),
+          opts.timeoutMs,
+        );
+        timer.unref?.();
+        if (!signal) return;
+        if (signal.aborted) {
+          reject(abortError());
+          return;
+        }
+        onAbort = () => reject(abortError());
+        signal.addEventListener('abort', onAbort, { once: true });
+      }),
+    ]);
+  } finally {
+    if (timer) clearTimeout(timer);
+    if (onAbort) signal?.removeEventListener('abort', onAbort);
+  }
+}
+
 export class CursorAgent extends BaseAgent {
   readonly kind = 'cursor' as const;
   readonly capabilities: Capabilities;
@@ -589,20 +658,29 @@ export class CursorAgent extends BaseAgent {
       onTransportError: (err) => log.warn('discovery transport error', { message: err.message }),
     });
     client.start();
+    // 这两条与逐模型探测同样要赛跑:它们卡住的话取消同样打不断,
+    // `startCursorModelRefresh` 的全局 inflight 永不清空，后续刷新全部 no-op。
+    const raceDiscovery = { ...(opts.signal ? { signal: opts.signal } : {}) };
     try {
-      await client.initialize({
-        protocolVersion: ACP_PROTOCOL_VERSION,
-        clientCapabilities: {
-          fs: { readTextFile: false, writeTextFile: false },
-          // 不声明就拿不到参数化 picker：模型 id 会带死参数、effort 选项整个消失。
-          _meta: { parameterizedModelPicker: true },
-        },
-        clientInfo: { name: 'cindy', title: 'Cindy', version: '0.0.0' },
-      });
-      const created = await client.request<NewSessionResponse>(Method.SessionNew, {
-        cwd: opts.workingDir,
-        mcpServers: [],
-      });
+      await raceAcpRequest(
+        client.initialize({
+          protocolVersion: ACP_PROTOCOL_VERSION,
+          clientCapabilities: {
+            fs: { readTextFile: false, writeTextFile: false },
+            // 不声明就拿不到参数化 picker：模型 id 会带死参数、effort 选项整个消失。
+            _meta: { parameterizedModelPicker: true },
+          },
+          clientInfo: { name: 'cindy', title: 'Cindy', version: '0.0.0' },
+        }),
+        { ...raceDiscovery, timeoutMs: BOOTSTRAP_RPC_TIMEOUT_MS, label: 'discovery initialize' },
+      );
+      const created = await raceAcpRequest(
+        client.request<NewSessionResponse>(Method.SessionNew, {
+          cwd: opts.workingDir,
+          mcpServers: [],
+        }),
+        { ...raceDiscovery, timeoutMs: BOOTSTRAP_RPC_TIMEOUT_MS, label: 'discovery session/new' },
+      );
       const parsed = parseCursorModelsState(created?.models);
       if (!parsed) {
         log.warn('discovery got no models; keeping previous listing');
@@ -630,9 +708,17 @@ export class CursorAgent extends BaseAgent {
       for (const model of this.listedModels) {
         if (opts.signal?.aborted) break;
         try {
-          const result = await client.request<SetConfigOptionResult>(
-            Method.SessionSetConfigOption,
-            { sessionId, configId: 'model', value: toCursorAcpModelId(model.id) },
+          const result = await raceAcpRequest(
+            client.request<SetConfigOptionResult>(Method.SessionSetConfigOption, {
+              sessionId,
+              configId: 'model',
+              value: toCursorAcpModelId(model.id),
+            }),
+            {
+              ...(opts.signal ? { signal: opts.signal } : {}),
+              timeoutMs: MODEL_PROBE_TIMEOUT_MS,
+              label: 'model probe',
+            },
           );
           enrichCursorModelFromConfigOptions(
             this.listedModels,
@@ -640,6 +726,8 @@ export class CursorAgent extends BaseAgent {
             parseAcpConfigOptions(result?.configOptions),
           );
         } catch (err) {
+          // 取消是用户意图，不是探测失败：立刻收尾，别再报一条 warn 也别走完进度。
+          if (opts.signal?.aborted) break;
           // 单个模型探测失败不该毁掉整轮：该模型保持「无档位」，其余照常。
           log.warn('discovery model probe failed', {
             model: model.id,
@@ -1116,19 +1204,20 @@ export class CursorAgent extends BaseAgent {
           if (entry.settled) continue;
           entry.settled = true;
           pendingExtensions.delete(requestId);
-          if (entry.kind === 'ask_user_question') {
-            entry.resolve({ outcome: { outcome: 'cancelled' } });
-          } else {
-            entry.resolve({
-              outcome:
-                resolveAs === 'allow'
-                  ? { outcome: 'accepted' }
-                  : { outcome: 'cancelled' },
-            });
-          }
+          // 扩展类待决（plan_review / ask_user_question）**一律取消，绝不批准**。
+          //
+          // 唯二会传 `resolveAs='allow'` 的调用方是权限档切换与退出计划模式；把它们
+          // 当成「同意这份计划」是偷换了用户动作 —— 他改的是文件/命令权限档，或者只是
+          // 退出计划模式，从没看过、更没批准过这份计划，而 accepted 会让 agent 直接照着
+          // 干。计划批准必须是用户在计划卡上的显式一次决定。
+          //
+          // 取消不会丢东西：这一轮仍在等，agent 收到 cancelled 后按既有路径收口。
+          entry.resolve({ outcome: { outcome: 'cancelled' } });
           eventQueue.push({
             type: 'interaction_dismissed',
-            data: { requestId, reason, resolvedAs: resolveAs },
+            // resolvedAs 报**实际**结果，不报调用方的意图：否则日志会显示
+            // 「allow」而 agent 实际收到 cancelled。
+            data: { requestId, reason, resolvedAs: 'deny' },
             source: 'cursor',
           });
         }
@@ -1294,6 +1383,8 @@ export class CursorAgent extends BaseAgent {
                   toolName,
                   input: toolInput,
                   kind: typeof toolCall.kind === 'string' ? toolCall.kind : null,
+                  // 分类器据此判定目标是否在工作区内：不给根它只能按路径形状保守裁决。
+                  workspaceRoot: opts.workingDir,
                 }),
               ),
               AUTO_PERMISSION_CLASSIFIER_TIMEOUT_MS,
@@ -1926,17 +2017,29 @@ export class CursorAgent extends BaseAgent {
           });
         }
       } else if (desiredFastMode !== undefined) {
-        // 初始 Fast 被请求但目标模型当前未暴露 fast option -> 跳过下发。
+        // 初始 Fast 被请求但目标模型当前未暴露 fast option -> 无法下发。
         // 隔离 config dir 下 session/new 的当前模型常是 `default`(Auto)，其
         // configOptions 不含 fast/effort/thinking，需先 set_config_option('model',…)
-        // 才出现；走 followAcpCurrent 时此分支恒成立，Fast 永远不下发。打 warn
-        // 留痕，不再静默（与 thinking 的「有 option 才发」语义不同：thinking 非可选
-        // 恒开，fast 是用户可拨开关，被跳过意味着 UI 与 ACP 不一致）。
+        // 才出现；走 followAcpCurrent 时此分支恒成立，Fast 永远不下发。
         log.warn('cursor initial setFastMode skipped: no fast option exposed', {
           model: mutableModel,
           fastMode: desiredFastMode,
           followAcpCurrent,
         });
+        // 只有「用户明确要开 Fast 却没开成」才提示 —— 关 Fast 没开成无行为差异。
+        // 光打 warn 不够：保存的自动化与 UI 都还显示 Fast 已开启，用户会以为在加速跑。
+        // 与初始模型切换失败同一处置（非终态 error，不打断会话）。
+        if (desiredFastMode === true) {
+          eventQueue.push({
+            type: 'error',
+            data: {
+              message: formatCursorFastModeUnavailableMessage(mutableModel),
+              isTerminal: false,
+              reason: 'fast_mode_unavailable',
+            },
+            source: 'cursor',
+          });
+        }
       }
 
       // 恒开语义不变：只跳过「已经是 true」，报 false 照发（不信任 false 方向）。
@@ -2096,10 +2199,18 @@ export class CursorAgent extends BaseAgent {
       const startedAt = Date.now();
       let created: NewSessionResponse;
       try {
-        created = await client.request<NewSessionResponse>(Method.SessionNew, {
-          cwd: opts.workingDir,
-          mcpServers,
-        });
+        created = await raceAcpRequest(
+          client.request<NewSessionResponse>(Method.SessionNew, {
+            cwd: opts.workingDir,
+            mcpServers,
+          }),
+          {
+            signal: bootstrapAbortController.signal,
+            timeoutMs: BOOTSTRAP_RPC_TIMEOUT_MS,
+            label: 'session/new',
+            abortMessage: 'Cursor session bootstrap cancelled',
+          },
+        );
       } finally {
         sessionMs = Date.now() - startedAt;
         sessionMethod = 'session/new';
@@ -2126,9 +2237,33 @@ export class CursorAgent extends BaseAgent {
         try {
           await applyAcpSessionMode('plan');
         } catch (e) {
-          log.warn('session/set_mode(plan) before queued prompt failed', {
-            message: e instanceof Error ? e.message : String(e),
+          // 同 send 路径：武装了 Plan 就不能降级按普通模式发。这里已经脱离 send 的
+          // 调用栈（bootstrap 完成后的 fire-and-forget 派发），只能以终态错误收口。
+          const reason = e instanceof Error ? e.message : String(e);
+          log.warn('session/set_mode(plan) before queued prompt failed; dropping the turn', {
+            message: reason,
           });
+          if (pending.token === turnGeneration && lastFinalizedGeneration !== pending.token) {
+            turnInFlight = false;
+            lastFinalizedGeneration = pending.token;
+          }
+          // 武装态还给用户：这条排队消息没发出去，Plan 勾选不该白白熄灭。
+          if (!mutablePlanMode) {
+            mutablePlanMode = true;
+            eventQueue.push({
+              type: 'plan_mode_changed',
+              data: { enabled: true },
+              source: 'cursor',
+            });
+          }
+          pushAll(
+            translateAcpError(
+              new Error(formatCursorPlanModeUnavailableMessage(reason)),
+              translateCtx,
+              { reason: 'plan_mode_unavailable' },
+            ),
+          );
+          return;
         }
       }
       if (
@@ -2165,6 +2300,18 @@ export class CursorAgent extends BaseAgent {
 
       try {
         assertBootstrapActive();
+        // 未授权不产生任何副作用 —— 放在 MCP 准备、隔离配置目录与 spawn 之前。
+        // Renderer 的发送门禁挡不住这条路径:定时任务 / Orca Worker / 会话恢复
+        // 都直接调 startSession,用户也可能在建会话与后台 bootstrap 之间登出。
+        // 语义见 base-agent 的 AgentNotAuthenticatedError 约定。
+        const authState = await this.deps.auth.getState();
+        assertBootstrapActive();
+        if (!authState.authenticated) {
+          throw new AgentNotAuthenticatedError(
+            'cursor',
+            `cursor not authenticated: ${authState.errorReason ?? 'no_credentials'}`,
+          );
+        }
         if (this.deps.prepareAcpMcpServers) {
           try {
             const prepared = await this.deps.prepareAcpMcpServers({
@@ -2201,18 +2348,28 @@ export class CursorAgent extends BaseAgent {
 
         const spawnInitializeStartedAt = Date.now();
         client.start();
-        const initResult = await client.initialize({
-          protocolVersion: ACP_PROTOCOL_VERSION,
-          clientCapabilities: {
-            fs: { readTextFile: false, writeTextFile: false },
-            _meta: { parameterizedModelPicker: true },
+        // 版本不兼容 / 内部死锁的 cursor-agent 可能起来了却不回 initialize。没有这条
+        // 上限,bootstrap 永远进不了终态,而首条消息已经 accepted 并显示 Starting...。
+        const initResult = await raceAcpRequest(
+          client.initialize({
+            protocolVersion: ACP_PROTOCOL_VERSION,
+            clientCapabilities: {
+              fs: { readTextFile: false, writeTextFile: false },
+              _meta: { parameterizedModelPicker: true },
+            },
+            clientInfo: {
+              name: 'cindy',
+              title: 'Cindy',
+              version: '0.0.0',
+            },
+          }),
+          {
+            signal: bootstrapAbortController.signal,
+            timeoutMs: BOOTSTRAP_RPC_TIMEOUT_MS,
+            label: 'initialize',
+            abortMessage: 'Cursor session bootstrap cancelled',
           },
-          clientInfo: {
-            name: 'cindy',
-            title: 'Cindy',
-            version: '0.0.0',
-          },
-        });
+        );
         spawnInitializeMs = Date.now() - spawnInitializeStartedAt;
         assertBootstrapActive();
 
@@ -2249,11 +2406,19 @@ export class CursorAgent extends BaseAgent {
             const loadStartedAt = Date.now();
             let loaded: LoadSessionResponse;
             try {
-              loaded = await client.request<LoadSessionResponse>(Method.SessionLoad, {
-                cwd: opts.workingDir,
-                sessionId: resumeId,
-                mcpServers,
-              });
+              loaded = await raceAcpRequest(
+                client.request<LoadSessionResponse>(Method.SessionLoad, {
+                  cwd: opts.workingDir,
+                  sessionId: resumeId,
+                  mcpServers,
+                }),
+                {
+                  signal: bootstrapAbortController.signal,
+                  timeoutMs: BOOTSTRAP_RPC_TIMEOUT_MS,
+                  label: 'session/load',
+                  abortMessage: 'Cursor session bootstrap cancelled',
+                },
+              );
             } finally {
               sessionMs = Date.now() - loadStartedAt;
               sessionMethod = 'session/load';
@@ -2379,7 +2544,15 @@ export class CursorAgent extends BaseAgent {
         turnInFlight = false;
         lastFinalizedGeneration = turnGeneration;
         closed = true;
-        pushAll(translateAcpError(err, translateCtx));
+        // 未授权是可操作的终态:打上 reason 让上层按「去设置里登录」引导,
+        // 而不是把它混进泛化的 ACP 失败里靠文案猜。
+        pushAll(
+          translateAcpError(
+            err,
+            translateCtx,
+            err instanceof AgentNotAuthenticatedError ? { reason: 'not_authenticated' } : undefined,
+          ),
+        );
         rejectBootstrapReady(err);
         await cleanupResources(`CursorAgentSession bootstrap failed: ${err.message}`);
         liveSessionClosers.delete(closeSession);
@@ -2429,9 +2602,12 @@ export class CursorAgent extends BaseAgent {
 
         // 武装态一次性消耗（与 Claude/Codex 同语义）：勾选熄灭，ACP sticky plan 保留到 create_plan 批准。
         const requestedPlanTurn = sendOpts?.planMode ?? mutablePlanMode;
+        /** 本次是否消耗了 UI 武装态；发送失败时要还回去。 */
+        let consumedArmedPlan = false;
         if (requestedPlanTurn) {
           if (mutablePlanMode && sendOpts?.planMode !== false) {
             mutablePlanMode = false;
+            consumedArmedPlan = true;
             eventQueue.push({
               type: 'plan_mode_changed',
               data: { enabled: false },
@@ -2442,9 +2618,25 @@ export class CursorAgent extends BaseAgent {
             try {
               await applyAcpSessionMode('plan');
             } catch (e) {
-              log.warn('session/set_mode(plan) before prompt failed', {
-                message: e instanceof Error ? e.message : String(e),
+              // 用户显式要的是「先给一份可复核的计划」。切不过去就**不能**降级按普通
+              // agent 模式发出去——那等于直接改文件 / 执行命令。失败必须可见。
+              const reason = e instanceof Error ? e.message : String(e);
+              log.warn('session/set_mode(plan) before prompt failed; refusing to send', {
+                message: reason,
               });
+              if (consumedArmedPlan) {
+                // 这一轮没发出去，武装态还给用户：能重试，也能显式关掉计划模式再发。
+                mutablePlanMode = true;
+                eventQueue.push({
+                  type: 'plan_mode_changed',
+                  data: { enabled: true },
+                  source: 'cursor',
+                });
+              }
+              if (token === turnGeneration && lastFinalizedGeneration !== token) {
+                turnInFlight = false;
+              }
+              throw new Error(formatCursorPlanModeUnavailableMessage(reason));
             }
           }
         }

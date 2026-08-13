@@ -1140,12 +1140,18 @@ describe('CursorAgent lifecycle (FakeTransport)', () => {
     });
   });
 
-  it('defers auth/bootstrap failures until after handle return and reuses the readable error', async () => {
+  it('gates bootstrap on auth before any MCP/transport side effect, and defers the error past handle return', async () => {
+    // 定时任务 / Orca Worker / 会话恢复都绕过 renderer 的发送门禁直接调 startSession，
+    // 用户也可能在建会话与后台 bootstrap 之间登出：未授权时一个副作用都不该发生。
     const userDataPath = mkdtempSync(join(tmpdir(), 'cindy-cursor-auth-failure-'));
     const getState = vi.fn(async () => ({
       authenticated: false,
       errorReason: 'no_credentials',
     }));
+    const createAcpTransport = vi.fn(() => {
+      throw new Error('cursor-agent must not be spawned while unauthenticated');
+    });
+    const prepareAcpMcpServers = vi.fn(async () => ({ servers: [], cleanup: () => undefined }));
     const agent = new CursorAgent({
       auth: {
         getState,
@@ -1157,21 +1163,22 @@ describe('CursorAgent lifecycle (FakeTransport)', () => {
       binaryPath: '/dev/null/cursor-agent',
       logger: createConsoleLogger(),
       networkConfigReader: () => undefined,
+      prepareAcpMcpServers,
     });
     const handle = await agent.startSession({
-        workingDir: '/tmp',
-        model: 'auto',
-        vendorOptions: {
-          createAcpTransport: () => {
-          throw new Error('cursor-agent is not authenticated; run cursor-agent login');
-          },
-        },
+      workingDir: '/tmp',
+      model: 'auto',
+      vendorOptions: { createAcpTransport },
     });
     try {
+      // 句柄仍立即返回：鉴权自检在后台 bootstrap 里，不把 cursor-agent status 挪回热路径。
       expect(handle.id).toBe('<pending>');
-      expect(getState).not.toHaveBeenCalled();
-      await expect(waitForBootstrapReady(handle)).rejects.toThrow(/cursor-agent login/);
-      await expect(handle.send({ type: 'user', content: 'retry' })).rejects.toThrow(/cursor-agent login/);
+      await expect(waitForBootstrapReady(handle)).rejects.toThrow(/not authenticated/);
+      expect(getState).toHaveBeenCalledTimes(1);
+      expect(prepareAcpMcpServers).not.toHaveBeenCalled();
+      expect(createAcpTransport).not.toHaveBeenCalled();
+      // 同一个可读错误在后续 send 上复用，不退化成泛化 ACP 失败。
+      await expect(handle.send({ type: 'user', content: 'retry' })).rejects.toThrow(/not authenticated/);
     } finally {
       await handle.close().catch(() => undefined);
       await agent.dispose().catch(() => undefined);

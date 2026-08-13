@@ -403,6 +403,13 @@ export function createOrcaMcpServer(
     sessionId: ctx.sessionId,
     getSessionContext,
     createWorker: deps.createWorker,
+    // 只有批量工具用得上只读名额快照；host 用具名参数，工具侧用位置参数，这里适配。
+    ...(deps.getWorkerLimitSnapshot
+      ? {
+          getWorkerLimitSnapshot: (leadSessionId: string) =>
+            deps.getWorkerLimitSnapshot!({ leadSessionId }),
+        }
+      : {}),
   });
   registerListWorkersTool(sink, {
     sessionId: ctx.sessionId,

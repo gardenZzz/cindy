@@ -6246,9 +6246,19 @@ export function parsePendingPluginSetup(request: {
   };
 }
 
-function initGlobalListeners(): void {
+interface GlobalListenerOptions {
+  /**
+   * Only the primary renderer owns legacy remote-auth recovery. Auxiliary renderers still
+   * consume the shared event stream, but must not read credentials, restart sessions, resend
+   * messages, or persist a retry failure independently.
+   */
+  ownsRemoteAuthRetry?: boolean;
+}
+
+function initGlobalListeners(options: GlobalListenerOptions = {}): void {
   if (globalListenersInitialized) return; // idempotent for StrictMode / HMR
   globalListenersInitialized = true;
+  const ownsRemoteAuthRetry = options.ownsRemoteAuthRetry !== false;
 
   // ── Maker 主事件流: 一根管子接所有 vendor → maker AgentEvent ──
   // 老链路是 8 个独立 IPC channel; 新链路一个 maker:event 通道,按 event.type 分发。
@@ -6322,6 +6332,7 @@ function initGlobalListeners(): void {
       const preSnap = getOrCreateState(sessionId);
       const authRetryCount = preSnap._authRetryCount ?? 0;
       if (
+        ownsRemoteAuthRetry &&
         isAuthError &&
         preSnap.remoteHostId &&
         preSnap.agentKind === 'claude-code' &&
@@ -6443,6 +6454,7 @@ function initGlobalListeners(): void {
       //     是否正在 retry；贸然落库若 retry 成功会留下虚假错误卡，不落库则
       //     等价于旧行为（重启后错误丢失）—— 保守起见不做 deferred。
       if (
+        ownsRemoteAuthRetry &&
         isAuthError &&
         preSnap.remoteHostId &&
         preSnap.agentKind === 'claude-code' &&
@@ -13776,9 +13788,13 @@ function getAgentSwitchIntentRev(sessionId: string): number {
 function normalizeAgentSwitchIntent(value: unknown): AgentSwitchIntentRecord | null {
   if (!value || typeof value !== 'object' || Array.isArray(value)) return null;
   const item = value as Record<string, unknown>;
+  // 恢复路径的运行时校验要与 noteAgentSwitchIntent 能保存的目标同集合：漏掉 cursor 时，
+  // Main 返回的 Cursor pending intent 会被归一成 null，选择器恢复显示旧 Agent，
+  // 而下一条消息仍按 Main 保留的意图切到 Cursor —— 界面与实际路由对不上。
   if (
     item.targetAgentKind !== 'claude-code' &&
     item.targetAgentKind !== 'codex' &&
+    item.targetAgentKind !== 'cursor' &&
     item.targetAgentKind !== 'pi'
   )
     return null;

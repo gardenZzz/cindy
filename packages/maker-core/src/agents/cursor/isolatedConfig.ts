@@ -22,15 +22,7 @@
  *   （见 credentials-and-local-storage.md）。
  */
 
-import {
-  existsSync,
-  mkdirSync,
-  readFileSync,
-  readdirSync,
-  renameSync,
-  rmSync,
-  writeFileSync,
-} from 'node:fs';
+import { mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { join, relative, resolve, sep } from 'node:path';
 import { createHash, randomUUID } from 'node:crypto';
@@ -249,44 +241,6 @@ export function removeCursorIsolatedConfigDir(
   const configDir = join(root, safeDirSegment(key));
   if (!isStrictlyInside(root, configDir)) return;
   rmSync(configDir, { recursive: true, force: true });
-}
-
-/**
- * 登出时清掉每个会话隔离目录里的 cli-config.json。
- *
- * 上游把登录身份（`authInfo`）与隐私档（`privacyCache`）缓存在这个文件里，而
- * `cursor-agent logout` 只清全局目录与 Keychain，够不着这些按会话隔离的副本。
- * 合并写之前，「每次 startSession 都整写」隐式承担了这个清理；改成合并写后必须
- * 显式做，否则登出后各会话目录仍留着上一个账号的邮箱 / 姓名 / 团队。
- *
- * 只删 cli-config.json：`acp-sessions/` 是 session/load 的依据，删了历史会话就
- * 再也打不开。文件缺失时下次 startSession 会重新整写，等价于登出前的行为。
- *
- * @returns 实际删掉的文件数；根目录不存在（从没起过 cursor 会话）时返回 0。
- */
-export function clearCursorIsolatedCliConfigs(userDataPath: string): number {
-  const root = resolveRoot(userDataPath);
-  let entries: string[];
-  try {
-    entries = readdirSync(root);
-  } catch {
-    return 0;
-  }
-  let cleared = 0;
-  for (const entry of entries) {
-    const configDir = join(root, entry);
-    // 删除路径上的兜底：只碰 cursor-acp root 之内的直接子目录。
-    if (!isStrictlyInside(root, configDir)) continue;
-    const configPath = join(configDir, 'cli-config.json');
-    if (!existsSync(configPath)) continue;
-    try {
-      rmSync(configPath, { force: true });
-      cleared += 1;
-    } catch {
-      // 单个目录清不掉不阻断其余会话的清理。
-    }
-  }
-  return cleared;
 }
 
 export function createCursorIsolatedConfigDir(

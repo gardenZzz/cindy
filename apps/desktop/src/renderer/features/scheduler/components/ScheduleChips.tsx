@@ -11,6 +11,7 @@ import {
   FolderPickerPopover,
   type FolderPickerOption,
 } from '@/components/new-chat/FolderPickerPopover';
+import { useCursorAvailable } from '@/hooks/useCursorAvailable';
 import { useDetectCwd } from '@/hooks/useWorktreeQueries';
 import { useAgentCapabilities, type ModelDescriptor } from '@/hooks/useAgentCapabilities';
 import { useProviders } from '@/hooks/useProviders';
@@ -185,10 +186,16 @@ export function ProjectChip({
  * while sharing the same AgentSelect dropdown used by IM settings and chat.
  */
 export function AgentTabs({ value, onChange, disabled }: { value: AgentKind; onChange: (v: AgentKind) => void; disabled?: boolean }) {
+  // 本机没装 cursor-agent 还让选 Cursor，只会建出一条到触发时才失败的自动化
+  // （定时任务在 runner 里按 agentKind 起会话，那时才发现 agent 未注册）。
+  // 与 CreateWorkerPopover 同一处置；hook 内部 fail-closed（未知也不露出），
+  // 已选中的值由 AgentSelect 自身保留，不会把存量任务的 Cursor 选择抹掉。
+  const cursorAvailable = useCursorAvailable();
   return (
     <AgentSelect
       value={agentKindToVendor(value)}
       disabled={disabled}
+      hiddenVendors={cursorAvailable ? undefined : (['cursor'] as const)}
       side="top"
       // ScheduleFormDialog 是 Radix modal。MorphPopover 的 custom portal 不在
       // Dialog focus scope 内，动画结束聚焦选中项时会被拉回并立即自动收起；

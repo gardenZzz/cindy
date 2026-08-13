@@ -779,6 +779,7 @@ export function resolveRemoteModelListStatus({
   agentKind,
   cc,
   codex,
+  cursor,
   pi,
   providers,
 }: {
@@ -786,13 +787,24 @@ export function resolveRemoteModelListStatus({
   agentKind: AgentKind | null;
   cc: RemoteCapabilityLoadState;
   codex: RemoteCapabilityLoadState;
+  cursor: RemoteCapabilityLoadState;
   pi: RemoteCapabilityLoadState;
   providers: RemoteProviderLoadState;
 }): RemoteModelListStatus {
   if (!deviceId) return 'idle';
+  // cursor 必须单列：漏掉时它会落进 pi 那一支，于是 Pi 在加载/报错会把已就绪的 Cursor
+  // 选择器显示成加载中/失败，反过来 Pi 就绪而 Cursor 未返回时又会过早 ready 并显示空列表。
   const required = agentKind
-    ? [agentKind === 'claude-code' ? cc : agentKind === 'codex' ? codex : pi]
-    : [cc, codex, pi];
+    ? [
+        agentKind === 'claude-code'
+          ? cc
+          : agentKind === 'codex'
+            ? codex
+            : agentKind === 'cursor'
+              ? cursor
+              : pi,
+      ]
+    : [cc, codex, cursor, pi];
   if (required.some((state) => !!state.error)) return 'error';
   if (providers.error && !providers.unsupported) return 'error';
   if (providers.loading || required.some((state) => state.loading || state.capabilities == null)) {
@@ -940,6 +952,7 @@ function ModelSelectorContentView({
     agentKind,
     cc,
     codex,
+    cursor,
     pi,
     providers: remoteProviders,
   });
@@ -2510,6 +2523,7 @@ export function ModelSelector({
     agentKind,
     cc,
     codex,
+    cursor,
     pi,
     providers: remoteProviders,
   });

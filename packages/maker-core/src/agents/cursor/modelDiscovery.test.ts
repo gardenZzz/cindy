@@ -79,8 +79,14 @@ class DiscoveryTransport implements Transport {
   readonly probedModels: string[] = [];
   private readonly lineHandlers = new Set<LineHandler>();
   private readonly closeHandlers = new Set<CloseHandler>();
-  /** 这些模型的 set_config_option 回错误，验证单点失败不影响整轮。 */
-  constructor(private readonly failingModels: ReadonlySet<string> = new Set()) {}
+  constructor(
+    /** 这些模型的 set_config_option 回错误，验证单点失败不影响整轮。 */
+    private readonly failingModels: ReadonlySet<string> = new Set(),
+    /** 这些模型的 set_config_option 永不回复，模拟对端卡死。 */
+    private readonly hangingModels: ReadonlySet<string> = new Set(),
+    /** 每次收到探测请求时同步回调（测试据此在 RPC 在途时触发取消）。 */
+    private readonly onProbe?: (model: string) => void,
+  ) {}
 
   async writeLine(line: string): Promise<void> {
     const msg = JSON.parse(line) as Record<string, any>;
@@ -99,6 +105,8 @@ class DiscoveryTransport implements Transport {
     if (msg.method === Method.SessionSetConfigOption) {
       const value = String(msg.params?.value ?? '');
       this.probedModels.push(value);
+      this.onProbe?.(value);
+      if (this.hangingModels.has(value)) return;
       if (this.failingModels.has(value)) {
         this.replyError(msg.id, 'Invalid model value');
         return;
@@ -166,7 +174,10 @@ function authStub(): AuthAdapter {
   };
 }
 
-async function runDiscovery(transport: DiscoveryTransport): Promise<CursorModelsListing[]> {
+async function runDiscovery(
+  transport: DiscoveryTransport,
+  opts: { signal?: AbortSignal } = {},
+): Promise<CursorModelsListing[]> {
   const published: CursorModelsListing[] = [];
   const userDataPath = mkdtempSync(join(tmpdir(), 'cindy-cursor-discovery-'));
   const agent = new CursorAgent({
@@ -183,6 +194,7 @@ async function runDiscovery(transport: DiscoveryTransport): Promise<CursorModels
     workingDir: userDataPath,
     userDataPath,
     createTransport: () => transport,
+    ...(opts.signal ? { signal: opts.signal } : {}),
   });
   return published;
 }
@@ -217,6 +229,25 @@ describe('CursorAgent.discoverModelOptions', () => {
     // 无参数模型保持空档位（选择器不显示推理强度）。
     expect(byId.get('kimi-k2.7-code')?.efforts).toEqual([]);
     expect(byId.get('auto')?.efforts).toEqual([]);
+  });
+
+  it('stops probing when the refresh is cancelled mid-RPC', async () => {
+    // 只在循环顶部查 signal 是不够的:探测 RPC 自身既不认 signal 也没有超时,
+    // 对端卡住时整轮永远停在 running,后续刷新还会因全局 inflight 全部 no-op。
+    const controller = new AbortController();
+    const transport = new DiscoveryTransport(
+      new Set(),
+      new Set(['claude-opus-5']),
+      (model) => {
+        // 第二个模型的探测发出后立刻取消:此时这条 RPC 正在途中且永不回复。
+        if (model === 'claude-opus-5') controller.abort();
+      },
+    );
+
+    await runDiscovery(transport, { signal: controller.signal });
+
+    // 卡住的那条被放弃,它之后的模型一个都不再探。
+    expect(transport.probedModels).toEqual(['default', 'claude-opus-5']);
   });
 
   it('keeps going when one model probe fails', async () => {

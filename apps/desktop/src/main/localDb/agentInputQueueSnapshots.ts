@@ -13,6 +13,8 @@
 
 import { eq } from 'drizzle-orm';
 
+import type { AgentKind } from '@cindy/maker-core';
+
 import { getDbClient } from './client/current';
 import { agentInputQueueSnapshots } from './schema';
 import { createLogger } from '../logger';
@@ -179,6 +181,19 @@ export async function loadAllQueueSnapshotPayloads(): Promise<string[]> {
   return rows.map((r) => r.payload);
 }
 
+/**
+ * `createOpts.agentKind` 的合法取值。用 Record 而不是三元/数组:少列一种就编译不过。
+ *
+ * 漏一种的后果是**丢用户输入**——那种 agent 的会话崩溃重启后,整条排队队列会被
+ * 这里逐条过滤掉,而且是静默的(坏条目本就该丢弃,日志里看不出区别)。
+ */
+const RESTORABLE_AGENT_KINDS: Record<AgentKind, true> = {
+  'claude-code': true,
+  codex: true,
+  cursor: true,
+  pi: true,
+};
+
 export function isRestorableQueuedMessage(value: unknown): value is AgentInputQueuedMessage {
   if (!value || typeof value !== 'object') return false;
   const msg = value as AgentInputQueuedMessage;
@@ -188,9 +203,7 @@ export function isRestorableQueuedMessage(value: unknown): value is AgentInputQu
     typeof msg.persistedContent === 'string' &&
     !!msg.chatMessage && typeof msg.chatMessage === 'object' &&
     !!msg.createOpts && typeof msg.createOpts === 'object' &&
-    (msg.createOpts.agentKind === 'claude-code' ||
-      msg.createOpts.agentKind === 'codex' ||
-      msg.createOpts.agentKind === 'pi')
+    Object.prototype.hasOwnProperty.call(RESTORABLE_AGENT_KINDS, msg.createOpts.agentKind)
   );
 }
 

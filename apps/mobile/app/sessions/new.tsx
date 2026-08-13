@@ -1078,8 +1078,8 @@ export default function NewRemoteSessionScreen() {
   );
   const WorkspaceIcon = draft.workspaceKind === 'dialogue' ? MessageCircle : Folder;
   const agentLabel = mobileAgentShortLabel(draft.agentKind);
-  // effect 在 commit 后才会把旧探测结果重置为 probing；render 期先按设备 + cwd 同步
-  // 对齐 target，切项目/设备后立即创建也拿不到上一仓库的 baseRepo/sourceBranch。
+  // effect 在 commit 后才会把旧探测结果重置为 probing；render 期先按设备 + cwd +
+  // 连接代次同步对齐 target，切项目/设备或同目标重连后立即创建也拿不到旧结果。
   const worktreeTarget = {
     deviceId: selectedDeviceId ?? '',
     workingDir: draft.workspaceKind === 'project' ? draft.workingDir.trim() : '',
@@ -1828,8 +1828,10 @@ export default function NewRemoteSessionScreen() {
         if (cancelled) return;
         setAvailableAgentKinds(
           new Set(
-            (Array.isArray(agents) ? agents : []).filter(
-              (a): a is NewSessionAgentKind => a === 'claude-code' || a === 'codex' || a === 'pi',
+            // 收敛到 NEW_SESSION_AGENT_OPTIONS 这一份正本：写死枚举会在新增 runtime
+            // 时漏项，被控端明明报了该 agent 也会被这里过滤掉（Cursor 就漏过一次）。
+            (Array.isArray(agents) ? agents : []).filter((a): a is NewSessionAgentKind =>
+              NEW_SESSION_AGENT_OPTIONS.some((option) => option.kind === a),
             ),
           ),
         );

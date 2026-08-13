@@ -5565,7 +5565,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
     getSessionAgentSwitchIntent: (
       sessionId: string,
     ): Promise<{
-      targetAgentKind: 'claude-code' | 'codex' | 'pi';
+      targetAgentKind: 'claude-code' | 'codex' | 'cursor' | 'pi';
       model: string;
       providerId: string | null;
       effort?: string;

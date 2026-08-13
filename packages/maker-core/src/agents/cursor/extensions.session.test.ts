@@ -240,6 +240,53 @@ describe('CursorAgent planMode + extensions (FakeTransport)', () => {
     await consume;
   });
 
+  it('switching permission mode never approves a pending plan review', async () => {
+    // 权限档切的是「文件/命令权限」，不是「同意这份计划」。原实现走
+    // dismissAllPending(..., 'allow')，会把还没看过的计划直接判成 accepted，
+    // agent 就照着干了 —— 用户从没在计划卡上做过任何决定。
+    const transport = new FakeTransport();
+    const { handle } = await boot(transport, { planMode: true });
+    const seen: InteractionRequest[] = [];
+    // plan_review 永不结算：模拟「卡还挂在那儿，用户没点」。
+    handle.setInteractionResolver(async (req) => {
+      seen.push(req);
+      if (req.kind === 'plan_review') return new Promise<never>(() => {});
+      return { kind: 'permission', behavior: 'deny' };
+    });
+
+    const events: AgentEvent[] = [];
+    const consume = (async () => {
+      for await (const ev of handle.events()) events.push(ev);
+    })();
+
+    transport.emit({
+      jsonrpc: JSONRPC_VERSION,
+      id: 9101,
+      method: CursorMethod.CreatePlan,
+      params: { toolCallId: 'call_plan_pending', plan: '1. rm -rf build', todos: [] },
+    });
+
+    const seenDeadline = Date.now() + 2000;
+    while (Date.now() < seenDeadline && seen.length === 0) {
+      await new Promise((r) => setTimeout(r, 10));
+    }
+    expect(seen[0]).toMatchObject({ kind: 'plan_review' });
+    expect(transport.findResponse(9101)).toBeUndefined();
+
+    // 切到 Full access —— 唯一会传 resolveAs='allow' 的入口之一。
+    expect(handle.setPermissionMode).toBeTypeOf('function');
+    await handle.setPermissionMode!('bypassPermissions');
+
+    const deadline = Date.now() + 2000;
+    while (Date.now() < deadline && !transport.findResponse(9101)) {
+      await new Promise((r) => setTimeout(r, 10));
+    }
+    expect(transport.findResponse(9101)).toEqual({ outcome: { outcome: 'cancelled' } });
+
+    await handle.close();
+    await consume;
+  });
+
   it('create_plan reject returns rejected outcome and stays without agent switch', async () => {
     const transport = new FakeTransport();
     const { handle } = await boot(transport);

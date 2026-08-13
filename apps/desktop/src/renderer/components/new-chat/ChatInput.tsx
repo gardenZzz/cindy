@@ -1405,12 +1405,17 @@ export function ChatInput({
   const codexCaps = useAgentCapabilities('codex', deviceLinkDeviceId);
   const cursorCaps = useAgentCapabilities('cursor', deviceLinkDeviceId);
   const piCaps = useAgentCapabilities('pi', deviceLinkDeviceId);
+  // 必须显式路由 Cursor：回落到 ccCaps 会让 Shift+Tab 按 Claude 的权限列表轮切，
+  // 轮到 Cursor 不支持的 acceptEdits 时运行时又归一成 ask，快捷键显示与实际权限对不上，
+  // 也与已经正确读 Cursor 能力的 PermissionSelector 用了两份列表。
   const activeAgentCapabilities =
     agentKind === 'codex'
       ? codexCaps.capabilities
-      : agentKind === 'pi'
-        ? piCaps.capabilities
-        : ccCaps.capabilities;
+      : agentKind === 'cursor'
+        ? cursorCaps.capabilities
+        : agentKind === 'pi'
+          ? piCaps.capabilities
+          : ccCaps.capabilities;
 
   // session-agent-switch 入口门控。device-link 远程会话读**被控端**的值；除了基础
   // supportsSessionAgentSwitch，还必须有 v2 CAS 能力。同引擎 no-op 的安全收尾依赖 host
@@ -1556,6 +1561,7 @@ export function ChatInput({
     agentKind: currentModelAgentKind,
     cc: ccCaps,
     codex: codexCaps,
+    cursor: cursorCaps,
     pi: piCaps,
     providers: remoteProviders,
   });

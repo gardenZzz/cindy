@@ -75,6 +75,7 @@ import type {
   ListCustomizationsResult,
 } from '../types/customizations.js';
 import type { PiRuntimeCapabilityManifest } from '../types/pi-runtime-capabilities.js';
+import type { PiProjectTrustInputSnapshot } from '../types/pi-project-trust.js';
 import { scanWorkspaceFileResources } from './shared/palette-scanner.js';
 import type { AutoReviewDelegate } from './shared/auto-review-decision.js';
 
@@ -384,6 +385,17 @@ export interface AgentDeps {
   resolvePiAgentHome?: () => string | undefined;
 
   /**
+   * Pi-only: resolve the immutable Cindy project-approval input for one new
+   * runtime. The host owns identity canonicalization, approval audit/revocation,
+   * and discovered-resource provenance. Missing/throwing resolvers fail closed.
+   */
+  resolvePiProjectTrustInput?: (ctx: {
+    sessionId?: string;
+    workingDir: string;
+    remoteHostId?: string;
+  }) => Promise<PiProjectTrustInputSnapshot | null>;
+
+  /**
    * pi 专用钩子:把 mcpProviders 转成 pi 子进程可消费的 MCP 桥配置。
    *
    * 与 prepareCodexExtraSpawnConfig 同因:pi 是独立子进程,没法消费 in-process
@@ -655,6 +667,8 @@ export interface AgentDeps {
     toolName: string;
     input: Record<string, unknown>;
     kind?: string | null;
+    /** 会话工作区根；分类器据此判定目标是否在工作区内。 */
+    workspaceRoot?: string;
   }) => Promise<'allow' | 'ask'>;
 
   /**

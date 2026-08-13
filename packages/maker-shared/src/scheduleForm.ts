@@ -332,9 +332,12 @@ export function buildMobileScheduleInput(draft: MobileScheduleDraft): RemoteSche
   if (model) input.model = model;
   const effort = draft.effort.trim();
   if (isMobileScheduleEffort(effort)) input.effort = effort;
-  // Fast 对 Codex 与 Pi 都生效(runner 对 claude-code 忽略此字段,并按模型 supportsFastMode
-  // 收口);只序列化 codex 会让 Pi 任务里开的 Fast 被静默丢弃。
-  if (draft.agentKind === 'codex' || draft.agentKind === 'pi') input.fastMode = draft.fastMode;
+  // Fast 对 Codex / Cursor / Pi 都生效(runner 对 claude-code 忽略此字段,并按模型
+  // supportsFastMode 收口);漏掉任一种,该 agent 表单里开的 Fast 都会被静默丢弃,
+  // 且**关闭**时因省略 key 让引擎保留旧的 true。写死开与关两个方向都要带上。
+  if (draft.agentKind === 'codex' || draft.agentKind === 'cursor' || draft.agentKind === 'pi') {
+    input.fastMode = draft.fastMode;
+  }
   return input;
 }
 

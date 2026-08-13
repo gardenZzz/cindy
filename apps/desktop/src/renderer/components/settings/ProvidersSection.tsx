@@ -1742,13 +1742,16 @@ function CursorDetail() {
     setInstalling(true);
     try {
       const result = await window.electronAPI.maker.agent.installCursorAgent();
-      // 已知结果直写全局缓存:装完立刻让 New Maker / worker 面板露出 Cursor 段,不等重探。
-      setCursorAvailability(result.installed);
       if (result.installed) {
+        // 本设置页如实显示「已装」，但**不写全局可用缓存**：main 侧的 Maker 单例是
+        // 启动时构造的，那时没有 cursor agent，也没有动态注册的口子。这时候把
+        // New Maker / worker 面板的 Cursor 段翻出来，用户点下去只会撞
+        // `requireAgent('cursor')`。刷新鉴权同理会撞，一并跳过。
+        // 按「装完提示重启」处理，直到 Maker 支持运行期注册。
         setProbe({ kind: 'installed' });
         toast.success(t('settings.providers.cursor.installSuccess'));
-        await refreshAuth();
       } else {
+        setCursorAvailability(false);
         setProbe({ kind: 'missing' });
         toast.error(t('settings.providers.cursor.installNotDetected'));
       }
@@ -1763,7 +1766,7 @@ function CursorDetail() {
     } finally {
       setInstalling(false);
     }
-  }, [confirm, installSupported, installing, refreshAuth, t]);
+  }, [confirm, installSupported, installing, t]);
 
   const handleLogin = useCallback(async () => {
     if (authBusy) return;
