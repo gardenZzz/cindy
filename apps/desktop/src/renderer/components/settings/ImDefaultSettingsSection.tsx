@@ -387,7 +387,7 @@ export function ImDefaultSettingsSection({
           </span>
           <PermissionSelector
             permissionMode={settings.groupPermissionMode}
-            vendorKey={vendorKeyFor(settings.agentKind)}
+            vendorKey={agentKindToDraftVendor(settings.agentKind)}
             triggerVariant="field"
             disabled={pending}
             ariaContext={t('settings.imBot.defaults.groupPermissionLabel')}
