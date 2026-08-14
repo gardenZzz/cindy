@@ -105,6 +105,12 @@ export interface ImCardBuilders {
     sessions: RecentControlSession[];
   }): InteractiveCardSpec;
   buildResolvedCard(label: string): InteractiveCardSpec;
+  /** 「群会话不能用完全访问」失败时的私聊修复卡(仅提供 permissionModeFix 文案的渠道)。 */
+  buildPermissionModeFixCard(args: {
+    sessionId: string;
+    agentKind: AgentKind;
+    sessionTitle: string;
+  }): InteractiveCardSpec;
   /** 授权卡收口: 保留原始正文 + 追加决策结果, 去掉按钮。 */
   buildResolvedPermissionCard(
     original: { title: string; body: string },
@@ -525,6 +531,36 @@ export function createCardBuilders(
       return {
         body: label,
         buttons: [],
+      };
+    },
+
+    /**
+     * 「群会话不能用完全访问」的私聊修复卡 — 一键把会话切回 auto。payload
+     * 带 sessionId + agentKind(cardAction 通道只带 senderId, 业务 id 走 payload)。
+     */
+    buildPermissionModeFixCard(args: {
+      sessionId: string;
+      agentKind: AgentKind;
+      sessionTitle: string;
+    }): InteractiveCardSpec {
+      const fixUi = ui.cards.permissionModeFix;
+      if (!fixUi) {
+        throw new Error('buildPermissionModeFixCard requires ui.cards.permissionModeFix (feishu)');
+      }
+      return {
+        title: fixUi.title,
+        body: fixUi.body(args.sessionTitle),
+        buttons: [
+          {
+            id: 'permissionMode:fix-auto',
+            label: fixUi.btnFix,
+            type: 'primary' as const,
+            payload: {
+              sessionId: args.sessionId,
+              agentKind: args.agentKind,
+            },
+          },
+        ],
       };
     },
 

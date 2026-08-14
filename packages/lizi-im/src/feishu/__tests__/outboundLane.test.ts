@@ -233,3 +233,70 @@ describe('feishu outbound lane routing', () => {
     );
   });
 });
+
+describe('feishu card lane registry', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    outbound.unbindClient(); // clears lane anchors + card registry
+    outbound.bindClient(creds);
+  });
+
+  it('registers topic-lane cards and resolves them back to the same lane', async () => {
+    outbound.pushReplyAnchor('g/oc_group1/omt_t1', 'om_topic_trigger');
+    const { messageId } = await outbound.sendInteractive('g/oc_group1/omt_t1', {
+      body: 'pick',
+      buttons: [{ id: 'control:exit', label: '退出', payload: { botAppId: 'cli_x' } }],
+    });
+    expect(messageId).toBe('om_replied');
+    expect(outbound.resolveCardLane('om_replied', 'oc_group1')).toBe('g/oc_group1/omt_t1');
+  });
+
+  it('registers plain group-lane cards (openThread 失败降级路径)', async () => {
+    outbound.pushReplyAnchor('g/oc_group1', 'om_trigger1');
+    const { messageId } = await outbound.sendInteractive('g/oc_group1', {
+      body: 'pick',
+      buttons: [{ id: 'control:exit', label: '退出' }],
+    });
+    expect(outbound.resolveCardLane(messageId, 'oc_group1')).toBe('g/oc_group1');
+  });
+
+  it('does not register p2p (DM) cards — callback keeps the open_id', async () => {
+    await outbound.sendInteractive('ou_dm_user', {
+      body: 'hi',
+      buttons: [{ id: 'control:exit', label: '退出' }],
+    });
+    expect(outbound.resolveCardLane('om_created', 'ou_dm_user')).toBeNull();
+  });
+
+  it('does not register deliverToOwnerDm cards (they live in the owner DM)', async () => {
+    outbound.pushReplyAnchor('g/oc_g', 'om_t');
+    const { messageId } = await outbound.sendInteractive(
+      'g/oc_g',
+      { body: '要执行危险操作', buttons: [{ id: 'permission:allow:once', label: '允许' }] },
+      { deliverToOwnerDm: true },
+    );
+    expect(larkMocks.create).toHaveBeenCalledWith(
+      expect.objectContaining({ data: expect.objectContaining({ receive_id: 'ou_owner' }) }),
+    );
+    expect(outbound.resolveCardLane(messageId, 'oc_g')).toBeNull();
+  });
+
+  it('rejects a lane lookup whose chatId does not match the callback chat', async () => {
+    outbound.pushReplyAnchor('g/oc_group1/omt_t1', 'om_topic_trigger');
+    await outbound.sendInteractive('g/oc_group1/omt_t1', {
+      body: 'pick',
+      buttons: [{ id: 'control:exit', label: '退出' }],
+    });
+    expect(outbound.resolveCardLane('om_replied', 'oc_another_group')).toBeNull();
+  });
+
+  it('unbindClient clears the registry (no cross-generation mismatch)', async () => {
+    outbound.pushReplyAnchor('g/oc_group1/omt_t1', 'om_topic_trigger');
+    await outbound.sendInteractive('g/oc_group1/omt_t1', {
+      body: 'pick',
+      buttons: [{ id: 'control:exit', label: '退出' }],
+    });
+    outbound.unbindClient();
+    expect(outbound.resolveCardLane('om_replied', 'oc_group1')).toBeNull();
+  });
+});
