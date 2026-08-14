@@ -3,7 +3,8 @@
  * 缺 sessionId / bridge 不可用 / 无可用 server / token 缺失都降级为空(不注册 ctx);
  * 正常路径注册 session ctx 并按 ACP http 形态下发(?session= + Bearer header);
  * 注入 bridge 全量已启用 server（collab 关时剥协同两件套）；默认主 token 全通;
- * cleanup 注销 ctx 且带代际比较。
+ * 主 token 必须同时 registerSessionToken（bridge 对 ?session= 的 TOCTOU 收口）;
+ * cleanup 成对注销 ctx + token 且带代际比较。
  */
 
 import { beforeEach, describe, expect, it, vi } from 'vitest';
@@ -16,6 +17,8 @@ import {
 
 function fakeBridge(token = 'primary-tok') {
   const registered = new Map<string, unknown>();
+  const tokens = new Map<string, { token: string; generation: number }>();
+  let nextGeneration = 0;
   const bridge = {
     token,
     registerSessionCtx: vi.fn((sessionId: string, ctx: unknown) => {
@@ -25,8 +28,22 @@ function fakeBridge(token = 'primary-tok') {
       if (expectedCtx !== undefined && registered.get(sessionId) !== expectedCtx) return;
       registered.delete(sessionId);
     }),
+    registerSessionToken: vi.fn((sessionId: string, sessionToken: string) => {
+      const generation = nextGeneration++;
+      tokens.set(sessionId, { token: sessionToken, generation });
+      return generation;
+    }),
+    unregisterSessionToken: vi.fn(
+      (sessionId: string, expectedToken?: string, generation?: number) => {
+        const entry = tokens.get(sessionId);
+        if (entry === undefined) return;
+        if (expectedToken !== undefined && entry.token !== expectedToken) return;
+        if (generation !== undefined && entry.generation !== generation) return;
+        tokens.delete(sessionId);
+      },
+    ),
   };
-  return { bridge: bridge as unknown as CodexHttpBridge, registered, spies: bridge };
+  return { bridge: bridge as unknown as CodexHttpBridge, registered, tokens, spies: bridge };
 }
 
 const STARTED = (
@@ -102,17 +119,18 @@ describe('buildCursorAcpMcpServers', () => {
   });
 
   it('returns empty without registering ctx when an injected token override is null', async () => {
-    const { bridge, registered } = fakeBridge();
+    const { bridge, registered, spies } = fakeBridge();
     const out = await buildCursorAcpMcpServers(
       { sessionId: 's1', workingDir: '/repo' },
       { ensureBridgeStarted: STARTED(bridge), getBridgeToken: () => null },
     );
     expect(out.servers).toEqual([]);
     expect(registered.size).toBe(0);
+    expect(spies.registerSessionToken).not.toHaveBeenCalled();
   });
 
   it('emits ACP http entries for all enabled bridge servers with primary token by default', async () => {
-    const { bridge, registered } = fakeBridge('primary-tok');
+    const { bridge, registered, spies } = fakeBridge('primary-tok');
     const out = await buildCursorAcpMcpServers(
       {
         sessionId: 'w-1',
@@ -143,6 +161,7 @@ describe('buildCursorAcpMcpServers', () => {
         __cindyDisabledBuiltinPluginIds: [],
       },
     });
+    expect(spies.registerSessionToken).toHaveBeenCalledWith('w-1', 'primary-tok');
   });
 
   it('stamps root caller provenance so worker bridge tools are not fail-closed', async () => {
@@ -196,7 +215,7 @@ describe('buildCursorAcpMcpServers', () => {
   });
 
   it('cleanup unregisters the ctx it registered and does not clobber a newer generation', async () => {
-    const { bridge, registered } = fakeBridge();
+    const { bridge, registered, tokens } = fakeBridge();
     const first = await buildCursorAcpMcpServers(
       { sessionId: 's1', workingDir: '/repo', vendorOptions: { orcaRole: 'worker' } },
       { ensureBridgeStarted: STARTED(bridge) },
@@ -209,5 +228,6 @@ describe('buildCursorAcpMcpServers', () => {
     // 旧代际迟到的 cleanup 不得删掉新 ctx。
     first.cleanup?.();
     expect(registered.size).toBe(1);
+    expect(tokens.size).toBe(1);
   });
 });

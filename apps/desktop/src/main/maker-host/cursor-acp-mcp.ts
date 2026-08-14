@@ -17,6 +17,11 @@
  * `REMOTE_ALLOWED_SERVER_NAMES` 白名单。协同两件套仍受 collab 全局开关约束。
  * 项目级禁用（workingDir）在建会话时冻结：既过滤下发名单，也写入 bridge
  * ctx 的 disabled snapshot，执行态与名单双重 fail-closed。
+ *
+ * 主 token 仍写进 ACP headers，但 `?session=` 请求必须同时命中
+ * `registerSessionToken` 槽（codexHttpBridge 轮 24 TOCTOU：否则「ctx 已注册、
+ * token 未注册」窗口里，任何持有主 token 的本地进程都能借任意 sessionId 绑
+ * 定目标 ctx）。cleanup 与 Pi 一样成对注销 ctx + token（含代次）。
  */
 
 import { getSessionOrcaRole, getWorkerLink } from '../localDb/orcaTeamStore.js';
@@ -110,7 +115,7 @@ export function selectCursorInjectableServerNames(
 
 /**
  * 为一个本地 cursor 会话构建 ACP `mcpServers`。cleanup 必须在 session close
- * 时调用，注销 bridge 上的 session ctx。
+ * 时调用，成对注销 bridge 上的 session ctx 与 session token。
  *
  * 任何一环不可用（无 sessionId / bridge 未起 / 无可用 server / token 缺失）都
  * 返回空数组，会话照常起（可读降级，不阻断纯对话）。
@@ -139,6 +144,7 @@ export async function buildCursorAcpMcpServers(
   });
   if (names.length === 0) {
     started.bridge.unregisterSessionCtx(args.sessionId);
+    started.bridge.unregisterSessionToken(args.sessionId);
     return empty;
   }
 
@@ -182,6 +188,23 @@ export async function buildCursorAcpMcpServers(
     mcpCallerAttested: true,
   };
   started.bridge.registerSessionCtx(sessionId, ctx);
+  // 主 token + ?session= 必须成对占 token 槽，否则 bridge 直接 401。
+  let tokenGeneration: number | undefined;
+  try {
+    tokenGeneration = started.bridge.registerSessionToken(sessionId, bridgeToken);
+  } catch (err) {
+    started.bridge.unregisterSessionCtx(sessionId, ctx);
+    throw err;
+  }
+
+  const dispose = () => {
+    try {
+      started.bridge.unregisterSessionCtx(sessionId, ctx);
+    } finally {
+      started.bridge.unregisterSessionToken(sessionId, bridgeToken, tokenGeneration);
+    }
+  };
+
   try {
     const servers = names.map((name) => ({
       type: 'http' as const,
@@ -191,10 +214,10 @@ export async function buildCursorAcpMcpServers(
     }));
     return {
       servers,
-      cleanup: () => started.bridge.unregisterSessionCtx(sessionId, ctx),
+      cleanup: dispose,
     };
   } catch (err) {
-    started.bridge.unregisterSessionCtx(sessionId, ctx);
+    dispose();
     throw err;
   }
 }
