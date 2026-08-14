@@ -53,6 +53,7 @@ export function unbindClient(): void {
   client = null;
   creds = null;
   laneAnchors.clear();
+  cardLanes.clear();
 }
 
 // ── group lane reply anchors ──────────────────────────────────────────────────
@@ -379,6 +380,59 @@ export async function removeReaction(messageId: string, reactionId: string): Pro
 
 // ── interactive cards ─────────────────────────────────────────────────────────
 
+// ── card lane registry (发卡登记 messageId → lane) ────────────────────────────
+// 卡片回调(card.action.trigger)的 context 只带 open_message_id / open_chat_id,
+// 不带话题 thread_id — 编排层按 (bot, senderId) 记 /ctr 锁与接管 binding, 消息
+// 侧 senderId 是群话题 lane(g/{chatId}/{threadId}), 回调侧只有 operator.open_id,
+// 键对不上会让 /ctr 锁永远清不掉。发往 lane 的卡在发送成功后把 messageId 登记
+// 回发卡 lane, 回调时反查归一成同一条 lane;私聊卡(open_id)与改投 owner DM 的卡
+// 不登记, 回调保持 open_id。飞书卡片回调有效期 30 天, 过期条目不会再有点击,
+// 按 31 天 TTL + 上限淘汰;unbindClient 随连接换代清空(与 laneAnchors 同口径)。
+
+const CARD_LANE_TTL_MS = 31 * 24 * 60 * 60 * 1000;
+const CARD_LANE_MAX_ENTRIES = 512;
+const cardLanes = new Map<string, { ts: number; lane: string }>();
+
+function pruneCardLanes(): void {
+  const now = Date.now();
+  for (const [messageId, entry] of cardLanes) {
+    if (now - entry.ts > CARD_LANE_TTL_MS) cardLanes.delete(messageId);
+  }
+  while (cardLanes.size > CARD_LANE_MAX_ENTRIES) {
+    let oldestKey: string | undefined;
+    let oldestTs = Number.POSITIVE_INFINITY;
+    for (const [messageId, entry] of cardLanes) {
+      if (entry.ts < oldestTs) {
+        oldestTs = entry.ts;
+        oldestKey = messageId;
+      }
+    }
+    if (oldestKey === undefined) break;
+    cardLanes.delete(oldestKey);
+  }
+}
+
+/** 发卡成功后在 lane 通道登记 card messageId → laneUserId;私聊发送不登记。 */
+function registerCardLane(userId: string, messageId: string): void {
+  if (!decodeLaneUserId(userId)) return;
+  cardLanes.set(messageId, { ts: Date.now(), lane: userId });
+  pruneCardLanes();
+}
+
+/**
+ * 按卡片回调的 open_message_id 反查发卡 lane。chatId 兜底比对防串(卡在话题里
+ * 时 open_chat_id 是群 id, 与 lane 的 chatId 恒一致)。查不到返回 null — 私聊卡、
+ * 改投 DM 卡或已过期淘汰的条目, 回调 senderId 保持 operator.open_id。
+ */
+export function resolveCardLane(messageId: string, chatId: string): string | null {
+  pruneCardLanes();
+  const entry = cardLanes.get(messageId);
+  if (!entry) return null;
+  const lane = decodeLaneUserId(entry.lane);
+  if (!lane || lane.chatId !== chatId) return null;
+  return entry.lane;
+}
+
 export async function sendInteractive(
   userId: string,
   spec: InteractiveCardSpec,
@@ -395,7 +449,13 @@ export async function sendInteractive(
     return createMessage({ kind: 'open_id', id: owner }, 'interactive', JSON.stringify(card));
   }
   const card = buildInteractiveCardV1(spec);
-  return createMessage(requireSendTarget(userId), 'interactive', JSON.stringify(card));
+  const result = await createMessage(
+    requireSendTarget(userId),
+    'interactive',
+    JSON.stringify(card),
+  );
+  registerCardLane(userId, result.messageId);
+  return result;
 }
 
 export async function updateInteractive(

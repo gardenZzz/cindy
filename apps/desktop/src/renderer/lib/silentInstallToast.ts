@@ -38,7 +38,9 @@ function makeKey(k: ToastKey): string {
 const activeToastIds = new Map<string, string>();
 
 function friendlyAgentName(agentKind: RemoteAgentKind): string {
-  return agentKind === 'codex' ? 'Codex' : 'Claude Code';
+  if (agentKind === 'codex') return 'Codex';
+  if (agentKind === 'pi') return 'Pi';
+  return 'Claude Code';
 }
 
 /**

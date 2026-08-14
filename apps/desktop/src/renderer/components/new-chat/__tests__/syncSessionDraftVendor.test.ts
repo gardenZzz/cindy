@@ -70,7 +70,7 @@ describe('本地 Cursor session→draft 同步（场景 B）', () => {
     const start = src.indexOf('const syncSessionDraftModelPrefs');
     expect(start).toBeGreaterThan(-1);
     const body = src.slice(start, start + 2200);
-    expect(body).toContain('agentKindToDraftVendor(currentModelAgentKind)');
+    expect(body).toContain('agentKindToDraftVendor(agentKind)');
     expect(body).not.toContain("currentModelAgentKind === 'codex' ? 'codex' : 'cc'");
   });
 });

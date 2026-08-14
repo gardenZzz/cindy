@@ -299,6 +299,7 @@ import {
 } from '@/state/providerModelMemory';
 import {
   getDraft,
+  patchVendorPrefs,
   patchVendorPrefsPreservingModelChoice,
   setEffortForModel,
   setFastModeForModel,
@@ -5227,28 +5228,38 @@ export function ChatInput({
         activeProviderId?: string | null;
         memoryProviderId?: string | null;
         remoteDeviceId?: string;
+        /** 跨引擎换模时写目标 Agent 的草稿槽,缺省用当前任务引擎。 */
+        agentKind?: AgentKind;
+        /** 已有任务里换模 / 换来源时为 true,下次新建跟随这次选择。只改思考档 / Fast 保持 false。 */
+        markModelChoice?: boolean;
       } = {},
     ) => {
-      if (!sessionId || !currentModelAgentKind || !modelId) return;
+      const agentKind = opts.agentKind ?? currentModelAgentKind;
+      if (!sessionId || !agentKind || !modelId) return;
       const activeProviderId =
         opts.activeProviderId !== undefined ? opts.activeProviderId : selectedProviderId;
       const memoryProviderId =
         opts.memoryProviderId !== undefined ? opts.memoryProviderId : memorySourceId;
       const remoteDeviceId =
         opts.remoteDeviceId ?? getSessionDeviceId(sessionId) ?? deviceLinkDeviceId;
+      const markModelChoice = opts.markModelChoice === true;
       if (!remoteDeviceId) {
-        const vendor = agentKindToDraftVendor(currentModelAgentKind);
-        patchVendorPrefsPreservingModelChoice(vendor, {
-          model: modelId,
-          providerId: activeProviderId ?? null,
+        const vendor = agentKindToDraftVendor(agentKind);
+        const persistPrefs = markModelChoice ? patchVendorPrefs : patchVendorPrefsPreservingModelChoice;
+        persistPrefs(vendor, {
+          // 换模才带配对并打标记。本机只改思考档 / Fast 不写回活动模型,
+          // 避免未打标用户把区域默认改成当前任务模型。
+          ...(markModelChoice
+            ? { model: modelId, providerId: activeProviderId ?? null }
+            : {}),
           ...(patch.effort !== undefined ? { effort: patch.effort } : {}),
         });
         if (memoryProviderId) {
           if (patch.effort !== undefined) {
-            setProviderModelChoice(currentModelAgentKind, memoryProviderId, modelId, patch.effort);
+            setProviderModelChoice(agentKind, memoryProviderId, modelId, patch.effort);
           }
           if (patch.fast !== undefined) {
-            setProviderModelFast(currentModelAgentKind, memoryProviderId, modelId, patch.fast);
+            setProviderModelFast(agentKind, memoryProviderId, modelId, patch.fast);
           }
         }
         if (patch.effort !== undefined) setEffortForModel(modelId, patch.effort);
@@ -5258,11 +5269,11 @@ export function ChatInput({
       window.electronAPI.deviceLink
         .invoke(remoteDeviceId, 'maker:apply-new-maker-draft-pref', [
           {
-            agent: currentModelAgentKind,
+            agent: agentKind,
             providerId: activeProviderId ?? '',
             modelId,
             active: true,
-            markModelChoice: false,
+            markModelChoice,
             ...(patch.effort !== undefined ? { effort: patch.effort } : {}),
             ...(patch.fast !== undefined ? { fast: patch.fast } : {}),
           },
@@ -5565,6 +5576,19 @@ export function ChatInput({
             effort: newEffort,
             fastMode: targetFast,
           });
+          // 跨引擎点选也是用户显式选模:记到目标 vendor,下次用该引擎新建跟随这次选择。
+          // 真切换可能推迟到下一条消息,但选择已经做出。
+          syncSessionDraftModelPrefs(
+            newModelId,
+            { effort: newEffort, fast: targetFast },
+            {
+              activeProviderId: providerId,
+              memoryProviderId: providerId,
+              remoteDeviceId: deviceLinkDeviceId,
+              agentKind: targetAgentKind,
+              markModelChoice: true,
+            },
+          );
           if (makerChatStore.getSnapshot(sourceSessionId).agentStatus.isRunning) {
             toast.success(
               t('newChat.chatInput.agentSwitch.deferred', {
@@ -5605,6 +5629,17 @@ export function ChatInput({
         }
         // 立即切换路径(harness / registry 缺省兜底,生产不走):维持旧收敛语义。
         makerChatStore.noteAgentSwitched(sourceSessionId, targetAgentKind);
+        syncSessionDraftModelPrefs(
+          newModelId,
+          { effort: newEffort, fast: targetFast },
+          {
+            activeProviderId: providerId,
+            memoryProviderId: providerId,
+            remoteDeviceId: deviceLinkDeviceId,
+            agentKind: targetAgentKind,
+            markModelChoice: true,
+          },
+        );
         if (!result.engineReady) {
           toast.error(t('newChat.chatInput.agentSwitch.engineNotReady'), { duration: 4000 });
         }
@@ -5632,6 +5667,7 @@ export function ChatInput({
       codexCaps.capabilities,
       cursorCaps.capabilities,
       piCaps.capabilities,
+      syncSessionDraftModelPrefs,
     ],
   );
   // 声明顺序在 performAgentSwitch 之前的 handler(handleFastModeChange)经此 ref
@@ -5753,7 +5789,7 @@ export function ChatInput({
             syncSessionDraftModelPrefs(
               newModelId,
               { effort: newEffort, fast: fastPersisted ? restoredFast : fastMode },
-              { remoteDeviceId: sourceRemoteDeviceId },
+              { remoteDeviceId: sourceRemoteDeviceId, markModelChoice: true },
             );
             if (remoteDeferred && isSourceSessionCurrent()) {
               toast.success(t('newChat.chatInput.credentialSwitchDeferred'), { duration: 4000 });
@@ -5787,7 +5823,9 @@ export function ChatInput({
               // 默认 success 1200ms 读不完这句;拉长到 4s。
               toast.success(t('newChat.chatInput.credentialSwitchDeferred'), { duration: 4000 });
             }
-            syncSessionDraftModelPrefs(newModelId, { effort: newEffort, fast: restoredFast });
+            syncSessionDraftModelPrefs(newModelId, { effort: newEffort, fast: restoredFast }, {
+              markModelChoice: true,
+            });
             if (currentModelAgentKind && effectiveSourceId) {
               modelMemory?.setFast(
                 currentModelAgentKind,
@@ -6158,6 +6196,7 @@ export function ChatInput({
             activeProviderId: newProviderId,
             memoryProviderId: newProviderId,
             remoteDeviceId: sourceRemoteDeviceId,
+            markModelChoice: true,
           },
         );
         onModelDidChange?.(targetModel);
@@ -6215,7 +6254,11 @@ export function ChatInput({
           syncSessionDraftModelPrefs(
             modelId,
             { effort: eff, fast: restoredFast },
-            { activeProviderId: newProviderId, memoryProviderId: newProviderId },
+            {
+              activeProviderId: newProviderId,
+              memoryProviderId: newProviderId,
+              markModelChoice: true,
+            },
           );
           if (currentModelAgentKind && newProviderId) {
             modelMemory?.setFast(currentModelAgentKind, newProviderId, modelId, restoredFast);
