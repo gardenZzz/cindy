@@ -2045,7 +2045,7 @@ function CursorDetail() {
     );
 
   return (
-    <>
+    <div className="flex min-h-0 flex-1 flex-col">
       <DetailHeader
         icon={<CursorMark size={18} />}
         title={t('settings.providers.cursor.title')}
@@ -2070,11 +2070,12 @@ function CursorDetail() {
         }
         detail={body}
       />
-      {/* 已安装且不在登录流程时才列;探测编排由 #28 接线。 */}
+      {/* 已安装且不在登录流程时才列;探测编排由 #28 接线。
+          详情头固定,清单在 CursorModelList 内独立滚动(卡片 overflow-hidden)。 */}
       {probe.kind === 'installed' && !loginUrl && (
         <>
           <div
-            className="border-t"
+            className="shrink-0 border-t"
             style={{ borderColor: 'var(--settings-theme-card-border)' }}
           />
           <CursorModelList
@@ -2090,7 +2091,7 @@ function CursorDetail() {
           />
         </>
       )}
-    </>
+    </div>
   );
 }
 
