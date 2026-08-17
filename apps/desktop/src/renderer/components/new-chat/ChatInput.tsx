@@ -1222,6 +1222,15 @@ export function ChatInput({
       // 冷加载帧:runtimeAgentKind 尚未确认时就默认 claude-code,会将其他引擎的会话内容
       // 发给 Claude Code provider —— 跳过预测,等 agent 身份确认后再恢复。
       if (runtimeAgentKind == null) return;
+      // Cursor 走 ACP,不在 predictNextPrompt 的 provider catalog 三档里;
+      // 把 Cursor 会话转写送到 Claude/Codex/Pi provider 会错账。
+      if (
+        runtimeAgentKind !== 'claude-code' &&
+        runtimeAgentKind !== 'codex' &&
+        runtimeAgentKind !== 'pi'
+      ) {
+        return;
+      }
       const latestMessages = messagesRef.current;
       const ed = editorRef.current;
       if (
