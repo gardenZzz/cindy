@@ -5,7 +5,9 @@
  * 因此这里**不复用** `UnifiedModelList` -- 后者绑死 `ProviderView`、停用轴(「⋯」菜单 +
  * 已停用分区)、分歧 chip 与分别调整模式,Cursor 一项都用不上;复用就得合成一个只在
  * UI 层存在的假 `ProviderView`,反而捅穿本 spec 要守的「Cursor 不进可路由 catalog」边界。
- * 视觉与交互节奏对齐既有供应商详情,代码不共用。
+ * 视觉与交互节奏对齐既有供应商详情,代码不共用。右栏卡片是固定高度 +
+ * overflow-hidden,本列表必须自己吃掉剩余高度并 overflow-y-auto,否则
+ * 31 个模型会被裁掉且滚轮无处可去(对齐 UnifiedModelList 的滚动契约)。
  *
  * 只做两件事(与真实供应商的「显示轴」语义一致):
  *   - 列出本机缓存到的全部 Cursor 模型,每行一个显示开关(「全部显示 / 全部隐藏」批量)。
@@ -205,10 +207,11 @@ export function CursorModelList({ onRefresh, onCancel, refresh }: CursorModelLis
   }
 
   return (
-    <div className="flex flex-col">
+    <div className="flex min-h-0 flex-1 flex-col">
       {/* 工具行:与 UnifiedModelList 同版式 —— 区块标题常驻左侧,刷新(图标)+ 全部开关在右;
-          Cursor 单 agent,无「分别调整」。模型计数已上 DetailHeader,此处不再重复。 */}
-      <div className="flex items-center gap-3 px-5 py-2.5">
+          Cursor 单 agent,无「分别调整」。模型计数已上 DetailHeader,此处不再重复。
+          工具行 shrink-0,只有下方清单滚动。 */}
+      <div className="flex shrink-0 items-center gap-3 px-5 py-2.5">
         <span className="shrink-0 text-13 font-medium" style={{ color: 'var(--text-secondary)' }}>
           {t('settings.providers.models.available')}
         </span>
@@ -256,7 +259,7 @@ export function CursorModelList({ onRefresh, onCancel, refresh }: CursorModelLis
         </button>
       </div>
 
-      <div className="flex flex-col gap-4 px-5 pb-4 pt-0.5">
+      <div className="flex min-h-0 flex-1 flex-col gap-4 overflow-y-auto px-5 pb-4 pt-0.5">
         {groups.map((g) => {
           const collapsed = showGroupHeaders && (collapsedMap[g.key] ?? false);
           return (
