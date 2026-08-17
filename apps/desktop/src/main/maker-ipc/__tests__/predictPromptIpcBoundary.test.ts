@@ -190,6 +190,11 @@ vi.mock('../promptPrediction.js', () => ({
 vi.mock('../../messagePersistBroadcaster.js', () => ({
   drainPersistQueue: h.drainPersistQueue,
 }));
+// feat 的 Cursor one-shot 标题会从 title.ts 拉 getMakerIfReady；不 mock 就会
+// 顺着 maker-host/index → register.ts 要 enqueueDurableWrite，撑爆本测试的窄 mock。
+vi.mock('../../maker-host/index.js', () => ({
+  getMakerIfReady: vi.fn(() => null),
+}));
 vi.mock('../../localDb/latestMessageText.js', () => ({
   regenerateTitleMaterial: h.regenerateMaterial,
 }));
