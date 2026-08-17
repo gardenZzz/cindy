@@ -277,6 +277,27 @@ describe('ProvidersSection - Cursor 模型清单与显示开关 (spec #21 / S1)'
     expect(await screen.findByText('settings.providers.cursor.models.refreshUnavailableAuth')).not.toBeNull();
   });
 
+  it('模型清单在右栏内独立滚动,工具行不进滚动区', async () => {
+    cursorState.installed = true;
+    cursorState.auth = { authenticated: true, identity: 'x' };
+    cursorCaps.availableModels = [
+      { id: 'auto', displayName: 'Auto', contextWindow: 200_000, efforts: [], defaultEffort: null },
+      { id: 'claude-opus-5', displayName: 'Opus 5', contextWindow: 300_000, efforts: ['low'], defaultEffort: 'low' },
+    ] as AgentCapabilities['availableModels'];
+
+    renderAt();
+    await selectCursor();
+
+    const row = await screen.findByText('Opus 5');
+    const scroller = row.closest('.overflow-y-auto');
+    expect(scroller).not.toBeNull();
+    expect(scroller!.className).toContain('min-h-0');
+    expect(scroller!.className).toContain('flex-1');
+    // 工具行固定在滚动区外,长清单滚走时「在模型选择中显示 / 全部隐藏」仍在。
+    const toolbar = screen.getByText('settings.providers.models.available');
+    expect(toolbar.closest('.overflow-y-auto')).toBeNull();
+  });
+
   it('真实供应商(Anthropic)行与刷新行为不受影响', async () => {
     cursorState.installed = true;
     cursorState.auth = { authenticated: true, identity: 'x' };
