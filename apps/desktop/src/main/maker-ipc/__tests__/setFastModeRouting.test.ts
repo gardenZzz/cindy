@@ -14,7 +14,9 @@ const registerSource = readFileSync(resolve(__dirname, '..', 'register.ts'), 'ut
 function extractSetFastModeHandler(source: string): string {
   const start = source.indexOf('MAKER_INVOKE.SET_FAST_MODE');
   expect(start).toBeGreaterThanOrEqual(0);
-  const end = source.indexOf('MAKER_INVOKE.MODEL_VISIBILITY_SYNC', start);
+  // main 把 MODEL_VISIBILITY_SYNC 抽到 registerMakerIpc 前部后，handler 后面
+  // 紧挨 SET_EXTRA_DIRS；不能再拿已前移的 channel 当切片终点。
+  const end = source.indexOf('MAKER_INVOKE.SET_EXTRA_DIRS', start);
   expect(end).toBeGreaterThan(start);
   return source.slice(start, end);
 }

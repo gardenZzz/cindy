@@ -9,6 +9,7 @@ import { ThemeProvider } from '@/hooks/useTheme';
 import { FontSettingsProvider } from '@/hooks/useFontSettings';
 import { LocaleProvider } from '@/hooks/useLocale';
 import { AuthProvider, useAuth } from '@/contexts/AuthContext';
+import { AppShellCoverProvider, useAppShellCover } from '@/contexts/AppShellCoverContext';
 import { LoginHandoffProvider } from '@/contexts/LoginHandoffContext';
 import { EnvCheckProvider, EnvCheckGuard } from '@/contexts/EnvCheckContext';
 import { WorktreeProvider } from '@/contexts/WorktreeContext';
@@ -73,10 +74,12 @@ import { router } from './router';
  */
 function LoginHandoffHost({ children }: { children: React.ReactNode }) {
   const { isInitializing, isAuthenticated, canEnterApp } = useAuth();
+  const { coverHeld } = useAppShellCover();
   return (
     <LoginHandoffProvider
       authResolved={!isInitializing}
       authenticated={isAuthenticated || canEnterApp}
+      coverHeld={coverHeld}
     >
       {/* 认证恢复后已登录(直进受保护路由、LoginPage 不挂载)时结束首启亮色门,
           避免 renderer localStorage 被清空但主进程仍持有会话时整个已登录会话
@@ -343,8 +346,9 @@ export function App() {
           <ConfirmDialogProvider>
             <EnvCheckProvider>
               <AuthProvider>
-                <WorktreeProvider>
-                  <PrRefsProvider>
+                <AppShellCoverProvider>
+                  <WorktreeProvider>
+                    <PrRefsProvider>
                     <Tooltip.Provider>
                       {/* LoginHandoffProvider 包 SplashScreen + RouterProvider(Step 3b
                           WHAT2 宿主契约):Splash→登录/主界面衔接动画状态机。
@@ -379,8 +383,9 @@ export function App() {
                         <LegacyMigrationDialog />
                       )}
                     </Tooltip.Provider>
-                  </PrRefsProvider>
-                </WorktreeProvider>
+                    </PrRefsProvider>
+                  </WorktreeProvider>
+                </AppShellCoverProvider>
               </AuthProvider>
             </EnvCheckProvider>
           </ConfirmDialogProvider>
