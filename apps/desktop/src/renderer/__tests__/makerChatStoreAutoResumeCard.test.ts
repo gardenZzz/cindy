@@ -709,6 +709,85 @@ describe('Codex 原生重连进行态与终态接管交棒', () => {
   });
 });
 
+/**
+ * 接管是跨 agent 的（main 侧的判据、额度、落库抑制都不看 agent kind），renderer 的广播
+ * 回声抑制必须同样跨 agent。这里锁的就是那条曾经写死 `source === 'codex'` 的门：Cursor
+ * 断流走自愈时会先闪一帧红横幅、并把刚插进来的「重新连接中」活动行删掉，直到退避结束
+ * 才复原。抑制的判据仍是「接管卡上存的原文与本事件 message 完全相等」，所以放开 source
+ * 不会吞掉别的 turn 的失败——下面两条反向用例就是这个边界。
+ */
+describe('接管广播回声抑制跨 agent 生效', () => {
+  const stateWithPending = (error: string) => {
+    const pendingCard = {
+      ...serverMessage({ clientId: PENDING_CARD_ID, content: '' }),
+      systemCardType: 'auto-resume-pending' as const,
+      systemCardData: { ...PENDING_INFO, error },
+    } as ChatMessage;
+    return { ...EMPTY_SESSION_STATE, messages: [pendingCard] };
+  };
+
+  const terminalEvent = (
+    source: 'cursor' | 'claude-code' | 'pi',
+    message: string,
+    extra: Record<string, unknown> = {},
+  ) => ({
+    sessionId: SID,
+    type: 'error' as const,
+    source,
+    data: { message, isTerminal: true, ...extra },
+  });
+
+  const SUPPRESSED_CASES: Array<
+    [string, 'cursor' | 'claude-code' | 'pi', string, Record<string, unknown>]
+  > = [
+    [
+      'cursor 断流',
+      'cursor',
+      'Error: RetriableError: [canceled] http/2 stream closed with error code CANCEL (0x8)',
+      { reason: 'cursor-stream-disconnect' },
+    ],
+    [
+      'claude-code SSE 截断',
+      'claude-code',
+      'API Error: Connection closed mid-response.',
+      { sdkError: 'server_error' },
+    ],
+    ['pi 上游容量', 'pi', 'Selected model is at capacity', { reason: 'upstream-overload' }],
+  ];
+
+  it.each(SUPPRESSED_CASES)(
+    '%s 的终态广播不点亮红 banner,也不撤掉接管活动行',
+    (_label, source, message, extra) => {
+      const next = handleStreamEvent(
+        stateWithPending(message),
+        terminalEvent(source, message, extra),
+      );
+      expect(next.error).toBeNull();
+      expect(next.errorReason).toBeNull();
+      expect(next.messages.some((m) => m.clientId === PENDING_CARD_ID)).toBe(true);
+    },
+  );
+
+  it('非 codex 的认证终态仍照常落红,不被接管卡吞掉', () => {
+    const message = 'Cursor session unauthorized.';
+    const next = handleStreamEvent(
+      stateWithPending(message),
+      terminalEvent('cursor', message, { errorStatus: 401 }),
+    );
+    expect(next.error).toMatch(/unauthorized/i);
+    expect(next.messages.some((m) => m.clientId === PENDING_CARD_ID)).toBe(false);
+  });
+
+  it('非 codex 的残留接管卡不吞掉正文不匹配的新终态错误', () => {
+    const next = handleStreamEvent(
+      stateWithPending('RetriableError: [unavailable] PING timed out'),
+      terminalEvent('cursor', '503 Service Unavailable'),
+    );
+    expect(next.error).toContain('503 Service Unavailable');
+    expect(next.messages.some((m) => m.clientId === PENDING_CARD_ID)).toBe(false);
+  });
+});
+
 // Main now owns the vendor-turn continuation identity; Renderer mirrors it without a sticky seen marker.
 describe('续跑边界投影能力与 vendor turn owner', () => {
   beforeEach(() => {
