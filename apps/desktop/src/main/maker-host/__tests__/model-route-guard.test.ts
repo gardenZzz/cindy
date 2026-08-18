@@ -501,6 +501,19 @@ describe('materializeExclusiveProviderRoute', () => {
       .toEqual({ kind: 'keep' });
   });
 
+  it('cursor 无 Cindy provider 条目,独占 Grok 保持 keep(不误伤登录制 agent)', () => {
+    // cursor 不在 XD 目录:任何 provider 都不 agents.includes('cursor'),目录里有无 xai
+    // 都不改变结论 —— 独占守卫对它不适用,reject 会误伤 cursor 会话(#2898 回归)。
+    expect(materializeExclusiveProviderRoute(xaiViews(), 'cursor', 'grok-4.6', null))
+      .toEqual({ kind: 'keep' });
+    expect(materializeExclusiveProviderRoute(xaiViews({ xd: true, xai: false }), 'cursor', 'grok-4.6', null))
+      .toEqual({ kind: 'keep' });
+    expect(materializeExclusiveProviderRoute(views(), 'cursor', 'grok-4.5', null))
+      .toEqual({ kind: 'keep' });
+    expect(checkModelRoute(xaiViews({ xd: true, xai: false }), 'cursor', 'grok-4.6', null))
+      .toEqual({ kind: 'pass' });
+  });
+
   it('裸 grok / xai/ 前缀在 xAI 已连接时钉死 xai', () => {
     expect(materializeExclusiveProviderRoute(xaiViews(), 'claude-code', 'grok-4.6', null))
       .toEqual({ kind: 'pin', providerId: 'xai' });

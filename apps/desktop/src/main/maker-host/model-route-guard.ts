@@ -80,6 +80,13 @@ export function materializeExclusiveProviderRoute(
       && provider.agents.includes(agent),
   );
   if (!xai) {
+    // cursor 无 Cindy provider(登录制 agent,模型由 cursor-agent 自己出账,
+    // 见 defaultSessionSettings.hasProviderCatalog 的同款约定)——xAI 独占守卫对
+    // 它不适用,keep 放行,否则新建会话选裸 grok 会误报 "requires SuperGrok"
+    // (#2898 回归)。XD 三档保持原语义:显式 user 来源豁免,其余拒绝(不 fail-open
+    // 进默认网关)。只按 agent 门控,不能按「views 里有没有该 agent 的 provider」判:
+    // 目录读取失败时 XD 也会得到空 views,数据上无法与 cursor 区分。
+    if (agent === 'cursor') return { kind: 'keep' };
     return providerId && !shouldApplyExclusiveProviderReroute(providerId, views) && providerId !== 'xai'
       ? { kind: 'keep' }
       : { kind: 'reject' };
