@@ -779,7 +779,9 @@ export function CustomProviderDialog({
       // 的 runtime 上,handleSave 的守卫拦不住"用户已经看不到"的这条草稿,表单
       // 卡死报错却找不到对应输入框(review P1)。
       setWindowDrafts({});
-      const first = configuredPresetAgents(p)[0];
+      const first = configuredPresetAgents(p).find((agent): agent is DialogAgentKind =>
+        AGENTS.includes(agent as DialogAgentKind),
+      );
       if (first) setActiveTab(first);
     },
     [i18n.language, setRtSynced],

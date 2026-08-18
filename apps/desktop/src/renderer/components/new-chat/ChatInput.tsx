@@ -289,6 +289,7 @@ import {
   stripHostCapabilityChips,
 } from '@/lib/composerListDocument';
 import { useAgentCapabilities, type AgentKind } from '@/hooks/useAgentCapabilities';
+import type { SelectableVendor } from '@/lib/agentVendors';
 import { useAvailableAgents } from '@/hooks/useAvailableAgents';
 import { useConnectedSource } from '@/hooks/useConnectedSource';
 import { useProviders } from '@/hooks/useProviders';
@@ -742,7 +743,7 @@ interface ChatInputProps {
    * `lastByVendor.model` 并原样进 createSession,写错就是首条请求路由到一个不存在的模型。
    */
   onUnifiedDraftSelect?: (selection: {
-    vendor: 'cc' | 'codex' | 'pi';
+    vendor: SelectableVendor;
     providerId: string;
     /** 选中引擎的 **wire model id**。 */
     modelId: string;
@@ -758,11 +759,14 @@ interface ChatInputProps {
 }
 
 /** 统一模型选择器联合列表的候选引擎全集(与 SELECTABLE_VENDORS 同一顺序)。 */
-const UNIFIED_AGENT_KINDS: readonly AgentKind[] = ['claude-code', 'codex', 'pi'];
+const UNIFIED_AGENT_KINDS: readonly AgentKind[] = ['claude-code', 'codex', 'cursor', 'pi'];
 
 /** AgentKind → NewMaker vendor(useAvailableAgents 用 vendor 口径)。 */
-function agentKindToVendor(kind: AgentKind): 'cc' | 'codex' | 'pi' {
-  return kind === 'codex' ? 'codex' : kind === 'pi' ? 'pi' : 'cc';
+function agentKindToVendor(kind: AgentKind): SelectableVendor {
+  if (kind === 'codex') return 'codex';
+  if (kind === 'cursor') return 'cursor';
+  if (kind === 'pi') return 'pi';
+  return 'cc';
 }
 
 function vendorKeyToAgentKind(v?: 'cc' | 'codex' | 'cursor' | 'pi'): AgentKind | null {
@@ -1699,7 +1703,7 @@ export function ChatInput({
     uid: string;
     /** 选中时会话落下的 wire model id(≠ 收藏条目里的归一化行 id,见草稿侧同名快照的说明)。 */
     wireModelId: string;
-    engine: 'cc' | 'codex' | 'pi';
+    engine: SelectableVendor;
     /** 选中时的显式来源 —— 来源也是锚点身份的一部分:同 wire id 同引擎、仅来源不同是两份
      *  配置。别的窗口 / 外部 patch 把会话来源从 A 切到 B 后,缺这一维会让面板继续在 A 的
      *  收藏上打勾,编辑/删除它还会误回落到 A 的默认(2026-08-17 review)。 */
@@ -6512,7 +6516,7 @@ export function ChatInput({
       /** 选中引擎的 **wire model id** —— 唯一可发送、可当记忆键的那个 id。 */
       modelId: string;
       effort?: Effort;
-      engine: 'cc' | 'codex' | 'pi';
+      engine: SelectableVendor;
       fast: boolean;
       favoriteUid: string | null;
       /** 行的归一化 id(面板行身份)。草稿层不消费,更不作为发送 id。 */

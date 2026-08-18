@@ -4744,7 +4744,13 @@ export function CCAgentSessionView({
                   {/* Cursor 尚无供应商 spend 数据(ACP usage 空);不渲染 chip,避免冒充 cc/codex 计费。 */}
                   {!isCursor && (
                     <TodaySpendChip
-                      vendorKey={normalizeDbAgentKind(displayAgentKind)}
+                      vendorKey={
+                        displayAgentKind === 'codex'
+                          ? 'codex'
+                          : displayAgentKind === 'pi'
+                            ? 'pi'
+                            : 'cc'
+                      }
                       modelId={agentSwitchIntent?.model ?? session?.model ?? null}
                       providerId={
                         agentSwitchIntent
