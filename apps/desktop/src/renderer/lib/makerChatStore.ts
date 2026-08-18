@@ -3631,7 +3631,11 @@ function upsertCodexReconnectPendingCard(
   return collapseConsecutiveAutoResumeRows([...messages, card]);
 }
 
-function isCodexUserActionableRetryError(data: unknown): boolean {
+/**
+ * 这条错误是不是「用户必须自己动手」（认证失效 / 额度耗尽）——判据与 agent 无关，
+ * 两个调用点（Codex 原生重连行、跨 agent 的自愈广播回声抑制）共用同一份。
+ */
+function isUserActionableRetryError(data: unknown): boolean {
   const root = data && typeof data === 'object' ? (data as Record<string, unknown>) : {};
   const message = typeof root.message === 'string' ? root.message : '';
   const sdkError = typeof root.sdkError === 'string' ? root.sdkError : '';
@@ -4588,7 +4592,7 @@ export function handleStreamEvent(
     event.source === 'codex' &&
     !isTerminalErrorData(event.data) &&
     reconnectAttempt !== null &&
-    !isCodexUserActionableRetryError(event.data);
+    !isUserActionableRetryError(event.data);
   const hasCodexReconnectRecoveryOutput = isCodexReconnectRecoveryOutput(event);
   const shouldClearCodexReconnectPendingCard =
     event.type === 'error' ? !isCodexReconnectProgress : hasCodexReconnectRecoveryOutput;
@@ -5288,9 +5292,16 @@ export function handleStreamEvent(
       }
       const finalized = finalizeStreamingInState(state);
       const derivedRetryText = deriveErrorRetryText(finalized);
+      // **刻意不看 event.source。** 接管是跨 agent 的（main 侧的判据、额度、落库抑制、
+      // 灵动岛抑制全都不看 agent kind，见 interruptedTurnAutoResume.ts），只有这里原先
+      // 写死了 `source === 'codex'`，于是 Cursor 的 `cursor-stream-disconnect`、
+      // Claude Code 的 SSE 截断、任何 agent 的 `empty-response` 走自愈时都会先闪一帧红
+      // 横幅、并把 projection 刚插进来的「重新连接中」活动行删掉，直到退避结束才复原。
+      // 门禁由 `hasMatchingAutoResumePendingError` 提供且本就与 agent 无关：它要求流里
+      // 已有接管卡、且卡上存的原始错误与本事件 message **完全相等** —— 那就是「main 已
+      // 接管的正是这一条错误」的证明，不会吞掉别的 turn 的失败。
       const suppressAutoResumeBroadcastError =
-        event.source === 'codex' &&
-        !isCodexUserActionableRetryError(event.data) &&
+        !isUserActionableRetryError(event.data) &&
         hasMatchingAutoResumePendingError(finalized.messages, event.data);
       // main coordinator 在终止型 error 时**先**同步 emit projection(errorRetryText
       // = projectionRetryText 的权威 retry token,active-turn 恢复恒非空)再 broadcast

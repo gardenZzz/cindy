@@ -122,6 +122,28 @@ describe('create_workers tool', () => {
     expect(createWorker).not.toHaveBeenCalled();
   });
 
+  it('forwards each worker provider_id through the shared batch schema', async () => {
+    const createWorker = vi.fn<CreateWorkerDeps['createWorker']>(async (_params) => created(1, 8));
+    const registry = setup(createWorker);
+
+    const result = await registry.call('create_workers', {
+      workers: [
+        { ...worker(1), model: 'deepseek/deepseek-v4-pro', provider_id: 'xd' },
+        { ...worker(2), model: 'gpt-5.5', provider_id: 'openai' },
+      ],
+    });
+
+    expect(result.isError).toBeUndefined();
+    expect(createWorker).toHaveBeenNthCalledWith(1, expect.objectContaining({
+      model: 'deepseek/deepseek-v4-pro',
+      providerId: 'xd',
+    }));
+    expect(createWorker).toHaveBeenNthCalledWith(2, expect.objectContaining({
+      model: 'gpt-5.5',
+      providerId: 'openai',
+    }));
+  });
+
   it('does not call host for the hard-limit suffix and summarizes all nine requests', async () => {
     let call = 0;
     const createWorker = vi.fn<CreateWorkerDeps['createWorker']>(async () => {
