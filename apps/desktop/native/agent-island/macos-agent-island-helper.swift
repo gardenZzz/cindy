@@ -1633,6 +1633,8 @@ private let expandedIslandBodySpacing: CGFloat = 4
 private let expandedIslandBottomPadding: CGFloat = 16
 private let compactIslandBaseWidth: CGFloat = 210
 private let compactIslandMinContentWidth: CGFloat = 80
+private let compactCollapseLeadingReservedWidth: CGFloat = 80
+private let compactCollapseTrailingReservedWidth: CGFloat = 100
 private let compactIslandBadgeCollapseContentThreshold: CGFloat = 152
 private let compactIslandDetailCollapseContentThreshold: CGFloat = 190
 private let compactIslandCjkTitleMinimumWidth: CGFloat = 32
@@ -1689,8 +1691,9 @@ private let cindyMascotFileName = "cindy.png"
 private let blackcatMascotFileName = "blackcat.png"
 private let erikaMascotFileName = "erika.png"
 private let defaultAgentIslandMascotSkin = "pululu"
-// Keep these mono Agent identity marks aligned with renderer ClaudeMark/CodexMark.
-// The native copies remain template images so Agent Island can apply status colors.
+// Keep these mono Agent identity marks aligned with renderer ClaudeMark/CodexMark/
+// CursorMark/PiMark. The native copies remain template images so Agent Island can
+// apply status colors.
 private let agentIslandCodexMarkSVG = """
 <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24">
   <g transform="translate(12 12) scale(1.1) translate(-12 -12)">
@@ -1702,6 +1705,21 @@ private let agentIslandCodexMarkSVG = """
 private let agentIslandClaudeMarkSVG = """
 <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24">
   <path fill="black" fill-rule="evenodd" clip-rule="evenodd" d="M20.998 10.949H24v3.102h-3v3.028h-1.487V20H18v-2.921h-1.487V20H15v-2.921H9V20H7.488v-2.921H6V20H4.487v-2.921H3V14.05H0v-3.1h3V5h17.998zM6 10.949h1.488V8.102H6zm10.51 0H18V8.102h-1.49z"/>
+</svg>
+"""
+// 立方体外框 + 反向子路径挖出正面三角(nonzero 成孔),所以不能加 fill-rule="evenodd"。
+private let agentIslandCursorMarkSVG = """
+<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24">
+  <path fill="black" d="M11.503.131 1.891 5.678a.84.84 0 0 0-.42.726v11.188c0 .3.162.575.42.724l9.609 5.55a1 1 0 0 0 .998 0l9.61-5.55a.84.84 0 0 0 .42-.724V6.404a.84.84 0 0 0-.42-.726L12.497.131a1.01 1.01 0 0 0-.996 0M2.657 6.338h18.55c.263 0 .43.287.297.515L12.23 22.918c-.062.107-.229.064-.229-.06V12.335a.59.59 0 0 0-.295-.51l-9.11-5.257c-.109-.063-.064-.23.061-.23"/>
+</svg>
+"""
+private let agentIslandPiMarkSVG = """
+<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24">
+  <g fill="none" stroke="black" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M3.6 6.6h16.8"/>
+    <path d="M8.4 6.6v11.8"/>
+    <path d="M15.6 6.6v9.6c0 1.5.9 2.2 2.4 2.2"/>
+  </g>
 </svg>
 """
 
@@ -3726,6 +3744,8 @@ func isMeaningfulExpandedTitle(_ title: String) -> Bool {
     && normalized != "codex"
     && normalized != "claude"
     && normalized != "claude code"
+    && normalized != "cursor"
+    && normalized != "pi"
     && normalized != "agent"
 }
 
@@ -3971,9 +3991,7 @@ func expandedStatusText(for session: AgentIslandSession, strings: AgentIslandStr
 }
 
 func sourceLabel(for agentKind: String) -> String {
-  let lower = agentKind.lowercased()
-  if lower.contains("codex") { return "Codex" }
-  if lower.contains("claude") { return "Claude" }
+  if let vendor = agentIslandSessionVendor(forAgentKind: agentKind) { return vendor.displayName }
   return agentKind.isEmpty ? "Agent" : agentKind
 }
 
@@ -4057,10 +4075,34 @@ struct StatusDot: View {
 enum AgentIslandSessionVendor {
   case cc
   case codex
+  case cursor
+  case pi
+
+  /// 品牌名,不进 i18n(与 renderer agentOptions 的 VENDOR_PRESENTATION.label 同源)。
+  var displayName: String {
+    switch self {
+    case .cc: return "Claude"
+    case .codex: return "Codex"
+    case .cursor: return "Cursor"
+    case .pi: return "Pi"
+    }
+  }
+}
+
+/// agentKind → vendor 的唯一映射,对齐 renderer 侧 `agentKindToVendor`。
+/// 返回 nil = 不认识的 kind,调用方自己决定回落(**不要**在这里默认 .cc,
+/// 否则 cursor / pi 会被吞成 Claude 身份 —— 本函数存在的原因)。
+func agentIslandSessionVendor(forAgentKind agentKind: String) -> AgentIslandSessionVendor? {
+  let lower = agentKind.lowercased()
+  if lower.contains("codex") { return .codex }
+  if lower.contains("cursor") { return .cursor }
+  if lower.contains("claude") || lower == "cc" { return .cc }
+  if lower == "pi" { return .pi }
+  return nil
 }
 
 func agentIslandSessionVendor(for session: AgentIslandSession) -> AgentIslandSessionVendor {
-  session.agentKind.lowercased().contains("codex") ? .codex : .cc
+  agentIslandSessionVendor(forAgentKind: session.agentKind) ?? .cc
 }
 
 final class AgentIslandVendorMarkImageStore {
@@ -4070,7 +4112,13 @@ final class AgentIslandVendorMarkImageStore {
 
   func image(for vendor: AgentIslandSessionVendor) -> NSImage? {
     if let cached = cache[vendor] { return cached }
-    let svg = vendor == .codex ? agentIslandCodexMarkSVG : agentIslandClaudeMarkSVG
+    let svg: String
+    switch vendor {
+    case .codex: svg = agentIslandCodexMarkSVG
+    case .cursor: svg = agentIslandCursorMarkSVG
+    case .pi: svg = agentIslandPiMarkSVG
+    case .cc: svg = agentIslandClaudeMarkSVG
+    }
     guard let data = svg.data(using: .utf8), let image = NSImage(data: data) else {
       return nil
     }
@@ -4092,7 +4140,8 @@ struct AgentIslandSessionVendorIcon: View {
   }
 
   private var markSize: CGFloat {
-    vendor == .codex ? 12 : 13
+    // codex 花形与 cursor 实心立方体都撑满 24 视框,收 1pt 才与像素脸 / π 等重。
+    vendor == .codex || vendor == .cursor ? 12 : 13
   }
 
   var body: some View {
@@ -4619,6 +4668,7 @@ final class AgentIslandController {
     notchBaselineHeight: 24,
     screenMetrics: .fallback
   )
+  private var lastCompactIslandWidth: CGFloat?
   private var globalClickMonitor: Any?
   private var localClickMonitor: Any?
   private var globalMoveMonitor: Any?
@@ -4758,7 +4808,7 @@ final class AgentIslandController {
       )
       return
     }
-    lastLayout = layout
+    rememberLayout(layout)
     if state.mode == "expanded" {
       cancelPendingCarrierFrame()
     }
@@ -5255,8 +5305,12 @@ final class AgentIslandController {
       return
     }
     pendingMoveInteraction = nil
+    // Collapse is owned here, not by SwiftUI top-bar taps, so the hit stays
+    // inside the original compact footprint instead of the whole spacer.
     if shouldTreatAsCompactClick(interaction: interaction, screenPoint: screenPoint) {
       eventSink(["type": "expand"])
+    } else if shouldTreatAsCompactCollapseClick(interaction: interaction, screenPoint: screenPoint) {
+      eventSink(["type": "collapse"])
     }
     handleMouseMoved(screenPoint: screenPoint, force: true)
     replayDeferredInteractionUpdateIfNeeded()
@@ -5424,8 +5478,64 @@ final class AgentIslandController {
     guard interaction.mode == .move, !interaction.startLayout.expanded else {
       return false
     }
-    return abs(screenPoint.x - interaction.startMouseX) <= agentIslandClickDragTolerance
+    return isClickWithoutDrag(interaction: interaction, screenPoint: screenPoint)
+  }
+
+  private func shouldTreatAsCompactCollapseClick(
+    interaction: PanelDragInteraction,
+    screenPoint: NSPoint
+  ) -> Bool {
+    guard interaction.mode == .move, interaction.startLayout.expanded else {
+      return false
+    }
+    guard isClickWithoutDrag(interaction: interaction, screenPoint: screenPoint) else {
+      return false
+    }
+    return isCompactFootprintClick(interaction: interaction)
+  }
+
+  private func isClickWithoutDrag(interaction: PanelDragInteraction, screenPoint: NSPoint) -> Bool {
+    abs(screenPoint.x - interaction.startMouseX) <= agentIslandClickDragTolerance
       && abs(screenPoint.y - interaction.startMouseY) <= agentIslandClickDragTolerance
+  }
+
+  /// The screen rectangle where the collapsed island sat. After expand, that
+  /// center strip is blank (hardware-notch Color.clear, or the top-bar spacer).
+  /// Clicking it should fold the island back; toolbar / title live outside it.
+  private func isCompactFootprintClick(interaction: PanelDragInteraction) -> Bool {
+    let layout = interaction.startLayout
+    let footprintWidth = compactCollapseFootprintWidth(layout: layout)
+    let centerX = interaction.startFrame.midX
+    let clickX = interaction.startMouseX
+    guard clickX >= centerX - footprintWidth / 2 && clickX <= centerX + footprintWidth / 2 else {
+      return false
+    }
+    let visualMinX = centerX - layout.width / 2
+    let visualMaxX = centerX + layout.width / 2
+    let sideChrome = layout.hasHardwareNotch
+      ? max(0, (layout.width - layout.notchWidth) / 2)
+      : 0
+    let leadingReserved = max(compactCollapseLeadingReservedWidth, sideChrome)
+    let trailingReserved = max(compactCollapseTrailingReservedWidth, sideChrome)
+    return clickX > visualMinX + leadingReserved
+      && clickX < visualMaxX - trailingReserved
+  }
+
+  private func compactCollapseFootprintWidth(layout: AgentIslandLayout) -> CGFloat {
+    if let remembered = lastCompactIslandWidth, remembered > 0 {
+      return remembered
+    }
+    if layout.hasHardwareNotch {
+      return max(1, layout.notchWidth)
+    }
+    return compactIslandBaseWidth
+  }
+
+  private func rememberLayout(_ layout: AgentIslandLayout) {
+    lastLayout = layout
+    if !layout.expanded, layout.width > 0 {
+      lastCompactIslandWidth = layout.width
+    }
   }
 
   private func shouldPromotePendingMove(interaction: PanelDragInteraction, screenPoint: NSPoint) -> Bool {
@@ -5478,7 +5588,7 @@ final class AgentIslandController {
       frame: frame,
       expanded: lastLayout.expanded
     )
-    lastLayout = AgentIslandLayout.compute(
+    rememberLayout(AgentIslandLayout.compute(
       state: model.state,
       availableFrameWidth: frame.width,
       locallyHovered: model.locallyHovered,
@@ -5486,7 +5596,7 @@ final class AgentIslandController {
       screenMetrics: model.screenMetrics,
       hardwareNotchLayoutEnabled: hardwareNotchLayoutEnabled,
       preferredContentWidth: currentContentWidth(frame: frame, layout: lastLayout)
-    )
+    ))
     let nextContentWidth = currentContentWidth(frame: frame, layout: lastLayout)
     if animatedSnap {
       beginCompactSnapLayoutAnimation()
@@ -6298,10 +6408,11 @@ enum AgentIslandDebugHarness {
     [
       debugSession("debug-1", title: "Run island review", project: "xdt-maker", detail: "$ pnpm test", phase: "running", agent: "codex", startedAt: now - 42_000),
       debugSession("debug-2", title: "Approve file edit", project: "desktop", detail: "macos-agent-island-helper.swift", phase: "needs-interaction", agent: "claude-code", interactionKind: "permission", startedAt: now - 68_000),
-      debugSession("debug-3", title: "Polish compact status", project: "maker-core", detail: "Thinking", phase: "running", agent: "codex", startedAt: now - 95_000),
+      // running 态才会显示 vendor mark,四家各留一个,`XDT_AGENT_ISLAND_DEBUG=idle` 一眼看全。
+      debugSession("debug-3", title: "Polish compact status", project: "maker-core", detail: "Thinking", phase: "running", agent: "cursor", startedAt: now - 95_000),
       debugSession("debug-4", title: "Render mock payload", project: "native-helper", detail: "", phase: "completed", agent: "codex", startedAt: now - 132_000),
       debugSession("debug-5", title: "Fix notification edge case", project: "main", detail: "Renderer did not ACK", phase: "error", agent: "claude-code", startedAt: now - 164_000),
-      debugSession("debug-6", title: "Update settings copy", project: "renderer", detail: "$ pnpm lint", phase: "running", agent: "codex", startedAt: now - 190_000),
+      debugSession("debug-6", title: "Update settings copy", project: "renderer", detail: "$ pnpm lint", phase: "running", agent: "pi", startedAt: now - 190_000),
       debugSession("debug-7", title: "Archive old task", project: "server", detail: "", phase: "completed", agent: "codex", startedAt: now - 240_000),
     ]
   }

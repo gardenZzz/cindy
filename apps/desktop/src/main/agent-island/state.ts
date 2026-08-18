@@ -404,6 +404,22 @@ export function requestAgentIslandManualExpand(state: AgentIslandState, displayI
   return changed;
 }
 
+export function requestAgentIslandManualCollapse(state: AgentIslandState, now: number): boolean {
+  if (state.layoutDragActive) return false;
+  const changed = state.hoverExpanded
+    || state.hoverIntentAt !== null
+    || state.collapseAt !== null
+    || state.protectedDismissPending;
+  state.hoverIntentAt = null;
+  state.hoverExpanded = false;
+  state.collapseAt = null;
+  state.protectedDismissPending = false;
+  state.hoverCooldownUntil = now + AGENT_ISLAND_HOVER_SHORT_COOLDOWN_MS;
+  // Keep current pointer-zone flags. Hover expand only re-arms after leave+re-enter,
+  // so clicking the original compact position does not immediately pop the island open again.
+  return changed;
+}
+
 export function applyAgentIslandMetadata(
   state: AgentIslandState,
   meta: AgentIslandSessionMeta,
@@ -1959,14 +1975,23 @@ function isGenericRunningStatusDetail(detail: string): boolean {
     || normalized === 'still running';
 }
 
+/** 只是 agent 名字的标题不算信息量,退回项目名/会话号。 */
+const AGENT_NAME_PLACEHOLDER_TITLES = new Set([
+  'codex',
+  'claude',
+  'claude code',
+  'cursor',
+  'pi',
+  'agent',
+]);
+
 function meaningfulSessionTitle(session: AgentIslandSessionState): string | null {
   const title = normalizeInlineText(session.title ?? '');
   if (!title) return null;
   const normalized = title.toLowerCase();
   if (normalized === 'new maker' || normalized === 'untitled') return null;
-  if (normalized === 'codex' || normalized === 'claude' || normalized === 'claude code' || normalized === 'agent') {
-    return null;
-  }
+  // 与 helper 侧 isMeaningfulExpandedTitle 的名单保持一致(四家 + 通称)。
+  if (AGENT_NAME_PLACEHOLDER_TITLES.has(normalized)) return null;
   return title;
 }
 

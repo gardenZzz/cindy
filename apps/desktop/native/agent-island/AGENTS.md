@@ -49,6 +49,21 @@ pnpm --filter desktop preview:island-mascots
 `AGENT_ISLAND_MASCOT_SKINS`（TS 侧），两处必须一致；预览网格从前者派生，所以加完
 第 2 步就能在预览窗口里看到新角色的全部状态。
 
+## Agent 身份 mark（vendor mark）
+
+角色（mascot）之外还有一套 **Agent 身份 mark**：running 的展开卡片用它代替角色头像，
+展开元信息行的 `Claude / Codex / Cursor / Pi` 文案也由同一张映射表出。单一真源是
+`agentIslandSessionVendor(forAgentKind:)` + `AgentIslandSessionVendor.displayName`，
+对齐 renderer 的 `agentKindToVendor`（`components/sidebar/VendorIcon.tsx`）与
+`agentOptions.ts` 的品牌名。**不要在调用点自己写 `contains("codex") ? … : .cc` 这类二元
+判断**——cursor / pi 会被吞成 Claude 身份（本 helper 2026-08 实测过一次）。
+
+新增引擎要改三处：`AgentIslandSessionVendor` 加 case（`displayName` 与
+`AgentIslandVendorMarkImageStore.image(for:)` 的 switch 会**编译报错**提醒补齐）、加一份
+mono SVG 常量（从 renderer 的同名 Mark 组件搬 path，保持 `fill/stroke="black"` 以便当
+template image 染色）、`agentIslandSessionVendor(forAgentKind:)` 加一条。改完用
+`XDT_AGENT_ISLAND_DEBUG=idle` 看：`debugSessions` 里四家各留了一个 running 会话。
+
 ## 本文件的两个 SwiftUI 陷阱
 
 单文件顶层脚本（`main.swift` 语义）下踩过的坑，改这个文件时注意：
