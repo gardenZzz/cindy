@@ -8080,13 +8080,14 @@
         "interval": "상대 간격",
         "cronHint": "달력 시계의 고정 시간대에 실행합니다.",
         "intervalHint": "이전 실행이 끝난 뒤 지정된 시간만큼 기다립니다.",
-        "intervalUnsupportedHint": "현재 정확한 간격은 그대로 유지됩니다. 분 또는 시간 프리셋을 선택하면 대체됩니다.",
+        "intervalUnsupportedHint": "현재 정확한 간격은 그대로 유지됩니다. 초, 분 또는 시간 프리셋을 선택하면 대체됩니다.",
         "currentExact": "현재 값 · {{schedule}}",
-        "exactIntervalPanelHint": "이 정확한 간격을 바꾸려는 경우에만 왼쪽의 분 또는 시간 프리셋을 선택하세요.",
+        "exactIntervalPanelHint": "이 정확한 간격을 바꾸려는 경우에만 왼쪽의 초, 분 또는 시간 프리셋을 선택하세요.",
         "cronChip": "Cron · {{schedule}}",
         "intervalChip": "완료 후 대기 · {{schedule}}"
       },
       "scheduleMenu": {
+        "intervalSeconds": "Seconds (N초마다)",
         "intervalMinutes": "Minutes (N분마다)",
         "interval": "Hourly (N시간마다)",
         "daily": "Daily (매일)",
@@ -8095,12 +8096,15 @@
         "monthly": "Monthly (매월)"
       },
       "schedulePreview": {
+        "everySecond": "매초 실행",
+        "everySeconds": "{{count}}초마다 실행",
         "everyMinute": "매분 실행",
         "everyMinutes": "{{count}}분마다 실행",
         "everyHour": "1시간마다 실행",
         "everyHours": "{{count}}시간마다 실행"
       },
       "scheduleField": {
+        "secondsSuffix": "초",
         "minutesSuffix": "분",
         "hoursSuffix": "시간",
         "daySuffix": "일",

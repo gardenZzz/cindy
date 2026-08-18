@@ -269,9 +269,45 @@ export function intervalMsToCronExpr(intervalMs: number): string | undefined {
   return undefined;
 }
 
+/** 秒级相对间隔的可编辑窗口。窗口外的精确间隔（如 90 秒）仍走 intervalExact 只读呈现。 */
+export const MAX_INTERVAL_SECONDS = 59;
+export const DEFAULT_INTERVAL_SECONDS = 30;
+
+/**
+ * 秒级间隔在 cron 里表达不了（5 字段 cron 最细到分钟），intervalMs 才是权威值。
+ * cronExpr 仍是引擎创建时要校验的必填占位，取最细的 cron 粒度「每分钟」——
+ * 用户显式切回 Cron 模式时也落到它。
+ */
+export const INTERVAL_SECONDS_CRON_EXPR = '* * * * *';
+
+/** intervalMs → 可编辑的整秒数；非 1-59 整秒（含 ≥1 分钟）返回 undefined。 */
+export function intervalMsToSeconds(intervalMs: number): number | undefined {
+  if (!Number.isInteger(intervalMs) || intervalMs % 1_000 !== 0) return undefined;
+  const seconds = intervalMs / 1_000;
+  return seconds >= 1 && seconds <= MAX_INTERVAL_SECONDS ? seconds : undefined;
+}
+
+/** 相对间隔的时长文案（"30 秒" / "5 分钟"）：取能整除的最大单位，交给 Intl 本地化。 */
+export function formatIntervalDuration(intervalMs: number, locale: string): string {
+  const units: ReadonlyArray<{ factor: number; unit: string }> = [
+    { factor: 24 * 60 * 60_000, unit: 'day' },
+    { factor: 60 * 60_000, unit: 'hour' },
+    { factor: 60_000, unit: 'minute' },
+    { factor: 1_000, unit: 'second' },
+    { factor: 1, unit: 'millisecond' },
+  ];
+  const selected = units.find(({ factor }) => intervalMs % factor === 0) ?? units[units.length - 1];
+  return new Intl.NumberFormat(locale, {
+    style: 'unit',
+    unit: selected.unit,
+    unitDisplay: 'long',
+  }).format(intervalMs / selected.factor);
+}
+
 export type ScheduleTimingPresentation =
   | { kind: 'cron'; displayCronExpr: string }
   | { kind: 'intervalPreset'; displayCronExpr: string }
+  | { kind: 'intervalSeconds'; seconds: number }
   | { kind: 'intervalExact' };
 
 /**
@@ -283,6 +319,8 @@ export function resolveScheduleTimingPresentation(
   intervalMs: number | undefined,
 ): ScheduleTimingPresentation {
   if (intervalMs === undefined) return { kind: 'cron', displayCronExpr: cronExpr };
+  const seconds = intervalMsToSeconds(intervalMs);
+  if (seconds !== undefined) return { kind: 'intervalSeconds', seconds };
   const displayCronExpr = intervalMsToCronExpr(intervalMs);
   return displayCronExpr
     ? { kind: 'intervalPreset', displayCronExpr }

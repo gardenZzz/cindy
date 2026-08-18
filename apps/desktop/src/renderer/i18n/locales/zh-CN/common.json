@@ -8080,13 +8080,14 @@
         "interval": "相对间隔",
         "cronHint": "按照日历时钟的固定时间槽位运行。",
         "intervalHint": "上一次运行完成后，再等待指定时长。",
-        "intervalUnsupportedHint": "当前精确间隔会原样保留；选择分钟或小时预设后才会替换。",
+        "intervalUnsupportedHint": "当前精确间隔会原样保留；选择秒、分钟或小时预设后才会替换。",
         "currentExact": "当前值 · {{schedule}}",
-        "exactIntervalPanelHint": "仅在需要替换当前精确间隔时，才选择左侧的分钟或小时预设。",
+        "exactIntervalPanelHint": "仅在需要替换当前精确间隔时，才选择左侧的秒、分钟或小时预设。",
         "cronChip": "Cron · {{schedule}}",
         "intervalChip": "完成后计时 · {{schedule}}"
       },
       "scheduleMenu": {
+        "intervalSeconds": "Seconds（每 N 秒）",
         "intervalMinutes": "Minutes（每 N 分钟）",
         "interval": "Hourly（每 N 小时）",
         "daily": "Daily（每天）",
@@ -8095,12 +8096,15 @@
         "monthly": "Monthly（每月某天）"
       },
       "schedulePreview": {
+        "everySecond": "每秒运行",
+        "everySeconds": "每 {{count}} 秒运行",
         "everyMinute": "每分钟运行",
         "everyMinutes": "每 {{count}} 分钟运行",
         "everyHour": "每 1 小时运行",
         "everyHours": "每 {{count}} 小时运行"
       },
       "scheduleField": {
+        "secondsSuffix": "秒",
         "minutesSuffix": "分钟",
         "hoursSuffix": "小时",
         "daySuffix": "日",

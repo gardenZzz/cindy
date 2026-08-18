@@ -47,7 +47,11 @@ import {
   configToCron,
   cronExprToIntervalMs,
   cronToConfig,
+  DEFAULT_INTERVAL_SECONDS,
   DEFAULT_SCHEDULE_INTERVAL_MS,
+  formatIntervalDuration,
+  INTERVAL_SECONDS_CRON_EXPR,
+  MAX_INTERVAL_SECONDS,
   resolveScheduleTimingPresentation,
   summarizeConfig,
   switchScheduleTimingMode,
@@ -112,6 +116,12 @@ export const ChipButton = React.forwardRef<HTMLButtonElement, ChipButtonProps>(f
     </button>
   );
 });
+
+/** 时间编辑器右侧参数面板的统一容器（秒 / cron 预设两种面板共用）。 */
+const PANEL_CLASS = cn(
+  'min-w-0 flex-1 rounded-xl border p-2 shadow-lg',
+  'border-[var(--cmd-palette-border)] bg-[var(--cmd-palette-bg)] dark:border-[var(--cmd-palette-border)] dark:bg-[var(--cmd-palette-bg)]',
+);
 
 const POPOVER_BASE = cn(
   'z-[10010] rounded-xl border p-2 shadow-lg',
@@ -323,7 +333,9 @@ type EditableScheduleMenuMode =
   | 'weekdays'
   | 'weekly'
   | 'monthly';
-type ScheduleMenuMode = EditableScheduleMenuMode | 'exactInterval';
+// 'intervalSeconds' 不进 EditableScheduleMenuMode：秒级间隔没有等价 cron，
+// 不参与 CodexScheduleConfig 那套 cron 往返，由 intervalMs 直接驱动。
+type ScheduleMenuMode = EditableScheduleMenuMode | 'exactInterval' | 'intervalSeconds';
 
 // Note: these mode strings mirror codex i18n keys (settings.automations.scheduleMode.*),
 // kept stable as IDs. Display labels are looked up via t('scheduler.chips.scheduleMenu.<mode>').
@@ -337,26 +349,12 @@ const SCHEDULE_MENU_MODES: ReadonlyArray<EditableScheduleMenuMode> = [
   'monthly',
 ];
 
-const INTERVAL_MENU_MODES: ReadonlyArray<EditableScheduleMenuMode> = [
+// 秒放最前 — 与 Minutes 同理由，粒度从细到粗。
+const INTERVAL_MENU_MODES: ReadonlyArray<ScheduleMenuMode> = [
+  'intervalSeconds',
   'intervalMinutes',
   'interval',
 ];
-
-function formatIntervalDuration(intervalMs: number, locale: string): string {
-  const units: ReadonlyArray<{ factor: number; unit: string }> = [
-    { factor: 24 * 60 * 60_000, unit: 'day' },
-    { factor: 60 * 60_000, unit: 'hour' },
-    { factor: 60_000, unit: 'minute' },
-    { factor: 1_000, unit: 'second' },
-    { factor: 1, unit: 'millisecond' },
-  ];
-  const selected = units.find(({ factor }) => intervalMs % factor === 0) ?? units[units.length - 1];
-  return new Intl.NumberFormat(locale, {
-    style: 'unit',
-    unit: selected.unit,
-    unitDisplay: 'long',
-  }).format(intervalMs / selected.factor);
-}
 
 const WEEKDAY_SHORT: Record<number, string> = {
   1: 'Mo',
@@ -383,9 +381,10 @@ export function ScheduleChip({
   const [open, setOpen] = useState(false);
   const timingMode = intervalMs === undefined ? 'cron' : 'interval';
   const timingPresentation = resolveScheduleTimingPresentation(cronExpr, intervalMs);
-  const displayCronExpr = timingPresentation.kind === 'intervalExact'
-    ? cronExpr
-    : timingPresentation.displayCronExpr;
+  const displayCronExpr =
+    timingPresentation.kind === 'cron' || timingPresentation.kind === 'intervalPreset'
+      ? timingPresentation.displayCronExpr
+      : cronExpr;
   const [config, setConfig] = useState<CodexScheduleConfig>(() => normalizeScheduleConfig(cronToConfig(displayCronExpr)));
 
   useEffect(() => {
@@ -398,7 +397,12 @@ export function ScheduleChip({
 
   const activeMode: ScheduleMenuMode = timingPresentation.kind === 'intervalExact'
     ? 'exactInterval'
-    : toMenuMode(config);
+    : timingPresentation.kind === 'intervalSeconds'
+      ? 'intervalSeconds'
+      : toMenuMode(config);
+  const intervalSeconds = timingPresentation.kind === 'intervalSeconds'
+    ? timingPresentation.seconds
+    : DEFAULT_INTERVAL_SECONDS;
   const availableModes: ReadonlyArray<ScheduleMenuMode> = timingMode === 'interval'
     ? (timingPresentation.kind === 'intervalExact'
       ? ['exactInterval', ...INTERVAL_MENU_MODES]
@@ -443,6 +447,23 @@ export function ScheduleChip({
       patch.intervalMinutes = config.mode === 'intervalMinutes' ? config.intervalMinutes : 5;
     }
     update(patch);
+  };
+
+  // 秒级间隔绕开 config/cron 往返：intervalMs 是权威值，cronExpr 只写占位。
+  const setIntervalSeconds = (seconds: number) => {
+    onChangeSchedule({
+      cronExpr: INTERVAL_SECONDS_CRON_EXPR,
+      intervalMs: clamp(seconds, 1, MAX_INTERVAL_SECONDS) * 1_000,
+    });
+  };
+
+  const selectMode = (mode: ScheduleMenuMode) => {
+    if (mode === 'exactInterval') return;
+    if (mode === 'intervalSeconds') {
+      setIntervalSeconds(intervalSeconds);
+      return;
+    }
+    setMode(mode);
   };
 
   return (
@@ -502,7 +523,7 @@ export function ScheduleChip({
                   <button
                     key={mode}
                     type="button"
-                    onClick={() => mode !== 'exactInterval' && setMode(mode)}
+                    onClick={() => selectMode(mode)}
                     className={cn(
                       'flex h-[34px] w-full items-center rounded-lg px-3 text-left text-sm font-medium transition-colors',
                       active
@@ -520,6 +541,8 @@ export function ScheduleChip({
             </div>
             {activeMode === 'exactInterval' ? (
               <ExactIntervalPanel summary={scheduleSummary} />
+            ) : activeMode === 'intervalSeconds' ? (
+              <IntervalSecondsPanel seconds={intervalSeconds} onChange={setIntervalSeconds} />
             ) : (
               <ScheduleConfigPanel
                 mode={activeMode}
@@ -549,6 +572,35 @@ function ExactIntervalPanel({ summary }: { summary: string }) {
   );
 }
 
+function IntervalSecondsPanel({
+  seconds,
+  onChange,
+}: {
+  seconds: number;
+  onChange: (seconds: number) => void;
+}) {
+  const { t } = useTranslation();
+  return (
+    <div className={PANEL_CLASS}>
+      <div className="flex flex-col gap-2">
+        <div className="flex min-h-[34px] w-full items-center gap-1.5">
+          <IntervalNumberInput value={seconds} max={MAX_INTERVAL_SECONDS} onChange={onChange} />
+          <span className="text-13 text-[var(--cmd-palette-item-meta)] dark:text-[var(--settings-section-desc)]">
+            {t('scheduler.chips.scheduleField.secondsSuffix')}
+          </span>
+        </div>
+        <PreviewPill
+          text={
+            seconds === 1
+              ? t('scheduler.chips.schedulePreview.everySecond')
+              : t('scheduler.chips.schedulePreview.everySeconds', { count: seconds })
+          }
+        />
+      </div>
+    </div>
+  );
+}
+
 function ScheduleConfigPanel({
   mode,
   config,
@@ -567,13 +619,14 @@ function ScheduleConfigPanel({
   };
 
   return (
-    <div className="min-w-0 flex-1 rounded-xl border border-[var(--cmd-palette-border)] bg-[var(--cmd-palette-bg)] p-2 shadow-lg dark:border-[var(--cmd-palette-border)] dark:bg-[var(--cmd-palette-bg)]">
+    <div className={PANEL_CLASS}>
       <div className="flex flex-col gap-2">
         {mode === 'intervalMinutes' && (
           <>
             <div className="flex min-h-[34px] w-full items-center gap-1.5">
-              <IntervalMinutesInput
+              <IntervalNumberInput
                 value={panelConfig.intervalMinutes}
+                max={59}
                 onFocus={commit}
                 onChange={(intervalMinutes) => onUpdate({ mode: 'intervalMinutes', intervalMinutes })}
               />
@@ -591,8 +644,9 @@ function ScheduleConfigPanel({
         {mode === 'interval' && (
           <>
             <div className="flex min-h-[34px] w-full items-center gap-1.5">
-              <IntervalHoursInput
+              <IntervalNumberInput
                 value={panelConfig.intervalHours}
+                max={23}
                 onFocus={commit}
                 onChange={(intervalHours) => onUpdate({ mode: 'interval', intervalHours })}
               />
@@ -626,13 +680,16 @@ function ScheduleConfigPanel({
   );
 }
 
-function IntervalHoursInput({
+/** 秒 / 分钟 / 小时三种间隔共用的 1..max 两位数输入。 */
+function IntervalNumberInput({
   value,
+  max,
   onFocus,
   onChange,
 }: {
   value: number;
-  onFocus: () => void;
+  max: number;
+  onFocus?: () => void;
   onChange: (value: number) => void;
 }) {
   const [draft, setDraft] = useState(String(value));
@@ -654,42 +711,7 @@ function IntervalHoursInput({
         const digits = e.target.value.replace(/\D/g, '').slice(0, 2);
         setDraft(digits);
         if (!digits) return;
-        onChange(clamp(Number(digits), 1, 23));
-      }}
-      className={inputPillClass('w-[68px] text-center')}
-    />
-  );
-}
-
-function IntervalMinutesInput({
-  value,
-  onFocus,
-  onChange,
-}: {
-  value: number;
-  onFocus: () => void;
-  onChange: (value: number) => void;
-}) {
-  const [draft, setDraft] = useState(String(value));
-
-  useEffect(() => {
-    setDraft(String(value));
-  }, [value]);
-
-  return (
-    <input
-      type="text"
-      inputMode="numeric"
-      pattern="[0-9]*"
-      maxLength={2}
-      value={draft}
-      onFocus={onFocus}
-      onBlur={() => setDraft(String(value))}
-      onChange={(e) => {
-        const digits = e.target.value.replace(/\D/g, '').slice(0, 2);
-        setDraft(digits);
-        if (!digits) return;
-        onChange(clamp(Number(digits), 1, 59));
+        onChange(clamp(Number(digits), 1, max));
       }}
       className={inputPillClass('w-[68px] text-center')}
     />

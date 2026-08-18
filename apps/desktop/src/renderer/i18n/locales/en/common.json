@@ -8092,13 +8092,14 @@
         "interval": "Relative interval",
         "cronHint": "Runs at calendar clock slots.",
         "intervalHint": "Waits this long after the previous run finishes.",
-        "intervalUnsupportedHint": "This exact interval is preserved. Choosing a minute or hour preset will replace it.",
+        "intervalUnsupportedHint": "This exact interval is preserved. Choosing a second, minute, or hour preset will replace it.",
         "currentExact": "Current · {{schedule}}",
-        "exactIntervalPanelHint": "Choose a minute or hour preset on the left only when you want to replace this exact interval.",
+        "exactIntervalPanelHint": "Choose a second, minute, or hour preset on the left only when you want to replace this exact interval.",
         "cronChip": "Cron · {{schedule}}",
         "intervalChip": "After completion · {{schedule}}"
       },
       "scheduleMenu": {
+        "intervalSeconds": "Seconds (every N seconds)",
         "intervalMinutes": "Minutes (every N minutes)",
         "interval": "Hourly (every N hours)",
         "daily": "Daily (every day)",
@@ -8107,12 +8108,15 @@
         "monthly": "Monthly (specific day)"
       },
       "schedulePreview": {
+        "everySecond": "Runs every second",
+        "everySeconds": "Runs every {{count}} seconds",
         "everyMinute": "Runs every minute",
         "everyMinutes": "Runs every {{count}} minutes",
         "everyHour": "Runs every 1 hour",
         "everyHours": "Runs every {{count}} hours"
       },
       "scheduleField": {
+        "secondsSuffix": "second(s)",
         "minutesSuffix": "minute(s)",
         "hoursSuffix": "hour(s)",
         "daySuffix": "Day",

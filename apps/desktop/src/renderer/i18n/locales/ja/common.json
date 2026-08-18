@@ -8080,13 +8080,14 @@
         "interval": "相対間隔",
         "cronHint": "カレンダー時刻の固定スロットで実行します。",
         "intervalHint": "前回の実行完了後に指定時間待ってから実行します。",
-        "intervalUnsupportedHint": "現在の正確な間隔は保持されます。分または時間のプリセットを選ぶと置き換わります。",
+        "intervalUnsupportedHint": "現在の正確な間隔は保持されます。秒、分、または時間のプリセットを選ぶと置き換わります。",
         "currentExact": "現在値 · {{schedule}}",
-        "exactIntervalPanelHint": "この正確な間隔を置き換える場合にのみ、左側の分または時間プリセットを選択してください。",
+        "exactIntervalPanelHint": "この正確な間隔を置き換える場合にのみ、左側の秒、分、または時間プリセットを選択してください。",
         "cronChip": "Cron · {{schedule}}",
         "intervalChip": "完了後に計時 · {{schedule}}"
       },
       "scheduleMenu": {
+        "intervalSeconds": "Seconds（N 秒ごと）",
         "intervalMinutes": "Minutes（N 分ごと）",
         "interval": "Hourly（N 時間ごと）",
         "daily": "Daily（毎日）",
@@ -8095,12 +8096,15 @@
         "monthly": "Monthly（毎月）"
       },
       "schedulePreview": {
+        "everySecond": "毎秒実行",
+        "everySeconds": "{{count}} 秒ごとに実行",
         "everyMinute": "毎分実行",
         "everyMinutes": "{{count}} 分ごとに実行",
         "everyHour": "1 時間ごとに実行",
         "everyHours": "{{count}} 時間ごとに実行"
       },
       "scheduleField": {
+        "secondsSuffix": "秒",
         "minutesSuffix": "分",
         "hoursSuffix": "時間",
         "daySuffix": "日",
