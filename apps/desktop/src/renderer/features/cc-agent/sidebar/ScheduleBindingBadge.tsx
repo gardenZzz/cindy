@@ -18,6 +18,7 @@ import { cn } from '@/lib/utils';
 import { Tooltip } from '@/components/ui/tooltip';
 import {
   cronToConfig,
+  formatIntervalDuration,
   summarizeConfig,
 } from '@/features/scheduler/lib/cronCodexPreset';
 import { scheduleFocusPath } from '@/features/scheduler/lib/scheduleSessionBinding';
@@ -33,14 +34,22 @@ export interface ScheduleBindingBadgeProps {
   activeForeground?: boolean;
 }
 
-/** 单条 schedule 的触发频率文案(与 RunHistoryPane 同源逻辑)。 */
+/**
+ * 单条 schedule 的触发频率文案(与 RunHistoryPane 同源逻辑)。相对间隔任务按
+ * intervalMs 呈现 —— cronExpr 在该模式下只是占位,秒级间隔恒为 `* * * * *`。
+ */
 function frequencyText(
   schedule: Schedule,
   t: ReturnType<typeof useTranslation>['t'],
+  locale: string,
 ): string {
-  return schedule.manual
-    ? t('scheduler.detail.manualTrigger')
-    : summarizeConfig(cronToConfig(schedule.cronExpr));
+  if (schedule.manual) return t('scheduler.detail.manualTrigger');
+  if (schedule.intervalMs !== undefined) {
+    return t('scheduler.chips.timingMode.intervalChip', {
+      schedule: formatIntervalDuration(schedule.intervalMs, locale),
+    });
+  }
+  return summarizeConfig(cronToConfig(schedule.cronExpr));
 }
 
 export function ScheduleBindingBadge({
@@ -49,7 +58,7 @@ export function ScheduleBindingBadge({
   className,
   activeForeground = false,
 }: ScheduleBindingBadgeProps) {
-  const { t } = useTranslation();
+  const { t, i18n } = useTranslation();
   const navigate = useNavigate();
   if (schedules.length === 0) return null;
 
@@ -94,7 +103,7 @@ export function ScheduleBindingBadge({
               </span>
               <span>
                 {t('ccAgent.sidebar.scheduleBinding.tooltipFrequency', {
-                  frequency: frequencyText(s, t),
+                  frequency: frequencyText(s, t, i18n.resolvedLanguage ?? i18n.language),
                 })}
               </span>
             </div>

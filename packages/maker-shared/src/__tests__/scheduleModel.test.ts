@@ -124,6 +124,13 @@ describe('schedule model', () => {
     });
   });
 
+  it('keeps sub-minute relative intervals in seconds instead of rounding to 每 1 分钟', () => {
+    expect(summarizeSchedule(schedule({ intervalMs: 30_000 }), [], NOW).detail)
+      .toContain('每 30 秒');
+    expect(summarizeSchedule(schedule({ intervalMs: 10 * 60_000 }), [], NOW).detail)
+      .toContain('每 10 分钟');
+  });
+
   it('summarizes persistent and bound schedule session behavior', () => {
     expect(summarizeSchedule(schedule({
       persistentSession: true,

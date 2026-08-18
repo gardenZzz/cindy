@@ -383,6 +383,8 @@ function formatRelativePast(timestamp: number, now: number): string {
 }
 
 function formatDuration(ms: number): string {
+  // 秒级相对间隔（桌面端可设 1-59 秒）四舍五入到分钟就会谎报成"每 1 分钟"。
+  if (ms < 60_000) return `${Math.max(1, Math.round(ms / 1_000))} 秒`;
   if (ms < 3_600_000) return `${Math.max(1, Math.round(ms / 60_000))} 分钟`;
   if (ms < 86_400_000) return `${Math.round(ms / 3_600_000)} 小时`;
   return `${Math.round(ms / 86_400_000)} 天`;

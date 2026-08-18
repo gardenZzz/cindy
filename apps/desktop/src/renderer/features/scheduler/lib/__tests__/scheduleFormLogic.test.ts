@@ -43,7 +43,9 @@ import {
 import type { ScheduleFormState } from '../scheduleFormLogic';
 import {
   cronExprToIntervalMs,
+  INTERVAL_SECONDS_CRON_EXPR,
   intervalMsToCronExpr,
+  intervalMsToSeconds,
   resolveScheduleTimingPresentation,
   switchScheduleTimingMode,
 } from '../cronCodexPreset';
@@ -488,6 +490,31 @@ describe('schedule timing mode conversion', () => {
     expect(resolveScheduleTimingPresentation('*/5 * * * *', 10 * 60_000)).toEqual({
       kind: 'intervalPreset',
       displayCronExpr: '*/10 * * * *',
+    });
+  });
+
+  it('presents whole-second intervals as an editable seconds preset', () => {
+    expect(resolveScheduleTimingPresentation(INTERVAL_SECONDS_CRON_EXPR, 30_000)).toEqual({
+      kind: 'intervalSeconds',
+      seconds: 30,
+    });
+    expect(resolveScheduleTimingPresentation(INTERVAL_SECONDS_CRON_EXPR, 1_000)).toEqual({
+      kind: 'intervalSeconds',
+      seconds: 1,
+    });
+    // 60 秒是分钟预设的地盘，秒窗口只到 59；再往上（90s）/ 非整秒（1.5s）留给 exact。
+    expect(resolveScheduleTimingPresentation('* * * * *', 60_000)).toEqual({
+      kind: 'intervalPreset',
+      displayCronExpr: '* * * * *',
+    });
+    expect(intervalMsToSeconds(90_000)).toBeUndefined();
+    expect(intervalMsToSeconds(1_500)).toBeUndefined();
+  });
+
+  it('falls back to the every-minute placeholder when a seconds interval switches to cron', () => {
+    expect(switchScheduleTimingMode(INTERVAL_SECONDS_CRON_EXPR, 30_000, 'cron')).toEqual({
+      cronExpr: '* * * * *',
+      intervalMs: undefined,
     });
   });
 
