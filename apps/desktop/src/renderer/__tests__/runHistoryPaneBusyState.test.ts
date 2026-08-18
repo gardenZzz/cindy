@@ -9,6 +9,7 @@ import { RunHistoryPane } from '@/features/scheduler/components/RunHistoryPane';
 
 vi.mock('react-i18next', () => ({
   useTranslation: () => ({
+    i18n: { language: 'zh-CN', resolvedLanguage: 'zh-CN' },
     t: (key: string) => key,
   }),
 }));

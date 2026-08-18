@@ -29,6 +29,7 @@ vi.mock('react-i18next', () => ({
     init: () => {},
   },
   useTranslation: () => ({
+    i18n: { language: 'zh-CN', resolvedLanguage: 'zh-CN' },
     t: (key: string, options?: Record<string, unknown>) => {
       const count = Number(options?.count ?? 0);
       const dict: Record<string, string> = {
