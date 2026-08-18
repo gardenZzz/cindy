@@ -131,6 +131,7 @@ function workerCreateParams(leadSessionId: string, worker: CreateWorkerSpec) {
     role: worker.role,
     agent: worker.agent,
     model: worker.model,
+    providerId: worker.provider_id,
     effort: worker.effort,
     fast: worker.fast,
     label: worker.label,

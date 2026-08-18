@@ -1521,6 +1521,7 @@ interface OrcaCollabService {
     role: string;
     agent: AgentKind;
     model?: string;
+    providerId?: string;
     effort?: 'minimal' | 'low' | 'medium' | 'high' | 'xhigh' | 'max' | 'ultra';
     fast?: boolean;
     workerPermissionMode?: OrcaWorkerPermissionMode;
@@ -1681,10 +1682,30 @@ interface OrcaCollabService {
   listAvailableModels: (params: { agent?: AgentKind }) => Promise<
     | {
         ok: true;
-        codex?: Array<{ id: string; label: string }>;
-        claude_code?: Array<{ id: string; label: string }>;
-        cursor?: Array<{ id: string; label: string }>;
-        pi?: Array<{ id: string; label: string }>;
+        codex?: Array<{
+          id: string;
+          label: string;
+          providers?: Array<{ id: string; name: string }>;
+          defaultProviderId?: string | null;
+        }>;
+        claude_code?: Array<{
+          id: string;
+          label: string;
+          providers?: Array<{ id: string; name: string }>;
+          defaultProviderId?: string | null;
+        }>;
+        cursor?: Array<{
+          id: string;
+          label: string;
+          providers?: Array<{ id: string; name: string }>;
+          defaultProviderId?: string | null;
+        }>;
+        pi?: Array<{
+          id: string;
+          label: string;
+          providers?: Array<{ id: string; name: string }>;
+          defaultProviderId?: string | null;
+        }>;
       }
     | { ok: false; errorCode: string; message: string }
   >;
@@ -10047,12 +10068,26 @@ export function registerMakerIpc(maker: Maker, options: RegisterMakerIpcOptions)
     listAvailableModels: async ({ agent }) => {
       try {
         const agents: AgentKind[] = agent ? [agent] : ['codex', 'claude-code', 'cursor', 'pi'];
-        const result: Record<string, Array<{ id: string; label: string }>> = {};
+        const providerRouting = await getProviderRoutingContext();
+        const result: Record<string, Array<{
+          id: string;
+          label: string;
+          providers: Array<{ id: string; name: string }>;
+          defaultProviderId: string | null;
+        }>> = {};
         for (const a of agents) {
           const caps = maker.getCapabilities(a);
           // key 必须区分 pi/cursor,否则与 claude_code 键混淆。
           const key = a === 'codex' ? 'codex' : a === 'cursor' ? 'cursor' : a === 'pi' ? 'pi' : 'claude_code';
-          result[key] = caps.availableModels.map((m) => ({ id: m.id, label: m.displayName }));
+          const providers = providerRouting.availability[a] ?? [];
+          result[key] = caps.availableModels.map((m) => ({
+            id: m.id,
+            label: m.displayName,
+            providers: providers
+              .filter((provider) => provider.models.includes(m.id))
+              .map((provider) => ({ id: provider.id, name: provider.name })),
+            defaultProviderId: providerRouting.resolveDefaultProviderIdForModel(a, m.id),
+          }));
         }
         return { ok: true, ...result };
       } catch (err) {
@@ -13668,8 +13703,7 @@ export function registerMakerIpc(maker: Maker, options: RegisterMakerIpcOptions)
   registerIOSSimulatorHandlers(
     createElectronIpcHandlerRegistry(),
     {
-      isPluginAvailable: (workingDir) =>
-        getIOSSimulatorPluginAccessDecision(workingDir).allowed,
+      getPluginAccess: getIOSSimulatorPluginAccessDecision,
       getSessionContext: async (sessionId) => {
         const liveSession = maker.getSession(sessionId);
         if (liveSession) return { workingDir: liveSession.workDir };
