@@ -78,7 +78,8 @@ export const PACKAGED_APP_NAME = 'Cindy';
  */
 export const PACKAGED_APP_NAME_BY_REGION = Object.freeze({
   cn: 'Cindy',
-  global: 'Cindy',
+  // ponytail: 本地自用补丁,勿提交 —— 镜像 brandIdentity 的 global: 'CindyX'。
+  global: 'CindyX',
   dev: 'CindyDev',
 });
 
