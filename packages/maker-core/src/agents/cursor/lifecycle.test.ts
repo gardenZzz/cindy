@@ -301,6 +301,7 @@ async function bootWithTransport(
     binaryPath: '/dev/null/cursor-agent',
     logger,
     networkConfigReader: () => undefined,
+    accountIdentityReader: () => undefined,
   });
 
   // Respond to initialize + session create/load as requests arrive.
@@ -1163,6 +1164,7 @@ describe('CursorAgent lifecycle (FakeTransport)', () => {
       binaryPath: '/dev/null/cursor-agent',
       logger: createConsoleLogger(),
       networkConfigReader: () => undefined,
+    accountIdentityReader: () => undefined,
       prepareAcpMcpServers,
     });
     const handle = await agent.startSession({

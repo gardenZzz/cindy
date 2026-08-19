@@ -806,6 +806,12 @@ export interface AgentDeps {
   networkConfigReader?: import('./cursor/isolatedConfig.js').CursorNetworkConfigReader;
 
   /**
+   * Cursor 用户全局 cli-config 的账号身份读取器。缺省时由 CursorAgent 显式使用
+   * 生产读取器；单测应注入空读取器，避免接触开发者真实 HOME。
+   */
+  accountIdentityReader?: import('./cursor/isolatedConfig.js').CursorAccountIdentityReader;
+
+  /**
    * Host-owned Auto permission fallback. A vendor reviewer timeout/unavailable
    * result has already blocked the current action; the host persists this session
    * from Auto to Ask and broadcasts the selector/toast update. Fire-and-forget:

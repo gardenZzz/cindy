@@ -65,6 +65,7 @@ describe('CursorAgent available_commands_update → listAgentSkills', () => {
       binaryPath: '/tmp/fake-cursor-agent',
       logger: createConsoleLogger('cursor-cmds-test'),
       networkConfigReader: () => undefined,
+    accountIdentityReader: () => undefined,
     });
 
     const origWrite = transport.writeLine.bind(transport);

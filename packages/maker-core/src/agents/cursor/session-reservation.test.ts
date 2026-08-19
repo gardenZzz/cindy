@@ -162,6 +162,7 @@ async function bootSession(
     binaryPath: '/dev/null/cursor-agent',
     logger: createConsoleLogger('cursor-session-reservation'),
     networkConfigReader: () => undefined,
+    accountIdentityReader: () => undefined,
   });
 
   const origWrite = transport.writeLine.bind(transport);
