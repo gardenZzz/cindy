@@ -1283,19 +1283,28 @@ function handleAssistant(
   // 未知块 fail-safe 为有内容，避免 SDK 新 block 被误续跑。
   // 逐条覆盖写, turn end 时留下的就是最后一条 assistant 消息的判定(见 TurnState 字段注释)。
   ctx.turn.lastAssistantMsgHadSubstance = content.some(assistantBlockHasSubstance);
+  // 该 parent 已经流过 text_delta 时,完整 text block 不再累加 uiEmittedText
+  // (两条路都会 push,但 renderer 在途流式会丢弃 isFinal)。必须在遍历 content 之前
+  // 一次算完:下面的清理循环会在第一个 text block 就删光该 parent 的 key,逐块重算
+  // 会让同一条消息的第二个 text block 误判成"没流过"而把它再累加一遍。
+  // 不能「完整消息一律不累加」:只发完整 assistant、不发 delta 时 emitted 会恒为 0,
+  // 收尾分支 ① 会把整段正文当缺失尾巴再推一遍,变成用户可见的重复。
+  const messageStreamKey = parentToolUseId ?? '__main__';
+  const messageStreamPrefix = `${messageStreamKey}:`;
+  let hadStreamedText = false;
+  for (const key of ctx.rt.streamStopTokenByKey.keys()) {
+    if (key === messageStreamKey || key.startsWith(messageStreamPrefix)) {
+      hadStreamedText = true;
+      break;
+    }
+  }
   for (const blockRaw of content) {
     const block = blockRaw as { type?: string; text?: string; name?: string; id?: string; input?: unknown; thinking?: string; signature?: string };
     if (block.type === 'text' && typeof block.text === 'string') {
       const parentStreamKey = parentToolUseId ?? '__main__';
       const prefix = `${parentStreamKey}:`;
-      // 该 parent 已经流过 text_delta 时,完整 text block 不再累加 uiEmittedText
-      // (两条路都会 push,但 renderer 在途流式会丢弃 isFinal)。不能「完整消息一律
-      // 不累加」:只发完整 assistant、不发 delta 时 emitted 会恒为 0,收尾分支 ①
-      // 会把整段正文当缺失尾巴再推一遍,变成用户可见的重复。
-      let hadStreamedText = false;
       for (const key of ctx.rt.streamStopTokenByKey.keys()) {
         if (key === parentStreamKey || key.startsWith(prefix)) {
-          hadStreamedText = true;
           ctx.rt.streamStopTokenByKey.delete(key);
         }
       }

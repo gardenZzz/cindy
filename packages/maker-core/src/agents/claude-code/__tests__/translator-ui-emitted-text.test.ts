@@ -222,4 +222,37 @@ describe('Claude Code translator uiEmittedText accounting and truncation fallbac
       emitted: true,
     });
   });
+
+  // 同一条 assistant 携带多个 text block 时,「已流式」必须在遍历 content 之前一次
+  // 算完。逐块重算的话,第一个 block 的清理循环会删光该 parent 的 key,第二个 block
+  // 看到空表就误判成"没流过"、把第二段再累加一遍 —— emitted 变长,本该命中的 tail
+  // 分支退化成 mismatch,兜底又一次静默失效。
+  it('counts every text block once when one assistant message carries several', async () => {
+    const queue = createAsyncQueue<AgentEvent>();
+    const ctx = createCtx();
+
+    pushTextDelta(queue, ctx, '第一段。');
+    pushTextDelta(queue, ctx, '第二段。');
+    translateSdkMessage(
+      {
+        type: 'assistant',
+        message: {
+          content: [
+            { type: 'text', text: '第一段。' },
+            { type: 'text', text: '第二段。' },
+          ],
+        },
+      },
+      queue,
+      ctx,
+    );
+    expect(ctx.turn.uiEmittedText).toBe('第一段。第二段。');
+
+    // 判别性收口: result 比 emitted 多一段尾巴,记账正确时 tail 分支补出「被截断的尾巴。」;
+    // 若第二段被重复累加,前缀比对会 mismatch,这里就一条都补不出来。
+    pushResult(queue, ctx, '第一段。第二段。被截断的尾巴。');
+
+    const events = await drain(queue);
+    expect(textEvents(events).at(-1)).toEqual({ text: '被截断的尾巴。', isFinal: false });
+  });
 });
