@@ -169,6 +169,7 @@ describe('Pi package slash command isolation', () => {
       .toEqual(['compact', 'package-review']);
     expect(mergePiPackageCommands('claude-code', builtin, prompts)).toEqual(builtin);
     expect(mergePiPackageCommands('codex', builtin, prompts)).toEqual(builtin);
+    expect(mergePiPackageCommands('cursor', builtin, prompts)).toEqual(builtin);
   });
 
   it('does not let a package prompt replace a Pi builtin', () => {
@@ -194,5 +195,7 @@ describe('Pi package slash command isolation', () => {
     expect(shouldListPiPackageCommands('pi', true, null)).toBe(false);
     expect(shouldListPiPackageCommands('claude-code', false, null)).toBe(false);
     expect(shouldListPiPackageCommands('codex', false, null)).toBe(false);
+    expect(shouldListPiPackageCommands('cursor', false, null)).toBe(false);
+    expect(shouldListPiPackageCommands('cursor', true, { agentKind: 'cursor' })).toBe(false);
   });
 });
