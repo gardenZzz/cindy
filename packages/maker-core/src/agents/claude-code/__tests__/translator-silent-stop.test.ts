@@ -25,6 +25,7 @@ function createTurnState(): TurnState {
     sawCompactBoundary: false,
     hasEmittedText: false,
     uiEmittedText: '',
+    uiEmittedTextLenAtLastToolUse: 0,
     pendingApiError: null,
     interruptRequested: false,
     generation: 0,
@@ -396,5 +397,83 @@ describe('Claude Code translator silent-stop observation (log only)', () => {
     const events = await drain(queue);
     expect(events.some((e) => e.type === 'error' && (e.data as { reason?: string }).reason === 'empty-response')).toBe(true);
     expect(silentStopWarned(ctx)).toBe(false);
+  });
+
+  it('does NOT mark a tool turn that emitted visible text before trailing empty thinking', async () => {
+    // 本 bug 形态: tool_use 之后已交付正文, 网关再追加一条空 thinking 收尾。
+    const tracker = new UsageTracker();
+    const queue = createAsyncQueue<AgentEvent>();
+    const ctx = createCtx(tracker);
+
+    pushToolUseMessage(queue, ctx);
+    translateSdkMessage(
+      { type: 'assistant', message: { content: [{ type: 'text', text: '这是完整答复。' }] } },
+      queue,
+      ctx,
+    );
+    pushEmptyThinkingMessage(queue, ctx);
+    translateSdkMessage(
+      { type: 'result', stop_reason: 'end_turn', total_cost_usd: 0.1, usage: NON_EMPTY_USAGE },
+      queue,
+      ctx,
+    );
+
+    const events = await drain(queue);
+    expect(silentStopWarned(ctx)).toBe(false);
+    expect(doneSilentStopFlag(events)).toBeUndefined();
+  });
+
+  it('still marks a tool turn with no visible text and thinking-only wrap-up as silent stop', async () => {
+    // 防漏判真 silent-stop(anthropics/claude-code#50597): tool_use 之后没有任何可见正文。
+    const tracker = new UsageTracker();
+    const queue = createAsyncQueue<AgentEvent>();
+    const ctx = createCtx(tracker);
+
+    pushToolUseMessage(queue, ctx);
+    pushEmptyThinkingMessage(queue, ctx);
+    translateSdkMessage(
+      { type: 'result', stop_reason: 'end_turn', total_cost_usd: 0.1, usage: NON_EMPTY_USAGE },
+      queue,
+      ctx,
+    );
+
+    const events = await drain(queue);
+    expect(silentStopWarned(ctx)).toBe(true);
+    expect(doneSilentStopFlag(events)).toBe(true);
+  });
+
+  it('still marks a tool turn whose visible text all arrived before the last tool_use as silent stop', async () => {
+    const tracker = new UsageTracker();
+    const queue = createAsyncQueue<AgentEvent>();
+    const ctx = createCtx(tracker);
+
+    translateSdkMessage(
+      { type: 'stream_event', event: { type: 'message_start', message: { model: 'claude-fable-5', usage: { input_tokens: 1000 } } } },
+      queue,
+      ctx,
+    );
+    translateSdkMessage(
+      { type: 'assistant', message: { content: [{ type: 'text', text: '先读文件。' }] } },
+      queue,
+      ctx,
+    );
+    translateSdkMessage(
+      {
+        type: 'assistant',
+        message: { content: [{ type: 'tool_use', id: 'tool-1', name: 'Read', input: { file_path: '/tmp/a' } }] },
+      },
+      queue,
+      ctx,
+    );
+    pushEmptyThinkingMessage(queue, ctx);
+    translateSdkMessage(
+      { type: 'result', stop_reason: 'end_turn', total_cost_usd: 0.1, usage: NON_EMPTY_USAGE },
+      queue,
+      ctx,
+    );
+
+    const events = await drain(queue);
+    expect(silentStopWarned(ctx)).toBe(true);
+    expect(doneSilentStopFlag(events)).toBe(true);
   });
 });

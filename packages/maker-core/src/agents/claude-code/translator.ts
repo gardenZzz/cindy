@@ -62,6 +62,12 @@ export interface TurnState {
    */
   uiEmittedText: string;
   /**
+   * 最近一次 tool_use 到达时 uiEmittedText.length 的快照。silent-stop 用
+   * 「自最后一次 tool_use 以来有没有产出可见正文」判定：长度仍等于快照则
+   * 视为没交出答复。零 tool 时恒为 0，退化成 uiEmittedText.length === 0。
+   */
+  uiEmittedTextLenAtLastToolUse: number;
+  /**
    * SDK API retry / assistant error envelope 的暂存详情。两者都不是可靠的 turn
    * 终态: Claude Code 可能随后自动重试并返回成功 result。只有最终
    * result.is_error 才把它推成 terminal error；成功 result 直接丢弃，避免下游
@@ -188,6 +194,7 @@ function resetTurnState(turn: TurnState): void {
   turn.sawCompactBoundary = false;
   turn.hasEmittedText = false;
   turn.uiEmittedText = '';
+  turn.uiEmittedTextLenAtLastToolUse = 0;
   turn.pendingApiError = null;
   turn.interruptRequested = false;
   turn.lastAssistantMsgHadSubstance = true;
@@ -1298,6 +1305,7 @@ function handleAssistant(
       }
     } else if (block.type === 'tool_use') {
       ctx.turn.toolUses += 1;
+      ctx.turn.uiEmittedTextLenAtLastToolUse = ctx.turn.uiEmittedText.length;
       // ctx.log.info('SDK ▷ tool_use', {
       //   toolName: block.name,
       //   toolUseId: block.id,
@@ -1868,24 +1876,26 @@ function handleResult(
       source: 'claude-code',
     });
   }
-  // silent-stop 判定: turn 内干过活(有 tool 调用),或整轮没有任何用户可见正文,且最后
-  // 一条 assistant 消息没有实质内容(典型: 只有 thinking 块),result 也没兜出可补的
-  // 文本 —— 上游把 turn 静默收了尾,用户侧表现为"干着干着停了、看起来像正常结束"。已知
-  // 上游形态: 模型偶发 thinking-only 空响应(anthropics/claude-code#50597,
+  // silent-stop 判定: 自最后一次 tool_use 以来没有产出可见正文,且最后一条
+  // assistant 消息没有实质内容(典型: 只有 thinking 块),result 也没兜出可补的
+  // 文本 —— 上游把 turn 静默收了尾,用户侧表现为"干着干着停了、看起来像正常结束"。
+  // 判据看交付语义(uiEmittedText 相对 tool_use 快照有没有增长),不能看最后一条
+  // 消息的形状: 部分网关(经 cliproxyapi 的 gemini flash)会在 end_turn 之后追加
+  // 一条零内容尾巴,把 lastAssistantMsgHadSubstance 抹成 false,但本轮已经交过
+  // 完整答复。零 tool 时快照恒为 0,退化成 uiEmittedText.length === 0。已知真
+  // silent-stop 形态: 模型偶发 thinking-only 空响应(anthropics/claude-code#50597,
   // stop_reason=end_turn)与 SSE 流被静默中断后 SDK 按正常结束处理(#38905, 此形态
-  // stop_reason 常缺失)。与 isEmptyResponseTurn(整轮 0 产出 + usage 全 0)互斥:
-  // 零 tool 但零可见正文也必须命中:第一次自动补发「继续」后,上游可能再次只返回
-  // thinking；旧的 toolUses > 0 守卫会把第二次当正常完成。已有可见正文的零 tool turn
-  // 则不扩张判定。沿用 turn 收尾同款排除项: is_error(另有 error 收尾)、
-  // interruptRequested(用户停止/watchdog)、sawCompactBoundary(compact 轮合法空)。
-  // 命中后事件流仍走正常 Done/done 收尾(记账/收口零变更), 只在 done.data 附加
-  // silentStop 标记交给 host 的自动续跑守卫决策; WARN 日志保留作 dev 排查。
+  // stop_reason 常缺失)。与 isEmptyResponseTurn(整轮 0 产出 + usage 全 0)互斥。
+  // 沿用 turn 收尾同款排除项: is_error(另有 error 收尾)、interruptRequested
+  // (用户停止/watchdog)、sawCompactBoundary(compact 轮合法空)。命中后事件流仍走
+  // 正常 Done/done 收尾(记账/收口零变更), 只在 done.data 附加 silentStop 标记
+  // 交给 host 的自动续跑守卫决策; WARN 日志保留作 dev 排查。
   const isSilentStopTurn =
     !msg.is_error &&
     !ctx.turn.interruptRequested &&
     !ctx.turn.sawCompactBoundary &&
     !isEmptyResponseTurn &&
-    (ctx.turn.toolUses > 0 || ctx.turn.uiEmittedText.length === 0) &&
+    ctx.turn.uiEmittedText.length === ctx.turn.uiEmittedTextLenAtLastToolUse &&
     !ctx.turn.lastAssistantMsgHadSubstance &&
     fallbackTail.length === 0;
   if (isSilentStopTurn) {
