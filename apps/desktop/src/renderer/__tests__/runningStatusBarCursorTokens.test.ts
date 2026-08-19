@@ -22,7 +22,9 @@ describe('RunningStatusBar cursor token degradation', () => {
     const bar = source.slice(barStart, barEnd);
     expect(bar).toContain('hideTokenCount');
     expect(bar).toContain('!sideTaskRunning && !hideTokenCount');
-    // 非 cursor 路径仍渲染 tokens 文案;隐藏门控不得删掉整段计数逻辑。
-    expect(bar).toMatch(/\$\{animatedTokens\} tokens/);
+    // 非 cursor 路径仍渲染 tokens 文案(走 i18n turnTokens + pending 占位);
+    // 隐藏门控不得删掉整段计数逻辑。
+    expect(bar).toContain('formatRunningTokenCount(animatedTokens, visible)');
+    expect(bar).toContain('{tokenText}');
   });
 });
