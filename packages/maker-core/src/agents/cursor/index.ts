@@ -90,6 +90,7 @@ import {
 import { scanCursorCustomizations } from './customization-scanner.js';
 import {
   createCursorIsolatedConfigDir,
+  readUserAccountIdentityFromEnv,
   readUserNetworkConfigFromEnv,
   type CursorModelSeed,
 } from './isolatedConfig.js';
@@ -643,6 +644,8 @@ export class CursorAgent extends BaseAgent {
       stableKey: 'model-discovery',
       userDataPath: opts.userDataPath,
       networkConfigReader: this.deps.networkConfigReader ?? readUserNetworkConfigFromEnv,
+      accountIdentityReader: this.deps.accountIdentityReader ?? readUserAccountIdentityFromEnv,
+      expectedIdentity: authState.identity,
     });
     const client = new AcpClient({
       createTransport:
@@ -927,6 +930,8 @@ export class CursorAgent extends BaseAgent {
       requestedPlanTurn: boolean;
     } | null = null;
     let isolated: ReturnType<typeof createCursorIsolatedConfigDir> | null = null;
+    /** 鉴权门拿到的 email；隔离目录预置账号身份用。未通过鉴权门前保持 undefined。 */
+    let expectedAccountIdentity: string | undefined;
 
     const pushAll = (events: AgentEvent[]): void => {
       for (const ev of events) eventQueue.push(ev);
@@ -968,6 +973,8 @@ export class CursorAgent extends BaseAgent {
         stableKey: opts.sessionId,
         userDataPath,
         networkConfigReader: this.deps.networkConfigReader ?? readUserNetworkConfigFromEnv,
+        accountIdentityReader: this.deps.accountIdentityReader ?? readUserAccountIdentityFromEnv,
+        expectedIdentity: expectedAccountIdentity,
         modelSeed: buildModelSeed(),
       });
       return isolated;
@@ -2312,6 +2319,7 @@ export class CursorAgent extends BaseAgent {
             `cursor not authenticated: ${authState.errorReason ?? 'no_credentials'}`,
           );
         }
+        expectedAccountIdentity = authState.identity;
         if (this.deps.prepareAcpMcpServers) {
           try {
             const prepared = await this.deps.prepareAcpMcpServers({

@@ -118,6 +118,151 @@ describe('DesktopCursorAuthAdapter', () => {
     await expect(adapter.getAuthEnv()).resolves.toEqual({});
   });
 
+  it('TTL 内连续取状态只起一次子进程', async () => {
+    const runCommand = vi.fn(async () => ({
+      stdout: JSON.stringify({
+        isAuthenticated: true,
+        status: 'authenticated',
+        userInfo: { email: 'fake@example.test' },
+      }),
+      stderr: '',
+      code: 0,
+    }));
+    let now = 1_000;
+    const adapter = createDesktopCursorAuthAdapter({
+      binaryPath: '/fake/cursor-agent',
+      runCommand,
+      now: () => now,
+      stateTtlMs: 60_000,
+    });
+    const first = await adapter.getState();
+    const second = await adapter.getState();
+    expect(first).toEqual(second);
+    expect(first).toEqual({
+      authenticated: true,
+      identity: 'fake@example.test',
+      authSource: 'oauth',
+    });
+    expect(runCommand).toHaveBeenCalledTimes(1);
+    expect(runCommand).toHaveBeenCalledWith(
+      ['status', '--format', 'json'],
+      expect.objectContaining({
+        env: expect.objectContaining({ NO_OPEN_BROWSER: '1' }),
+      }),
+    );
+  });
+
+  it('TTL 过期后重新起子进程', async () => {
+    const runCommand = vi.fn(async () => ({
+      stdout: JSON.stringify({
+        isAuthenticated: true,
+        status: 'authenticated',
+        userInfo: { email: 'fake@example.test' },
+      }),
+      stderr: '',
+      code: 0,
+    }));
+    let now = 0;
+    const adapter = createDesktopCursorAuthAdapter({
+      binaryPath: '/fake/cursor-agent',
+      runCommand,
+      now: () => now,
+      stateTtlMs: 50,
+    });
+    await adapter.getState();
+    now = 49;
+    await adapter.getState();
+    expect(runCommand).toHaveBeenCalledTimes(1);
+    now = 50;
+    await adapter.getState();
+    expect(runCommand).toHaveBeenCalledTimes(2);
+  });
+
+  it('登录结算后取状态会重新起子进程', async () => {
+    const { child } = hangingLoginChild();
+    const runCommand = vi.fn(async (args: string[]) => {
+      if (args[0] === 'status') {
+        return {
+          stdout: JSON.stringify({
+            isAuthenticated: true,
+            status: 'authenticated',
+            userInfo: { email: 'after-login@example.test' },
+          }),
+          stderr: '',
+          code: 0,
+        };
+      }
+      return { stdout: '', stderr: '', code: 0 };
+    });
+    const adapter = createDesktopCursorAuthAdapter({
+      binaryPath: '/fake/cursor-agent',
+      runCommand,
+      now: () => 0,
+      stateTtlMs: 60_000,
+      spawnProcess: () => {
+        queueMicrotask(() => child.emit('close', 0));
+        return child;
+      },
+    });
+    await adapter.getState();
+    expect(runCommand.mock.calls.filter((call) => call[0][0] === 'status')).toHaveLength(1);
+    await adapter.triggerLogin();
+    expect(runCommand.mock.calls.filter((call) => call[0][0] === 'status')).toHaveLength(2);
+    await adapter.getState();
+    expect(runCommand.mock.calls.filter((call) => call[0][0] === 'status')).toHaveLength(2);
+  });
+
+  it('登出后取状态会重新起子进程', async () => {
+    const runCommand = vi.fn(async (args: string[]) => {
+      if (args[0] === 'logout') {
+        return { stdout: '', stderr: '', code: 0 };
+      }
+      return {
+        stdout: JSON.stringify({
+          isAuthenticated: true,
+          status: 'authenticated',
+          userInfo: { email: 'fake@example.test' },
+        }),
+        stderr: '',
+        code: 0,
+      };
+    });
+    const adapter = createDesktopCursorAuthAdapter({
+      binaryPath: '/fake/cursor-agent',
+      runCommand,
+      now: () => 0,
+      stateTtlMs: 60_000,
+    });
+    await adapter.getState();
+    await adapter.getState();
+    await adapter.logout();
+    await adapter.getState();
+    expect(runCommand.mock.calls.filter((call) => call[0][0] === 'status')).toHaveLength(2);
+  });
+
+  it('未登录时的返回语义与错误原因不变', async () => {
+    const runCommand = vi.fn(async () => ({
+      stdout: JSON.stringify({ isAuthenticated: false, status: 'unauthenticated' }),
+      stderr: '',
+      code: 0,
+    }));
+    const adapter = createDesktopCursorAuthAdapter({
+      binaryPath: '/fake/cursor-agent',
+      runCommand,
+      now: () => 0,
+      stateTtlMs: 60_000,
+    });
+    await expect(adapter.getState()).resolves.toEqual({
+      authenticated: false,
+      errorReason: 'no_credentials',
+    });
+    await expect(adapter.getState()).resolves.toEqual({
+      authenticated: false,
+      errorReason: 'no_credentials',
+    });
+    expect(runCommand).toHaveBeenCalledTimes(1);
+  });
+
   it('triggerLogin sets NO_OPEN_BROWSER and surfaces login URL via onProgress', async () => {
     const progress: string[] = [];
     const { child } = hangingLoginChild();

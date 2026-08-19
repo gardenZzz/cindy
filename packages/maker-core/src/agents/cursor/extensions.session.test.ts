@@ -106,6 +106,7 @@ async function boot(
     binaryPath: '/dev/null/cursor-agent',
     logger: createConsoleLogger('cursor-ext-session'),
     networkConfigReader: () => undefined,
+    accountIdentityReader: () => undefined,
     ...agentDeps,
   });
 

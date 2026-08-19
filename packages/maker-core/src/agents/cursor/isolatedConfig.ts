@@ -54,6 +54,9 @@ export interface CursorModelSeed {
 /** 读取用户全局 cli-config 的 network 段；测试可注入以隔离真实用户目录。 */
 export type CursorNetworkConfigReader = (baseEnv: NodeJS.ProcessEnv) => unknown;
 
+/** 读取用户全局 cli-config 的账号身份段；测试可注入以隔离真实用户目录。 */
+export type CursorAccountIdentityReader = (baseEnv: NodeJS.ProcessEnv) => unknown;
+
 export interface CreateCursorIsolatedConfigOptions {
   /**
    * Cindy 业务 session id（非上游 sdk session id）。
@@ -68,6 +71,13 @@ export interface CreateCursorIsolatedConfigOptions {
   userDataPath: string;
   /** 可选的 network 来源；未注入时不继承用户配置，使用内置默认值。 */
   networkConfigReader?: CursorNetworkConfigReader;
+  /**
+   * 可选的账号身份来源；未注入时不读取用户配置。
+   * 预置前与 expectedIdentity（email）比对，对不上或不完整则不写。
+   */
+  accountIdentityReader?: CursorAccountIdentityReader;
+  /** 鉴权门已经拿到的身份（email）。缺省或对不上读取器结果时不预置。 */
+  expectedIdentity?: string;
   /** 可选的模型档位预写；省掉建会话后的 set_config_option 往返。 */
   modelSeed?: CursorModelSeed;
 }
@@ -101,6 +111,16 @@ function isStrictlyInside(parent: string, child: string): boolean {
   return rel !== '' && !rel.startsWith(`..${sep}`) && rel !== '..' && !rel.startsWith(sep);
 }
 
+function readUserCliConfigFromEnv(baseEnv: NodeJS.ProcessEnv): Record<string, unknown> | undefined {
+  const dir = baseEnv.CURSOR_CONFIG_DIR?.trim() || join(homedir(), '.cursor');
+  try {
+    const raw = JSON.parse(readFileSync(join(dir, 'cli-config.json'), 'utf8')) as unknown;
+    return isPlainRecord(raw) ? raw : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
 /**
  * 显式读取用户全局 cli-config 的 `network` 段，供生产调用点选择性传入。
  * `useHttp1ForAgent` 是上游对付「h2 stream CANCEL / 反复重连」的逃生阀；
@@ -108,14 +128,40 @@ function isStrictlyInside(parent: string, child: string): boolean {
  * 读不到就 undefined（用默认）。
  */
 export function readUserNetworkConfigFromEnv(baseEnv: NodeJS.ProcessEnv): unknown {
-  const dir = baseEnv.CURSOR_CONFIG_DIR?.trim() || join(homedir(), '.cursor');
+  return readUserCliConfigFromEnv(baseEnv)?.network;
+}
+
+/** 显式读取用户全局 cli-config 的 `authInfo` 段，供生产调用点选择性传入。 */
+export function readUserAccountIdentityFromEnv(baseEnv: NodeJS.ProcessEnv): unknown {
+  return readUserCliConfigFromEnv(baseEnv)?.authInfo;
+}
+
+function emailsMatch(left: string, right: string): boolean {
+  return left.trim().toLowerCase() === right.trim().toLowerCase();
+}
+
+/**
+ * fail-closed：读不到、没有账号身份、没传期望身份、email 对不上 —— 一律不预置。
+ * 读取器抛错也吞掉，不阻断建目录。
+ */
+function resolvePresetAuthInfo(
+  reader: CursorAccountIdentityReader | undefined,
+  expectedIdentity: string | undefined,
+  baseEnv: NodeJS.ProcessEnv,
+): Record<string, unknown> | undefined {
+  const expected = typeof expectedIdentity === 'string' ? expectedIdentity.trim() : '';
+  if (!reader || !expected) return undefined;
+  let raw: unknown;
   try {
-    const raw = JSON.parse(readFileSync(join(dir, 'cli-config.json'), 'utf8')) as unknown;
-    if (typeof raw !== 'object' || raw === null) return undefined;
-    return (raw as Record<string, unknown>).network;
+    raw = reader(baseEnv);
   } catch {
     return undefined;
   }
+  if (!isPlainRecord(raw)) return undefined;
+  const email = raw.email;
+  if (typeof email !== 'string' || !email.trim()) return undefined;
+  if (!emailsMatch(email, expected)) return undefined;
+  return raw;
 }
 
 function isPlainRecord(value: unknown): value is Record<string, unknown> {
@@ -196,10 +242,13 @@ function writeIsolatedCliConfig(
   configDir: string,
   network: unknown,
   modelSeed?: CursorModelSeed,
+  authInfo?: Record<string, unknown>,
 ): void {
   const existing = readExistingCliConfig(configDir);
   const cliConfig: Record<string, unknown> = {
     version: 1,
+    // 预置在 existing 之前：目录已被上游写热时既有 authInfo 优先。
+    ...(authInfo ? { authInfo } : {}),
     ...existing,
     // 以下四键整棵子树覆盖，不做深合并 —— permissions 深合并会让上游写进来的
     // always-allow 授权跨重启存活，那是权限边界变化而不只是性能问题。
@@ -252,7 +301,12 @@ export function createCursorIsolatedConfigDir(
   const configDir = join(root, safeDirSegment(opts.stableKey ?? `ephemeral-${Date.now()}`));
   mkdirSync(configDir, { recursive: true });
   const network = opts.networkConfigReader?.(baseEnv);
-  writeIsolatedCliConfig(configDir, network, opts.modelSeed);
+  const authInfo = resolvePresetAuthInfo(
+    opts.accountIdentityReader,
+    opts.expectedIdentity,
+    baseEnv,
+  );
+  writeIsolatedCliConfig(configDir, network, opts.modelSeed, authInfo);
 
   return {
     configDir,

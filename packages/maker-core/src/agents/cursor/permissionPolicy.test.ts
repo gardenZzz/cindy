@@ -107,6 +107,7 @@ async function bootCursorSession(args: {
     binaryPath: '/tmp/fake-cursor-agent',
     logger: createConsoleLogger('cursor-perm-test'),
     networkConfigReader: () => undefined,
+    accountIdentityReader: () => undefined,
     classifyAutoPermission: args.classifyAutoPermission,
     onAutoPermissionClassifierUnavailable: args.onAutoPermissionClassifierUnavailable,
     prepareAcpMcpServers: args.prepareAcpMcpServers,
@@ -190,6 +191,7 @@ describe('CursorAgent capabilities — permission modes', () => {
       binaryPath: '/tmp/fake-cursor-agent',
       logger: createConsoleLogger('cursor-perm-test'),
       networkConfigReader: () => undefined,
+    accountIdentityReader: () => undefined,
     });
     const ids = agent.capabilities.permissionModes.map((p) => p.id);
     expect(ids).toEqual(['ask', 'auto', 'bypassPermissions']);
