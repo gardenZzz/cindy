@@ -28,6 +28,8 @@ const LOGOUT_TIMEOUT_MS = 30_000;
 const LOGIN_TIMEOUT_MS = 10 * 60_000;
 /** kill 后若 close 永不来，强制结算 login Promise / logout 等待。 */
 const LOGIN_FORCE_SETTLE_MS = 1_500;
+/** getState 默认缓存窗口；登录结算与登出主动作废。 */
+const STATE_TTL_MS = 60_000;
 
 const LOGIN_URL_RE = /https:\/\/[^\s<>"']+/i;
 
@@ -60,6 +62,10 @@ export interface CursorAuthAdapterDeps {
   forceSettleMs?: number;
   /** 单测注入跨平台终止（默认复用 scheduler-host killProcessTree）。 */
   killProcessTree?: CursorKillProcessTree;
+  /** 单测可注入时钟，配合 stateTtlMs 验证过期。 */
+  now?: () => number;
+  /** 单测可缩短 getState TTL。 */
+  stateTtlMs?: number;
 }
 
 interface ActiveLoginSession {
@@ -155,6 +161,9 @@ export class DesktopCursorAuthAdapter implements AuthAdapter {
   private readonly loginTimeoutMs: number;
   private readonly forceSettleMs: number;
   private readonly killTree: CursorKillProcessTree;
+  private readonly now: () => number;
+  private readonly stateTtlMs: number;
+  private cachedState: { state: AuthState; expiresAt: number } | null = null;
   private activeLogin: ActiveLoginSession | null = null;
   private loginWaiters: Array<() => void> = [];
   private forceSettleTimers = new Set<ReturnType<typeof setTimeout>>();
@@ -177,9 +186,25 @@ export class DesktopCursorAuthAdapter implements AuthAdapter {
     this.loginTimeoutMs = deps.loginTimeoutMs ?? LOGIN_TIMEOUT_MS;
     this.forceSettleMs = deps.forceSettleMs ?? LOGIN_FORCE_SETTLE_MS;
     this.killTree = deps.killProcessTree ?? killProcessTree;
+    this.now = deps.now ?? Date.now;
+    this.stateTtlMs = deps.stateTtlMs ?? STATE_TTL_MS;
   }
 
   async getState(): Promise<AuthState> {
+    const now = this.now();
+    if (this.cachedState && now < this.cachedState.expiresAt) {
+      return this.cachedState.state;
+    }
+    const state = await this.fetchState();
+    this.cachedState = { state, expiresAt: now + this.stateTtlMs };
+    return state;
+  }
+
+  private invalidateStateCache(): void {
+    this.cachedState = null;
+  }
+
+  private async fetchState(): Promise<AuthState> {
     try {
       const result = await this.runCommand(['status', '--format', 'json'], {
         env: { ...process.env, NO_OPEN_BROWSER: '1' },
@@ -201,9 +226,11 @@ export class DesktopCursorAuthAdapter implements AuthAdapter {
   }
 
   async triggerLogin(opts?: AuthLoginOptions): Promise<AuthState> {
+    this.invalidateStateCache();
     if (this.activeLogin) {
       opts?.onProgress?.('login-pending');
       await this.waitForLoginChildExit();
+      this.invalidateStateCache();
       return this.getState();
     }
 
@@ -318,6 +345,7 @@ export class DesktopCursorAuthAdapter implements AuthAdapter {
       // timeout 后用户态已返回，但 kill 可能仍在收敛，reservation 须留到收口。
     }
 
+    this.invalidateStateCache();
     const state = await this.getState();
     if (!state.authenticated) {
       return {
@@ -345,6 +373,7 @@ export class DesktopCursorAuthAdapter implements AuthAdapter {
   }
 
   async logout(): Promise<void> {
+    this.invalidateStateCache();
     if (this.activeLogin) {
       this.cancelLogin();
       await this.waitForLoginChildExit();
