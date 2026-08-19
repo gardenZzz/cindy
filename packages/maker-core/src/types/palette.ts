@@ -82,6 +82,8 @@ export interface ListAgentSkillsOptions {
    * available_commands_update（无 sessionId 时只返回磁盘 skill）。
    */
   sessionId?: string;
+  /** Host-owned Pi boundary; renderer input must never set this directly. */
+  includeManagedPiPackages?: boolean;
 }
 
 export interface ListAgentSkillsResult {
