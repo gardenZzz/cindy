@@ -201,6 +201,7 @@ async function bootSession(transport: SessionWritebackTransport) {
     binaryPath: '/dev/null/cursor-agent',
     logger: createConsoleLogger('cursor-s4-unit'),
     networkConfigReader: () => undefined,
+    accountIdentityReader: () => undefined,
     onCursorLocalModelsListed: (listing) => {
       published.push(listing);
     },

@@ -26,6 +26,14 @@ _Avoid_: Cursor Agent、Cursor CLI(通道/二进制是实现细节,不作产品�
 maker-core 里不开会话、不进事件流的一次性 LLM 调用(起标题、生成摘要等辅助任务)。
 _Avoid_: 单轮对话(那是会话内的一个 turn)
 
+**silent stop（静默收尾）**:
+一个 turn 干了活却没交出答复,上游却按正常结束收尾(不报错),用户侧表现为「做到一半
+看起来正常结束」。判据是**有没有交付答复**这个语义,不是最后一条上游消息长什么形状
+--部分网关每轮都会在结束后追加一条零内容消息,按形状判会把已交付的 turn 全部误判。
+命中后由桌面 main 的守卫决定自动续跑还是提示耗尽。
+_Avoid_: 连接中断(UI 上的「连接中断,已自动继续」只是自动续跑的展示文案,与网络无关);
+空响应(那是整轮零产出且用量为 0 的另一种终态)
+
 **session bootstrap（后台化）**:
 Agent 子进程从 spawn 到可接收首条 turn 的就绪过程(spawn + initialize + session/new
 + 初始配置)。对齐 Claude Code `sdkQuery` 形态:`startSession` 立即返回 handle,

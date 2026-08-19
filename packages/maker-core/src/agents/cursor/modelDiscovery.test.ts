@@ -186,6 +186,7 @@ async function runDiscovery(
     binaryPath: '/dev/null/cursor-agent',
     logger: createConsoleLogger('cursor-discovery-unit'),
     networkConfigReader: () => undefined,
+    accountIdentityReader: () => undefined,
     onCursorLocalModelsListed: (listing) => {
       published.push(listing);
     },
