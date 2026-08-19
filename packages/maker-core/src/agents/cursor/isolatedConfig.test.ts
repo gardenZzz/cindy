@@ -342,3 +342,202 @@ describe('cli-config 合并写', () => {
     }
   });
 });
+
+describe('cli-config 预置账号身份', () => {
+  const matchingIdentity = {
+    email: 'alice@example.invalid',
+    displayName: 'Alice',
+    userId: 42,
+    teamId: 7,
+  };
+
+  function readConfig(configDir: string): Record<string, unknown> {
+    return JSON.parse(readFileSync(join(configDir, 'cli-config.json'), 'utf8')) as Record<
+      string,
+      unknown
+    >;
+  }
+
+  it('注入假读取器且期望身份一致时落账号身份', () => {
+    const userDataPath = mkUserData();
+    try {
+      const reader = vi.fn(() => matchingIdentity);
+      const { configDir } = createCursorIsolatedConfigDir({}, {
+        stableKey: 'auth-match',
+        userDataPath,
+        accountIdentityReader: reader,
+        expectedIdentity: 'alice@example.invalid',
+      });
+      expect(reader).toHaveBeenCalledOnce();
+      expect(readConfig(configDir).authInfo).toEqual(matchingIdentity);
+    } finally {
+      rmSync(userDataPath, { recursive: true, force: true });
+    }
+  });
+
+  it('期望身份不一致时不落账号身份且不抛错', () => {
+    const userDataPath = mkUserData();
+    try {
+      const { configDir } = createCursorIsolatedConfigDir({}, {
+        stableKey: 'auth-mismatch',
+        userDataPath,
+        accountIdentityReader: () => matchingIdentity,
+        expectedIdentity: 'bob@example.invalid',
+      });
+      expect(readConfig(configDir).authInfo).toBeUndefined();
+    } finally {
+      rmSync(userDataPath, { recursive: true, force: true });
+    }
+  });
+
+  it('读取器返回空、缺账号身份、或未传期望身份时不落、不抛错', () => {
+    const userDataPath = mkUserData();
+    try {
+      const emptyReader = createCursorIsolatedConfigDir({}, {
+        stableKey: 'auth-empty',
+        userDataPath,
+        accountIdentityReader: () => undefined,
+        expectedIdentity: 'alice@example.invalid',
+      });
+      expect(readConfig(emptyReader.configDir).authInfo).toBeUndefined();
+
+      const missingEmail = createCursorIsolatedConfigDir({}, {
+        stableKey: 'auth-no-email',
+        userDataPath,
+        accountIdentityReader: () => ({ displayName: 'Alice' }),
+        expectedIdentity: 'alice@example.invalid',
+      });
+      expect(readConfig(missingEmail.configDir).authInfo).toBeUndefined();
+
+      const noExpected = createCursorIsolatedConfigDir({}, {
+        stableKey: 'auth-no-expected',
+        userDataPath,
+        accountIdentityReader: () => matchingIdentity,
+      });
+      expect(readConfig(noExpected.configDir).authInfo).toBeUndefined();
+
+      const throwing = createCursorIsolatedConfigDir({}, {
+        stableKey: 'auth-throw',
+        userDataPath,
+        accountIdentityReader: () => {
+          throw new Error('should not surface');
+        },
+        expectedIdentity: 'alice@example.invalid',
+      });
+      expect(readConfig(throwing.configDir).authInfo).toBeUndefined();
+    } finally {
+      rmSync(userDataPath, { recursive: true, force: true });
+    }
+  });
+
+  it('默认不读取用户来源，注入 reader 时只使用注入值', () => {
+    const userDataPath = mkUserData();
+    const userCursorDir = mkUserData();
+    try {
+      writeFileSync(
+        join(userCursorDir, 'cli-config.json'),
+        JSON.stringify({ version: 1, authInfo: matchingIdentity }),
+      );
+
+      const withoutReader = createCursorIsolatedConfigDir(
+        { CURSOR_CONFIG_DIR: userCursorDir },
+        {
+          stableKey: 'auth-default',
+          userDataPath,
+          expectedIdentity: 'alice@example.invalid',
+        },
+      );
+      expect(readConfig(withoutReader.configDir).authInfo).toBeUndefined();
+
+      const reader = vi.fn(() => matchingIdentity);
+      const withReader = createCursorIsolatedConfigDir(
+        { CURSOR_CONFIG_DIR: join(userCursorDir, 'missing') },
+        {
+          stableKey: 'auth-injected',
+          userDataPath,
+          accountIdentityReader: reader,
+          expectedIdentity: 'alice@example.invalid',
+        },
+      );
+      expect(reader).toHaveBeenCalledWith({
+        CURSOR_CONFIG_DIR: join(userCursorDir, 'missing'),
+      });
+      expect(readConfig(withReader.configDir).authInfo).toEqual(matchingIdentity);
+    } finally {
+      rmSync(userDataPath, { recursive: true, force: true });
+      rmSync(userCursorDir, { recursive: true, force: true });
+    }
+  });
+
+  it('预置之后仍清空权限、强制 allowlist，且模型档位预写仍生效', () => {
+    const userDataPath = mkUserData();
+    try {
+      const { configDir } = createCursorIsolatedConfigDir({}, {
+        stableKey: 'auth-security',
+        userDataPath,
+        accountIdentityReader: () => matchingIdentity,
+        expectedIdentity: 'alice@example.invalid',
+        modelSeed: { modelId: 'grok-4.5', parameters: { fast: 'false' } },
+      });
+      const cfg = readConfig(configDir);
+      expect(cfg.authInfo).toEqual(matchingIdentity);
+      expect(cfg.approvalMode).toBe('allowlist');
+      expect(cfg.permissions).toEqual({ allow: [], deny: [] });
+      expect(cfg.model).toMatchObject({ modelId: 'grok-4.5' });
+      expect(cfg.selectedModel).toEqual({
+        modelId: 'grok-4.5',
+        parameters: [{ id: 'fast', value: 'false' }],
+      });
+    } finally {
+      rmSync(userDataPath, { recursive: true, force: true });
+    }
+  });
+
+  it('目录已有配置时既有账号身份不被预置逻辑覆盖', () => {
+    const userDataPath = mkUserData();
+    try {
+      const first = createCursorIsolatedConfigDir({}, {
+        stableKey: 'auth-keep',
+        userDataPath,
+      });
+      const existing = {
+        ...readConfig(first.configDir),
+        authInfo: { email: 'resident@example.invalid', teamId: 99 },
+      };
+      writeFileSync(join(first.configDir, 'cli-config.json'), JSON.stringify(existing, null, 2));
+
+      const second = createCursorIsolatedConfigDir({}, {
+        stableKey: 'auth-keep',
+        userDataPath,
+        accountIdentityReader: () => matchingIdentity,
+        expectedIdentity: 'alice@example.invalid',
+      });
+      expect(readConfig(second.configDir).authInfo).toEqual({
+        email: 'resident@example.invalid',
+        teamId: 99,
+      });
+    } finally {
+      rmSync(userDataPath, { recursive: true, force: true });
+    }
+  });
+
+  it('只预置账号身份，不搬服务端配置缓存、隐私模式缓存、实验开关缓存', () => {
+    const userDataPath = mkUserData();
+    try {
+      const reader = vi.fn(() => matchingIdentity);
+      const { configDir } = createCursorIsolatedConfigDir({}, {
+        stableKey: 'auth-only-key',
+        userDataPath,
+        accountIdentityReader: reader,
+        expectedIdentity: 'alice@example.invalid',
+      });
+      const cfg = readConfig(configDir);
+      expect(cfg.authInfo).toEqual(matchingIdentity);
+      expect(cfg.serverConfigCache).toBeUndefined();
+      expect(cfg.privacyCache).toBeUndefined();
+      expect(cfg.cachedAvailableReviewModels).toBeUndefined();
+    } finally {
+      rmSync(userDataPath, { recursive: true, force: true });
+    }
+  });
+});
