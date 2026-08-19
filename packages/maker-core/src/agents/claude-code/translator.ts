@@ -121,6 +121,13 @@ export interface TurnState {
    * 因此必须在 assistant 消息到达时按 turn 暂存，再随 done 交给 host。
    */
   lastAssistantRequestId?: string;
+  /**
+   * 本 turn 最近一条**主流** assistant 消息自报的 wire model。会话配置的模型 id
+   * (ctx.getModel()) 只是用户视角的身份,网关可能把它分流到别的实际模型,两者不一致时
+   * 按配置 id 做归因会得出错误结论。异常日志同时打两者,缺失时不打占位值。
+   * 只取主流:子代理跑在自己的模型上,把它的 model 记进来会重演同一类归因错误。
+   */
+  lastAssistantWireModel?: string;
 }
 
 export interface RuntimeState {
@@ -201,6 +208,7 @@ function resetTurnState(turn: TurnState): void {
   turn.interruptRequested = false;
   turn.lastAssistantMsgHadSubstance = true;
   turn.lastAssistantRequestId = undefined;
+  turn.lastAssistantWireModel = undefined;
   // generation / interruptGeneration 刻意不清: 代际跨 turn 单调递增(见字段注释)。
 }
 
@@ -1240,6 +1248,10 @@ function handleAssistant(
   const assistantModel = typeof assistantMeta.model === 'string' && assistantMeta.model
     ? assistantMeta.model
     : undefined;
+  if (!parentToolUseId && assistantModel) {
+    // 主流 wire model:异常日志的归因依据,与会话配置 id 分开记。
+    ctx.turn.lastAssistantWireModel = assistantModel;
+  }
   if (parentToolUseId && assistantModel) {
     ctx.rt.streamModelByParentToolUseId.set(parentToolUseId, assistantModel);
     const actualModel = ctx.rt.resolvedSubagentModelByParentToolUseId.get(parentToolUseId)
@@ -1604,6 +1616,11 @@ function handleResult(
     : ctx.turn.text;
   // 顶层 model 表示当前 runtime model; modelUsage 是累计分桶, 只作为诊断字段。
   const currentModel = ctx.getModel();
+  // 异常日志的归因字段: 会话配置 id 与上游自报的 wire model 可能不是一回事(网关分流),
+  // 只记前者会把 A 模型的故障算到 B 头上。wire model 缺失时整个字段不出现,不打占位值。
+  const wireModelFields = ctx.turn.lastAssistantWireModel
+    ? { wireModel: ctx.turn.lastAssistantWireModel }
+    : {};
   const modelsUsed = msg.modelUsage ? Object.keys(msg.modelUsage) : [];
 
   // contextWindow: 优先取当前 model 的 modelUsage[model].contextWindow,
@@ -1856,6 +1873,8 @@ function handleResult(
   // error_during_execution / context 超限等)。补一条 WARN 保证 info 级可见。
   if (msg.is_error) {
     ctx.log.warn('SDK ◀ turn ended with error', {
+      model: currentModel,
+      ...wireModelFields,
       stopReason: msg.stop_reason,
       terminalReason: msg.terminal_reason,
       durationMs: msg.duration_ms,
@@ -1918,6 +1937,7 @@ function handleResult(
   if (isSilentStopTurn) {
     ctx.log.warn('SDK ◀ turn ended by silent stop (last assistant message had no content)', {
       model: currentModel,
+      ...wireModelFields,
       stopReason: msg.stop_reason ?? null,
       terminalReason: msg.terminal_reason,
       apiCalls: ctx.turn.apiCalls,
@@ -1932,6 +1952,7 @@ function handleResult(
   if (isEmptyResponseTurn) {
     ctx.log.warn('SDK ◀ turn produced empty response (0 content, usage all zero)', {
       model: currentModel,
+      ...wireModelFields,
       apiCalls: ctx.turn.apiCalls,
       stopReason: msg.stop_reason,
       terminalReason: msg.terminal_reason,
