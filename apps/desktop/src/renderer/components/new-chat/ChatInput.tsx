@@ -6104,7 +6104,7 @@ export function ChatInput({
     ) => void | boolean | Promise<void | boolean>;
   }>({ byProvider: () => {}, byModel: () => {} });
   const confirmAgentBrowseSwitch = useCallback(
-    (targetAgent: 'claude-code' | 'codex' | 'pi' | null) =>
+    (targetAgent: AgentKind | null) =>
       confirmAgentSwitchRisk({
         // 两条「不必再问」的出口(任一成立即放行):
         //
