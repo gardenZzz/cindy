@@ -55,10 +55,12 @@ export interface TurnState {
    */
   hasEmittedText: boolean;
   /**
-   * 本 turn 已推给 UI 的全部 text(assistant block + 流式 delta,按到达顺序拼接)。
-   * turn-end 时与 result.result 做前缀比对,只补 UI 缺失的尾部(末尾截断兜底),绝不重复推。
-   * 这是修复 e7ea882b 盲区(末尾截断)的依据:hasEmittedText 是 per-turn 布尔,无法区分
-   * "整轮全空"和"前面推过、最后一段被截断";uiEmittedText 让兜底能精确算出缺哪一段。
+   * 本 turn 已推给 UI 的可见 text。流式 text_delta 到达时累加;完整 assistant text
+   * block 仅在该 parent 还没流过时累加(与 renderer 在途流式丢弃 isFinal 对齐),
+   * 避免同一段正文计两遍。turn-end 时与 result.result 做前缀比对,只补 UI 缺失的
+   * 尾部(末尾截断兜底),绝不重复推。这是修复 e7ea882b 盲区(末尾截断)的依据:
+   * hasEmittedText 是 per-turn 布尔,无法区分"整轮全空"和"前面推过、最后一段被截断";
+   * uiEmittedText 让兜底能精确算出缺哪一段。
    */
   uiEmittedText: string;
   /**
@@ -1286,8 +1288,14 @@ function handleAssistant(
     if (block.type === 'text' && typeof block.text === 'string') {
       const parentStreamKey = parentToolUseId ?? '__main__';
       const prefix = `${parentStreamKey}:`;
+      // 该 parent 已经流过 text_delta 时,完整 text block 不再累加 uiEmittedText
+      // (两条路都会 push,但 renderer 在途流式会丢弃 isFinal)。不能「完整消息一律
+      // 不累加」:只发完整 assistant、不发 delta 时 emitted 会恒为 0,收尾分支 ①
+      // 会把整段正文当缺失尾巴再推一遍,变成用户可见的重复。
+      let hadStreamedText = false;
       for (const key of ctx.rt.streamStopTokenByKey.keys()) {
         if (key === parentStreamKey || key.startsWith(prefix)) {
+          hadStreamedText = true;
           ctx.rt.streamStopTokenByKey.delete(key);
         }
       }
@@ -1295,7 +1303,7 @@ function handleAssistant(
       ctx.turn.text += visibleText;
       if (visibleText.length > 0) {
         ctx.turn.hasEmittedText = true;
-        ctx.turn.uiEmittedText += visibleText;
+        if (!hadStreamedText) ctx.turn.uiEmittedText += visibleText;
         queue.push({
           type: 'text',
           data: { text: visibleText, isFinal: true },
