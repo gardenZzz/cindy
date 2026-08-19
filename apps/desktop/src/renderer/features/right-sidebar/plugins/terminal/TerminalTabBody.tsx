@@ -23,7 +23,7 @@ import { useTranslation } from 'react-i18next';
 
 import { Spinner } from '@/components/ui/spinner';
 import type { TabKindHostContext } from '../../types';
-import { getOrCreateXterm, TERMINAL_BACKGROUND, type XtermEntry } from './lib/xtermPool';
+import { getOrCreateXterm, type XtermEntry } from './lib/xtermPool';
 import type {
   TerminalDataEvent,
   TerminalExitEvent,
@@ -207,10 +207,7 @@ export function TerminalTabBody({ state, ctx, active }: Props) {
 
   // 渲染:slot 撑满,exited / runtimeError 在上面叠一层 overlay
   return (
-    <div
-      className="relative h-full w-full"
-      style={{ backgroundColor: TERMINAL_BACKGROUND }}
-    >
+    <div className="relative h-full w-full bg-[var(--surface)]">
       <div ref={slotRef} className="absolute inset-0" />
       {state.exited != null && !runtimeError && (
         <ExitedOverlay

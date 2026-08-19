@@ -153,16 +153,12 @@ export const BRAND_IDENTITY: BrandIdentity = Object.freeze({
     cn: 'Cindy',
     // 2026-07-26 与 cn 同值(见字段 doc):global 包全部可见位置显示 Cindy,
     // 放弃 cn/global 同机双装的文件层隔离;appId / userData 仍分区。
-    // ponytail: 本地自用补丁,勿提交 —— global 改名 CindyX,方便和正式版同机共存;
-    // userData 仍是 CindyGlobal(共库),两个装一起但同一时刻只能开一个。
-    global: 'CindyX',
+    global: 'Cindy',
     dev: 'CindyDev',
   }),
   appIdByRegion: Object.freeze({
     cn: 'com.xd.cindycn',
-    // ponytail: 同上,本地自用补丁 —— 换 bundle id 才不会被 LaunchServices
-    // 和正式版认成同一个 app。
-    global: 'com.xd.cindyx',
+    global: 'com.xd.cindy',
     dev: 'com.xd.cindydev',
   }),
   primaryScheme: 'cindy',

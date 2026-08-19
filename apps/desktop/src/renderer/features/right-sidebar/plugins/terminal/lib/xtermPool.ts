@@ -10,8 +10,7 @@
  * Terminal 只是个 JS 对象,没有像 webview 那样必须保活的 DOM,挂到哪个 div
  * 都能 open()。所以 pool 只存"实例本体 + addons + 上次 fit 的尺寸",不存 DOM。
  *
- * Terminal 实例首次创建时,主题色用 RSB 内嵌色块预设(后续可改 token);如果将来
- * 接 token system,把这里的 theme 改成读 CSS variable 即可。
+ * 主题色从 Cindy token 解析（见 xtermTheme.ts），切主题时整池重刷。
  */
 
 // xterm.js 自带的样式表 —— 必须 import,否则 xterm 内部用来接键盘/IME 输入的
@@ -25,6 +24,9 @@ import { FitAddon } from '@xterm/addon-fit';
 import { WebLinksAddon } from '@xterm/addon-web-links';
 
 import { createLogger } from '@/lib/logger';
+import { themeService } from '@/themes/theme-service';
+
+import { buildXtermTheme } from './xtermTheme';
 
 const log = createLogger('terminal');
 
@@ -45,9 +47,6 @@ export interface XtermEntry {
 
 const pool = new Map<string, XtermEntry>();
 
-/** iTerm2 Default light 背景,与 RSB 外层 div 对齐。 */
-export const TERMINAL_BACKGROUND = '#f4f5f7';
-
 const DEFAULT_OPTIONS: ITerminalOptions = {
   // Nerd Font 优先,回退到系统等宽字体;cursorBlink 跟 iTerm 默认行为对齐。
   fontFamily:
@@ -60,37 +59,31 @@ const DEFAULT_OPTIONS: ITerminalOptions = {
   scrollback: 5000,
   // 允许 OSC 8 超链接(WebLinksAddon 也会处理裸 URL)
   allowProposedApi: false,
-  // iTerm2 Default light ANSI 主题,背景与 TERMINAL_BACKGROUND 一致。
-  theme: {
-    background: TERMINAL_BACKGROUND,
-    foreground: '#000000',
-    cursor: '#000000',
-    cursorAccent: TERMINAL_BACKGROUND,
-    selectionBackground: '#b4d5fe',
-    black: '#000000',
-    red: '#c91b00',
-    green: '#00c200',
-    yellow: '#c7c400',
-    blue: '#0225c7',
-    magenta: '#c930c7',
-    cyan: '#00c5c7',
-    white: '#c7c7c7',
-    brightBlack: '#686868',
-    brightRed: '#ff6e67',
-    brightGreen: '#5ffa68',
-    brightYellow: '#fffc67',
-    brightBlue: '#6871ff',
-    brightMagenta: '#ff76ff',
-    brightCyan: '#5ffdff',
-    brightWhite: '#ffffff',
-  },
 };
+
+let themeUnsub: (() => void) | null = null;
+
+function applyHostThemeToAllXterms(): void {
+  const theme = buildXtermTheme();
+  for (const entry of pool.values()) {
+    entry.terminal.options.theme = theme;
+  }
+}
+
+function ensureThemeSubscription(): void {
+  if (themeUnsub) return;
+  themeUnsub = themeService.onDidChangeTheme(applyHostThemeToAllXterms);
+}
 
 /** 获取或创建某个 tabId 的 xterm 实例。重复调用同 id 返回同一个。 */
 export function getOrCreateXterm(tabId: string): XtermEntry {
+  ensureThemeSubscription();
   let entry = pool.get(tabId);
   if (entry) return entry;
-  const terminal = new Terminal(DEFAULT_OPTIONS);
+  const terminal = new Terminal({
+    ...DEFAULT_OPTIONS,
+    theme: buildXtermTheme(),
+  });
   const fitAddon = new FitAddon();
   // xterm's default link handler uses `window.open()`. In an Electron
   // renderer that creates a popup window, which is intentionally blocked by
@@ -152,6 +145,10 @@ export function disposeXterm(tabId: string): void {
     entry.terminal.dispose();
   } catch {
     /* swallow */
+  }
+  if (pool.size === 0 && themeUnsub) {
+    themeUnsub();
+    themeUnsub = null;
   }
 }
 
