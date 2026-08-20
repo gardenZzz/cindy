@@ -83,6 +83,7 @@ import {
   WAKE_BRIDGE_RECONCILE_MS,
 } from '@/lib/makerChatStore';
 import type { SessionChatState } from '@/lib/makerChatStore';
+import type { Message } from '@/lib/ccAgent.types';
 
 describe('makerChatStore agent task updates', () => {
   it('keeps cursor provider instead of collapsing to claude-code', () => {
@@ -103,6 +104,25 @@ describe('makerChatStore agent task updates', () => {
     );
     expect(next.taskUpdates?.get('ag-1')?.provider).toBe('cursor');
     expect(next.taskUpdates?.get('call_1')?.provider).toBe('cursor');
+  });
+
+  it('restores an agent task terminal state from persisted tool_use metadata', () => {
+    const [mapped] = makerChatStore.__mapServerMessagesForTest([{
+      id: 'row-1',
+      clientId: 'tool-call-1',
+      sessionId: 's1',
+      role: 'tool_use',
+      content: { toolUseId: 'toolu-1', toolName: 'Agent', input: { prompt: 'Inspect auth' } },
+      toolUseId: 'toolu-1',
+      agentMeta: { agentTaskStatus: 'failed' },
+      createdAt: '2026-08-14T00:00:00.000Z',
+    } satisfies Message]);
+
+    expect(mapped).toMatchObject({
+      toolUseId: 'toolu-1',
+      toolName: 'Agent',
+      agentTaskStatus: 'failed',
+    });
   });
 
   it('preserves Pi as the task provider for explicit and source-derived updates', () => {
