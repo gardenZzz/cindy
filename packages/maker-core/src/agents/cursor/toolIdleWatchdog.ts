@@ -10,6 +10,13 @@
 
 export const DEFAULT_CURSOR_TOOL_IDLE_MS = 300_000;
 
+/**
+ * tool-call 空闲超时的 terminal error reason。与 `CURSOR_STREAM_DISCONNECT_REASON`
+ * 同款共享常量：maker-core 侧推 error 事件、desktop 侧中断自愈判据认同一个 key，
+ * 不各自维护字符串以免漂移。
+ */
+export const CURSOR_TOOL_CALL_IDLE_TIMEOUT_REASON = 'tool_call_idle_timeout';
+
 export function resolveCursorToolIdleMs(
   env: NodeJS.ProcessEnv = process.env,
   fallback = DEFAULT_CURSOR_TOOL_IDLE_MS,
@@ -28,10 +35,19 @@ export interface ToolIdleWatchdog {
   noteToolTerminal(toolCallId: string): void;
   /** 任意活动（文本块、tool update、permission）重置计时。 */
   noteActivity(): void;
+  /**
+   * 有进行中的人机交互（权限审批 / 提问 / 计划审阅）→ 暂停计时。
+   * 可重入：多个交互叠加时调用多次，计数归零才恢复。
+   */
+  suspend(): void;
+  /** 交互收口 → 恢复计时（与 suspend 配对，计数归零后重新武装）。 */
+  resume(): void;
   /** 清全部 + 停表（turn 结束 / abort / close）。 */
   clear(): void;
   /** 当前进行中的 tool 数（单测用）。 */
   pendingCount(): number;
+  /** 当前暂停深度（单测用）。 */
+  suspendedDepth(): number;
 }
 
 export function createToolIdleWatchdog(opts: {
@@ -42,6 +58,8 @@ export function createToolIdleWatchdog(opts: {
 }): ToolIdleWatchdog {
   const pending = new Set<string>();
   let timer: unknown = null;
+  /** 人机交互（审批 / 提问 / 计划审阅）进行中 → 不计空闲配额。可重入。 */
+  let suspended = 0;
   const setTimer = opts.setTimer ?? ((fn: () => void, ms: number) => setTimeout(fn, ms));
   const clearTimer =
     opts.clearTimer ?? ((id: unknown) => clearTimeout(id as ReturnType<typeof setTimeout>));
@@ -55,10 +73,10 @@ export function createToolIdleWatchdog(opts: {
 
   const armTimer = () => {
     stopTimer();
-    if (tripped || pending.size === 0 || opts.idleMs <= 0) return;
+    if (tripped || pending.size === 0 || opts.idleMs <= 0 || suspended > 0) return;
     const id = setTimer(() => {
       timer = null;
-      if (tripped || pending.size === 0) return;
+      if (tripped || pending.size === 0 || suspended > 0) return;
       tripped = true;
       const ids = Array.from(pending);
       opts.onTimeout({ idleMs: opts.idleMs, pendingToolIds: ids });
@@ -85,16 +103,30 @@ export function createToolIdleWatchdog(opts: {
       armTimer();
     },
     noteActivity() {
-      if (tripped || pending.size === 0) return;
+      if (tripped || pending.size === 0 || suspended > 0) return;
       armTimer();
+    },
+    suspend() {
+      if (tripped) return;
+      suspended += 1;
+      stopTimer();
+    },
+    resume() {
+      if (tripped || suspended === 0) return;
+      suspended -= 1;
+      if (suspended === 0) armTimer();
     },
     clear() {
       pending.clear();
       stopTimer();
       tripped = false;
+      suspended = 0;
     },
     pendingCount() {
       return pending.size;
+    },
+    suspendedDepth() {
+      return suspended;
     },
   };
 }
@@ -102,8 +134,8 @@ export function createToolIdleWatchdog(opts: {
 export function formatCursorToolIdleMessage(idleMs: number): string {
   const secs = Math.max(1, Math.round(idleMs / 1000));
   return (
-    `工具调用已超过 ${secs}s 无活动，已自动取消当前轮次` +
-    `（上游偶发挂起）。可以直接发下一条消息继续。`
+    `工具调用已超过 ${secs}s 无活动，当前轮次已中断。` +
+    `已尝试自动续跑仍未恢复，可直接发下一条消息继续。`
   );
 }
 

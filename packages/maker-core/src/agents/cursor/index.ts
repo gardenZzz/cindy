@@ -133,6 +133,7 @@ import type {
   ListAgentSkillsResult,
 } from '../../types/palette.js';
 import {
+  CURSOR_TOOL_CALL_IDLE_TIMEOUT_REASON,
   createToolIdleWatchdog,
   formatCursorInvalidResumeCasConflictMessage,
   formatCursorFastModeUnavailableMessage,
@@ -1026,7 +1027,7 @@ export class CursorAgent extends BaseAgent {
           turnGeneration,
         });
         void finalizeTurnCancel({
-          reason: 'tool_call_idle_timeout',
+          reason: CURSOR_TOOL_CALL_IDLE_TIMEOUT_REASON,
           errorMessage: formatCursorToolIdleMessage(idleMs),
         });
       },
@@ -1148,6 +1149,22 @@ export class CursorAgent extends BaseAgent {
     const pendingExtensions = new Map<string, PendingExtensionEntry>();
     let permissionSeq = 0;
 
+    /**
+     * 人机交互（审批 / 提问 / 计划审阅）进行中 → 暂停 tool-idle 计时。
+     *
+     * 上游在等人：期间没有 session/update 是正常的，不该消耗 tool-call 不活动的
+     * 空闲配额（否则用户在审批卡上想太久，看门狗会误杀整轮 turn，连待决审批一起
+     * dismiss）。语义与 Codex 的 upstream-idle「ball 不在上游不计配额」同源。
+     */
+    const syncToolIdleSuspend = (): void => {
+      const active = pendingApprovals.size + pendingExtensions.size > 0;
+      if (active) {
+        if (toolIdle.suspendedDepth() === 0) toolIdle.suspend();
+      } else if (toolIdle.suspendedDepth() > 0) {
+        toolIdle.resume();
+      }
+    };
+
     const sessionSuggestionsFor = (sessionAllowKey: string) =>
       this.createSessionPermissionUpdates({
         type: 'cursorSessionApproval',
@@ -1229,6 +1246,8 @@ export class CursorAgent extends BaseAgent {
           });
         }
       }
+      // dismiss 直接删 entry、不经过 finalize，这里统一重算暂停状态。
+      syncToolIdleSuspend();
     }
 
     const applyAcpSessionMode = async (modeId: 'agent' | 'plan'): Promise<void> => {
@@ -1432,10 +1451,12 @@ export class CursorAgent extends BaseAgent {
           forcePrompt: forcePromptEachTime,
         };
         pendingApprovals.set(requestId, entry);
+        syncToolIdleSuspend();
         const finalize = (result: RequestPermissionResult) => {
           if (entry.settled) return;
           entry.settled = true;
           pendingApprovals.delete(requestId);
+          syncToolIdleSuspend();
           resolve(result);
         };
 
@@ -1499,10 +1520,12 @@ export class CursorAgent extends BaseAgent {
           settled: false,
         };
         pendingExtensions.set(requestId, entry);
+        syncToolIdleSuspend();
         const finalize = (result: unknown) => {
           if (entry.settled) return;
           entry.settled = true;
           pendingExtensions.delete(requestId);
+          syncToolIdleSuspend();
           resolve(result);
         };
         dispatchInteraction(req)
@@ -1537,10 +1560,12 @@ export class CursorAgent extends BaseAgent {
           settled: false,
         };
         pendingExtensions.set(requestId, entry);
+        syncToolIdleSuspend();
         const finalize = (result: unknown) => {
           if (entry.settled) return;
           entry.settled = true;
           pendingExtensions.delete(requestId);
+          syncToolIdleSuspend();
           resolve(result);
         };
         dispatchInteraction(req)
@@ -1814,7 +1839,7 @@ export class CursorAgent extends BaseAgent {
     };
 
     const finalizeTurnCancel = async (optsCancel: {
-      reason: 'user_abort' | 'tool_call_idle_timeout';
+      reason: 'user_abort' | typeof CURSOR_TOOL_CALL_IDLE_TIMEOUT_REASON;
       errorMessage?: string;
     }): Promise<void> => {
       if (closed) return;

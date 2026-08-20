@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
 
-import { CURSOR_STREAM_DISCONNECT_REASON } from '@cindy/maker-core';
+import { CURSOR_STREAM_DISCONNECT_REASON, CURSOR_TOOL_CALL_IDLE_TIMEOUT_REASON } from '@cindy/maker-core';
 
 import {
   INTERRUPTED_TURN_MAX_CONSECUTIVE_ATTEMPTS,
@@ -95,6 +95,21 @@ describe('isInterruptedTurnError', () => {
     ).toBe(true);
     // reason 是权威判据:不要求 sdkError tag,也不要求文案形态。
     expect(isInterruptedTurnError({ reason: 'empty-response' })).toBe(true);
+  });
+
+  it('accepts the cursor tool-call idle timeout reason (长任务静默自动续跑)', () => {
+    // Cursor ACP 不流式回传终端输出:跑 CI / 长构建 / 监听类命令在整段等待期内
+    // 零 session/update,看门狗按阈值判定超时。已配合 maker-core 的交互期暂停
+    // (审批/提问/计划审阅期间不计空闲配额),故此处只能命中真正的工具静默,走有界
+    // 续跑(退避 + 连续/每人话上限 + kill switch)由 Agent 决定重挂还是轮询。
+    expect(
+      isInterruptedTurnError({
+        reason: CURSOR_TOOL_CALL_IDLE_TIMEOUT_REASON,
+        message: '工具调用已超过 300s 无活动，当前轮次已中断。',
+      }),
+    ).toBe(true);
+    // reason 是权威判据:不要求文案形态。
+    expect(isInterruptedTurnError({ reason: CURSOR_TOOL_CALL_IDLE_TIMEOUT_REASON })).toBe(true);
   });
 
   it('rejects errors that carry a stable reason (已分类,另有处置路径)', () => {
