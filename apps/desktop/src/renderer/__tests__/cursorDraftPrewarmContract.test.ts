@@ -78,4 +78,26 @@ describe('Cursor 非阻塞预热契约（claim-if-ready）', () => {
     expect(routeSource).toContain('prewarmed: false }');
     expect(routeSource).toContain('cancelPrewarmSession(prewarm.sessionId)');
   });
+
+  it('T3：预热 effect 依赖草稿全部档位变量，配置变化触发回收旧句柄并按最新档位重新预热', () => {
+    // 配置预写联动（ADR 0005 / #78）：预热句柄按**当前最新**档位预写，而非快照。
+    // 档位变量出现在 effect deps → 任一变化（模型/effort/fast/权限/plan/provider）都会
+    // 触发 cleanup（回收未 claim 旧句柄）+ 按最新档位重新预热。claim 不做逐项 reconcile。
+    for (const dep of [
+      'persistedAgentKind',
+      'effectiveWorkingDir',
+      'draftInitialModel',
+      'draftInitialEffort',
+      'effectiveFastMode',
+      'chatInitialPermissionMode',
+      'effectivePlanMode',
+      'chatInitialProviderId',
+    ]) {
+      expect(routeSource).toContain(dep);
+    }
+    // prewarmSession 的 opts 直接用草稿当前档位（非快照）：draftInitialModel 等是活引用。
+    expect(routeSource).toContain('model: draftInitialModel');
+    expect(routeSource).toContain('effort: draftInitialEffort');
+    expect(routeSource).toContain('permissionMode: chatInitialPermissionMode');
+  });
 });
