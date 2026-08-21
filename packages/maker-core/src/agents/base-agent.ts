@@ -314,6 +314,8 @@ export interface PiExtraSpawnConfigContext {
   remoteHostId?: string | null;
 }
 
+export type CodexSubagentRoutingProfile = 'default' | 'configured' | 'oauth-default';
+
 export interface CodexExtraSpawnConfig {
   extraArgs: string[];
   extraEnv: Record<string, string>;
@@ -331,6 +333,8 @@ export interface CodexExtraSpawnConfig {
   codexBrowserUseAvailable?: boolean;
   /** Whether the OpenAI identity provider on this app-server may use Responses WebSocket. */
   codexOpenAiWebSocketsEnabled?: boolean;
+  /** Host-level Subagent route profile used to prevent incompatible local host reuse. */
+  codexSubagentRoutingProfile?: CodexSubagentRoutingProfile;
   /** Exact verified Chrome plugin version provisioned into this app-server. */
   codexBrowserUseVersion?: string;
   /** Maximum startup wait copied from the verified companion descriptor. */
@@ -724,6 +728,8 @@ export interface AgentDeps {
     ctx: {
       remoteHostId?: string;
       credentialMode?: AgentCredentialMode;
+      /** Original session request when the shared host was upgraded to a credential superset. */
+      requestedCredentialMode?: AgentCredentialMode;
       /** Marks one-off app-server work (e.g. model/list) that must not alter session routing. */
       hostPurpose?: 'control-plane' | 'review';
     },
@@ -767,6 +773,13 @@ export interface AgentDeps {
     | { ok: true; url: string; filename: string }
     | { ok: false; reason: string }
   >;
+
+  /**
+   * Codex-only host policy: disable local app-server plugin runtimes even when
+   * dynamic spawn configuration degrades after a non-fatal preparation error.
+   * Remote transports own their runtime and ignore this local policy.
+   */
+  disableCodexPluginRuntime?: boolean;
 
   /**
    * Codex 专用：登记本机 stdio app-server 的 PID 与职责。

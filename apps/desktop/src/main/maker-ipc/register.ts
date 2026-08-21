@@ -4492,16 +4492,31 @@ export function wireSessionToIpc(session: ReturnType<Maker['getSession']>): void
         if (!isContinuationBoundary) {
           void (async () => {
             try {
-              const doneData = event.data as { result?: unknown } | null;
+              const doneData = event.data as {
+                result?: unknown;
+                message?: unknown;
+                sdkError?: unknown;
+                reason?: unknown;
+                error?: { message?: unknown };
+              } | null;
               const finalText =
                 typeof doneData?.result === 'string' && doneData.result.length > 0
                   ? doneData.result
                   : '';
+              const diagnostic = isTerminalTurnErrorEvent(event)
+                ? [
+                    doneData?.message,
+                    doneData?.sdkError,
+                    doneData?.reason,
+                    doneData?.error?.message,
+                  ].find((value): value is string => typeof value === 'string' && value.trim().length > 0)
+                : undefined;
               await workerTurnStartSequencer.waitForStart(session.id);
               await orcaTeamServiceForEvents?.handleWorkerTerminalTurn({
                 sessionId: session.id,
                 status: isTerminalTurnErrorEvent(event) ? 'error' : 'done',
                 finalText,
+                diagnostic,
               });
             } catch {
               /* non-fatal */
