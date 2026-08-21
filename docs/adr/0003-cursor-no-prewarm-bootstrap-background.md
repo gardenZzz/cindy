@@ -6,6 +6,10 @@ Date: 2026-08-03
 
 Accepted — 纠正 [`736d392fc`]（回退对象） 对 ADR 0001 / spec #40 设计意图的偏离。
 
+> 2026-08-21 修订：ADR 0005 将「预热」重述为**非阻塞预热（claim-if-ready）**——后台化
+> session bootstrap 的叠加允许项，发送热路径零 await 就绪，不构成本文回退对象的发送
+> 阻塞回归。本文决策（纯后台化）仍成立，是 0005 的兜底基线。
+
 ## Context
 
 ADR 0001 明确排除 cursor 进程预热 / 复用：每 session 一个独立 `cursor-agent acp` 子进程。

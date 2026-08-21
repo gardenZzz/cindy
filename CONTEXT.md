@@ -39,5 +39,18 @@ Agent 子进程从 spawn 到可接收首条 turn 的就绪过程(spawn + initial
 + 初始配置)。对齐 Claude Code `sdkQuery` 形态:`startSession` 立即返回 handle,
 bootstrap 在后台进行;首条消息经 accept 语义立刻接收,bootstrap 未就绪时进
 `pendingPrompt` 排队,就绪后自动 flush。UI 用「正在启动…」状态覆盖,用户不空等。
-见 ADR 0003;与「预热(pre-warm)」相对--后者在草稿期提前完成 bootstrap,本仓不采用
-(ADR 0001 排除进程预热/复用)。
+见 ADR 0003;与「非阻塞预热(pre-warm, claim-if-ready)」相对--后者在草稿期提前
+完成 bootstrap,二者都是**后台化**家族:预热被 claim-if-ready 限定为「发送热路径
+零 await 就绪」的叠加允许项(ADR 0005),不构成 ADR 0003 回退对象的发送阻塞回归。
+
+**非阻塞预热(pre-warm, claim-if-ready)**:
+本地普通 Cursor 草稿打开后,客户端在后台把 Cursor 会话完整 bootstrap(spawn +
+initialize + session/new + 档位)到「会话就绪」,发送时 claim-if-ready:已就绪则
+直接接管、首条 turn 0 等待;未就绪/无预热则回退普通创建(`pendingPrompt` 排队
+兜底,不阻塞)。与「session bootstrap(后台化)」的区别在**触发时机与就绪等待**:
+bootstrap 是发送后才起、用户接受「正在启动…」;预热把 bootstrap 提前到草稿期,
+claim 只查就绪标志、发送热路径任何地方都不 await 就绪。仅本地普通草稿
+(非 worktree / device-link / remote);预热句柄是「一个已就绪的会话」,不是可复用
+进程(ADR 0001/0004 隔离约束不变;跨会话进程池因 CURSOR_CONFIG_DIR 进程启动即
+固定 + ADR 0004 禁共享 cli-config 暂不做)。见 ADR 0005 / spec #74。
+_Avoid_: 预热池(那是跨会话进程复用的另一立项,本词条不含)

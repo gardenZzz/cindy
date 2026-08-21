@@ -10,6 +10,16 @@ import { IOS_SIMULATOR_ROUTE_STATUS_CHANNEL } from '../../shared/iosSimulatorIpc
 
 export const MAKER_INVOKE = {
   CREATE_SESSION: 'maker:create-session',
+  /**
+   * 非阻塞预热（claim-if-ready）：草稿期提前完成 Cursor 会话 bootstrap（spawn +
+   * initialize + session/new + 档位），发送热路径零 await 就绪。
+   *  - PREWARM_SESSION：只接受请求、立即返回，不在 IPC 栈上等 bootstrap；
+   *  - CLAIM_PREWARM_SESSION：返回 { claimed: boolean }——已就绪才 true；
+   *  - CANCEL_PREWARM_SESSION：回收未 claim 的预热句柄，幂等。
+   */
+  PREWARM_SESSION: 'maker:prewarm-session',
+  CLAIM_PREWARM_SESSION: 'maker:claim-prewarm-session',
+  CANCEL_PREWARM_SESSION: 'maker:cancel-prewarm-session',
   START_REVIEW: 'maker:review:start',
   TURN_CHANGE_SETS_LIST: 'maker:turn-change-sets:list',
   TURN_CHANGE_SETS_GET: 'maker:turn-change-sets:get',

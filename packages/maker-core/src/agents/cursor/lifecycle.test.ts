@@ -528,6 +528,29 @@ describe('CursorAgent lifecycle (FakeTransport)', () => {
     }
   });
 
+  it('dispose() closes an un-published prewarmed handle (prewarm process does not leak, T3)', async () => {
+    // T3 #78 验收：预热进程关闭（cancel/TTL/抢占/app-quit）不泄漏 cursor-agent 子进程。
+    // 预热句柄 = agent.startSession 创建、**不发布到 maker 池**（不经 maker.createSession
+    // 落库）。它仍注册进 liveSessionClosers，agent.dispose() 必须把它一起关掉。
+    const transport = new FakeTransport();
+    transport.deferInitializeResponse = true; // bootstrap 未完成，更接近真实预热态
+    const { agent, userDataPath } = await bootWithTransport(
+      transport,
+      {},
+      pipelineModels(),
+      createConsoleLogger('cursor-lifecycle-prewarm-dispose'),
+      false,
+    );
+    try {
+      expect(transport.getPid(), 'transport should be live before dispose').toBe(4242);
+      // 不调 handle.close()：模拟 app-quit 时预热句柄仍在池中（未 claim）。
+      await agent.dispose();
+      expect(transport.getPid(), 'prewarmed transport still live after dispose').toBeNull();
+    } finally {
+      rmSync(userDataPath, { recursive: true, force: true });
+    }
+  });
+
   it('logs startup timing segments for new and resumed sessions', async () => {
     const businessSessionId = '12345678-1234-1234-1234-123456789abc';
     const cases = [

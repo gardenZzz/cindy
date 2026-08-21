@@ -5631,6 +5631,27 @@ contextBridge.exposeInMainWorld('electronAPI', {
       usedProjectContext?: boolean;
     }> => ipcRenderer.invoke('maker:create-session', opts),
 
+    // 非阻塞预热（claim-if-ready）：prewarm 立即返回，claim 返回已就绪布尔，
+    // 发送热路径零 await 就绪（ADR 0005）。
+    prewarmSession: (opts: {
+      id: string;
+      agentKind: AgentKind;
+      workingDir?: string;
+      workspaceKind?: 'project' | 'dialogue';
+      model: string;
+      effort?: string;
+      fastMode?: boolean;
+      permissionMode?: string;
+      planMode?: boolean;
+      providerId?: string | null;
+    }): Promise<{ accepted: true }> => ipcRenderer.invoke('maker:prewarm-session', opts),
+
+    claimPrewarmSession: (sessionId: string): Promise<{ claimed: boolean }> =>
+      ipcRenderer.invoke('maker:claim-prewarm-session', sessionId),
+
+    cancelPrewarmSession: (sessionId: string): Promise<void> =>
+      ipcRenderer.invoke('maker:cancel-prewarm-session', sessionId),
+
     markOrcaRole: (sessionId: string, role: 'lead' | 'worker'): Promise<void> =>
       ipcRenderer.invoke('maker:mark-orca-role', sessionId, role),
 

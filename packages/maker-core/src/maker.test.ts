@@ -826,6 +826,196 @@ describe('Maker Cursor session startup', () => {
   });
 });
 
+describe('Maker Cursor prewarm (claim-if-ready)', () => {
+  function setup() {
+    let resolveBootstrap!: () => void;
+    const bootstrapReady = new Promise<void>((resolve) => {
+      resolveBootstrap = resolve;
+    });
+    const startSession = vi.fn(async () =>
+      createHandle({ id: 'cursor-sdk', agentKind: 'cursor', model: 'auto', bootstrapReady }),
+    );
+    const maker = new Maker({
+      agents: { cursor: createAgent(startSession, 'cursor') },
+      storage: createStorage(),
+      logger: createLogger(),
+    });
+    return { maker, startSession, bootstrapReady, resolveBootstrap };
+  }
+  const prewarmOpts = (id: string): CreateSessionOptions => ({
+    id,
+    agentKind: 'cursor',
+    workingDir: '/repo',
+    model: 'auto',
+  });
+
+  it('prewarmSession returns immediately without awaiting bootstrap; claim before ready is false and non-blocking', async () => {
+    const { maker, startSession, bootstrapReady, resolveBootstrap } = setup();
+
+    await maker.prewarmSession(prewarmOpts('cursor-business'));
+
+    expect(startSession).toHaveBeenCalledTimes(1);
+    // prewarm 已返回（不阻塞 bootstrap），但 bootstrapReady 仍 pending。
+    const settled = await Promise.race([
+      bootstrapReady.then(() => true).catch(() => true),
+      Promise.resolve(false),
+    ]);
+    expect(settled).toBe(false);
+
+    // claim 未就绪 → false，且不阻塞（无需等 bootstrap）。
+    const claimed = await maker.claimPrewarmedSession('cursor-business');
+    expect(claimed).toBe(false);
+    resolveBootstrap();
+  });
+
+  it('claim after ready is true and createSession adopts the prewarmed handle without a second spawn', async () => {
+    const { maker, startSession, resolveBootstrap } = setup();
+
+    await maker.prewarmSession(prewarmOpts('cursor-business'));
+    resolveBootstrap();
+    // 等 bootstrap 落定（ready 标记由后台 watcher 置位）。
+    await vi.waitFor(async () => {
+      expect(await maker.claimPrewarmedSession('cursor-business')).toBe(true);
+    });
+
+    const session = await maker.createSession(prewarmOpts('cursor-business'));
+    expect(startSession).toHaveBeenCalledTimes(1); // 复用预热句柄，不二次 spawn
+    expect(session).toBeInstanceOf(Session);
+    await session.close();
+  });
+
+  it('claim unknown id returns false; cancel is idempotent', async () => {
+    const { maker, resolveBootstrap } = setup();
+
+    expect(await maker.claimPrewarmedSession('missing')).toBe(false);
+    await expect(maker.cancelPrewarmedSession('missing')).resolves.toBeUndefined();
+    resolveBootstrap();
+  });
+
+  it('cancel closes the prewarmed handle', async () => {
+    const { maker, resolveBootstrap } = setup();
+    const close = vi.fn(async () => {});
+
+    let resolveBootstrapInner!: () => void;
+    const bootstrapReady = new Promise<void>((resolve) => {
+      resolveBootstrapInner = resolve;
+    });
+    const startSession = vi.fn(async () =>
+      createHandle({
+        id: 'cursor-sdk',
+        agentKind: 'cursor',
+        model: 'auto',
+        bootstrapReady,
+        close,
+      }),
+    );
+    const maker2 = new Maker({
+      agents: { cursor: createAgent(startSession, 'cursor') },
+      storage: createStorage(),
+      logger: createLogger(),
+    });
+
+    await maker2.prewarmSession(prewarmOpts('cursor-business'));
+    await maker2.cancelPrewarmedSession('cursor-business');
+    expect(close).toHaveBeenCalledTimes(1);
+    resolveBootstrapInner();
+    resolveBootstrap();
+  });
+
+  // ─── T2 池安全语义：TTL / 上限 1 / 已 claim 免疫 TTL / cancel 幂等 ───
+  function t2Setup() {
+    const closed: string[] = [];
+    let resolveBootstrap!: () => void;
+    const bootstrapReady = new Promise<void>((resolve) => {
+      resolveBootstrap = resolve;
+    });
+    const startSession = vi.fn(async (opts: { sessionId: string }) =>
+      createHandle({
+        id: 'cursor-sdk',
+        agentKind: 'cursor',
+        model: 'auto',
+        bootstrapReady,
+        close: vi.fn(async () => {
+          closed.push(opts.sessionId);
+        }),
+      }),
+    );
+    const maker = new Maker({
+      agents: { cursor: createAgent(startSession, 'cursor') },
+      storage: createStorage(),
+      logger: createLogger(),
+    });
+    return { maker, startSession, bootstrapReady, resolveBootstrap, closed };
+  }
+
+  it('TTL reaps an unclaimed prewarmed handle after 60s (process closed)', async () => {
+    vi.useFakeTimers();
+    try {
+      const { maker, startSession, closed, resolveBootstrap } = t2Setup();
+      await maker.prewarmSession(prewarmOpts('cursor-a'));
+      resolveBootstrap();
+      await vi.waitFor(() => expect(startSession).toHaveBeenCalledTimes(1));
+
+      // 60s TTL 到期前不被回收。
+      await vi.advanceTimersByTimeAsync(59_000);
+      expect(closed).toEqual([]);
+      // 到期后自动回收（进程关闭），claim 也返回 false。
+      await vi.advanceTimersByTimeAsync(2_000);
+      expect(closed).toEqual(['cursor-a']);
+      expect(await maker.claimPrewarmedSession('cursor-a')).toBe(false);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('claimed handles are immune to TTL', async () => {
+    vi.useFakeTimers();
+    try {
+      const { maker, closed, resolveBootstrap } = t2Setup();
+      await maker.prewarmSession(prewarmOpts('cursor-a'));
+      resolveBootstrap();
+      await vi.waitFor(async () => {
+        expect(await maker.claimPrewarmedSession('cursor-a')).toBe(true);
+      });
+
+      await vi.advanceTimersByTimeAsync(120_000);
+      expect(closed).toEqual([]); // 已 claim，TTL 不回收
+      // 且 createSession 仍能 0 等待接管。
+      const session = await maker.createSession(prewarmOpts('cursor-a'));
+      expect(session).toBeInstanceOf(Session);
+      await session.close();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('cap of one: a new prewarm preempts an older unclaimed one (old closed first)', async () => {
+    const { maker, startSession, closed, resolveBootstrap } = t2Setup();
+    await maker.prewarmSession(prewarmOpts('cursor-a'));
+    resolveBootstrap();
+    await vi.waitFor(() => expect(startSession).toHaveBeenCalledTimes(1));
+
+    // 新草稿触发预热 → 旧的未 claim 句柄先被回收。
+    await maker.prewarmSession(prewarmOpts('cursor-b'));
+    expect(closed).toEqual(['cursor-a']);
+    expect(startSession).toHaveBeenCalledTimes(2); // 第二个 spawn
+  });
+
+  it('cancel is idempotent: repeated cancels on the same handle do not explode', async () => {
+    const { maker, closed, resolveBootstrap } = t2Setup();
+    await maker.prewarmSession(prewarmOpts('cursor-a'));
+    resolveBootstrap();
+    await vi.waitFor(async () => {
+      expect(await maker.claimPrewarmedSession('cursor-a')).toBe(true);
+    });
+
+    await maker.cancelPrewarmedSession('cursor-a');
+    await maker.cancelPrewarmedSession('cursor-a');
+    await maker.cancelPrewarmedSession('cursor-a');
+    expect(closed).toEqual(['cursor-a']); // 只 close 一次
+  });
+});
+
 describe('Maker Cursor startup fallback', () => {
   it('persists the active model and replays its warning to host listeners attached after creation', async () => {
     const storage = createStorage();
