@@ -70,7 +70,12 @@ const getSessionMetaMock = vi.fn(async () =>
 function useFakeSession(agentKind: AgentKind) {
   fakeSession = {
     agentKind,
-    sdkSessionId: agentKind === 'codex' ? 'codex-thread-old' : 'sdk-uuid-old',
+    sdkSessionId:
+      agentKind === 'codex'
+        ? 'codex-thread-old'
+        : agentKind === 'pi'
+          ? 'pi-session-old'
+          : 'sdk-uuid-old',
     workDir: '/repo',
     remoteHostId: null,
     isTurnRunning: isTurnRunningMock,
@@ -918,6 +923,38 @@ describe('commitRewindAtMessage', () => {
       sdkSessionId: 'rollback-thread-id',
     });
     expect(setLastAssistantTranscriptUuidMock).not.toHaveBeenCalled();
+    expect(result.id).toBe('sess-1');
+  });
+
+  it('Pi: executes rewind after lazy activation establishes a live session', async () => {
+    fakeSession = undefined;
+    await expect(
+      commitRewindAtMessage('sess-1', 'client-id'),
+    ).rejects.toMatchObject({ code: 'NO_LIVE_QUERY' });
+    expect(commitRewindFilesMock).not.toHaveBeenCalled();
+    expect(txCalls).toHaveLength(0);
+    getSessionMock.mockClear();
+
+    useFakeSession('pi');
+    commitRewindFilesMock.mockResolvedValueOnce({ sdkSessionId: 'pi-session-rewound' });
+    selectQueue.push([makeUserMessageRow({ agentMeta: null })]);
+    selectQueue.push([]);
+    selectQueue.push([
+      makeUserMessageRow({ clientId: 'client-id', createdAt: 3000 }),
+      makeUserMessageRow({ clientId: 'later-user', createdAt: 5000 }),
+    ]);
+    selectQueue.push([makeSessionRow({ agentKind: 'pi', sdkSessionId: 'pi-session-rewound' })]);
+
+    const result = await commitRewindAtMessage('sess-1', 'client-id');
+
+    expect(getSessionMock).toHaveBeenCalledTimes(2);
+    expect(getSessionMock).toHaveBeenLastCalledWith('sess-1');
+    expect(commitRewindFilesMock).toHaveBeenCalledOnce();
+    expect(commitRewindFilesMock).toHaveBeenCalledWith('', '', { tailTurnsToDrop: 2 });
+    expect(txCalls.find((call) => call.name === 'rewind.commit')?.args).toMatchObject({
+      sessionId: 'sess-1',
+      sdkSessionId: 'pi-session-rewound',
+    });
     expect(result.id).toBe('sess-1');
   });
 
