@@ -147,7 +147,7 @@ describe('buildHandoffText', () => {
     expect(text).toContain('- pnpm test');
     expect(text).toContain('- git status');
     expect(text).toContain('Files changed:');
-    expect(text).toContain('Commands run');
+    expect(text).toContain('Commands (most recent):');
   });
 
   it('Cursor edit 的 file_path 键名同样被提取(ACP rawInput 可能用 file_path)', () => {
