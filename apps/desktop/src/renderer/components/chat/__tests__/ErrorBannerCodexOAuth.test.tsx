@@ -8,13 +8,14 @@ import { ErrorBanner } from '../ErrorBanner';
 import { ErrorTailErrorBanner } from '../InterruptedTurnBanner';
 import { useCodexAuth } from '@/hooks/useCodexAuth';
 import { useCodexSessionExpiredPrompt } from '@/hooks/useCodexSessionExpiredPrompt';
+import type { AgentKind } from '@cindy/maker-core';
 import {
   CLAUDE_GATEWAY_OPUS_PLAN_MISMATCH_REASON,
   CLAUDE_SUBSCRIPTION_OPUS_PLAN_MISMATCH_REASON,
 } from '../../../../shared/claudeGatewayError';
 
 type AuthStateChangedPayload = {
-  agentKind: 'claude-code' | 'codex';
+  agentKind: AgentKind;
   authenticated: boolean;
   identity?: string;
   expiresAt?: number;

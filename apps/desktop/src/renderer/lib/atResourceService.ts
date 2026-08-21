@@ -5,6 +5,7 @@ import {
   conversationSearchTitle,
   type ConversationSearchResponse,
 } from '../../shared/conversationSearch';
+import type { AgentKind } from '@cindy/maker-core';
 
 const log = createLogger('AtResourceService');
 /**
@@ -82,7 +83,7 @@ const EMPTY_QUERY_SECTIONS: ReadonlyArray<ReadonlySet<AtResourceType>> = [
   new Set(['plugin-command']),
 ];
 
-export type PaletteAgentKind = 'claude-code' | 'codex' | 'pi';
+export type PaletteAgentKind = AgentKind;
 
 export interface AtResourceScanContext {
   /** Current local task. Its built-in browser tabs are the only tabs exposed. */

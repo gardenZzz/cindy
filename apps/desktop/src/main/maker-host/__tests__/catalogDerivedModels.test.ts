@@ -14,7 +14,7 @@ import { describe, it, expect } from 'vitest';
 
 import { BUNDLED_CATALOG, buildUserProvider } from '@cindy/model-providers';
 import type { Catalog, CatalogModel } from '@cindy/model-providers';
-import type { ModelDescriptor } from '@cindy/maker-core';
+import type { ModelDescriptor, AgentKind } from '@cindy/maker-core';
 
 import {
   deriveAvailableModels,
@@ -638,7 +638,7 @@ describe('deriveAvailableModels — dynamic-first catalog contract', () => {
     const codexRef = codexModels;
     const piRef = piModels;
     const target = {
-      getCapabilities(agent: 'claude-code' | 'codex' | 'pi') {
+      getCapabilities(agent: AgentKind) {
         if (agent === 'pi') return { availableModels: piModels };
         return { availableModels: agent === 'claude-code' ? claudeModels : codexModels };
       },

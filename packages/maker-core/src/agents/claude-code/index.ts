@@ -2346,6 +2346,7 @@ export class ClaudeCodeAgent extends BaseAgent {
       sawCompactBoundary: false,
       hasEmittedText: false,
       uiEmittedText: '',
+      uiEmittedTextLenAtLastToolUse: 0,
       pendingApiError: null,
       interruptRequested: false,
       generation: 0,
@@ -2364,9 +2365,11 @@ export class ClaudeCodeAgent extends BaseAgent {
       turnState.sawCompactBoundary = false;
       turnState.hasEmittedText = false;
       turnState.uiEmittedText = '';
+      turnState.uiEmittedTextLenAtLastToolUse = 0;
       runtimeState.streamStopTokenByKey.clear();
       turnState.pendingApiError = null;
       turnState.lastAssistantRequestId = undefined;
+      turnState.lastAssistantWireModel = undefined;
       turnState.lastAssistantMsgHadSubstance = true;
       // 代际前进: 迟到的被打断 result 据此被 translator 识别为已被本 send 接管。
       turnState.generation += 1;

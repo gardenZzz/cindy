@@ -20,11 +20,12 @@ import { dbToMakerAgentKind } from '../../shared/agentKindConversion.js';
 import { eq } from 'drizzle-orm';
 
 import { connectedProvidersForAgent, type ProviderView } from '@cindy/model-providers';
-import type { AgentKind } from '@cindy/maker-core';
+import { CURSOR_ONESHOT_DEFAULT_MODEL, type AgentKind } from '@cindy/maker-core';
 
 import { getResolvedMainLocale } from '../i18n.js';
 import { getDbClient } from '../localDb/client/current.js';
 import { sessions } from '../localDb/schema.js';
+import { getMakerIfReady } from '../maker-host/index.js';
 import { getDesktopProviderService } from '../maker-host/createDesktopProviderService.js';
 import {
   generateTitleViaProvider,
@@ -100,6 +101,9 @@ async function listConnectedProvidersForAgent(agentKind: AgentKind): Promise<Pro
 /**
  * 给某会话起标题。`sessionId` 用于读 DB 显式来源(race-free);空串 = 走 WYSIWYG 默认。
  * 失败统一返回 null(调用方回落启发式),不抛。
+ *
+ * Cursor 不走 Cindy provider catalog HTTP oneShot，改走 agent.oneShot
+ * （headless `cursor-agent -p` + 便宜模型）。
  */
 export async function generateMakerSessionTitle(
   message: string,
@@ -110,6 +114,12 @@ export async function generateMakerSessionTitle(
   // "请提供用户消息内容"式回复当标题返回。直接放弃,调用方保留默认名。
   const trimmed = message.trim();
   if (!trimmed) return null;
+  if (agentKind === 'cursor') {
+    return generateCursorSessionTitle(
+      buildAutoTitlePrompt(trimmed.slice(0, AUTO_TITLE_MESSAGE_SLICE), getResolvedMainLocale()),
+      sessionId,
+    );
+  }
   return generateTitleViaProvider(
     {
       sessionId: sessionId ?? '',
@@ -125,6 +135,40 @@ export async function generateMakerSessionTitle(
     },
   );
 }
+
+async function generateCursorSessionTitle(
+  prompt: string,
+  sessionId?: string,
+): Promise<string | null> {
+  try {
+    const maker = getMakerIfReady();
+    if (!maker || !maker.listAvailableAgents().includes('cursor')) return null;
+    // `cursor-agent -p` 自带冷启动；等 ACP session/new 就绪后再起，避免两次冷启动争抢资源。
+    if (sessionId) await maker.waitForSessionBootstrap(sessionId);
+    const text = await maker.oneShot('cursor', prompt, {
+      model: CURSOR_ONESHOT_DEFAULT_MODEL,
+      timeoutMs: TITLE_TIMEOUT_MS_CURSOR,
+    });
+    // 与其它 provider 通路同一把尺子：裸 trim+slice 会把多行、`Title:` 前缀、角色标签、
+    // Markdown 与指令复述原样落进自动标题，重新生成标题走的也是这套校验。
+    return validateTitleOutput(text, CURSOR_TITLE_MAX_CHARS);
+  } catch (err) {
+    log.debug('cursor title oneShot failed (swallowed)', {
+      error: err instanceof Error ? err.message : String(err),
+    });
+    return null;
+  }
+}
+
+/** Cursor headless 起标题超时（略宽于 HTTP 通路，CLI 冷启动更慢）。 */
+const TITLE_TIMEOUT_MS_CURSOR = 30_000;
+
+/**
+ * 与共享自动标题通路（`title-one-shot.ts` 的 `TITLE_OUTPUT_MAX_CHARS`）取同一上限。
+ * 原先这里是裸 `slice(0, 40)`：既没有校验，超长时又是**截断**而非判为不合格，
+ * 与其它 provider 的口径两处都不一致。
+ */
+const CURSOR_TITLE_MAX_CHARS = 256;
 
 /** regenerate 的依赖注入面——单测用内存实现替换 DB / LLM 调用。 */
 export interface RegenerateTitleDeps {
@@ -157,14 +201,19 @@ async function readSessionAgentKindFromDb(sessionId: string): Promise<AgentKind 
 const defaultRegenerateDeps: RegenerateTitleDeps = {
   readSessionAgentKind: readSessionAgentKindFromDb,
   collectMaterial: regenerateTitleMaterial,
-  generateTitle: (sessionId, agentKind, prompt) =>
-    generateTitleViaProviderResult(
+  generateTitle: async (sessionId, agentKind, prompt) => {
+    if (agentKind === 'cursor') {
+      const title = await generateCursorSessionTitle(prompt, sessionId);
+      return title ? { status: 'ok' as const, title } : { status: 'failed' as const };
+    }
+    return generateTitleViaProviderResult(
       { sessionId, agentKind, prompt },
       {
         readSessionProviderId: readSessionProviderIdFromDb,
         listConnectedProviders: listConnectedProvidersForAgent,
       },
-    ),
+    );
+  },
 };
 
 /**
@@ -257,7 +306,7 @@ const AUTO_TITLE_TEXT_MAX = 2000;
 /** sessionId 长度上限(UUID / cuid 都远小于此)。 */
 const SESSION_ID_MAX = 128;
 
-const TITLE_AGENT_KINDS = ['claude-code', 'codex', 'pi'] as const satisfies readonly AgentKind[];
+const TITLE_AGENT_KINDS = ['claude-code', 'codex', 'cursor', 'pi'] as const satisfies readonly AgentKind[];
 
 interface GenerateTitleRequest {
   message: string;

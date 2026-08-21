@@ -6827,6 +6827,55 @@ export type GhostPipeCindyRequest =
       maxTokens?: number;
       /** 归因号(同 gen_image 分支)。 */
       callId?: string;
+      /** 异步模式(同 gen_video 分支)。 */
+      mode?: 'submit';
+    }
+  | {
+      type: 'cindy-request';
+      kind: 'query_job';
+      /** mode:'submit' 受理时返回的任务号(仅本意识自己的任务可查)。 */
+      jobId: string;
+    }
+  | {
+      /**
+       * 寄存:把意识手里已有的媒体字节存入总仓、记到本意识名下,换回指纹
+       * (makecindy/cindy#784)。典型来源是面板里用户粘贴/拖入的图与面板存量
+       * 素材——它们的字节只在面板侧(IndexedDB / 面板内存),不在总仓,因此
+       * 在寄存之前不能当 edit_image / edit_video 的源图。
+       *
+       * 不经模型、不花钱、不产出新内容:这条通道只是"字节换指纹"。因此它
+       * **不进 ghost_call 产物账**(不会被当成生成物自动送进聊天/IM——用户
+       * 自己粘的参考图被回推到 IM 会是隐私事故),也不进画廊(粘贴的参考图
+       * 不是这个意识的"作品")。
+       *
+       * 须声明 'cindy' 卡槽 + `cindy.media: ["deposit"]`。
+       */
+      type: 'cindy-request';
+      kind: 'deposit_media';
+      /**
+       * 媒体字节的 base64(不含 data: 前缀;解码后 ≤
+       * GHOST_CINDY_DEPOSIT_MAX_BYTES = 50MB)。真实类型由主机按字节魔数
+       * 判定,识别不出受支持媒体一律拒收——自报的 mime / 扩展名不作为依据。
+       */
+      data: string;
+      /** 可选备注(入账 label;仅供主机侧账目与排查,不进聊天)。 */
+      label?: string;
+      /** 归因号(仅日志归因;寄存不计入产物账,见上)。 */
+      callId?: string;
+    }
+  | {
+      /**
+       * 撤回寄存:删掉本意识对该指纹的寄存引用(配额随之释放)。面板上那件
+       * 素材被用户删掉时调用,是 deposit 配额的正常释放口。
+       *
+       * 只删**本意识自己的寄存引用**:别人的引用、画廊引用、聊天消息引用都
+       * 不受影响;字节本身交回收器按"引用归零"统一处理,本请求删不掉字节。
+       * 与 deposit 共用 `cindy.media: ["deposit"]` 授权。
+       */
+      type: 'cindy-request';
+      kind: 'release_media';
+      /** 要撤回的寄存指纹(sha256)。 */
+      hash: string;
     }
   | {
       /**

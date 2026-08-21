@@ -66,12 +66,20 @@ export interface TurnState {
    */
   hasEmittedText: boolean;
   /**
-   * 本 turn 已推给 UI 的全部 text(assistant block + 流式 delta,按到达顺序拼接)。
-   * turn-end 时与 result.result 做前缀比对,只补 UI 缺失的尾部(末尾截断兜底),绝不重复推。
-   * 这是修复 e7ea882b 盲区(末尾截断)的依据:hasEmittedText 是 per-turn 布尔,无法区分
-   * "整轮全空"和"前面推过、最后一段被截断";uiEmittedText 让兜底能精确算出缺哪一段。
+   * 本 turn 已推给 UI 的可见 text。流式 text_delta 到达时累加;完整 assistant text
+   * block 仅在该 parent 还没流过时累加(与 renderer 在途流式丢弃 isFinal 对齐),
+   * 避免同一段正文计两遍。turn-end 时与 result.result 做前缀比对,只补 UI 缺失的
+   * 尾部(末尾截断兜底),绝不重复推。这是修复 e7ea882b 盲区(末尾截断)的依据:
+   * hasEmittedText 是 per-turn 布尔,无法区分"整轮全空"和"前面推过、最后一段被截断";
+   * uiEmittedText 让兜底能精确算出缺哪一段。
    */
   uiEmittedText: string;
+  /**
+   * 最近一次 tool_use 到达时 uiEmittedText.length 的快照。silent-stop 用
+   * 「自最后一次 tool_use 以来有没有产出可见正文」判定：长度仍等于快照则
+   * 视为没交出答复。零 tool 时恒为 0，退化成 uiEmittedText.length === 0。
+   */
+  uiEmittedTextLenAtLastToolUse: number;
   /**
    * SDK API retry / assistant error envelope 的暂存详情。两者都不是可靠的 turn
    * 终态: Claude Code 可能随后自动重试并返回成功 result。只有最终
@@ -124,6 +132,13 @@ export interface TurnState {
    * 因此必须在 assistant 消息到达时按 turn 暂存，再随 done 交给 host。
    */
   lastAssistantRequestId?: string;
+  /**
+   * 本 turn 最近一条**主流** assistant 消息自报的 wire model。会话配置的模型 id
+   * (ctx.getModel()) 只是用户视角的身份,网关可能把它分流到别的实际模型,两者不一致时
+   * 按配置 id 做归因会得出错误结论。异常日志同时打两者,缺失时不打占位值。
+   * 只取主流:子代理跑在自己的模型上,把它的 model 记进来会重演同一类归因错误。
+   */
+  lastAssistantWireModel?: string;
 }
 
 export interface RuntimeState {
@@ -218,10 +233,12 @@ function resetTurnState(turn: TurnState): void {
   turn.sawCompactBoundary = false;
   turn.hasEmittedText = false;
   turn.uiEmittedText = '';
+  turn.uiEmittedTextLenAtLastToolUse = 0;
   turn.pendingApiError = null;
   turn.interruptRequested = false;
   turn.lastAssistantMsgHadSubstance = true;
   turn.lastAssistantRequestId = undefined;
+  turn.lastAssistantWireModel = undefined;
   // generation / interruptGeneration 刻意不清: 代际跨 turn 单调递增(见字段注释)。
 }
 
@@ -1265,6 +1282,10 @@ function handleAssistant(
   const assistantModel = typeof assistantMeta.model === 'string' && assistantMeta.model
     ? assistantMeta.model
     : undefined;
+  if (!parentToolUseId && assistantModel) {
+    // 主流 wire model:异常日志的归因依据,与会话配置 id 分开记。
+    ctx.turn.lastAssistantWireModel = assistantModel;
+  }
   if (parentToolUseId && assistantModel) {
     ctx.rt.streamModelByParentToolUseId.set(parentToolUseId, assistantModel);
     const actualModel = ctx.rt.resolvedSubagentModelByParentToolUseId.get(parentToolUseId)
@@ -1308,6 +1329,21 @@ function handleAssistant(
   // 未知块 fail-safe 为有内容，避免 SDK 新 block 被误续跑。
   // 逐条覆盖写, turn end 时留下的就是最后一条 assistant 消息的判定(见 TurnState 字段注释)。
   ctx.turn.lastAssistantMsgHadSubstance = content.some(assistantBlockHasSubstance);
+  // 该 parent 已经流过 text_delta 时,完整 text block 不再累加 uiEmittedText
+  // (两条路都会 push,但 renderer 在途流式会丢弃 isFinal)。必须在遍历 content 之前
+  // 一次算完:下面的清理循环会在第一个 text block 就删光该 parent 的 key,逐块重算
+  // 会让同一条消息的第二个 text block 误判成"没流过"而把它再累加一遍。
+  // 不能「完整消息一律不累加」:只发完整 assistant、不发 delta 时 emitted 会恒为 0,
+  // 收尾分支 ① 会把整段正文当缺失尾巴再推一遍,变成用户可见的重复。
+  const messageStreamKey = parentToolUseId ?? '__main__';
+  const messageStreamPrefix = `${messageStreamKey}:`;
+  let hadStreamedText = false;
+  for (const key of ctx.rt.streamStopTokenByKey.keys()) {
+    if (key === messageStreamKey || key.startsWith(messageStreamPrefix)) {
+      hadStreamedText = true;
+      break;
+    }
+  }
   for (const blockRaw of content) {
     const block = blockRaw as { type?: string; text?: string; name?: string; id?: string; input?: unknown; thinking?: string; signature?: string };
     if (block.type === 'text' && typeof block.text === 'string') {
@@ -1322,7 +1358,7 @@ function handleAssistant(
       ctx.turn.text += visibleText;
       if (visibleText.length > 0) {
         ctx.turn.hasEmittedText = true;
-        ctx.turn.uiEmittedText += visibleText;
+        if (!hadStreamedText) ctx.turn.uiEmittedText += visibleText;
         queue.push({
           type: 'text',
           data: { text: visibleText, isFinal: true },
@@ -1332,6 +1368,7 @@ function handleAssistant(
       }
     } else if (block.type === 'tool_use') {
       ctx.turn.toolUses += 1;
+      ctx.turn.uiEmittedTextLenAtLastToolUse = ctx.turn.uiEmittedText.length;
       // ctx.log.info('SDK ▷ tool_use', {
       //   toolName: block.name,
       //   toolUseId: block.id,
@@ -1645,6 +1682,11 @@ function handleResult(
     : ctx.turn.text;
   // 顶层 model 表示当前 runtime model; modelUsage 是累计分桶, 只作为诊断字段。
   const currentModel = ctx.getModel();
+  // 异常日志的归因字段: 会话配置 id 与上游自报的 wire model 可能不是一回事(网关分流),
+  // 只记前者会把 A 模型的故障算到 B 头上。wire model 缺失时整个字段不出现,不打占位值。
+  const wireModelFields = ctx.turn.lastAssistantWireModel
+    ? { wireModel: ctx.turn.lastAssistantWireModel }
+    : {};
   const modelsUsed = msg.modelUsage ? Object.keys(msg.modelUsage) : [];
 
   // contextWindow: 优先取当前 model 的 modelUsage[model].contextWindow,
@@ -1900,6 +1942,8 @@ function handleResult(
   // error_during_execution / context 超限等)。补一条 WARN 保证 info 级可见。
   if (msg.is_error) {
     ctx.log.warn('SDK ◀ turn ended with error', {
+      model: currentModel,
+      ...wireModelFields,
       stopReason: msg.stop_reason,
       terminalReason: msg.terminal_reason,
       durationMs: msg.duration_ms,
@@ -1937,29 +1981,32 @@ function handleResult(
       source: 'claude-code',
     });
   }
-  // silent-stop 判定: turn 内干过活(有 tool 调用),或整轮没有任何用户可见正文,且最后
-  // 一条 assistant 消息没有实质内容(典型: 只有 thinking 块),result 也没兜出可补的
-  // 文本 —— 上游把 turn 静默收了尾,用户侧表现为"干着干着停了、看起来像正常结束"。已知
-  // 上游形态: 模型偶发 thinking-only 空响应(anthropics/claude-code#50597,
+  // silent-stop 判定: 自最后一次 tool_use 以来没有产出可见正文,且最后一条
+  // assistant 消息没有实质内容(典型: 只有 thinking 块),result 也没兜出可补的
+  // 文本 —— 上游把 turn 静默收了尾,用户侧表现为"干着干着停了、看起来像正常结束"。
+  // 判据看交付语义(uiEmittedText 相对 tool_use 快照有没有增长),不能看最后一条
+  // 消息的形状: 部分网关(经 cliproxyapi 的 gemini flash)会在 end_turn 之后追加
+  // 一条零内容尾巴,把 lastAssistantMsgHadSubstance 抹成 false,但本轮已经交过
+  // 完整答复。零 tool 时快照恒为 0,退化成 uiEmittedText.length === 0。已知真
+  // silent-stop 形态: 模型偶发 thinking-only 空响应(anthropics/claude-code#50597,
   // stop_reason=end_turn)与 SSE 流被静默中断后 SDK 按正常结束处理(#38905, 此形态
-  // stop_reason 常缺失)。与 isEmptyResponseTurn(整轮 0 产出 + usage 全 0)互斥:
-  // 零 tool 但零可见正文也必须命中:第一次自动补发「继续」后,上游可能再次只返回
-  // thinking；旧的 toolUses > 0 守卫会把第二次当正常完成。已有可见正文的零 tool turn
-  // 则不扩张判定。沿用 turn 收尾同款排除项: is_error(另有 error 收尾)、
-  // interruptRequested(用户停止/watchdog)、sawCompactBoundary(compact 轮合法空)。
-  // 命中后事件流仍走正常 Done/done 收尾(记账/收口零变更), 只在 done.data 附加
-  // silentStop 标记交给 host 的自动续跑守卫决策; WARN 日志保留作 dev 排查。
+  // stop_reason 常缺失)。与 isEmptyResponseTurn(整轮 0 产出 + usage 全 0)互斥。
+  // 沿用 turn 收尾同款排除项: is_error(另有 error 收尾)、interruptRequested
+  // (用户停止/watchdog)、sawCompactBoundary(compact 轮合法空)。命中后事件流仍走
+  // 正常 Done/done 收尾(记账/收口零变更), 只在 done.data 附加 silentStop 标记
+  // 交给 host 的自动续跑守卫决策; WARN 日志保留作 dev 排查。
   const isSilentStopTurn =
     !msg.is_error &&
     !ctx.turn.interruptRequested &&
     !ctx.turn.sawCompactBoundary &&
     !isEmptyResponseTurn &&
-    (ctx.turn.toolUses > 0 || ctx.turn.uiEmittedText.length === 0) &&
+    ctx.turn.uiEmittedText.length === ctx.turn.uiEmittedTextLenAtLastToolUse &&
     !ctx.turn.lastAssistantMsgHadSubstance &&
     fallbackTail.length === 0;
   if (isSilentStopTurn) {
     ctx.log.warn('SDK ◀ turn ended by silent stop (last assistant message had no content)', {
       model: currentModel,
+      ...wireModelFields,
       stopReason: msg.stop_reason ?? null,
       terminalReason: msg.terminal_reason,
       apiCalls: ctx.turn.apiCalls,
@@ -1974,6 +2021,7 @@ function handleResult(
   if (isEmptyResponseTurn) {
     ctx.log.warn('SDK ◀ turn produced empty response (0 content, usage all zero)', {
       model: currentModel,
+      ...wireModelFields,
       apiCalls: ctx.turn.apiCalls,
       stopReason: msg.stop_reason,
       terminalReason: msg.terminal_reason,

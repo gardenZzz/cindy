@@ -1904,6 +1904,70 @@
           "cleared": "已清除影像生成 API key",
           "clearFailed": "清除影像生成 API key 失敗"
         }
+      },
+      "cursor": {
+        "title": "Cursor",
+        "installedDescription": "本機已安裝 cursor-agent。可用時可選用 Cursor 作為 Agent。",
+        "installedSignedOutDescription": "本機已安裝 cursor-agent，但尚未登入 Cursor。登入後即可新建對話。",
+        "loggedInDescription": "已登入 Cursor（{{identity}}）。新建對話將使用此登入狀態。",
+        "loggedInUnknown": "已登入帳號",
+        "loginPendingDescription": "正在等待瀏覽器完成 Cursor 登入。可開啟或複製下方連結；Cindy 不會自動開啟瀏覽器。",
+        "missingDescription": "安裝官方 cursor-agent 後即可在 Cindy 中使用 Cursor。可選——不裝也不影響其它功能。",
+        "installedPill": "已安裝",
+        "loggedInPill": "已登入",
+        "signedOutPill": "未登入",
+        "installCta": "安裝",
+        "installing": "正在安裝…",
+        "loginCta": "登入",
+        "loggingIn": "登入中…",
+        "logoutCta": "登出",
+        "cancelLogin": "取消登入",
+        "openLoginUrl": "開啟登入頁",
+        "copyLoginUrl": "複製連結",
+        "loginUrlHint": "請在瀏覽器完成授權後回到此處；連結含一次性憑證，請勿分享。",
+        "loginUrlCopied": "登入連結已複製",
+        "loginUrlCopyFailed": "無法複製登入連結",
+        "loginSuccess": "Cursor 已登入",
+        "loginFailed": "Cursor 登入失敗",
+        "logoutSuccess": "Cursor 已登出",
+        "logoutFailed": "Cursor 登出失敗",
+        "logoutConfirmTitle": "登出 Cursor？",
+        "logoutConfirmDescription": "將清除本機 cursor-agent 的登入狀態（由 Cursor CLI 管理）。登出後需重新登入才能新建 Cursor 對話。",
+        "logoutConfirm": "登出",
+        "authRequiredTitle": "需要登入 Cursor",
+        "authRequiredDescription": "請先在設定 → 模型供應商中登入 Cursor，然後再新建對話。",
+        "optionalHint": "Cursor ACP",
+        "refreshAria": "重新檢測 Cursor 安裝狀態",
+        "confirmTitle": "安裝 Cursor？",
+        "confirmDescription": "確認後，Cindy 將在本機執行官方安裝指令：\n\n{{command}}\n\n未確認前不會執行任何安裝。",
+        "confirmInstall": "安裝",
+        "confirmCancel": "取消",
+        "installSuccess": "Cursor 已安裝。重新啟動 Cindy 後即可在新增任務時選擇 Cursor。",
+        "installFailed": "無法安裝 Cursor",
+        "installNotDetected": "安裝已結束，但仍未檢測到 cursor-agent。請重新整理，或在終端自行安裝。",
+        "unsupportedPlatform": "官方 cursor-agent 安裝程式僅支援 macOS 與 Linux。",
+        "models": {
+          "emptyState": "還沒有 Cursor 模型目錄。點擊「重新整理模型」拉取一次（需已登入 Cursor）。",
+          "refreshCta": "重新整理模型",
+          "refreshing": "已探 {{done}} / {{total}}",
+          "refreshUnavailableInstalled": "需先安裝 cursor-agent",
+          "refreshUnavailableAuth": "需先登入 Cursor",
+          "autoHint": "兜底",
+          "autoAlwaysOn": "常顯",
+          "effortHint_one": "{{count}} 檔推理強度",
+          "effortHint_other": "{{count}} 檔推理強度",
+          "cancelRefresh": "取消重新整理",
+          "refreshFailed": "模型重新整理失敗，請稍後再試"
+        },
+        "groups": {
+          "cursor": "Cursor",
+          "anthropic": "Anthropic",
+          "openai": "OpenAI",
+          "google": "Google",
+          "xai": "xAI",
+          "domestic": "國內",
+          "other": "其它"
+        }
       }
     },
     "experimental": {
@@ -3483,7 +3547,8 @@
         "agents": {
           "claude-code": "Claude Code",
           "codex": "Codex",
-          "pi": "Pi"
+          "pi": "Pi",
+          "cursor": "Cursor"
         },
         "groupPermissionLabel": "群聊新建任務權限檔",
         "groupPermissionDescription": "群組裡新建任務時統一使用的權限檔（@bot 開話題、/new、/ctr 都算），預設「自動審批」；上面那個權限檔只管私聊。群組上下文裡有成員可控制的內容，設成「完全存取」後將直接執行、不再逐項確認，請確認群組成員都可信。變更只影響之後新建的任務，已有任務在群組裡用 /permission 單獨切換。"
@@ -6206,7 +6271,8 @@
       "inlineSecretStoreFailed": "憑證儲存失敗",
       "targetNotFound": "目標插件已解除安裝或當前不可用",
       "targetDisabled": "目標插件已被停用",
-      "targetDisabledInWorkdir": "使用者已在當前工作目錄停用該插件；不要重試。"
+      "targetDisabledInWorkdir": "使用者已在當前工作目錄停用該插件；不要重試。",
+      "targetToolNotFound": "目標插件不再提供該工具"
     },
     "createAgent": {
       "quickStart": "快速開始",
@@ -6306,7 +6372,8 @@
           "claudeCode": "Claude Code",
           "codex": "Codex",
           "pi": "Pi",
-          "pending": "下條：{{agent}}"
+          "pending": "下條：{{agent}}",
+          "cursor": "Cursor"
         }
       },
       "category": {
@@ -6423,6 +6490,20 @@
           "bypassPermissions": {
             "label": "完全訪問",
             "description": "常規工具無需詢問直接執行；安裝、更新或解除安裝 Pi 擴展仍需確認。風險最高，只適合可信任務。"
+          }
+        },
+        "cursor": {
+          "ask": {
+            "label": "預設權限",
+            "description": "需要審批的工具呼叫會先詢問。由 Cindy 在客戶端處理每一次權限請求。"
+          },
+          "auto": {
+            "label": "自動審批",
+            "description": "自動放行讀取、搜尋與思考類工具；編輯、執行等更高風險工具仍會詢問。"
+          },
+          "bypassPermissions": {
+            "label": "完全訪問",
+            "description": "工具呼叫不再詢問。風險最高，只適合可信任務。不會改動你的 Cursor 沙箱設定。"
           }
         }
       }
@@ -6844,7 +6925,8 @@
         "codex": "Codex",
         "pi": "Pi",
         "workflow": "Workflow",
-        "shell": "後臺命令"
+        "shell": "後臺命令",
+        "cursor": "Cursor"
       },
       "status": {
         "running": "執行中",
@@ -7623,7 +7705,10 @@
       "running": "執行中…",
       "turnStart": "正在處理，{{name}}",
       "issueTip": "{{name}}，試試用 /issue 給我們提反饋或建議",
-      "runningTool": "{{tool}} 執行中…"
+      "runningTool": "{{tool}} 執行中…",
+      "starting": "正在啟動…",
+      "cancelled": "已取消",
+      "error": "執行失敗"
     },
     "remoteSession": {
       "reconnecting": "與被控裝置的連線中斷，正在重連…",
@@ -7826,7 +7911,8 @@
       "filterVendor": {
         "all": "全部",
         "cc": "Claude",
-        "codex": "Codex"
+        "codex": "Codex",
+        "cursor": "Cursor"
       },
       "filterGroupBy": {
         "project": "按專案分組",
@@ -8711,13 +8797,14 @@
         "interval": "相對間隔",
         "cronHint": "按照日曆時鐘的固定時間槽位執行。",
         "intervalHint": "上一次執行完成後，再等待指定時長。",
-        "intervalUnsupportedHint": "當前精確間隔會原樣保留；選擇分鐘或小時預設後才會替換。",
+        "intervalUnsupportedHint": "當前精確間隔會原樣保留；選擇秒、分鐘或小時預設後才會替換。",
         "currentExact": "當前值 · {{schedule}}",
-        "exactIntervalPanelHint": "僅在需要替換當前精確間隔時，才選擇左側的分鐘或小時預設。",
+        "exactIntervalPanelHint": "僅在需要替換當前精確間隔時，才選擇左側的秒、分鐘或小時預設。",
         "cronChip": "Cron · {{schedule}}",
         "intervalChip": "完成後計時 · {{schedule}}"
       },
       "scheduleMenu": {
+        "intervalSeconds": "Seconds（每 N 秒）",
         "intervalMinutes": "Minutes（每 N 分鐘）",
         "interval": "Hourly（每 N 小時）",
         "daily": "Daily（每天）",
@@ -8726,12 +8813,15 @@
         "monthly": "Monthly（每月某天）"
       },
       "schedulePreview": {
+        "everySecond": "每秒執行",
+        "everySeconds": "每 {{count}} 秒執行",
         "everyMinute": "每分鐘執行",
         "everyMinutes": "每 {{count}} 分鐘執行",
         "everyHour": "每 1 小時執行",
         "everyHours": "每 {{count}} 小時執行"
       },
       "scheduleField": {
+        "secondsSuffix": "秒",
         "minutesSuffix": "分鐘",
         "hoursSuffix": "小時",
         "daySuffix": "日",

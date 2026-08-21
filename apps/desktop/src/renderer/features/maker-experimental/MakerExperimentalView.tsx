@@ -13,6 +13,7 @@ import { useState, useEffect, type ReactElement } from 'react';
 import { useTranslation } from 'react-i18next';
 
 import { useMakerSession } from '@/hooks/useMakerSession';
+import type { AgentKind } from '@cindy/maker-core';
 
 const CLAUDE_MODELS = ['claude-opus-4-8', 'claude-opus-4-7', 'claude-opus-4-6', 'claude-sonnet-4-6', 'claude-haiku-4-5-20251001'];
 const CODEX_MODELS = ['gpt-5'];
@@ -31,7 +32,7 @@ interface AgentCapabilitiesShape {
 export function MakerExperimentalView(): ReactElement {
   const { t } = useTranslation();
   const m = useMakerSession();
-  const [agentKind, setAgentKind] = useState<'claude-code' | 'codex'>('claude-code');
+  const [agentKind, setAgentKind] = useState<AgentKind>('claude-code');
   const [workingDir, setWorkingDir] = useState('');
   const [model, setModel] = useState(CLAUDE_MODELS[0]);
   const [effort, setEffort] = useState<Effort>('medium');
@@ -76,7 +77,7 @@ export function MakerExperimentalView(): ReactElement {
     );
   }
 
-  const handleAgentChange = (k: 'claude-code' | 'codex') => {
+  const handleAgentChange = (k: AgentKind) => {
     setAgentKind(k);
     setModel(k === 'claude-code' ? CLAUDE_MODELS[0] : CODEX_MODELS[0]);
   };

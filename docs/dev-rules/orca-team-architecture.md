@@ -38,6 +38,7 @@ Orca 是 Cindy Desktop 内的多 agent 协同能力：一个 **Lead session** �
 
 - 多 worker：同一个 active team 下可创建多个 worker，支持 role、label、focused worker 切换、soft/hard limit 与归档。
 - Split view：Lead 与 focused Worker 共用 `OrcaSplitView` pane 外壳，宽屏为左右 split，doc rail 为 Lead/Worker toggle。见 `apps/desktop/src/renderer/features/cc-agent/OrcaSplitView.tsx` 的 `OrcaSplitView`、`OrcaPaneShell`。
+- Cursor 已接入协同：本机装有 `cursor-agent` 时，Cursor 会话可作本地项目 Lead，也可作为 Worker 被创建（创建面板与 `create_worker` / `create_workers` 的 `agent` 都接受 `cursor`）。本地 Cursor 经同一座 `codexHttpBridge` 注入**当前已启用的全量 lizi MCP**（含协同两件套；主 token 全通，会话建立时冻入），见 `apps/desktop/src/main/maker-host/cursor-acp-mcp.ts` 的 `buildCursorAcpMcpServers` 与 `packages/maker-core/src/agents/cursor/index.ts` 的 `prepareAcpMcpServers`；MCP 审批与 Claude/Codex 共用 `getDesktopMcpToolApprovalPolicy`。
 - 本地 Claude Code、Codex 与 Pi 的普通 Lead 无论是项目还是对话都可开启协同，本地 Worker 也支持这三类 agent；Pi 当前仅支持本地 Lead / Worker，不支持 SSH 远程协同。SSH 远端会话的 Claude Code 与 Codex 两端均可作 Lead（远端 agent 经 SSH remote-forward 直连本机 HTTP MCP bridge，`cindy_orca` 在两端都可用：codex 走 daemon config 注入，cc 走 per-query http 注入）；device-link 被控端的项目与对话同样可作 Lead（Lead / Worker / team 的真身都在被控端，控制端只是镜像）。renderer 的入口判定收敛在 `apps/desktop/src/renderer/features/cc-agent/collabEntryPolicy.ts` 的 `resolveCollabEntryPolicy`，新建草稿（`NewMakerDraftRoute`）与会话视图（`CCAgentSessionView` 的 `allowCollabToggle`）共用同一份：普通 Lead 都显示入口，只排除不能嵌套协同的 Orca Worker 子会话。项目按项目级策略查询；Main 的 `resolveLocalCollabPolicyWorkingDir` 同时服务入口状态查询与最终授权，只有 workspace kind 为 dialogue 且 Main 确认目录位于 app 托管 dialogue root 时才只查用户级/全局级策略（即使 cwd 内出现 `.cindy/plugins.json`），显式绑定真实目录的对话仍按该目录的项目级策略查询，不能靠自报 `workspaceKind` 绕过项目禁用。
 - Codex Lead 使用全局注册的 `cindy_orca`，调用时通过 context 恢复身份并在 handler 内拒绝越权。远端 Codex 同样走 `params._meta.threadId` 路由——remote thread 与本地 thread 一样注册进 `CodexMcpThreadContextStore`（`packages/maker-core/src/agents/codex/index.ts` 的 `registerCodexMcpContext` 不再跳过 remoteHostId）。远端 cc 没有 threadId，身份走持久 bearer token + URL `?session=<id>` 路由（`codexHttpBridge.registerSessionCtx`），审批归属快照在 `remoteCcQueryFactory` 注入后按 `startParams.mcpServers` 最终清单定稿。
 - SSH 远端 Codex 的 MCP 桥接：本机 `codexHttpBridge` 在原有 per-run 主 token 之外接受一个 persistent bearer token（safeStorage）；`remote-ssh/codex-remote-mcp.ts` 在 session start/resume 前置完成 per-host 固定端口 remote-forward（`RemoteHost.openRemoteForward`，重连自动 rebind）、远端 `$CODEX_HOME/config.toml` 的 `mcp_servers` 管理段漂移检测（行级 marker + 剥离用户同名 table）与 daemon 幂等 bootstrap（token 只经 stdin 的 KEY=value 块注入，不进 argv）；config 漂移需要重启 daemon 时若同 host 有 live turn 则本次降级（留待下次 ensure）。worker 创建经 `OrcaLeadSessionSnapshot.remoteHostId` 继承在同一台远端主机 spawn，创建前走 `ensureRemoteReadyForSessionStart`（SSH 重连 / agent 安装 / MCP 注入）；lazy resume 与 Orca worker 唤醒路径同样先 ensure 再 bootstrap。
@@ -50,6 +51,7 @@ Orca 是 Cindy Desktop 内的多 agent 协同能力：一个 **Lead session** �
 - Worker archive 后 UI 内没有 unarchive 入口；DB 记录保留，用户需要新建 worker 继续。
 - workflow_run / CC Workflow 编排还未纳入当前实现。
 - side_chat 尚未登记为 side activity 对象，也未挂进 pane；PR #107 只是 fork 数据动作。
+- Cursor 只支持本地：远端主机只装 cc / codex（`maker-remote-ssh` 的 `RemoteAgentKind`），远端 Lead 下创建 cursor worker 在 `OrcaWorkerCreationService` 直接拒绝；device-link 远程创建面板也不翻 Cursor 段。Cursor 的工具调用卡在 UI 上显示为通用「MCP: tool」（cursor ACP 的 `session/update` 不回传 MCP server/tool 名与 input，2026-07 实测），协同工具调用因此看不到具体工具名。
 - device-link 协同的 Lead / Worker / team 全部在被控端进程内编排，控制端只按 session 来源经隧道路由（`makerTransport` 的 `makerApiFor` / `orcaWorkflowsFor` / `subscribeOrcaWorkerChanged`，channel 见 `packages/device-link/src/allowlist.ts` 的 Orca 段）。collab 开关同样查被控端（`maker:plugins:get-state` 经 `pluginEnableStateFor`）：项目读取被控端项目级策略，对话读取被控端用户级/全局级策略。控制端本机状态不能代表被控端真相。老被控端没有该 channel 时回 `CHANNEL_NOT_ALLOWED`，控制端 fail-closed 置灰入口并提示设备版本过旧，而不是放行到 `enableOrca` 才撞错。
 - SSH 远端协同仅支持 codex 与 claude-code 两类 lead + 远端 worker（继承 remoteHostId），不支持 Pi Lead 或 Pi Worker。cc 远端经 `cc-remote-mcp.ts` 把 `cindy_orca` / `orca_worker_bridge` 以 http 形态追加进 `startParams.mcpServers`（persistent token + `?session=` 路由，白名单仅此两个 server）。远端 worker 手动 `send_to_lead` 依赖 daemon 侧 `orca_worker_bridge` 经同一 bridge 可达；auto-bridge 回报不依赖 worker 侧 MCP，天然可用。共享 userData 多实例连同一远端 host 时，只有先建立 SSH 转发的实例能持有该 host 的 MCP bridge 端口，其余实例按“远端无 MCP”降级（与历史行为一致）。远端会话的项目级 collab 开关不查本机 fs；`assertCollabProjectEnabled` 对 remote 只查用户级/全局级开关，远端项目级配置机制是 follow-up。
 
@@ -94,7 +96,8 @@ PR #101 之后，Orca 的 main 侧业务由独立 service 承接，`register.ts`
 1. `start_team`
 2. `end_team`
 3. `create_worker`
-4. `create_workers`（批量创建；顺序执行、hard limit 后停止并返回逐项汇总）
+4. `create_workers`（批量创建；先按只读名额快照切分可创建前缀，前缀内最多 4 路并发，
+   超限后缀不调用 host，返回按请求顺序的逐项汇总）
 5. `list_workers`
 6. `switch_focus`
 7. `send_to_worker`
@@ -108,7 +111,7 @@ PR #101 之后，Orca 的 main 侧业务由独立 service 承接，`register.ts`
 15. `worker_status`（只读诊断）
 16. `read_worker`（只读诊断）
 
-批量创建必须走一次 `create_workers` 调用，不能让 Lead 并行或连续发多个独立 `create_worker`。批量工具按输入顺序复用同一个 `OrcaLifecycleService.createWorker` 原语；首次收到 `WORKER_LIMIT_HARD_EXCEEDED` 或批次级 `HOST_NOT_READY` 后不再调用 host，剩余项稳定标为 `skipped`。返回值必须包含请求数、实际尝试数、成功数、失败数、跳过数、总未创建数、数量闸快照、代码确定生成的 `user_report`，以及逐项真实 worker/session 或失败终态，供 Lead 如实向用户收口；`success_count + failure_count + skipped_count` 必须等于 `request_count`，其中 `not_created_count = failure_count + skipped_count`。单个 `create_worker` 继续作为兼容入口，并返回相同的结构化 hard-limit 快照。
+批量创建必须走一次 `create_workers` 调用，不能让 Lead 并行或连续发多个独立 `create_worker`。批量工具复用同一个 `OrcaLifecycleService.createWorker` 原语，并在调用 host 之前先取一次只读名额快照（`OrcaWorkerCreationService.getWorkerLimitSnapshot`，只组合 `limitSnapshot` / `listWorkersByLead` / `readCollaborationSettings`，不 reserve、不 create、无副作用），按 `remainingSlots` 把输入切成「可创建前缀」与「超限后缀」；前缀内最多 4 路并发发起（并发上限见 `create_workers.ts` 的 `MAX_CONCURRENT_WORKER_CREATIONS`），后缀不调用 host。**并发只作用于发起，不作用于语义**：结果按请求顺序汇总，`success` / `failure` / `skipped` 仍是互斥分区。host 未注入快照回调、快照不自洽或查询抛错时，回退到原「首项既是探测也是创建、拿到 limit 后再切前缀」的路径。收到 `WORKER_LIMIT_HARD_EXCEEDED` 或批次级 `HOST_NOT_READY` 后调度器停止发起尚未入飞的调用，已入飞的仍结算真实终态；批次级 `stop_reason` 取请求顺序里更早的那个边界，其后未发起的项稳定标为 `skipped`。**每一项的 skip 原因按区间单独判定，不共用批次级原因**：容量后缀是调用 host 之前就由快照切定的分区，即使前缀里先撞上 `HOST_NOT_READY`，后缀仍标 `WORKER_LIMIT_HARD_EXCEEDED`，`suggestions` 按批次里实际用到的原因取并集（否则用户等主进程恢复后重试后缀仍会因名额不足失败，且拿不到提限/归档的出路）。前缀一经切定不做动态回填：前缀内某项因 `DUPLICATE_LABEL` 等 reservation 前错误失败时，空出的名额不会补给后缀（宁可少建，hard limit 的最终裁决仍在 main 侧原子 reservation）。所有在途调用结算后会**再取一次只读快照**作为对外报告的容量真相——并发下每个成功结果带回的 `limit` 只是它拿到 reservation 那一刻的占用，其中可能含之后又被释放的预留，沿用其中的最大值会把容量报成比实际更满。返回值必须包含请求数、实际尝试数、成功数、失败数、跳过数、总未创建数、数量闸快照、代码确定生成的 `user_report`，以及逐项真实 worker/session 或失败终态，供 Lead 如实向用户收口；`success_count + failure_count + skipped_count` 必须等于 `request_count`，其中 `not_created_count = failure_count + skipped_count`。单个 `create_worker` 继续作为兼容入口，并返回相同的结构化 hard-limit 快照。
 
 排队消息控制 3 工具让 Lead 在消息被 worker 消费前管理自己发出的排队消息：`send_to_worker` / `create_worker`（initial_task）在 `wakeKind='queued'` 时回传 `queued_message_id`（coordinator 队列内的 clientId），Lead 可据此列出、整条改写或撤回。实现走 `OrcaTeamService.listWorkerQueuedMessages / updateWorkerQueuedMessage / cancelWorkerQueuedMessage`，语义约束见「协同运行时行为契约 · 消息派发与 auto-bridge」第 6 条。
 

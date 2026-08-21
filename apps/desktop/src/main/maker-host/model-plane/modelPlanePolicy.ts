@@ -110,6 +110,10 @@ export function isRegistryTombstoneForConsumer(
   const policy = MODEL_PLANE_POLICIES.get(providerId);
   if (!registry || !policy) return false;
 
+  if (agent === 'cursor') {
+    // Cursor 模型来自 ACP capabilities,不进 registry roots/bridges。
+    return false;
+  }
   if (agent === 'pi') {
     return piRegistryMatch(registry, providerId, modelId)?.entry.status === 'retired';
   }

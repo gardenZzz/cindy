@@ -254,6 +254,7 @@ import {
   normalizeOrcaDisplayAgentKind,
   orcaAgentLabel,
   orcaVendorForAgentKind,
+  type OrcaDisplayVendor,
 } from './lib/orcaAgentDisplay';
 import {
   shouldRevealOrcaWorkersAfterPaint,
@@ -542,6 +543,7 @@ function findLatestWorkflowTask(
   }
   return latest;
 }
+
 
 export function CCAgentSessionView({
   sessionIdProp,
@@ -900,6 +902,9 @@ export function CCAgentSessionView({
     const deviceId = remoteDeviceId;
     const scopeKey = remoteModelMemoryScopeKey;
     const agent = dbToMakerAgentKind(session?.agentKind);
+    // NEW_MAKER_DRAFT_CHANGED 现在已 fan-out cursor 槽(见 buildNewMakerDraftChangedPayload),
+    // 但远程 Cursor **会话内**的模型记忆镜像尚未接线,故仍保持空镜像降级 -- 关键是不读
+    // claudeCode 冒充。接线属独立范围,不在本 PR。
     const vendorSlot = agent === 'claude-code' ? 'claudeCode' : agent;
     let cancelled = false;
 
@@ -919,6 +924,7 @@ export function CCAgentSessionView({
 
     const off = window.electronAPI.deviceLink.onRemotePush((push, localOwnerStamp) => {
       if (push.deviceId !== deviceId || push.channel !== 'maker:new-maker-draft:changed') return;
+      if (!vendorSlot) return;
       if (!isDeviceLinkRemotePushCurrent(push, localOwnerStamp)) return;
       const payload = push.payload as Record<
         string,
@@ -1370,7 +1376,11 @@ export function CCAgentSessionView({
   const isRemoteSession = !!session?.remoteHostId;
   useEffect(() => {
     let cancelled = false;
-    const agentKind = dbToMakerAgentKind(session?.agentKind);
+    const agent = dbToMakerAgentKind(session?.agentKind);
+    // NEW_MAKER_DRAFT_CHANGED 现在已 fan-out cursor 槽(见 buildNewMakerDraftChangedPayload),
+    // 但远程 Cursor **会话内**的模型记忆镜像尚未接线,故仍保持空镜像降级 -- 关键是不读
+    // claudeCode 冒充。接线属独立范围,不在本 PR。
+    const vendorSlot = agent === 'claude-code' ? 'claudeCode' : agent;
     // SSH remote 显式禁用控制端本机 skill 扫描；本地无 workingDir 时 Claude 仍扫全局 skills。
     const wd = session?.workingDir;
     // 先同步清空:切换会话(尤其 local→remote)时 loadAllCommands 是异步的,清空可避免
@@ -1381,11 +1391,11 @@ export function CCAgentSessionView({
     // 会把被控端 skill/builtin 影子掉的 /clear、/help 等误判成 desktop 命令、在控制端执行。
     // 本机会话 remoteDeviceId=undefined → 行为不变。desktop 命令始终本地(见 loadAllCommands)。
     loadAllCommands(
-      agentKind,
+      agent,
       wd,
       {
         skipAgentSkills: isRemoteSession,
-        sessionId: session?.id,
+        ...(session?.id ? { sessionId: session.id } : {}),
       },
       remoteDeviceId,
     )
@@ -1609,6 +1619,12 @@ export function CCAgentSessionView({
   // 否则 intent 乐观切到 pi 但真实会话仍在跑 claude-code 时会错调 compact-session(#1933 review)。
   const realAgentKind = dbToMakerAgentKind(session?.agentKind);
   const isCodex = displayAgentKind === 'codex';
+  const isCursor = displayAgentKind === 'cursor';
+  const displayVendorKey = normalizeDbAgentKind(displayAgentKind);
+  // NEW_MAKER_DRAFT_CHANGED 现在已 fan-out cursor 槽(见 buildNewMakerDraftChangedPayload),
+  // 但远程 Cursor **会话内**的模型记忆镜像尚未接线,故仍保持空镜像降级 -- 关键是不读
+  // claudeCode 冒充。接线属独立范围,不在本 PR。
+  const vendorSlot = displayAgentKind === 'claude-code' ? 'claudeCode' : displayAgentKind;
   // 手动压缩通道判定(#1927/#1933 review):真实 Claude Code → maker:input:compact;
   // 其余 agent 声明 manualCompact.supported(当前仅 pi)→ maker:compact-session;其余无入口。
   // 能力取**真实 agent**(displayAgentKind 在 pending switch 期间可能乐观指向目标 agent,
@@ -2045,13 +2061,20 @@ export function CCAgentSessionView({
   const getHelpCommandsSnapshot = useCallback(async (): Promise<UnifiedCommand[]> => {
     const cached = allCommandsRef.current;
     if (cached.length > 0) return cached;
-    const agentKind = dbToMakerAgentKind(session?.agentKind);
+    const agent = dbToMakerAgentKind(session?.agentKind);
+    // NEW_MAKER_DRAFT_CHANGED 现在已 fan-out cursor 槽(见 buildNewMakerDraftChangedPayload),
+    // 但远程 Cursor **会话内**的模型记忆镜像尚未接线,故仍保持空镜像降级 -- 关键是不读
+    // claudeCode 冒充。接线属独立范围,不在本 PR。
+    const vendorSlot = agent === 'claude-code' ? 'claudeCode' : agent;
     try {
       // device-link 远程会话同源:传 remoteDeviceId,fallback 快照也从被控端读(见上方 cache effect 说明)。
       return await loadAllCommands(
-        agentKind,
+        agent,
         session?.workingDir,
-        { skipAgentSkills: isRemoteSession, sessionId: session?.id },
+        {
+          skipAgentSkills: isRemoteSession,
+          ...(session?.id ? { sessionId: session.id } : {}),
+        },
         remoteDeviceId,
       );
     } catch {
@@ -2148,7 +2171,7 @@ export function CCAgentSessionView({
   // F-COLLAB: 协同模式真实状态。enabled 来自 session.orcaRole === 'lead';
   // worker(显示用)从 active workflow 的 Worker session 列表查到 agentKind。
   // 切换协同走 IPC enableOrca / disableOrca,失败时 toast。
-  const [collabWorker, setCollabWorker] = useState<'cc' | 'codex' | 'pi'>('codex');
+  const [collabWorker, setCollabWorker] = useState<OrcaDisplayVendor>('codex');
   // enableBusy 只盖"开启协同"路径;关闭走 useStopOrcaCollab hook 自己管 busy。
   const [enableBusy, setEnableBusy] = useState(false);
   const [createWorkerOpen, setCreateWorkerOpen] = useState(false);
@@ -2331,9 +2354,9 @@ export function CCAgentSessionView({
     if (!collabProjectionLeadId) return;
     const activeWorker = collabWorkerProjection.workers[0]; // MVP: 假设最多 1 个 active Worker
     if (!activeWorker) return;
-    // orca worker 创建面未开 pi;万一读到脏值也按 codex 收敛,不撑开 toggle 契约。
-    const normalizedKind = normalizeDbAgentKind(activeWorker.agent);
-    setCollabWorker(normalizedKind === 'cc' ? 'cc' : 'codex');
+    // activeWorker.agent 是 maker 形态(maker-core 归一, 含 cursor/pi), 走 orcaVendorForAgentKind
+    // 出四家 vendor -- cursor/pi worker 也要正确投射, 不能硬收敛成 codex。
+    setCollabWorker(orcaVendorForAgentKind(activeWorker.agent));
   }, [collabProjectionLeadId, collabWorkerProjection.workers]);
 
   // F-COLLAB: "外部触发" 协同状态变化时自动打开协同 tab (典型场景: MCP team
@@ -2418,8 +2441,7 @@ export function CCAgentSessionView({
         : Promise.resolve();
       try {
         const workerAgent = form.agent;
-        const normalizedWorker = normalizeDbAgentKind(workerAgent);
-        setCollabWorker(normalizedWorker === 'cc' ? 'cc' : 'codex');
+        setCollabWorker(orcaVendorForAgentKind(normalizeOrcaDisplayAgentKind(workerAgent)));
         setCreateWorkerOpen(false);
         // 粘滞归属(codex review P2):入口与协同策略查询都按粘滞 remoteDeviceId 指向被控端,
         // mutation 必须同口径 —— 非粘滞的 makerApiFor 在 relay 瞬断窗口内会退回本机
@@ -2923,10 +2945,12 @@ export function CCAgentSessionView({
         insertSystemCard('context', { usage: null });
         return true;
       }
-      if (session?.agentKind === 'codex') {
+      if (session?.agentKind === 'codex' || session?.agentKind === 'cursor') {
         insertSystemCard('context', {
           usage: null,
-          error: t('chat.systemCard.context.unsupportedAgent', { agent: 'Codex' }),
+          error: t('chat.systemCard.context.unsupportedAgent', {
+            agent: session.agentKind === 'cursor' ? 'Cursor' : 'Codex',
+          }),
         });
         return true;
       }
@@ -3080,8 +3104,7 @@ export function CCAgentSessionView({
       // 重连后由被控端 enqueue / steer 路径做权威校验。这样离开任务后旧 outbox 也不会
       // 再弹出旧页面的认证对话框或导航回旧路由。
       if (!remoteDeviceId) {
-        const authVendor = displayAgentKind === 'pi' ? 'pi' : isCodex ? 'codex' : 'cc';
-        const { proceed } = await vendorAuthGate.checkAndConfirm(authVendor, {
+        const { proceed } = await vendorAuthGate.checkAndConfirm(displayVendorKey, {
           // 已建会话:suspended 来源计入(停用不打断运行中会话,门禁只看凭证连接态,
           // PR #744 review 第十七轮)。
           existingSessionRoute: true,
@@ -3208,7 +3231,8 @@ export function CCAgentSessionView({
       maybeDispatchDesktopSlashCommand,
       maybeShowContextUsage,
       folderPickerOpen,
-      isCodex,
+      displayVendorKey,
+      ownsWindowRoute,
       canNavigateSession,
       navigationMode,
       onSessionNavigate,
@@ -3528,7 +3552,16 @@ export function CCAgentSessionView({
     // 远程模型可能只存在于被控端(本地目录查不到 → 误判跨 vendor),且本地 DB 没有该会话行,
     // sessionService.update 会写错 / refreshServerSession 对远程是 no-op。直接跳过(规则:host 为准)。
     if (getSessionDeviceId(sessionId)) return;
-    const agent = displayAgentKind;
+    // Cursor 尚无独立模型目录(T4);不做 vendor fallback,也不冒充 cc/codex 默认模型。
+    if (sessionAgentKind === 'cursor') return;
+    // displayAgentKind 已把 session.agentKind 三值化(含 pi);isCodex 只覆盖 codex。
+    // 必须用 displayAgentKind 映射,否则 pi 会话会被误写成 claude-code 默认模型。
+    const agent =
+      displayAgentKind === 'pi'
+        ? 'pi'
+        : displayAgentKind === 'codex'
+          ? 'codex'
+          : 'claude-code';
     if (!shouldFallbackVendorModel(providers, sessionModel, agent)) return;
     // 用三值化后的 agent 映射选默认模型:Pi 会话必须回退到 Pi 目录默认,而不是被
     // `isCodex ? 'codex' : 'cc'` 误写成 CC 首选(可能是更贵的 Opus)(codex review)。
@@ -4222,6 +4255,8 @@ export function CCAgentSessionView({
                   visible={!pendingPlanReview && (agentStatus.isRunning || backgroundTasksActive)}
                   inputWidth={inputWidth}
                   sideTaskRunning={agentStatus.sideTaskRunning ?? false}
+                  // ACP/Cursor 上游当前不上报 usage;显示 0 tokens 会误导(issue #6)。
+                  hideTokenCount={isCursor}
                   backgroundTasksRunning={backgroundTasksActive}
                   // 仅后台 Bash 在跑(无模型调用)时换专属文案 + 温和停止语义:
                   // 逐任务 stopTask,不关常驻子进程。proxy 信号在时维持原语义
@@ -4613,7 +4648,7 @@ export function CCAgentSessionView({
                   attachmentState={attachmentState}
                   externalDragOver={isDragOver}
                   onComposerDropHandled={resetFullAreaDragState}
-                  vendorKey={normalizeDbAgentKind(displayAgentKind)}
+                  vendorKey={displayVendorKey}
                   extraDirs={session?.extraDirs ?? []}
                   onExtraDirsChange={handleExtraDirsChange}
                   compactToolbar={compactToolbar}
@@ -4779,45 +4814,62 @@ export function CCAgentSessionView({
                       />
                     </Tip>
                   )}
-                  <TodaySpendChip
-                    vendorKey={normalizeDbAgentKind(displayAgentKind)}
-                    modelId={agentSwitchIntent?.model ?? session?.model ?? null}
-                    providerId={
-                      agentSwitchIntent
-                        ? agentSwitchIntent.providerId
-                        : (session?.providerId ?? null)
-                    }
-                    sessionId={sessionId}
-                    sessionInitialMoney={session?.totalMoney ?? null}
-                    sessionInitialCostUsd={session?.totalCostUsd ?? null}
-                    sessionInitialTokens={session?.totalTokenUsage ?? null}
-                    remoteHostId={session?.remoteHostId ?? null}
-                    deviceLinkDeviceId={remoteDeviceId ?? null}
-                  />
-                  <ContextCapacityRing
-                    contextTokens={agentStatus.contextTokens}
-                    model={agentSwitchIntent?.model ?? session?.model ?? ''}
-                    vendorKey={normalizeDbAgentKind(displayAgentKind)}
-                    sdkContextWindow={agentStatus.contextWindow}
-                    deviceId={remoteDeviceId}
-                    onCompact={
-                      // 按 agent 能力分流(#1927/#1933 review):claude-code 走 inputCoordinator,
-                      // 其余声明 manualCompact.supported(当前仅 pi)走 compact-session 通道;
-                      // codex 无手动 compact(上游自动压缩)保持纯展示。pi 的 SSH 远程会话
-                      // (remoteHostId)无 compact-session 路由 → 不开放(与 SessionContentHeader
-                      // 压缩菜单仅本地/device-link 一致);device-link 远程 pi 走隧道,照常开放。
-                      // pi 回合运行中会拒绝压缩 → compact-session 通道在 running 时禁用
-                      // (与 SessionContentHeader 的 runningSessionIds 一致,codex P1);
-                      // claude-input 保留旧行为(turn 中可走 inputCoordinator)。
-                      compactChannel !== null &&
-                      !(realAgentKind === 'pi' && !!session?.remoteHostId) &&
-                      session != null &&
-                      agentStatus.contextTokens > 0 &&
-                      !(compactChannel === 'compact-session' && agentStatus.isRunning)
-                        ? handleCompactRequest
-                        : undefined
-                    }
-                  />
+                  {/* Cursor 尚无供应商 spend 数据(ACP usage 空);不渲染 chip,避免冒充 cc/codex 计费。 */}
+                  {!isCursor && (
+                    <TodaySpendChip
+                      vendorKey={
+                        displayAgentKind === 'codex'
+                          ? 'codex'
+                          : displayAgentKind === 'pi'
+                            ? 'pi'
+                            : 'cc'
+                      }
+                      modelId={agentSwitchIntent?.model ?? session?.model ?? null}
+                      providerId={
+                        agentSwitchIntent
+                          ? agentSwitchIntent.providerId
+                          : (session?.providerId ?? null)
+                      }
+                      sessionId={sessionId}
+                      sessionInitialMoney={session?.totalMoney ?? null}
+                      sessionInitialCostUsd={session?.totalCostUsd ?? null}
+                      sessionInitialTokens={session?.totalTokenUsage ?? null}
+                      remoteHostId={session?.remoteHostId ?? null}
+                      deviceLinkDeviceId={remoteDeviceId ?? null}
+                    />
+                  )}
+                  {/* Cursor 的 ACP 上游不上报 usage(usage_update 不发送、
+                      PromptResponse.usage 为空,见 acp/protocol.ts UsageUpdate 注释),
+                      圆环永远 0/200K 是在冒充"空上下文"。与上方 TodaySpendChip 同一处理:
+                      拿到真实数据(contextTokens/contextWindow 任一 > 0)前不渲染。 */}
+                  {(!isCursor ||
+                    agentStatus.contextTokens > 0 ||
+                    agentStatus.contextWindow > 0) && (
+                    <ContextCapacityRing
+                      contextTokens={agentStatus.contextTokens}
+                      model={agentSwitchIntent?.model ?? session?.model ?? ''}
+                      vendorKey={normalizeDbAgentKind(displayAgentKind)}
+                      sdkContextWindow={agentStatus.contextWindow}
+                      deviceId={remoteDeviceId}
+                      onCompact={
+                        // 按 agent 能力分流(#1927/#1933 review):claude-code 走 inputCoordinator,
+                        // 其余声明 manualCompact.supported(当前仅 pi)走 compact-session 通道;
+                        // codex 无手动 compact(上游自动压缩)保持纯展示。pi 的 SSH 远程会话
+                        // (remoteHostId)无 compact-session 路由 → 不开放(与 SessionContentHeader
+                        // 压缩菜单仅本地/device-link 一致);device-link 远程 pi 走隧道,照常开放。
+                        // pi 回合运行中会拒绝压缩 → compact-session 通道在 running 时禁用
+                        // (与 SessionContentHeader 的 runningSessionIds 一致,codex P1);
+                        // claude-input 保留旧行为(turn 中可走 inputCoordinator)。
+                        compactChannel !== null &&
+                        !(realAgentKind === 'pi' && !!session?.remoteHostId) &&
+                        session != null &&
+                        agentStatus.contextTokens > 0 &&
+                        !(compactChannel === 'compact-session' && agentStatus.isRunning)
+                          ? handleCompactRequest
+                          : undefined
+                      }
+                    />
+                  )}
                 </div>
               </div>
             </div>
@@ -4976,6 +5028,7 @@ function RunningStatusBar({
   visible,
   inputWidth,
   sideTaskRunning = false,
+  hideTokenCount = false,
   backgroundTasksRunning = false,
   backgroundBashOnlyCount = 0,
   backgroundStopping = false,
@@ -4999,6 +5052,11 @@ function RunningStatusBar({
    * 把 status 当成进行中, 即便 status 文案恰好是 "Done")。
    */
   sideTaskRunning?: boolean;
+  /**
+   * 上游不上报 usage 时(如 Cursor ACP)隐藏 token 计数,只留 elapsed。
+   * 显示 0 tokens 会误导用户以为本轮没消耗(issue #6)。
+   */
+  hideTokenCount?: boolean;
   /**
    * 后台子任务模式:turn 已结束但该会话 CC 子进程仍在调模型(后台子 agent 持续
    * 消耗用量)。true 时状态栏保持点亮:左段换 Activity 图标 + 后台运行文案(shimmer
@@ -5247,7 +5305,7 @@ function RunningStatusBar({
                 <span className="text-13 font-medium text-[var(--status-bar-meta)]">
                   {elapsedText}
                 </span>
-                {!sideTaskRunning && usageMeta.kind !== 'none' && (
+                {!sideTaskRunning && !hideTokenCount && usageMeta.kind !== 'none' && (
                   <>
                     <span className="text-13 font-medium text-[var(--status-bar-meta)]">
                       &middot;
@@ -5306,9 +5364,11 @@ function formatTokenCount(n: number): string {
  */
 function getModelContextWindow(
   model: string,
-  vendorKey: 'cc' | 'codex' | 'pi',
+  vendorKey: 'cc' | 'codex' | 'cursor' | 'pi',
   deviceId?: string,
 ): number | undefined {
+  // Cursor 模型表暂无独立 contextWindow 目录;圆环回落 SDK / 默认。
+  if (vendorKey === 'cursor') return undefined;
   const found = getModelsForVendor(vendorKey, deviceId).find((m) => m.id === model);
   return found?.contextWindow;
 }
@@ -5323,7 +5383,7 @@ function ContextCapacityRing({
 }: {
   contextTokens: number;
   model: string;
-  vendorKey: 'cc' | 'codex' | 'pi';
+  vendorKey: 'cc' | 'codex' | 'cursor' | 'pi',
   /** SDK-reported context window; 0 = not yet known → use hardcoded fallback. */
   sdkContextWindow: number;
   /** device-link 远程会话所属被控端 id;按被控端能力查 contextWindow(本机会话 undefined,行为不变)。 */

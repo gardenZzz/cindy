@@ -19,7 +19,7 @@
 import { effectiveSourceIdForModel, type ProviderView } from '@cindy/model-providers';
 
 import type { Session, WorkspaceKind } from '@/lib/ccAgent.types';
-import type { AgentKind } from '@/hooks/useAgentCapabilities';
+import type { AgentKind } from '@cindy/maker-core';
 import type { Effort, PermissionMode } from '@/lib/userPreferences.types';
 
 export interface DeviceLinkCreateParams {
@@ -56,7 +56,7 @@ export interface DeviceLinkCreateParams {
 }
 
 export interface DeviceLinkCreateArgs {
-  agentKind: 'claude-code' | 'codex' | 'pi';
+  agentKind: AgentKind;
   /** 仅远程 worktree 流程出现(与 worktree:create 登记的绑定同 id)。 */
   id?: string;
   /** 仅项目会话出现;dialogue 不带此字段(被控端自行分配运行目录)。 */

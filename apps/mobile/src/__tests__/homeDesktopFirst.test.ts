@@ -199,12 +199,15 @@ describe('mobile home desktop-first surface', () => {
     );
     // 2026-07-20 双端 Agent mark 同步为 Claude Code 像素脸 / Codex CLI `>_` 花形。
     // ——箭头统一后依赖图标区分 agent 类型的场景(创建自动化 chips / 侧栏混排)全部失效。
+    // T2 (#6): desktop VendorIcon 扩成 cc | codex | cursor 三路;断言锁住与 mobile 身份槽同步。
     expect(desktopVendorIconSource).toContain('ClaudeMark');
     expect(desktopVendorIconSource).toContain('CodexMark');
+    expect(desktopVendorIconSource).toContain('CursorMark');
     expect(desktopVendorIconSource).toContain("vendor === 'codex' ? (");
     expect(desktopVendorIconSource).toContain('<CodexMark size={size} />');
     expect(desktopVendorIconSource).toContain('<ClaudeMark size={size} />');
-    expect(desktopVendorIconSource).toContain("export type VendorIconKind = 'cc' | 'codex' | 'pi'");
+    // union of cursor (feat) + pi (main) after desktop VendorIcon merge
+    expect(desktopVendorIconSource).toContain("export type VendorIconKind = 'cc' | 'codex' | 'cursor' | 'pi'");
     expect(desktopVendorIconSource).toContain('vendor: VendorIconKind;');
     expect(desktopVendorIconSource).toContain('session-status-breathing');
     expect(vendorIconSource).not.toContain('XD_SYMBOL_PATHS');
@@ -216,6 +219,7 @@ describe('mobile home desktop-first surface', () => {
     expect(vendorPathsSource).toContain('CLAUDE_AGENT_PATH');
     expect(vendorPathsSource).toContain('CODEX_AGENT_FLOWER_PATH');
     expect(vendorPathsSource).toContain('CODEX_AGENT_PROMPT_PATH');
+    expect(vendorPathsSource).toContain('CURSOR_AGENT_PATH');
     expect(agentMarkSource).not.toContain('ANTHROPIC_PROVIDER_PATH');
     expect(agentMarkSource).not.toContain('OPENAI_PROVIDER_PATH');
     expect(providerMarkSource).toContain('ANTHROPIC_PROVIDER_PATH');
@@ -223,7 +227,13 @@ describe('mobile home desktop-first surface', () => {
     expect(providerMarkSource).not.toContain('CLAUDE_AGENT_PATH');
     expect(providerMarkSource).not.toContain('CODEX_AGENT_FLOWER_PATH');
     expect(vendorIconSource).toContain("import { MobileAgentMark } from './MobileAgentMark';");
-    expect(vendorIconSource).toContain("agentKind={vendor === 'codex' || vendor === 'pi' ? vendor : 'claude-code'}");
+    // T9 (#13): mobile 身份槽与 desktop VendorIcon 同步为四路（cursor + pi）。
+    expect(vendorIconSource).toContain("vendor: 'cc' | 'codex' | 'cursor' | 'pi' | string");
+    expect(agentMarkSource).toContain("agentKind === 'codex' ? (");
+    expect(agentMarkSource).toContain("agentKind === 'cursor' ? (");
+    expect(agentMarkSource).toContain('CURSOR_AGENT_PATH');
+    // resolved MobileVendorIcon uses vendorToAgentKind helper (toMakerAgentKind)
+    expect(vendorIconSource).toContain('vendorToAgentKind(vendor)');
     expect(vendorIconSource).not.toContain('viewBox="136 137 282 158"');
     expect(vendorIconSource).not.toContain('transform="translate(');
     expect(vendorIconSource).toContain('Easing.inOut(Easing.ease)');

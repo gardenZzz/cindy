@@ -4,6 +4,7 @@
  * AgentKind 翻译：
  *   maker-core 'claude-code' ⇄ db 'cc'
  *   maker-core 'codex'       ⇄ db 'codex'
+ *   maker-core 'cursor'      ⇄ db 'cursor'
  *
  * 注意：本轮 (stage-1) 是新链路独立写入，不会影响老链路 ('local-db:sessions:*' IPC) 的查询/读取。
  * 两边读同一张表，新链路默认 source='desktop'；host-owned Review 在同一 INSERT
@@ -27,7 +28,7 @@ import { normalizeRemoteHostId } from '../localDb/mapper.js';
 import { DESKTOP_VISIBLE_SESSION_SOURCES } from '../../shared/sessionSource.js';
 import { normalizeWorkingDirForStorage } from '../../shared/workingDir.js';
 
-type DbAgentKind = 'cc' | 'codex' | 'pi';
+type DbAgentKind = 'cc' | 'codex' | 'cursor' | 'pi';
 
 // 形态映射走 shared/agentKindConversion 正本(支持 pi;此前 pi 被误落成 codex)。
 function toDbKind(k: AgentKind): DbAgentKind {

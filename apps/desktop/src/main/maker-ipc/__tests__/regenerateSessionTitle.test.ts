@@ -28,6 +28,9 @@ vi.mock('../../maker-host/title-one-shot.js', () => ({
   generateTitleViaProvider: vi.fn(),
   generateTitleViaProviderResult: vi.fn(),
 }));
+vi.mock('../../maker-host/index.js', () => ({
+  getMakerIfReady: vi.fn(() => null),
+}));
 vi.mock('../../i18n.js', () => ({
   getResolvedMainLocale: vi.fn(() => 'en'),
 }));
@@ -41,12 +44,14 @@ import {
   generateTitleViaProvider,
   type TitleOneShotResult,
 } from '../../maker-host/title-one-shot.js';
+import { getMakerIfReady } from '../../maker-host/index.js';
 import { getResolvedMainLocale } from '../../i18n.js';
 import type { RegenerateTitleMaterial } from '../../localDb/latestMessageText.js';
 
 beforeEach(() => {
-  vi.mocked(getResolvedMainLocale).mockReturnValue('en');
   vi.clearAllMocks();
+  vi.mocked(getResolvedMainLocale).mockReturnValue('en');
+  vi.mocked(getMakerIfReady).mockReturnValue(null);
 });
 
 function generatedTitle(title: string): TitleOneShotResult {
@@ -389,6 +394,25 @@ describe('generateMakerSessionTitle', () => {
     expect(request.agentKind).toBe('claude-code');
     expect(request.prompt).toContain('帮我排查登录失败');
     expect(request.prompt).not.toContain('  帮我排查登录失败');
+  });
+
+  it('Cursor 标题 oneShot 等 ACP session/new 就绪后再启动', async () => {
+    const waitForSessionBootstrap = vi.fn(async () => true);
+    const oneShot = vi.fn(async () => 'Cursor 标题');
+    vi.mocked(getMakerIfReady).mockReturnValue({
+      listAvailableAgents: () => ['cursor'],
+      waitForSessionBootstrap,
+      oneShot,
+    } as unknown as NonNullable<ReturnType<typeof getMakerIfReady>>);
+
+    await expect(generateMakerSessionTitle('修复首发延迟', 'cursor', 'cursor-session')).resolves.toBe(
+      'Cursor 标题',
+    );
+
+    expect(waitForSessionBootstrap).toHaveBeenCalledWith('cursor-session');
+    expect(waitForSessionBootstrap.mock.invocationCallOrder[0]).toBeLessThan(
+      oneShot.mock.invocationCallOrder[0],
+    );
   });
 
   it.each([

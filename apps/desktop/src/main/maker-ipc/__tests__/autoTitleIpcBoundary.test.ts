@@ -64,6 +64,9 @@ vi.mock('../../maker-host/title-one-shot.js', () => ({
   generateTitleViaProvider: h.generateTitle,
   generateTitleViaProviderResult: h.generateTitleResult,
 }));
+vi.mock('../../maker-host/index.js', () => ({
+  getMakerIfReady: vi.fn(() => null),
+}));
 vi.mock('../../messagePersistBroadcaster.js', () => ({
   drainPersistQueue: h.drainPersistQueue,
 }));
@@ -383,6 +386,17 @@ describe('maker:auto-title — sender 断言', () => {
       sessionId: 's1',
       text: '帮我排查登录失败',
       agentKind: 'codex',
+    });
+  });
+  it('受信来源 + agentKind=cursor 完整走到 runSessionAutoTitle（#11 AC）', async () => {
+    await expect(
+      invoke({ sessionId: 's-cursor', text: '帮我改一下这个组件', agentKind: 'cursor' }),
+    ).resolves.toEqual({ applied: true, done: true });
+    expect(h.run).toHaveBeenCalledTimes(1);
+    expect(h.run).toHaveBeenCalledWith({
+      sessionId: 's-cursor',
+      text: '帮我改一下这个组件',
+      agentKind: 'cursor',
     });
   });
 });

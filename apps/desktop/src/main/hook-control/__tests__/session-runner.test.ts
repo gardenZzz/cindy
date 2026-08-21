@@ -19,7 +19,7 @@
  */
 
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import type { AgentEvent, Effort, PermissionMode, PermissionModeState } from '@cindy/maker-core';
+import type { AgentEvent, Effort, AgentKind, PermissionMode, PermissionModeState } from '@cindy/maker-core';
 import type { CatalogModel, ProviderView } from '@cindy/model-providers';
 
 const h = vi.hoisted(() => {
@@ -94,9 +94,11 @@ vi.mock('electron', () => ({
 // 非终止 error 的处理)。maker-core 零 Electron 依赖, 可直接加载。
 vi.mock('@cindy/maker-core', async (importOriginal) => {
   const actual = await importOriginal<typeof import('@cindy/maker-core')>();
+  // spread 全部真实导出:runner 经由 model-route-guard-live 间接 import 的
+  // CURSOR_ONESHOT_DEFAULT_MODEL 等常量也必须可见,否则 vitest 报 "No export
+  // defined"。只覆写下面需要桩的几个判定函数。
   return {
-    isAutoReviewUnavailableNotice: actual.isAutoReviewUnavailableNotice,
-    isAutoReviewConfirmUndeliveredNotice: actual.isAutoReviewConfirmUndeliveredNotice,
+    ...actual,
     isTerminalAgentErrorEvent: actual.isTerminalAgentErrorEvent,
     MAIN_OWNED_SEND_CONTEXT: actual.MAIN_OWNED_SEND_CONTEXT,
     parseOverloadError: actual.parseOverloadError,
@@ -342,7 +344,7 @@ function catalogModel(id: string, name = id): CatalogModel {
 function connectedProvider(
   id: string,
   models: CatalogModel[],
-  agentKind: 'claude-code' | 'codex' = 'claude-code',
+  agentKind: AgentKind = 'claude-code',
 ): ProviderView {
   return {
     id,

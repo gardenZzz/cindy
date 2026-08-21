@@ -2762,6 +2762,7 @@ function agentTaskStatusLabel(status: AgentTaskStatus): string {
 const AGENT_TASK_PROVIDER_LABEL: Record<AgentTaskCardModel['provider'], string> = {
   'claude-code': 'Claude Code',
   codex: 'Codex',
+  cursor: 'Cursor',
   pi: 'Pi',
 };
 

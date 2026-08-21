@@ -1,4 +1,5 @@
 import { BRAND_NAME } from '@cindy/maker-shared/branding';
+import type { AgentKind } from '@cindy/maker-core';
 import type { SessionActivitySnapshot } from '@cindy/maker-shared/session-activity';
 
 export type AgentIslandSessionPhase = 'running' | 'needs-interaction' | 'completed' | 'error';
@@ -30,7 +31,7 @@ export interface AgentIslandSessionSnapshot {
   compactDetail: string;
   messagePreview: AgentIslandActivityLine | null;
   phase: AgentIslandSessionPhase;
-  agentKind: 'claude-code' | 'codex' | string;
+  agentKind: AgentKind | string;
   interactionKind?: AgentIslandInteractionKind;
   permissionAction: AgentIslandPermissionActionSnapshot | null;
   attention: boolean;

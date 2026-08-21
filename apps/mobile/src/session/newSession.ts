@@ -11,13 +11,17 @@ import type { MobileModelOption } from './agentCapabilities';
 import { effectiveSourceIdForModel } from '@cindy/model-providers/registry';
 import { reconcileEffortForModel, type ProviderModelRow } from './providerModelSections';
 import type { RemoteSession } from './types';
+import type { AgentKind } from '@cindy/maker-shared';
+import { mobileAgentShortLabel, toDbAgentKind, toMakerAgentKind } from './sessionAgentSwitch';
 
-export type NewSessionAgentKind = 'claude-code' | 'codex' | 'pi';
+/** 新建会话选择面覆盖已注册 runtime（含 Cursor / Pi）。 */
+export type NewSessionAgentKind = AgentKind;
 export type NewSessionWorkspaceKind = 'project' | 'dialogue';
 
 export const NEW_SESSION_AGENT_OPTIONS: readonly { kind: NewSessionAgentKind; label: string }[] = [
   { kind: 'claude-code', label: 'Claude' },
   { kind: 'codex', label: 'Codex' },
+  { kind: 'cursor', label: 'Cursor' },
   { kind: 'pi', label: 'Pi' },
 ];
 
@@ -119,7 +123,7 @@ export function parseNewSessionDeviceOptions(
 }
 
 export function normalizeNewSessionAgentKind(value: unknown): NewSessionAgentKind | null {
-  return value === 'claude-code' || value === 'codex' || value === 'pi' ? value : null;
+  return value === 'claude-code' || value === 'codex' || value === 'cursor' || value === 'pi' ? value : null;
 }
 
 export function pickNewSessionDefaultDevice(input: {
@@ -153,6 +157,8 @@ export const DEFAULT_NEW_SESSION_DRAFT: NewSessionDraft = {
 const DEFAULT_MODELS: Record<NewSessionAgentKind, string> = {
   'claude-code': 'claude-sonnet-4-6',
   codex: 'gpt-5.4',
+  // 与桌面 New Maker cursor 默认对齐（ACP Auto）。
+  cursor: 'auto',
   pi: 'gpt-5.4',
 };
 
@@ -210,7 +216,7 @@ export function summarizeNewSessionDraft(
   content: NewSessionDraftContentState = {},
 ): NewSessionDraftSummary {
   const validationMessage = validateNewSessionDraft(draft, content);
-  const agentLabel = draft.agentKind === 'codex' ? 'Codex' : draft.agentKind === 'pi' ? 'Pi' : 'Claude';
+  const agentLabel = mobileAgentShortLabel(draft.agentKind);
   const model = draft.model.trim() || i18n.t('session.new.noModelSelected');
   const effort = draft.effort.trim();
   const workspaceLabel = draft.workspaceKind === 'dialogue'
@@ -329,9 +335,11 @@ type NewSessionDefaultModel = {
 };
 
 function isNewSessionDefaultForAgent(
-  model: NewSessionDefaultModel,
+  model: { newSessionDefault?: readonly AgentKind[] },
   agentKind: NewSessionAgentKind,
 ): boolean {
+  // cursor 不在 XD 新对话默认标记里；带进去会让 includes 的参数类型对不上。
+  if (agentKind === 'cursor') return false;
   return model.newSessionDefault?.includes(agentKind) === true;
 }
 
@@ -609,7 +617,7 @@ function findSectionModelRow(
  * 过滤:排除 status==='deleted'、无 model;可选 `deviceId`(只看该设备——模型列表 per-device,跨设备 model 可能
  * 在目标设备不存在,来源同理——同设备过滤保证继承的来源在目标设备存在);可选 `agentKind`(只看该 agent)。
  * 排序:按活动时间(userSendAt ?? updatedAt ?? createdAt)降序取第一条。
- * 映射 `RemoteSession.agentKind`:'codex'|'pi' 原样保留,其余(含 'cc')归一为 'claude-code'。无匹配→null。
+ * 映射 `RemoteSession.agentKind`:'codex'|'cursor'|'pi' 原样保留,其余(含 'cc')归一为 'claude-code'。无匹配→null。
  * deviceId 过滤口径对齐 buildRecentWorkspaceOptions:仅当 session 带了 deviceLinkDeviceId 且与目标不符才排除。
  */
 export function pickMostRecentSessionRuntime(
@@ -622,9 +630,7 @@ export function pickMostRecentSessionRuntime(
     const model = session.model?.trim();
     if (!model) continue;
     if (options.deviceId && session.deviceLinkDeviceId && session.deviceLinkDeviceId !== options.deviceId) continue;
-    const agentKind: NewSessionAgentKind = session.agentKind === 'codex' || session.agentKind === 'pi'
-      ? session.agentKind
-      : 'claude-code';
+    const agentKind: NewSessionAgentKind = toMakerAgentKind(session.agentKind);
     if (options.agentKind && agentKind !== options.agentKind) continue;
     const activityAt = session.userSendAt ?? session.updatedAt ?? session.createdAt;
     if (!best || activityAt.localeCompare(best.activityAt) > 0) {
@@ -891,7 +897,7 @@ export function sessionFromCreateResult(
     permissionMode: fallback.permissionMode,
     fastMode: fallback.fastMode,
     status: 'active',
-    agentKind: fallback.agentKind === 'claude-code' ? 'cc' : fallback.agentKind,
+    agentKind: toDbAgentKind(fallback.agentKind),
     userSendAt: iso,
     createdAt: iso,
     updatedAt: iso,

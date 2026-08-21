@@ -1671,6 +1671,70 @@
         "hintLoggedIn": "检测到 {{cli}} 已登录，可直接授权接入",
         "hintInstalled": "检测到本机已安装 {{cli}}"
       },
+      "cursor": {
+        "title": "Cursor",
+        "installedDescription": "本机已安装 cursor-agent。可用时可选用 Cursor 作为 Agent。",
+        "installedSignedOutDescription": "本机已安装 cursor-agent，但尚未登录 Cursor。登录后即可新建对话。",
+        "loggedInDescription": "已登录 Cursor（{{identity}}）。新建对话将使用此登录态。",
+        "loggedInUnknown": "已登录账号",
+        "loginPendingDescription": "正在等待浏览器完成 Cursor 登录。可打开或复制下方链接；Cindy 不会自动打开浏览器。",
+        "missingDescription": "安装官方 cursor-agent 后即可在 Cindy 中使用 Cursor。可选——不装也不影响其它功能。",
+        "installedPill": "已安装",
+        "loggedInPill": "已登录",
+        "signedOutPill": "未登录",
+        "installCta": "安装",
+        "installing": "正在安装…",
+        "loginCta": "登录",
+        "loggingIn": "登录中…",
+        "logoutCta": "登出",
+        "cancelLogin": "取消登录",
+        "openLoginUrl": "打开登录页",
+        "copyLoginUrl": "复制链接",
+        "loginUrlHint": "请在浏览器完成授权后回到此处；链接含一次性凭证，请勿分享。",
+        "loginUrlCopied": "登录链接已复制",
+        "loginUrlCopyFailed": "无法复制登录链接",
+        "loginSuccess": "Cursor 已登录",
+        "loginFailed": "Cursor 登录失败",
+        "logoutSuccess": "Cursor 已登出",
+        "logoutFailed": "Cursor 登出失败",
+        "logoutConfirmTitle": "登出 Cursor？",
+        "logoutConfirmDescription": "将清除本机 cursor-agent 的登录态（由 Cursor CLI 管理）。登出后需重新登录才能新建 Cursor 对话。",
+        "logoutConfirm": "登出",
+        "authRequiredTitle": "需要登录 Cursor",
+        "authRequiredDescription": "请先在设置 → 模型供应商中登录 Cursor，然后再新建对话。",
+        "optionalHint": "Cursor ACP",
+        "refreshAria": "重新检测 Cursor 安装状态",
+        "confirmTitle": "安装 Cursor？",
+        "confirmDescription": "确认后，Cindy 将在本机执行官方安装命令：\n\n{{command}}\n\n未确认前不会执行任何安装。",
+        "confirmInstall": "安装",
+        "confirmCancel": "取消",
+        "installSuccess": "Cursor 已安装。重启 Cindy 后即可在新建任务时选择 Cursor。",
+        "installFailed": "无法安装 Cursor",
+        "installNotDetected": "安装已结束，但仍未检测到 cursor-agent。请刷新，或在终端自行安装。",
+        "unsupportedPlatform": "官方 cursor-agent 安装程序仅支持 macOS 与 Linux。",
+        "models": {
+          "emptyState": "还没有 Cursor 模型目录。点击「刷新模型」拉取一次（需已登录 Cursor）。",
+          "refreshCta": "刷新模型",
+          "refreshing": "已探 {{done}} / {{total}}",
+          "refreshUnavailableInstalled": "需先安装 cursor-agent",
+          "refreshUnavailableAuth": "需先登录 Cursor",
+          "autoHint": "兜底",
+          "autoAlwaysOn": "常显",
+          "effortHint_one": "{{count}} 档推理强度",
+          "effortHint_other": "{{count}} 档推理强度",
+          "cancelRefresh": "取消刷新",
+          "refreshFailed": "模型刷新失败，请稍后再试"
+        },
+        "groups": {
+          "cursor": "Cursor",
+          "anthropic": "Anthropic",
+          "openai": "OpenAI",
+          "google": "Google",
+          "xai": "xAI",
+          "domestic": "国内",
+          "other": "其它"
+        }
+      },
       "wizard": {
         "title": "添加供应商",
         "titleWith": "添加 · {{name}}",
@@ -3483,7 +3547,8 @@
         "agents": {
           "claude-code": "Claude Code",
           "codex": "Codex",
-          "pi": "Pi"
+          "pi": "Pi",
+          "cursor": "Cursor"
         },
         "groupPermissionLabel": "群聊新建任务权限档",
         "groupPermissionDescription": "群里新建任务时统一使用的权限档（@bot 开话题、/new、/ctr 都算），默认「自动审批」；上面那个权限档只管私聊。群上下文里有成员可控的内容，设成「完全访问」后将直接执行、不再逐条确认，请确认群里的人都可信。改动只影响之后新建的任务，已有任务在群里用 /permission 单独切换。"
@@ -6206,7 +6271,8 @@
       "inlineSecretStoreFailed": "凭证保存失败",
       "targetNotFound": "目标插件已卸载或当前不可用",
       "targetDisabled": "目标插件已被停用",
-      "targetDisabledInWorkdir": "用户已在当前工作目录停用该插件；不要重试。"
+      "targetDisabledInWorkdir": "用户已在当前工作目录停用该插件；不要重试。",
+      "targetToolNotFound": "目标插件不再提供该工具"
     },
     "createAgent": {
       "quickStart": "快速开始",
@@ -6306,6 +6372,7 @@
         "agent": {
           "claudeCode": "Claude Code",
           "codex": "Codex",
+          "cursor": "Cursor",
           "pi": "Pi",
           "pending": "下条：{{agent}}"
         }
@@ -6409,6 +6476,20 @@
           "bypassPermissions": {
             "label": "完全访问",
             "description": "允许修改任意文件并运行联网命令，无需再次确认。风险最高，只适合可信任务。"
+          }
+        },
+        "cursor": {
+          "ask": {
+            "label": "默认权限",
+            "description": "需要审批的工具调用会先询问。由 Cindy 在客户端处理每一次权限请求。"
+          },
+          "auto": {
+            "label": "自动审批",
+            "description": "自动放行读、搜索与思考类工具；编辑、执行等更高风险工具仍会询问。"
+          },
+          "bypassPermissions": {
+            "label": "完全访问",
+            "description": "工具调用不再询问。风险最高，只适合可信任务。不会改动你的 Cursor 沙箱设置。"
           }
         },
         "pi": {
@@ -6843,6 +6924,7 @@
       "provider": {
         "claude": "Claude Code",
         "codex": "Codex",
+        "cursor": "Cursor",
         "pi": "Pi",
         "workflow": "Workflow",
         "shell": "后台命令"
@@ -7621,6 +7703,9 @@
       "waiting": "请稍候…",
       "working": "正在工作…",
       "running": "运行中…",
+      "starting": "正在启动…",
+      "cancelled": "已取消",
+      "error": "执行失败",
       "turnStart": "正在处理，{{name}}",
       "issueTip": "{{name}}，试试用 /issue 给我们提反馈或建议",
       "runningTool": "{{tool}} 运行中…"
@@ -7826,7 +7911,8 @@
       "filterVendor": {
         "all": "全部",
         "cc": "Claude",
-        "codex": "Codex"
+        "codex": "Codex",
+        "cursor": "Cursor"
       },
       "filterGroupBy": {
         "project": "按项目分组",
@@ -8711,13 +8797,14 @@
         "interval": "相对间隔",
         "cronHint": "按照日历时钟的固定时间槽位运行。",
         "intervalHint": "上一次运行完成后，再等待指定时长。",
-        "intervalUnsupportedHint": "当前精确间隔会原样保留；选择分钟或小时预设后才会替换。",
+        "intervalUnsupportedHint": "当前精确间隔会原样保留；选择秒、分钟或小时预设后才会替换。",
         "currentExact": "当前值 · {{schedule}}",
-        "exactIntervalPanelHint": "仅在需要替换当前精确间隔时，才选择左侧的分钟或小时预设。",
+        "exactIntervalPanelHint": "仅在需要替换当前精确间隔时，才选择左侧的秒、分钟或小时预设。",
         "cronChip": "Cron · {{schedule}}",
         "intervalChip": "完成后计时 · {{schedule}}"
       },
       "scheduleMenu": {
+        "intervalSeconds": "Seconds（每 N 秒）",
         "intervalMinutes": "Minutes（每 N 分钟）",
         "interval": "Hourly（每 N 小时）",
         "daily": "Daily（每天）",
@@ -8726,12 +8813,15 @@
         "monthly": "Monthly（每月某天）"
       },
       "schedulePreview": {
+        "everySecond": "每秒运行",
+        "everySeconds": "每 {{count}} 秒运行",
         "everyMinute": "每分钟运行",
         "everyMinutes": "每 {{count}} 分钟运行",
         "everyHour": "每 1 小时运行",
         "everyHours": "每 {{count}} 小时运行"
       },
       "scheduleField": {
+        "secondsSuffix": "秒",
         "minutesSuffix": "分钟",
         "hoursSuffix": "小时",
         "daySuffix": "日",

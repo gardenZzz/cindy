@@ -177,6 +177,22 @@ describe('projectInvokeResultForTunnel — maker:provider:list 投影', () => {
     });
   });
 
+  it('保留模型显示 override 快照并过滤非布尔值', () => {
+    const projected = project({
+      providers: [xdProviderWithFullRouting()],
+      modelVisibilityOverrides: {
+        'claude-code:xd:claude-opus-4-8': false,
+        'codex:xd:gpt-5.4': true,
+        malformed: 'hidden',
+      },
+    });
+
+    expect(projected.modelVisibilityOverrides).toEqual({
+      'claude-code:xd:claude-opus-4-8': false,
+      'codex:xd:gpt-5.4': true,
+    });
+  });
+
   it('provider 无 routing → 投影为 undefined（不报错）', () => {
     const { providers } = project({
       providers: [{ id: 'bare', name: 'Bare', connected: true, agents: ['claude-code'] }],

@@ -71,20 +71,59 @@ export function resolveScheduleGenerationProviderId(input: {
   );
 }
 
+/** 某 (来源, 模型) 拷贝的档位能力;`known=false` = 没有权威条目,调用方不得据此清空表单值。 */
+export interface ScheduleModelEfforts {
+  efforts: readonly EffortValue[];
+  defaultEffort: EffortValue | null;
+  known: boolean;
+}
+
+function toEffortValues(efforts: readonly string[]): EffortValue[] {
+  return efforts.filter(isEffortValue);
+}
+
 /**
- * Resolve effort options without crossing an explicit provider boundary.
- * A stale pinned provider preserves its effort until the provider is repaired;
- * only an unpinned selection may follow the effective fallback.
+ * 自动化面板读档位能力的唯一口径 —— 按**当前生效来源**的目录条目算,不读
+ * `capabilities.availableModels`。
+ *
+ * 后者是按 model id 跨来源去重的扁平表:Pi 碰到 BYOM(自定义 API)提供同一个 id 时,
+ * 公布的是各条路由的**交集**(main/maker-host/catalog-to-descriptors.ts 的
+ * `intersectPiEffortCapabilities`)。CLIProxyAPI 这类自定义来源只声明部分档位、或没
+ * 勾「支持推理」时交集会塌成空,于是模型面板的行按目录照常给出档位,chip 和表单却
+ * 判定「这个模型没有档位」,把用户挑好的档清掉 —— 用户看到的就是「选了 Pi 之后自定义
+ * API 没有档位可选」(2026-08 实测)。聊天侧一直按 (来源, 模型) 解析,自动化这里补齐。
+ *
+ * Pi 的 minimal 补档与 main 侧投影同规则:非用户来源(内置/网关)只要声明了档位就补上
+ * runtime 原生支持的 minimal;BYOM 的档位是用户逐模型显式声明的协议能力,原样保留 ——
+ * 多宣称一个档,Pi 启动时的档位断言会直接拒绝这次运行。
+ *
+ * 取不到目录条目(Cursor 没有 Cindy provider、来源未连接、模型已下架、providers 还在加载)
+ * 时回落调用方给的扁平 descriptor,与历史行为一致;但 Pi 的扁平表按契约就是有损的,
+ * 这时只标 `known=false`,让调用方**别**拿它去清用户存好的档位。
  */
 export function resolveScheduleModelEfforts(input: {
   providers: ProviderView[];
+  /** 表单里显式选定的来源;'' = 跟随该模型的生效来源。 */
   providerId: string;
   model: string;
   agentKind: AgentKind;
-  fallbackEfforts?: readonly string[];
-}): readonly string[] | undefined {
+  /** 扁平 capabilities 里的同 id 条目,仅作兜底。 */
+  fallback?: { efforts: readonly string[]; defaultEffort: string | null } | undefined;
+}): ScheduleModelEfforts {
+  const fallback = (): ScheduleModelEfforts =>
+    input.fallback
+      ? {
+          efforts: toEffortValues(input.fallback.efforts),
+          defaultEffort:
+            input.fallback.defaultEffort && isEffortValue(input.fallback.defaultEffort)
+              ? input.fallback.defaultEffort
+              : null,
+          known: input.agentKind !== 'pi',
+        }
+      : { efforts: [], defaultEffort: null, known: false };
+
   const model = input.model.trim();
-  if (!model) return undefined;
+  if (!model) return fallback();
   const explicitProviderId = input.providerId.trim();
   const sourceId = effectiveSourceIdForModel(
     input.providers,
@@ -92,13 +131,46 @@ export function resolveScheduleModelEfforts(input: {
     model,
     input.agentKind,
   );
-  if (explicitProviderId && sourceId !== explicitProviderId) return undefined;
-  const source = sourceId
-    ? input.providers.find((provider) => provider.id === sourceId)
-    : undefined;
-  return source
-    ? getModel(source, model, input.agentKind)?.efforts
-    : input.fallbackEfforts;
+  // 显式钉住的来源不跨界:它掉线 / 被停用时 effectiveSourceIdForModel 会回落到别的
+  // 来源,拿那份档位表校验等于悄悄换了路由。此时按「没有权威条目」处理,让调用方
+  // 保留用户存好的档位,直到该来源修好。
+  if (explicitProviderId && sourceId !== explicitProviderId) {
+    return { efforts: [], defaultEffort: null, known: false };
+  }
+  const provider = sourceId ? input.providers.find((p) => p.id === sourceId) : undefined;
+  const entry = provider ? getModel(provider, model, input.agentKind) : undefined;
+  if (!provider || !entry) return fallback();
+  const efforts =
+    input.agentKind === 'pi' &&
+    provider.source !== 'user' &&
+    entry.efforts.length > 0 &&
+    !entry.efforts.includes('minimal')
+      ? ['minimal', ...entry.efforts]
+      : entry.efforts;
+  return {
+    efforts: toEffortValues(efforts),
+    defaultEffort:
+      entry.defaultEffort && isEffortValue(entry.defaultEffort) ? entry.defaultEffort : null,
+    known: true,
+  };
+}
+
+/**
+ * 保存时把 chip 展示的目录默认档写成显式值。
+ * 表单已有合法档 → 原样；心跳 / 跟随会话（空 model）/ 脚本 / 目录未知 → 不写。
+ */
+export function resolvePersistedScheduleEffort(
+  form: Pick<ScheduleFormState, 'effort' | 'model' | 'executionMode' | 'targetSessionId'>,
+  modelEfforts?: ScheduleModelEfforts,
+): EffortValue | undefined {
+  if (form.effort && isEffortValue(form.effort)) return form.effort;
+  if ((form.executionMode ?? 'agent') === 'script') return undefined;
+  // 心跳空档 = 跟随会话，不能把 chip 展示档落成任务自己的值。
+  if (form.targetSessionId.trim()) return undefined;
+  if (!form.model.trim()) return undefined;
+  if (!modelEfforts?.known) return undefined;
+  const fallback = modelEfforts.defaultEffort;
+  return fallback && modelEfforts.efforts.includes(fallback) ? fallback : undefined;
 }
 
 export interface ScheduleFormState {
@@ -119,7 +191,7 @@ export interface ScheduleFormState {
   recurring: boolean;
   /** 手动模式:true → 创建后永不自动 fire,只能 Run now。UI 上需要 recurring=false 才能勾。 */
   manual: boolean;
-  agentKind: 'claude-code' | 'codex' | 'pi';
+  agentKind: AgentKind;
   model: string;
   /**
    * 显式选定的来源(供应商)id。'' = 跟随该 agent 原生默认来源（no-break，与未升级
@@ -128,7 +200,7 @@ export interface ScheduleFormState {
    */
   providerId: string;
   effort: EffortValue | '';
-  /** Codex Fast 模式开关。仅 Codex 有意义;切到 Claude / 不支持 fast 的模型时自动清为 false。 */
+  /** Fast 模式开关。对 Codex / Cursor 有意义;切到 Claude / 不支持 fast 的模型时自动清为 false。 */
   fastMode: boolean;
   workspaceKind: ScheduleWorkspaceKind;
   workingDir: string;
@@ -348,11 +420,12 @@ export function applyRunMode(
   return unchanged ? form : next;
 }
 
-/** renderer Session.agentKind('cc'|'codex')→ schedule agentKind 映射。 */
+/** renderer Session.agentKind('cc'|'codex'|'cursor')→ schedule agentKind 映射。 */
 export function sessionAgentKindToScheduleAgentKind(
-  kind: 'cc' | 'codex' | 'pi',
+  kind: 'cc' | 'codex' | 'cursor' | 'pi',
 ): ScheduleFormState['agentKind'] {
   if (kind === 'codex') return 'codex';
+  if (kind === 'cursor') return 'cursor';
   if (kind === 'pi') return 'pi';
   return 'claude-code';
 }
@@ -497,7 +570,10 @@ export function parseScriptTimeoutMs(sec: string): number | undefined {
   return Number.isFinite(n) && n > 0 ? Math.floor(n * 1000) : undefined;
 }
 
-export function buildScheduleInput(form: ScheduleFormState): CreateScheduleInput {
+export function buildScheduleInput(
+  form: ScheduleFormState,
+  modelEfforts?: ScheduleModelEfforts,
+): CreateScheduleInput {
   const isHeartbeat = !!form.targetSessionId.trim();
   const isScript = (form.executionMode ?? 'agent') === 'script';
   const cronExpr = form.cronExpr.trim();
@@ -542,17 +618,16 @@ export function buildScheduleInput(form: ScheduleFormState): CreateScheduleInput
     base.useWorktree = false;
     base.model = form.model.trim() || undefined;
     base.providerId = form.providerId.trim() || undefined;
-    base.effort = form.effort && isEffortValue(form.effort) ? form.effort : undefined;
+    base.effort = resolvePersistedScheduleEffort(form, modelEfforts);
     return base;
   }
   if (form.workspaceKind === 'project') base.workingDir = form.workingDir.trim();
   else base.useWorktree = false;
   if (form.model.trim()) base.model = form.model.trim();
   if (form.providerId.trim()) base.providerId = form.providerId.trim();
-  if (form.effort && isEffortValue(form.effort)) base.effort = form.effort;
-  // fastMode 对 Codex / Pi 都生效(runner.ts:665 明确 claude-code 忽略此字段);只序列化
-  // codex 会让用户在 Pi 任务里开的 Fast 被静默丢弃(codex review)。表单侧 Fast 开关已按
-  // capability × 模型 supportsFastMode 门控,Pi 只有真支持时才可能为 true。
-  if (form.agentKind === 'codex' || form.agentKind === 'pi') base.fastMode = form.fastMode;
+  const persistedEffort = resolvePersistedScheduleEffort(form, modelEfforts);
+  if (persistedEffort) base.effort = persistedEffort;
+  // fastMode 对 Codex / Cursor / Pi 都生效;claude-code 忽略此字段。
+  if (form.agentKind === 'codex' || form.agentKind === 'cursor' || form.agentKind === 'pi') base.fastMode = form.fastMode;
   return base;
 }

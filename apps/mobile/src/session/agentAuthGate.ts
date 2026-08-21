@@ -14,6 +14,7 @@ import { connectedProvidersForAgent } from '@cindy/model-providers/registry';
 import type { ProviderView } from '@cindy/model-providers/registry';
 
 import { i18n } from '@/i18n';
+import type { AgentKind } from '@cindy/maker-shared';
 
 export type AgentAuthGateVerdict = 'ready' | 'unauthenticated' | 'unknown';
 
@@ -24,7 +25,7 @@ export interface AgentAuthGateInput {
   loading: boolean;
   /** 目录拉取失败(典型:旧被控端不识别通道)。 */
   error: string | null;
-  agentKind: 'claude-code' | 'codex' | 'pi';
+  agentKind: AgentKind;
   /**
    * true = 已建会话的发送门禁:计入 suspended 来源(停用是准入轴,不打断运行中
    * 会话,门禁只回答「凭证还连着吗」)。缺省 false = 新建草稿:suspended 不算可
@@ -37,6 +38,11 @@ export interface AgentAuthGateInput {
 /** 判定某 agent 在被控端是否有已连接来源;不确定时回 'unknown'(调用方不拦截)。 */
 export function agentAuthGateVerdict(input: AgentAuthGateInput): AgentAuthGateVerdict {
   if (input.loading || input.error !== null || input.providers.length === 0) return 'unknown';
+  // Cursor 的鉴权在 cursor-agent CLI 自己那边，不经 Cindy 的供应商目录：内置与自定义
+  // ProviderView 都不会声明 cursor runtime，走通用判定必然 0 条、判成 unauthenticated，
+  // 于是手机上的 Cursor 新建在目录正常就绪时反而被拦死。按本门禁「不确定时回 unknown、
+  // 调用方不拦截」的既定语义放行，真正不可用时由被控端 fail-closed 拒绝。
+  if (input.agentKind === 'cursor') return 'unknown';
   return connectedProvidersForAgent(input.providers, input.agentKind, {
     includeSuspended: input.existingSessionRoute === true,
   }).length > 0
@@ -45,7 +51,13 @@ export function agentAuthGateVerdict(input: AgentAuthGateInput): AgentAuthGateVe
 }
 
 /** 未鉴权时的提示文案(与 describeAgentAuthError 的引导口径一致)。 */
-export function agentAuthGateHint(agentKind: 'claude-code' | 'codex' | 'pi'): string {
-  const label = agentKind === 'claude-code' ? 'Claude' : agentKind === 'pi' ? 'Pi' : 'Codex';
+export function agentAuthGateHint(agentKind: AgentKind): string {
+  const label = agentKind === 'claude-code'
+    ? 'Claude'
+    : agentKind === 'cursor'
+      ? 'Cursor'
+      : agentKind === 'pi'
+        ? 'Pi'
+        : 'Codex';
   return i18n.t('session.row.authGateHint', { agent: label });
 }

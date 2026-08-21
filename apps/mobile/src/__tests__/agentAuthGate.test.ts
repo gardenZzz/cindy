@@ -59,5 +59,6 @@ describe('agentAuthGateHint', () => {
     expect(agentAuthGateHint('claude-code')).toContain('Claude');
     expect(agentAuthGateHint('claude-code')).toContain('设置 → 模型供应商');
     expect(agentAuthGateHint('codex')).toContain('Codex');
+    expect(agentAuthGateHint('cursor')).toContain('Cursor');
   });
 });

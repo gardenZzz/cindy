@@ -16,15 +16,15 @@ import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover
 import { Tip } from '@/components/ui/tooltip';
 import {
   useAgentCapabilities,
-  type AgentKind,
   type PermissionModeDescriptor,
 } from '@/hooks/useAgentCapabilities';
 import type { PermissionMode } from '@/lib/userPreferences.types';
+import { dbToMakerAgentKind } from '../../../shared/agentKindConversion';
 
 interface PermissionSelectorProps {
   permissionMode: PermissionMode;
   onPermissionModeChange: (mode: PermissionMode) => void;
-  vendorKey?: 'cc' | 'codex' | 'pi';
+  vendorKey?: 'cc' | 'codex' | 'cursor' | 'pi';
   /** device-link 远程会话所属被控端 id;非空 = 权限档从被控端读(本地会话 undefined,行为不变)。 */
   deviceId?: string;
   /** 禁用 trigger。用于断线远程会话等只读 composer 状态。 */
@@ -65,12 +65,6 @@ const PERMISSION_ICONS: Record<string, typeof Hand> = {
   auto: Sparkles,
   bypassPermissions: TriangleAlert,
 };
-
-function vendorKeyToAgentKind(v: 'cc' | 'codex' | 'pi'): AgentKind {
-  if (v === 'codex') return 'codex';
-  if (v === 'pi') return 'pi';
-  return 'claude-code';
-}
 
 /** Codex 不支持 acceptEdits/plan, 落到 ask 兜底 */
 function normalizeMode(mode: PermissionMode, options: PermissionModeDescriptor[]): PermissionMode {
@@ -116,7 +110,7 @@ export function PermissionSelector({
   const [open, setOpen] = useState(false);
   const [focusedOptionId, setFocusedOptionId] = useState<string | null>(null);
   const selectedOptionRef = useRef<HTMLButtonElement>(null);
-  const agentKind = vendorKeyToAgentKind(vendorKey);
+  const agentKind = dbToMakerAgentKind(vendorKey);
   // device-link:deviceId 非空 → 权限档从被控端读(本地会话 undefined,行为不变)。
   const { capabilities } = useAgentCapabilities(agentKind, deviceId);
 

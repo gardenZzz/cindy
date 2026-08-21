@@ -362,7 +362,6 @@ export function SubagentModelSection() {
   if (!settings) return null;
 
   const unspecifiedLabel = t('settings.subagentModels.unspecified');
-
   // 已存显式来源当前不可用(目录就绪后判定):断开、或仍连接但目录已不再提供已存
   // 模型,都算——只查 id 会让「掉了该模型的来源」静默换显示,存储值分叉且可静默复活
   // (codex review)。trigger 显示**真实存储来源** + 断开错误态,不回落默认图标。

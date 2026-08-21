@@ -1,3 +1,4 @@
+import type { AgentKind } from '@cindy/maker-core';
 import { IOS_SIMULATOR_ROUTE_STATUS_CHANNEL } from '../../shared/iosSimulatorIpc.js';
 
 /**
@@ -9,6 +10,16 @@ import { IOS_SIMULATOR_ROUTE_STATUS_CHANNEL } from '../../shared/iosSimulatorIpc
 
 export const MAKER_INVOKE = {
   CREATE_SESSION: 'maker:create-session',
+  /**
+   * 非阻塞预热（claim-if-ready）：草稿期提前完成 Cursor 会话 bootstrap（spawn +
+   * initialize + session/new + 档位），发送热路径零 await 就绪。
+   *  - PREWARM_SESSION：只接受请求、立即返回，不在 IPC 栈上等 bootstrap；
+   *  - CLAIM_PREWARM_SESSION：返回 { claimed: boolean }——已就绪才 true；
+   *  - CANCEL_PREWARM_SESSION：回收未 claim 的预热句柄，幂等。
+   */
+  PREWARM_SESSION: 'maker:prewarm-session',
+  CLAIM_PREWARM_SESSION: 'maker:claim-prewarm-session',
+  CANCEL_PREWARM_SESSION: 'maker:cancel-prewarm-session',
   START_REVIEW: 'maker:review:start',
   TURN_CHANGE_SETS_LIST: 'maker:turn-change-sets:list',
   TURN_CHANGE_SETS_GET: 'maker:turn-change-sets:get',
@@ -130,7 +141,7 @@ export const MAKER_INVOKE = {
    *  - 选中(active=true):额外 patchVendorPrefs 更新 lastByVendor 的激活 effort(被控端 trigger 读源),
    *    fast 经 providerModelMemory 已覆盖 trigger。
    * 变更经既有 SYNC_* 自动 re-mirror + 广播 NEW_MAKER_DRAFT_CHANGED 回控制端镜像。
-   * 入参 = { agent:'claude-code'|'codex', providerId, modelId, effort?, fast?, active? }。
+   * 入参 = { agent:AgentKind, providerId, modelId, effort?, fast?, active? }。
    */
   APPLY_NEW_MAKER_DRAFT_PREF: 'maker:apply-new-maker-draft-pref',
   /**
@@ -219,7 +230,7 @@ export const MAKER_INVOKE = {
    * 旧控制端的会话模型预设写穿兼容 channel。新控制端统一经 APPLY_NEW_MAKER_DRAFT_PREF 写被控端
    * providerModelMemory 全局预设;旧控制端仍发此 invoke 时,被控端 renderer 也会将其收敛到同一
    * 全局预设,并保留 session scoped 回流供旧控制端显示。入参 =
-   * { sessionId, agent:'claude-code'|'codex', providerId, model, effort?, fast? }。
+   * { sessionId, agent:AgentKind, providerId, model, effort?, fast? }。
    */
   SET_SESSION_MODEL_PREF: 'maker:set-session-model-pref',
   /**
@@ -306,6 +317,26 @@ export const MAKER_INVOKE = {
   AGENT_STATUS: 'maker:agent:status',
   // Agent 二进制 --version 输出 (About 面板用) —— spawn binary, 进程内缓存
   AGENT_BINARY_VERSION: 'maker:agent:binary-version',
+  /**
+   * Cursor 本机 cursor-agent 探测（设置 → 供应商区安装引导）。
+   * 查询型：只回 `{ installed: boolean }`，不回绝对路径；失败降级未安装。
+   * 本地桌面专属，不进 device-link allowlist（Cursor 一期不做 remote / mobile）。
+   */
+  CURSOR_BINARY_STATUS: 'maker:cursor:binary-status',
+  /**
+   * 用户在设置页显式确认后执行官方安装：`curl -fsSL https://cursor.com/install | bash`。
+   * 仅 darwin / linux；未确认不得调用。本地桌面专属，不进 device-link allowlist。
+   */
+  CURSOR_INSTALL: 'maker:cursor:install',
+  /**
+   * 设置页「刷新模型」:启动一轮 Cursor 模型档位串行探测(可重入 + 进行中互斥)。
+   * 进行中再调 no-op(返回 started:false)。本地桌面专属,不进 device-link allowlist。
+   */
+  CURSOR_REFRESH_MODELS: 'maker:cursor:refresh-models',
+  /** 取消进行中的探测;已探到的结果已落盘。 */
+  CURSOR_CANCEL_REFRESH: 'maker:cursor:cancel-refresh',
+  /** 探测进度推送(已探 n / 总数),仅 main -> renderer。 */
+  CURSOR_REFRESH_PROGRESS: 'maker:cursor:refresh-progress',
   // Agent 今日累计 (取代老 codex:usage:today) —— 走 host 的 readAgentTodayUsage
   USAGE_TODAY: 'maker:usage:today',
   USAGE_ACCOUNT: 'maker:usage:account',
@@ -871,8 +902,9 @@ export const MAKER_PUSH = {
   /**
    * 被控端「当前 New Maker 草稿」全量变更广播。SYNC_NEW_MAKER_DRAFT 落 main 缓存后随即发,
    * 经 device-link tap 转发给控制端(account 级 → sessions topic),控制端刷新远程草稿显示镜像。
-   * payload = { claudeCode, codex, pi }(每项均为 RemoteNewMakerDefaults，控制端直接复用
-   * resolveDeviceLinkDraftDefaults)。本地窗口不消费(被控端是真相、不自镜像)。
+   * payload = { claudeCode, codex, cursor, pi } 四槽,值均为 RemoteNewMakerDefaults(per-vendor,
+   * 控制端直接复用 resolveDeviceLinkDraftDefaults)。槽名由 agentKindToDraftPushSlot 统一
+   * 给出,构造见 buildNewMakerDraftChangedPayload。本地窗口不消费(被控端是真相、不自镜像)。
    */
   NEW_MAKER_DRAFT_CHANGED: 'maker:new-maker-draft:changed',
   /**

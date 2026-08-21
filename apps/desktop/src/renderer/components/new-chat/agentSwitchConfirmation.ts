@@ -201,3 +201,39 @@ export function resolveAgentSwitchAckAction(args: {
   }
   return isAgentSwitchResponseFresh(freshness) ? 'apply-switched' : 'discard';
 }
+
+/** 单个 Agent 的 capability 快照投影(门控只读这两位)。 */
+export interface AgentSessionSwitchCapability {
+  supportsSessionAgentSwitch?: boolean;
+  supportsSessionAgentSwitchCas?: boolean;
+}
+
+/**
+ * session-agent-switch 入口是否展示的纯门控判定。
+ *
+ * 四家(Claude Code / Codex / Pi / Cursor)同构,不为任何一家引入特殊分支:
+ * 入口的显示与否只取决于**任务真实 Agent**(agentKind)在被控端上报的能力位,
+ * 而不是固定写死某个 Agent 能/不能切。本机会话(deviceLinkDeviceId 为空)恒可用--
+ * main 与 renderer 同版本;device-link 远程会话读被控端的真实 Agent 能力位。
+ *
+ * 两个判据同缺一不可:
+ *  - `supportsSessionAgentSwitch`:该 Agent 能不能在任务内被切走(老被控端对 Cursor 报
+ *    false,升级前入口正确隐藏);
+ *  - `supportsSessionAgentSwitchCas`:同引擎 no-op 的安全收尾依赖 host 返回修订号,
+ *    缺该位的旧 host 会随机吞掉模型重选,不开放入口。
+ *
+ * 把判定收在此纯函数里而非散在组件内,使其可被行为测试覆盖(不再靠读源码文本断言)。
+ */
+export function resolveSessionAgentSwitchEntry(args: {
+  /** 任务真实 Agent;未锁定(undefined)时 fail-closed,冷启动不冒充支持。 */
+  agentKind: string | null | undefined;
+  /** 各 Agent 的能力快照,按任务真实 Agent 取对应那一份。 */
+  capabilities: Record<string, AgentSessionSwitchCapability | null | undefined>;
+  /** 本机会话恒可用;远程会话按被控端能力位。 */
+  isLocalSession: boolean;
+}): boolean {
+  if (args.isLocalSession) return true;
+  const caps = args.agentKind ? args.capabilities[args.agentKind] : undefined;
+  return caps?.supportsSessionAgentSwitch === true
+    && caps?.supportsSessionAgentSwitchCas === true;
+}

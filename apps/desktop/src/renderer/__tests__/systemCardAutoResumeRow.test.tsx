@@ -182,3 +182,42 @@ describe('SystemCard auto-resume 行', () => {
     expect(slot?.querySelector('svg')).toBeNull();
   });
 });
+
+describe('SystemCard agent-switch 引擎名', () => {
+  it('fromAgentKind=cursor 显示 Cursor,不得落成 Claude Code', () => {
+    render(
+      <SystemCard
+        cardType="agent-switch"
+        data={{ fromAgentKind: 'cursor', toAgentKind: 'pi', toModel: 'glm-5.2' }}
+      />,
+    );
+    const sep = screen.getByRole('separator');
+    expect(sep.getAttribute('aria-label')).toContain(
+      '"from":"Cursor"',
+    );
+    expect(sep.getAttribute('aria-label')).toContain('"to":"Pi"');
+    expect(sep.getAttribute('aria-label')).not.toContain('Claude Code');
+    expect(screen.getByText('glm-5.2')).toBeTruthy();
+  });
+
+  it('四家引擎名齐全(cc / codex / cursor / pi)', () => {
+    const cases = [
+      { from: 'cc', to: 'codex', fromLabel: 'Claude Code', toLabel: 'Codex' },
+      { from: 'codex', to: 'cursor', fromLabel: 'Codex', toLabel: 'Cursor' },
+      { from: 'cursor', to: 'pi', fromLabel: 'Cursor', toLabel: 'Pi' },
+      { from: 'pi', to: 'cc', fromLabel: 'Pi', toLabel: 'Claude Code' },
+    ] as const;
+    for (const c of cases) {
+      const { unmount } = render(
+        <SystemCard
+          cardType="agent-switch"
+          data={{ fromAgentKind: c.from, toAgentKind: c.to }}
+        />,
+      );
+      const label = screen.getByRole('separator').getAttribute('aria-label') ?? '';
+      expect(label, `${c.from}→${c.to}`).toContain(`"from":"${c.fromLabel}"`);
+      expect(label, `${c.from}→${c.to}`).toContain(`"to":"${c.toLabel}"`);
+      unmount();
+    }
+  });
+});

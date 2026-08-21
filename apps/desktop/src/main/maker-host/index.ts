@@ -15,12 +15,15 @@ import {
   Maker,
   ClaudeCodeAgent,
   CodexAgent,
+  CursorAgent,
+  classifyAcpAutoPermission,
   configureDefaultImageResizer,
   type McpProvider,
 } from '@cindy/maker-core';
 import type { ProviderView } from '@cindy/model-providers';
 import {
   getActiveCatalog,
+  getActiveCatalogRevision,
   getLocalCatalogOverridesSnapshot,
   setActiveCatalogChangedListener,
   setDiscoveredCodexModels,
@@ -51,6 +54,14 @@ import { tapWindowBroadcast } from '../device-link/broadcast-tap.js';
 import { remoteInvoke } from '../device-link/index.js';
 import { WorktreePool } from '../worktree/index.js';
 import { getReadyBinaryPath, getCachedBinaryStatus } from '../agent-binaries/index.js';
+import { discoverCursorAgentBinarySync } from './cursor-binary-discovery.js';
+import { buildCursorAcpMcpServers } from './cursor-acp-mcp.js';
+import { createDesktopCursorAuthAdapter } from './cursor-auth-adapter.js';
+import * as cindyChatAttachments from '../cindy-media/chatAttachments.js';
+import {
+  defaultCursorGeneratedImageRoots,
+  materializeCursorGeneratedImageSource,
+} from '../cindy-media/cursorGeneratedImage.js';
 import { activeOwnerScopeKey, isAppSessionBoundaryPending } from '../appSessionState.js';
 import { getIOSSimulatorPluginAccessDecision } from '../cindy-brain/index.js';
 import {
@@ -125,6 +136,7 @@ import {
 import {
   buildDesktopClaudeRuntimeConfig,
   desktopCodexRuntimeConfig,
+  desktopCursorRuntimeConfig,
   ensureBundledRipgrepReady,
 } from './runtime-configs.js';
 import {
@@ -135,6 +147,7 @@ import {
 import { resolveRemoteClaudeRoute } from './remote-claude-route.js';
 import { resolveDesktopClaudeSubagentModelAccess } from './subagent-model-access.js';
 import { claudeSubagentUsageBridge } from './claude-subagent-usage-bridge.js';
+import { notifyAutoPermissionClassifierUnavailable } from './claude-auto-permission-fallback.js';
 import { createAutoPermissionReviewer } from './auto-permission-reviewer.js';
 import {
   AUTO_REVIEW_ROUTER_GUARD_TIMEOUT_MS,
@@ -253,6 +266,12 @@ import {
   getDesktopMcpToolApprovalPresentation,
 } from './mcp-tool-approval-policy.js';
 import { mapCodexAppServerModelsToCatalog } from './codex-model-discovery.js';
+import {
+  mapCursorAcpModelsToDescriptors,
+  readCachedCursorModels,
+  setCursorModelDiscoverer,
+  writeCachedCursorModels,
+} from './cursor-model-discovery.js';
 import { prepareSharedProjectSkillLinks } from './shared-global-skills.js';
 import {
   buildDesktopCapabilityRoutingPolicy,
@@ -1677,10 +1696,92 @@ export function getMaker(): Maker {
     // API 模式切换 / api_key 变更时 dispose 重建 app-server (单例进程, 配置 spawn 冻入)。
     _codexAgent = codexAgent;
 
+    // Cursor:用户自装二进制,探测不到就不注册(全程可选,不影响既有 agent)。
+    // auth 走本机 cursor_login（Keychain；Cindy 不落盘凭证）。
+    const cursorBinary = discoverCursorAgentBinarySync();
+    const cursorAuth = cursorBinary.installed
+      ? createDesktopCursorAuthAdapter({ binaryPath: cursorBinary.binaryPath })
+      : null;
+    const cursorAgent = cursorBinary.installed && cursorAuth
+      ? new CursorAgent({
+          auth: cursorAuth,
+          runtimeConfig: desktopCursorRuntimeConfig,
+          binaryPath: cursorBinary.binaryPath,
+          logger: desktopMakerLogger,
+          // Cursor 无 vendor Auto reviewer；注入 Cindy 侧分类器（看 tool 名 + input）。
+          classifyAutoPermission: async (args) => classifyAcpAutoPermission(args),
+          onAutoPermissionClassifierUnavailable: notifyAutoPermissionClassifierUnavailable,
+          // 与 Claude/Codex 同一 MCP 审批真源（#47）。
+          getMcpToolApprovalPolicy: getDesktopMcpToolApprovalPolicy,
+          // 全量已启用 lizi MCP 经 HTTP bridge 注入 ACP session/new|load（#47）；
+          // 本地用主 token 全通。协同两件套仍受 collab 开关约束。
+          prepareAcpMcpServers: (ctx) =>
+            buildCursorAcpMcpServers(ctx, {
+              ensureBridgeStarted: ensureCodexMcpBridgeStartedForRemote,
+              isCollabEnabled: () => pluginRegistry.isEnabled('collab'),
+              getDisabledRuntimePluginIds: (workingDir) =>
+                getPluginRegistry().getDisabledRuntimePluginIds(workingDir),
+            }),
+          // #50：generate_image 必须在 ACK generated 前完成主机入仓校验。
+          materializeCursorGeneratedImage: async ({ workingDir, path, url }) => {
+            try {
+              const result = await materializeCursorGeneratedImageSource(
+                { path, url },
+                {
+                  allowedRoots: defaultCursorGeneratedImageRoots(workingDir),
+                  ingestBuffer: cindyChatAttachments.ingestChatImageBuffer,
+                },
+              );
+              if (!result) {
+                return { ok: false as const, reason: 'missing filePath/imageData' };
+              }
+              return { ok: true as const, url: result.url, filename: result.filename };
+            } catch (err) {
+              return {
+                ok: false as const,
+                reason: err instanceof Error ? err.message : String(err),
+              };
+            }
+          },
+          onCursorLocalModelsListed: (listing) => {
+            const maker = _maker;
+            if (!maker) return;
+            const mapped = mapCursorAcpModelsToDescriptors(listing);
+            // 空目录不覆盖兜底 Auto，避免选择器被清空卡住新建。
+            if (mapped.length === 0) return;
+            const availableModels = maker.getCapabilities('cursor').availableModels;
+            availableModels.splice(0, availableModels.length, ...mapped);
+            writeCachedCursorModels(mapped);
+            // 复用 PROVIDER_CHANGED 收口，让 renderer 原子刷新 capabilities（含 cursor）。
+            refreshSelectableModelsAndBroadcast({
+              revision: getActiveCatalogRevision(),
+              cursorModels: true,
+            });
+          },
+        })
+      : null;
+    if (!cursorAgent) {
+      desktopMakerLogger.info('cursor-agent binary not found; Cursor agent not registered');
+    } else {
+      // 冷启动只读落盘缓存 seed 进 capabilities,不触发探测(spec #21 / #29)。
+      // 缓存为空 ⇒ 选择器只有 Auto 兜底;目录唯一写入方 = 设置页刷新 / 登录成功。
+      const cached = readCachedCursorModels();
+      if (cached.length > 0) {
+        const availableModels = cursorAgent.capabilities.availableModels;
+        availableModels.splice(0, availableModels.length, ...cached);
+        // agent 侧也要预热：session/new 只报 id + 名字，档位靠它按 id 保旧续上。
+        cursorAgent.seedListedModels(cached);
+      }
+    }
+    // 探测编排接入 cursor-model-discovery 模块(可重入 / 进度 / 取消)。
+    // 二进制未装时 cursorAgent 为 null,setCursorModelDiscoverer(null) 让刷新入口不可用。
+    setCursorModelDiscoverer(cursorAgent);
+
     // 装配第二步: 把 agents 引用挂回 manager (manager.enable() 时遍历 setMemory(false))。
     attachAgentsToMakerMemory(makerMemoryManager, {
       'claude-code': claudeAgent,
       codex: codexAgent,
+      ...(cursorAgent ? { cursor: cursorAgent } : {}),
     });
     if (makerMemoryManager.isEnabled()) {
       void makerMemoryManager.enable();
@@ -2059,6 +2160,7 @@ export function getMaker(): Maker {
       agents: {
         'claude-code': claudeAgent,
         codex: codexAgent,
+        ...(cursorAgent ? { cursor: cursorAgent } : {}),
         ...(piAgent ? { pi: piAgent } : {}),
       },
       storage: desktopSessionStorage,

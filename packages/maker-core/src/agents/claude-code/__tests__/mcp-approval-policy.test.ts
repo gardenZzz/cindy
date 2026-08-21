@@ -843,6 +843,7 @@ describe('prompt-each-time never turns into a persisted grant', () => {
     await new Promise((resolve) => setImmediate(resolve));
 
     // CC agent 实现了 setPermissionMode (接口上可选是因为其他 agent 可缺省)。
+    expect(handle.setPermissionMode).toBeTypeOf('function');
     await handle.setPermissionMode!('bypassPermissions');
 
     // 切到 Full access 也不能替用户批准这一次高风险调用。
@@ -860,6 +861,7 @@ describe('prompt-each-time never turns into a persisted grant', () => {
     });
     await new Promise((resolve) => setImmediate(resolve));
 
+    expect(handle.setPermissionMode).toBeTypeOf('function');
     await handle.setPermissionMode!('bypassPermissions');
 
     expect((await pending).behavior).toBe('allow');

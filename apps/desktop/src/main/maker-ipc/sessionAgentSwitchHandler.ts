@@ -1,5 +1,5 @@
 /**
- * session-agent-switch:同一会话在 Claude Code / Codex 引擎间切换的 IPC handler。
+ * session-agent-switch:同一会话在 Claude Code / Codex / Cursor 引擎间切换的 IPC handler。
  *
  * 意图制(2026-07-20):外部调用(IPC)只登记切换意图并返回 deferred——用户在
  * 选择器里反复改选零成本;renderer 乐观呈现意图。真切换在下一条消息发送时刻由
@@ -23,7 +23,9 @@
  *    上述回落再降级)。
  *
  * 边界:远程会话(remoteHostId)与 Orca 协同会话不支持切换(UNSUPPORTED_CAPABILITY);
- * turn 进行中登记 pending 推迟到下一条消息发送时刻执行。
+ * 四家引擎(Claude Code / Codex / Pi / Cursor)可在任务内两两互换--从 Cursor 切走
+ * 与从其它引擎切走语义完全一致(departure snapshot 快照 Cursor 的 ACP session id,
+ * 切回时 resume 续接);turn 进行中登记 pending 推迟到下一条消息发送时刻执行。
  */
 
 import type { AgentKind } from '@cindy/maker-core';
@@ -52,7 +54,7 @@ export interface ParkedEngineSessionRef {
   watermarkRowid: number;
 }
 
-/** DB ↔ maker-core 形态映射 —— 正本在 shared/agentKindConversion.ts,此处仅转发。 */
+/** DB ↔ maker-core 形态映射 -- 正本在 shared/agentKindConversion.ts,此处仅转发。 */
 export function toDbAgentKind(kind: AgentKind): DbAgentKind {
   return makerToDbAgentKind(kind);
 }
@@ -64,6 +66,7 @@ export function toMakerAgentKind(dbKind: string): AgentKind {
 /** 交接 framing 与边界卡展示用的引擎名。 */
 export function agentEngineLabel(dbKind: DbAgentKind): string {
   if (dbKind === 'codex') return 'Codex';
+  if (dbKind === 'cursor') return 'Cursor';
   if (dbKind === 'pi') return 'Pi';
   return 'Claude Code';
 }
@@ -115,7 +118,7 @@ export interface MakerSessionAgentSwitchHandlerDeps {
    * (测试最小 harness)。
    */
   assertModelRouteUsable?(
-    agent: 'claude-code' | 'codex' | 'pi',
+    agent: AgentKind,
     model: string,
     providerId: string | null,
   ): Promise<string | undefined>;
@@ -360,9 +363,15 @@ export async function performSessionAgentSwitch(
   if (typeof sessionId !== 'string' || sessionId.length === 0) {
     throwIpcError('INVALID_PARAMS', 'sessionId required');
   }
-  if (targetAgentKind !== 'claude-code' && targetAgentKind !== 'codex' && targetAgentKind !== 'pi') {
-    throwIpcError('INVALID_PARAMS', 'targetAgentKind must be claude-code | codex | pi');
+  if (
+    targetAgentKind !== 'claude-code'
+    && targetAgentKind !== 'codex'
+    && targetAgentKind !== 'cursor'
+    && targetAgentKind !== 'pi'
+  ) {
+    throwIpcError('INVALID_PARAMS', 'targetAgentKind must be claude-code | codex | cursor | pi');
   }
+  const targetKind = targetAgentKind as AgentKind;
   if (typeof model !== 'string' || model.length === 0) {
     throwIpcError('INVALID_PARAMS', 'model required');
   }
@@ -449,7 +458,7 @@ export async function performSessionAgentSwitch(
   // 重复登记 = 覆盖(同一意图的最新表达)。
   if (!params.applyNow && deps.pendingSwitches) {
     const intent: PendingAgentSwitchIntent = {
-      targetAgentKind,
+      targetAgentKind: targetKind,
       model,
       providerId: normalizedProviderId,
       ...(typeof params.effort === 'string' && params.effort ? { effort: params.effort } : {}),
@@ -459,10 +468,10 @@ export async function performSessionAgentSwitch(
     deps.onPendingSwitchChanged?.(sessionId, projectPendingAgentSwitchIntent(intent));
     deps.log.info('agent-switch: intent registered (applies on next send)', {
       sessionId,
-      targetAgentKind,
+      targetAgentKind: targetKind,
       model,
     });
-    return { switched: false, agentKind: targetAgentKind, model, engineReady: true, deferred: true };
+    return { switched: false, agentKind: targetKind, model, engineReady: true, deferred: true };
   }
 
   const live = deps.getLiveSession(sessionId);
@@ -575,7 +584,7 @@ export async function performSessionAgentSwitch(
           // 只有 spawn 时才暴露。回落是确定性代码路径,不留半 resume 状态。
           deps.log.warn('agent-switch: resume parked session failed; fallback to fresh + full handoff', {
             sessionId,
-            targetAgentKind,
+            targetAgentKind: targetKind,
             parkedSdkSessionId: parked.sdkSessionId,
             err: err instanceof Error ? err.message : String(err),
           });
@@ -599,7 +608,7 @@ export async function performSessionAgentSwitch(
               // 清 id 与改边界必须同成同败。失败后重新登记完整意图与恢复载荷,
               // 下一条消息先重试原子恢复尾段,而不是带半状态继续 lazy-create。
               deps.pendingSwitches?.set(sessionId, {
-                targetAgentKind,
+                targetAgentKind: targetKind,
                 model,
                 providerId: normalizedProviderId,
                 ...(typeof params.effort === 'string' && params.effort ? { effort: params.effort } : {}),
@@ -622,7 +631,7 @@ export async function performSessionAgentSwitch(
             // 边界插入失败时无法原子保证“清 id + 改边界”。保留意图自愈,
             // 避免只清 sdk id 后 DB pending 与实际注入内容分叉。
             deps.pendingSwitches?.set(sessionId, {
-              targetAgentKind,
+              targetAgentKind: targetKind,
               model,
               providerId: normalizedProviderId,
               ...(typeof params.effort === 'string' && params.effort ? { effort: params.effort } : {}),
@@ -652,7 +661,7 @@ export async function performSessionAgentSwitch(
               engineReady = false;
               deps.log.warn('agent-switch: fresh bootstrap after resume fallback failed', {
                 sessionId,
-                targetAgentKind,
+                targetAgentKind: targetKind,
                 err: err2 instanceof Error ? err2.message : String(err2),
               });
             }
@@ -661,7 +670,7 @@ export async function performSessionAgentSwitch(
           engineReady = false;
           deps.log.warn('agent-switch: bootstrap new engine failed; next send will lazy-create', {
             sessionId,
-            targetAgentKind,
+            targetAgentKind: targetKind,
             err: err instanceof Error ? err.message : String(err),
           });
         }
@@ -679,7 +688,7 @@ export async function performSessionAgentSwitch(
     });
     return {
       switched: true,
-      agentKind: targetAgentKind,
+      agentKind: targetKind,
       model,
       engineReady,
       ...(retryPending ? { retryPending: true } : {}),

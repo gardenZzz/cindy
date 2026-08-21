@@ -12,13 +12,16 @@ import {
   providerOffersModel,
 } from '@cindy/model-providers';
 
+import { AgentSelect } from '@/components/new-chat/AgentSelect';
 import { FastModeToggle } from '@/components/new-chat/FastModeToggle';
 import { FullAccessConfirmContent } from '@/components/new-chat/FullAccessConfirmContent';
 import { ModelSelector } from '@/components/new-chat/ModelSelector';
 import { PermissionSelector } from '@/components/new-chat/PermissionSelector';
 import { VendorSegmentedSwitcher } from '@/components/new-chat/VendorSegmentedSwitcher';
 import { agentKindToVendor } from '@/components/sidebar/VendorIcon';
+import type { MakerVendor } from '@/lib/ccAgent.types';
 import { useAgentCapabilities } from '@/hooks/useAgentCapabilities';
+import { useCursorAvailable } from '@/hooks/useCursorAvailable';
 import { useDeviceProviders } from '@/hooks/useDeviceProviders';
 import { useProviders } from '@/hooks/useProviders';
 import { filterChatBridgedCodexProviders } from '@/lib/providerModels';
@@ -36,6 +39,7 @@ import {
   DEFAULT_WORKER_CREATION_PREFS,
   readWorkerCreationPrefs,
   writeWorkerCreationPrefs,
+  type WorkerAgentKind,
   type WorkerCreationPrefs,
 } from '@/state/workerCreationPrefs';
 import type { Effort } from '@/lib/userPreferences.types';
@@ -47,13 +51,14 @@ import {
   type OrcaWorkerPermissionMode,
 } from '../../../shared/orca-worker-permission-mode';
 import { selectWorkerModels } from './workerModelAvailability';
+import type { AgentKind } from '@cindy/maker-core';
 
 const PREDEFINED_ROLES = ['developer', 'designer', 'reviewer', 'tester', 'merger'] as const;
 const AUTO_ONLY_WORKER_PERMISSION_MODES = ['auto'] as const;
 
 export interface CreateWorkerForm {
   role: string;
-  agent: 'claude-code' | 'codex' | 'pi';
+  agent: AgentKind;
   model: string;
   effort?: Effort;
   fast?: boolean;
@@ -100,7 +105,7 @@ export function CreateWorkerPopover({
   const navigate = useNavigate();
   const [role, setRole] = useState('developer');
   const [customRole, setCustomRole] = useState('');
-  const [agent, setAgent] = useState<'claude-code' | 'codex' | 'pi'>('codex');
+  const [agent, setAgent] = useState<WorkerAgentKind>('codex');
   const [model, setModel] = useState(DEFAULT_WORKER_CREATION_PREFS.codex.model);
   const [effort, setEffort] = useState<Effort>(DEFAULT_WORKER_CREATION_PREFS.codex.effort);
   const [fast, setFast] = useState(DEFAULT_WORKER_CREATION_PREFS.codex.fast);
@@ -117,6 +122,9 @@ export function CreateWorkerPopover({
 
   const ccCaps = useAgentCapabilities('claude-code', deviceId);
   const codexCaps = useAgentCapabilities('codex', deviceId);
+  const cursorCaps = useAgentCapabilities('cursor', deviceId);
+  // device-link 被控端不一定装了 cursor-agent，远程创建面板不翻 Cursor 段。
+  const cursorAvailable = useCursorAvailable() && !deviceId;
   const piCaps = useAgentCapabilities('pi', deviceId);
   const localProviders = useProviders();
   const remoteProviders = useDeviceProviders(deviceId);
@@ -124,7 +132,14 @@ export function CreateWorkerPopover({
   const providersLoading = deviceId ? remoteProviders.loading : localProviders.loading;
   const providersError = deviceId ? remoteProviders.error : null;
   const visibilityVersion = useModelVisibilityVersion();
-  const activeCapabilitiesState = agent === 'codex' ? codexCaps : agent === 'pi' ? piCaps : ccCaps;
+  const activeCapabilitiesState =
+    agent === 'codex'
+      ? codexCaps
+      : agent === 'cursor'
+        ? cursorCaps
+        : agent === 'pi'
+          ? piCaps
+          : ccCaps;
   const activeCaps = activeCapabilitiesState.capabilities;
   const supportsWorkerPermissionModeSelection =
     !deviceId || activeCaps?.supportsOrcaWorkerPermissionMode === true;
@@ -226,10 +241,15 @@ export function CreateWorkerPopover({
   // effect 尚未把 state 置 null 的同一渲染里,直接用旧值会得到 false 并把记忆的
   // fast=true 清掉,回退默认来源支持 Fast 也不会恢复(codex review)。收窄后按
   // 「实际会生效的来源」口径判定,不经历 false 窗口。
+  // cursor 无 Cindy provider 维度,Fast 能力直接以 capabilities 目录条目的
+  // supportsFastMode 为准(与 ModelSelector 行级 fastEditable 的 cursor 特判同口径);
+  // codex/cc 走 per-provider 判定(同 id 模型在不同来源可分叉)。
   const currentModelSupportsFast = Boolean(
-    (agent === 'codex' || agent === 'pi') &&
-      activeCaps?.hasFastMode &&
-      providerFastSupported(narrowProviderSource(providerSource, model), model),
+    activeCaps?.hasFastMode &&
+      (agent === 'cursor'
+        ? activeModels.find((m) => m.id === model)?.supportsFastMode === true
+        : (agent === 'codex' || agent === 'pi') &&
+          providerFastSupported(narrowProviderSource(providerSource, model), model)),
   );
   // 实际路由来源的 effort 档位表:**显示收敛与提交共用同一口径**,保证面板显示的
   // effort 就是派发的 effort —— 只在提交口改写会出现「显示 high、创建 low」的静默
@@ -340,9 +360,21 @@ export function CreateWorkerPopover({
     }
   }, [currentModel, currentModelSupportsFast, fast]);
 
+  // 记忆里停在 cursor 但本机没装 cursor-agent（或这是 device-link 远程面板）时回落，
+  // 避免提交一个 spawn 必失败的 agent。
+  useEffect(() => {
+    if (agent === 'cursor' && !cursorAvailable) {
+      setAgent('codex');
+      setModel(prefs.codex.model);
+      setEffort(prefs.codex.effort);
+      setFast(prefs.codex.fast);
+      setProviderSource(deviceId ? null : prefs.codex.providerId);
+    }
+  }, [agent, cursorAvailable, deviceId, prefs]);
+
   const vendorKey = agentKindToVendor(agent);
   const updateAgent = useCallback(
-    (nextAgent: 'claude-code' | 'codex' | 'pi') => {
+    (nextAgent: WorkerAgentKind) => {
       if (nextAgent === agent) return;
       // 切走前把当前 agent 的 live 编辑(模型/effort/Fast/来源)快照进内存 prefs:
       // 恢复读的是 prefs,不快照会把「改了还没提交就切了个 tab」的编辑静默回滚到
@@ -722,19 +754,29 @@ export function CreateWorkerPopover({
           )}
         </div>
 
-        <div className="mb-4 grid grid-cols-[220px_minmax(0,1fr)] gap-4">
+        <div className="mb-4 grid grid-cols-[auto_minmax(0,1fr)] gap-4">
           <div className="min-w-0">
             <div className="mb-2 text-12 font-medium uppercase tracking-[0.5px] text-[var(--text-tertiary)]">
               {t('orca.createWorker.agentLabel')}
             </div>
-            {/* 应用标准 Agent 分段控件(替换此前手写的按钮组;与 New Maker / IM 目录偏好同款,
-                「不自建选择 UI」的组件复用原则)。 */}
-            <VendorSegmentedSwitcher
+            {/* 与「新建」页同款 AgentSelect 下拉(取代定宽分段器;引擎数量不再挤布局)。
+                Cursor 本机未装 / device-link 远程时用 hiddenVendors 藏项。 */}
+            <AgentSelect
               value={vendorKey}
-              width={220}
-              ariaLabel={t('orca.createWorker.agentLabel')}
+              side="bottom"
+              hiddenVendors={
+                cursorAvailable ? undefined : (['cursor'] as const satisfies readonly MakerVendor[])
+              }
               onChange={(next) =>
-                updateAgent(next === 'codex' ? 'codex' : next === 'pi' ? 'pi' : 'claude-code')
+                updateAgent(
+                  next === 'codex'
+                    ? 'codex'
+                    : next === 'cursor'
+                      ? 'cursor'
+                      : next === 'pi'
+                        ? 'pi'
+                        : 'claude-code',
+                )
               }
             />
           </div>
@@ -790,19 +832,25 @@ export function CreateWorkerPopover({
                       }
                 }
                 modelMemory={modelMemory}
-                // worker 创建链的显式 Fast 派发支持 Codex 与 Pi(resolveWorkerConfig 对二者
-                // 消费 input.fast,并按模型 supportsFastMode 收口):cc 层面为 no-op,不接线,
-                // 面板就不显示 Fast 开关,避免「开关能开、提交被丢」的名不副实(codex review)。
-                fastMode={deviceId || !(agent === 'codex' || agent === 'pi') ? undefined : fast}
-                onFastModeChange={
-                  deviceId || !(agent === 'codex' || agent === 'pi') ? undefined : updateFast
-                }
+                // worker 创建链的显式 Fast 派发:resolveWorkerConfig 对 codex / cursor / pi
+                // 消费 input.fast;cc 不接线,面板就不显示 Fast 开关,避免「开关能开、
+                // 提交被丢」的名不副实(codex review)。cursor 无来源维度,能力判定见
+                // currentModelSupportsFast 的目录条目口径。
+                fastMode={deviceId || agent === 'claude-code' ? undefined : fast}
+                onFastModeChange={deviceId || agent === 'claude-code' ? undefined : updateFast}
               />
             </div>
             {noAvailableLocalModels ? (
               <p className="mt-1.5 text-11 leading-snug text-[var(--error-fg)]" role="status">
                 {t('orca.createWorker.noAvailableModels', {
-                  agent: agent === 'codex' ? 'Codex' : agent === 'pi' ? 'Pi' : 'Claude Code',
+                  agent:
+                    agent === 'codex'
+                      ? 'Codex'
+                      : agent === 'cursor'
+                        ? 'Cursor'
+                        : agent === 'pi'
+                          ? 'Pi'
+                          : 'Claude Code',
                 })}
               </p>
             ) : null}

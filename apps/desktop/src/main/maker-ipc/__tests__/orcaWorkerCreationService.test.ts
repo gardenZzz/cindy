@@ -4,6 +4,7 @@ import { describe, expect, it, vi } from 'vitest';
 import {
   buildNoProviderMessage,
   createOrcaWorkerCreationService,
+  normalizeOrcaWorkerAgent,
   providerRouteRequiresExplicitSelection,
   type OrcaWorkerCreationDeps,
   type OrcaWorkerCreateParams,
@@ -22,7 +23,7 @@ const WORKER_SESSION_ID = '123e4567-e89b-42d3-a456-426614174000';
 describe('buildNoProviderMessage (pi first-class)', () => {
   const snap = (name: string): OrcaWorkerProviderSnapshot => ({ name }) as OrcaWorkerProviderSnapshot;
   it('names Pi (not Claude Code) when pi has no connected provider', () => {
-    const msg = buildNoProviderMessage('pi', { 'claude-code': [], codex: [], pi: [] });
+    const msg = buildNoProviderMessage('pi', { 'claude-code': [], codex: [], cursor: [], pi: [] });
     expect(msg).toContain('Pi 当前没有可用的模型供应商');
     expect(msg).not.toContain('Claude Code 当前没有');
   });
@@ -30,6 +31,7 @@ describe('buildNoProviderMessage (pi first-class)', () => {
     const msg = buildNoProviderMessage('codex', {
       'claude-code': [],
       codex: [],
+      cursor: [],
       pi: [snap('Cindy AI')],
     });
     expect(msg).toContain('Pi(已连接:Cindy AI)');
@@ -52,12 +54,26 @@ describe('providerRouteRequiresExplicitSelection', () => {
   );
 });
 
+describe('normalizeOrcaWorkerAgent', () => {
+  it.each(['codex', 'cursor', 'claude-code'] as const)('keeps %s as the requested worker agent', (agent) => {
+    expect(normalizeOrcaWorkerAgent(agent)).toBe(agent);
+  });
+
+  it.each([undefined, null, '', 'claude', 'Cursor', 42, {}])(
+    'falls back to claude-code for %s',
+    (value) => {
+      expect(normalizeOrcaWorkerAgent(value)).toBe('claude-code');
+    },
+  );
+});
+
 function providerRoutingContext(
   partial: Partial<Record<AgentKind, OrcaWorkerProviderSnapshot[]>>,
 ): OrcaWorkerProviderRoutingContext {
   const availability: Record<AgentKind, OrcaWorkerProviderSnapshot[]> = {
     'claude-code': partial['claude-code'] ?? [],
     codex: partial.codex ?? [],
+    cursor: partial.cursor ?? [],
     pi: partial.pi ?? [],
   };
   return {
@@ -112,6 +128,7 @@ function createDeps(overrides: Partial<OrcaWorkerCreationDeps> = {}) {
         name: 'XD Gateway',
         models: ['gpt-5.5', 'gpt-5.4', 'gpt-5.4-mini', 'codex/budget', 'gpt-no-fast'],
       }],
+      cursor: [],
     })),
     readClaudeApiKey: vi.fn((): string | null => 'sk-test'),
     reserveWorkerCreation: vi.fn(async ({ label }) => {
@@ -377,6 +394,27 @@ describe('OrcaWorkerCreationService', () => {
     expect(deps.bootstrapSession).not.toHaveBeenCalled();
     expect(deps.addOrUpdateWorker).not.toHaveBeenCalled();
     expect(deps.dispatchWorkerTask).not.toHaveBeenCalled();
+  });
+
+  it('returns a read-only worker limit snapshot without reserving or creating a worker', async () => {
+    const { deps, service } = createDeps({
+      readCollaborationSettings: vi.fn(() => ({ workerSoftLimit: 2, workerHardLimit: 5 })),
+      listWorkersByLead: vi.fn(async () => [
+        { id: 'worker-1', label: 'one', status: workerStatus('idle') },
+        { id: 'worker-2', label: 'two', status: workerStatus('running') },
+      ]),
+    });
+
+    await expect(service.getWorkerLimitSnapshot({ leadSessionId: 'lead-1' })).resolves.toEqual({
+      workerHardLimit: 5,
+      occupiedSlots: 2,
+      remainingSlots: 3,
+    });
+
+    expect(deps.getActiveTeamByLead).toHaveBeenCalledWith('lead-1');
+    expect(deps.reserveWorkerCreation).not.toHaveBeenCalled();
+    expect(deps.bootstrapSession).not.toHaveBeenCalled();
+    expect(deps.addOrUpdateWorker).not.toHaveBeenCalled();
   });
 
   it('returns a hard-limit snapshot when the atomic reservation loses a concurrent slot race', async () => {
@@ -800,7 +838,8 @@ describe('OrcaWorkerCreationService', () => {
       getProviderRoutingContext: vi.fn(async () => providerRoutingContext({
         'claude-code': [{ id: 'xd', name: 'XD Gateway', models: ['claude-sonnet-4-6'] }],
         codex: [],
-      })),
+        cursor: [],
+    })),
     });
 
     await expect(
@@ -824,7 +863,7 @@ describe('OrcaWorkerCreationService', () => {
 
   it('rejects worker creation when no agent has a connected provider, without an agent suggestion', async () => {
     const { deps, service } = createDeps({
-      getProviderRoutingContext: vi.fn(async () => providerRoutingContext({ 'claude-code': [], codex: [] })),
+      getProviderRoutingContext: vi.fn(async () => providerRoutingContext({ 'claude-code': [], codex: [], cursor: [] })),
     });
 
     const result = await service.createWorker({
@@ -842,6 +881,58 @@ describe('OrcaWorkerCreationService', () => {
 
     expect(deps.bootstrapSession).not.toHaveBeenCalled();
     expect(deps.addOrUpdateWorker).not.toHaveBeenCalled();
+  });
+
+  it('creates a cursor worker although cursor has no connected provider (login-based agent)', async () => {
+    // cursor 的凭证在 cursor-agent 自己的 login 态里，model-providers 恒无它的
+    // 供应商条目 —— 供应商 preflight 必须整段跳过，否则 cursor worker 永远建不出来。
+    const { deps, service } = createDeps({
+      getAvailableModels: vi.fn((agent: AgentKind) => (
+        agent === 'cursor'
+          ? [{ id: 'auto', efforts: [], defaultEffort: null }]
+          : [{ id: 'claude-sonnet-4-6', efforts: ['low', 'high'], defaultEffort: 'high' }]
+      )),
+    });
+
+    const result = await service.createWorker({
+      leadSessionId: 'lead-1',
+      role: 'developer',
+      agent: 'cursor',
+      label: 'cursor-dev',
+    });
+
+    expect(result).toMatchObject({ ok: true });
+    expect(deps.bootstrapSession).toHaveBeenCalledWith(
+      expect.objectContaining({ agentKind: 'cursor', model: 'auto', providerId: null }),
+    );
+  });
+
+  it('rejects a cursor worker under an SSH remote lead (remote hosts only provision cc / codex)', async () => {
+    const { deps, service } = createDeps({
+      getAvailableModels: vi.fn(() => [{ id: 'auto', efforts: [], defaultEffort: null }]),
+      getLeadSessionRow: vi.fn(async () => ({
+        id: 'lead-1',
+        agentKind: 'codex' as const,
+        workspaceKind: 'project' as const,
+        workingDir: '/remote/repo',
+        model: 'gpt-5.5',
+        effort: 'medium',
+        permissionMode: 'default',
+        fastMode: false,
+        providerId: 'xd',
+        remoteHostId: 'host-1',
+      })),
+    });
+
+    const result = await service.createWorker({
+      leadSessionId: 'lead-1',
+      role: 'developer',
+      agent: 'cursor',
+      label: 'cursor-dev',
+    });
+
+    expect(result).toMatchObject({ ok: false, errorCode: 'INVALID_PARAMS' });
+    expect(deps.bootstrapSession).not.toHaveBeenCalled();
   });
 
   it('returns NOT_FOUND when the lead session row is missing', async () => {
@@ -896,7 +987,8 @@ describe('OrcaWorkerCreationService', () => {
       getProviderRoutingContext: vi.fn(async () => providerRoutingContext({
         'claude-code': [],
         codex: [{ id: 'openai', name: 'OpenAI', models: ['gpt-5.5'] }],
-      })),
+        cursor: [],
+    })),
       readClaudeApiKey: vi.fn((): string | null => null),
     });
 
@@ -922,7 +1014,8 @@ describe('OrcaWorkerCreationService', () => {
       getProviderRoutingContext: vi.fn(async () => providerRoutingContext({
         'claude-code': [],
         codex: [{ id: 'openai', name: 'OpenAI', models: ['gpt-5.5'] }],
-      })),
+        cursor: [],
+    })),
       readClaudeApiKey: vi.fn((): string | null => null),
     });
 
@@ -1260,9 +1353,81 @@ describe('OrcaWorkerCreationService', () => {
     }));
   });
 
+// ── #25: Cursor worker 的 Fast 不再被硬绑在 Codex 上 ──────────────────
+  it.each([
+    ['adopts explicit fast=true for a cursor worker whose model supports fast', true, true],
+    ['forces fast=false when cursor worker model does not support fast', false, false],
+  ])('%s', async (_name, supportsFastMode, expectedFast) => {
+    const { deps, service } = createDeps({
+      getAvailableModels: vi.fn((agent: AgentKind) => (
+        agent === 'cursor'
+          ? [{ id: 'claude-opus-5', efforts: [], defaultEffort: null, supportsFastMode }]
+          : [{ id: 'claude-sonnet-4-6', efforts: ['low', 'high'], defaultEffort: 'high' }]
+      )),
+    });
+
+    await expect(
+      service.createWorker({
+        leadSessionId: 'lead-1',
+        role: 'developer',
+        agent: 'cursor',
+        label: 'cursor-fast',
+        model: 'claude-opus-5',
+        fast: true,
+      }),
+    ).resolves.toMatchObject({
+      ok: true,
+      resolved: {
+        agent: 'cursor',
+        model: 'claude-opus-5',
+        fastMode: expectedFast,
+      },
+    });
+
+    expect(deps.buildCreateOptsWithStderr).toHaveBeenCalledWith(expect.objectContaining({
+      agentKind: 'cursor',
+      model: 'claude-opus-5',
+      fastMode: expectedFast,
+    }));
+  });
+
+  it('inherits lead.fastMode for a cursor worker when fast is not explicit', async () => {
+    const { service } = createDeps({
+      getLeadSessionRow: vi.fn(async () => ({
+        id: 'lead-1',
+        agentKind: 'cursor' as const,
+        workspaceKind: 'project' as const,
+        workingDir: '/repo',
+        model: 'claude-opus-5',
+        effort: 'high',
+        permissionMode: 'default',
+        fastMode: true,
+        providerId: null,
+        remoteHostId: null,
+      })),
+      getAvailableModels: vi.fn((agent: AgentKind) => (
+        agent === 'cursor'
+          ? [{ id: 'claude-opus-5', efforts: [], defaultEffort: null, supportsFastMode: true }]
+          : [{ id: 'claude-sonnet-4-6', efforts: ['low', 'high'], defaultEffort: 'high' }]
+      )),
+    });
+
+    await expect(
+      service.createWorker({
+        leadSessionId: 'lead-1',
+        role: 'developer',
+        agent: 'cursor',
+        label: 'cursor-inherit',
+      }),
+    ).resolves.toMatchObject({
+      ok: true,
+      resolved: { agent: 'cursor', fastMode: true },
+    });
+  });
+
   it('honors an explicit fast request for a Pi worker on a fast-capable model', async () => {
     // Pi 也支持 Fast:显式 fast:true 必须被消费(此前两处判定只认 codex,静默丢弃)。
-    // lead.fastMode 默认 false —— 若 pi 未接线,结果会退回 false,构成有效判别。
+    // lead.fastMode 默认 false -- 若 pi 未接线,结果会退回 false,构成有效判别。
     const { deps, service } = createDeps({
       getAvailableModels: vi.fn((agent: AgentKind) => (
         agent === 'pi'
@@ -1468,7 +1633,8 @@ describe('OrcaWorkerCreationService', () => {
       getProviderRoutingContext: vi.fn(async () => providerRoutingContext({
         'claude-code': [],
         codex: [{ id: 'custom-codex', name: 'Custom Codex', models: ['codex/budget'] }],
-      })),
+        cursor: [],
+    })),
       readClaudeApiKey: vi.fn((): string | null => null),
     });
 
@@ -1676,7 +1842,8 @@ describe('OrcaWorkerCreationService', () => {
       getProviderRoutingContext: vi.fn(async () => providerRoutingContext({
         'claude-code': [],
         codex: [{ id: 'xd', name: 'XD Gateway', models: ['gpt-5.4'] }],
-      })),
+        cursor: [],
+    })),
     });
 
     await expect(service.createWorker({
@@ -1706,7 +1873,8 @@ describe('OrcaWorkerCreationService', () => {
           models: ['gpt-5.4'],
           requiresExplicitRoute: true,
         }],
-      })),
+        cursor: [],
+    })),
     });
 
     await expect(service.createWorker({
@@ -1785,6 +1953,7 @@ describe('OrcaWorkerCreationService', () => {
         { id: 'custom-codex', name: 'Custom Codex', models: ['gpt-5.5'] },
         { id: 'xd', name: 'XD Gateway', models: ['gpt-5.4'] },
       ],
+      cursor: [],
       pi: [],
     } satisfies Record<AgentKind, OrcaWorkerProviderSnapshot[]>;
     const { deps, service } = createDeps({
@@ -1855,7 +2024,8 @@ describe('OrcaWorkerCreationService', () => {
           models: ['gpt-5.4'],
           requiresExplicitRoute: true,
         }],
-      })),
+        cursor: [],
+    })),
     });
 
     await expect(service.createWorker({
@@ -1885,7 +2055,8 @@ describe('OrcaWorkerCreationService', () => {
           models: ['codex/budget'],
           requiresExplicitRoute: true,
         }],
-      })),
+        cursor: [],
+    })),
       readClaudeApiKey: vi.fn((): string | null => null),
     });
 
@@ -1912,7 +2083,8 @@ describe('OrcaWorkerCreationService', () => {
       getProviderRoutingContext: vi.fn(async () => providerRoutingContext({
         'claude-code': [],
         codex: [{ id: 'custom-codex', name: 'Custom Codex', models: ['gpt-5.5'] }],
-      })),
+        cursor: [],
+    })),
     });
 
     await expect(service.createWorker({
@@ -1936,7 +2108,8 @@ describe('OrcaWorkerCreationService', () => {
       getProviderRoutingContext: vi.fn(async () => providerRoutingContext({
         'claude-code': [],
         codex: [{ id: 'custom-codex', name: 'Custom Codex', models: ['gpt-5.5'] }],
-      })),
+        cursor: [],
+    })),
     });
 
     await expect(service.createWorker({
@@ -2094,6 +2267,7 @@ describe('buildNoProviderMessage', () => {
       'claude-code': [{ id: 'xd', name: 'XD Gateway', models: ['claude-sonnet-4-6'] }],
       pi: [],
       codex: [],
+      cursor: [],
     });
     expect(msg).toContain('Codex 当前没有可用的模型供应商');
     expect(msg).toContain('改用');
@@ -2101,7 +2275,7 @@ describe('buildNoProviderMessage', () => {
   });
 
   it('omits the agent suggestion when no agent has a connected provider', () => {
-    const msg = buildNoProviderMessage('claude-code', { 'claude-code': [], codex: [], pi: [] });
+    const msg = buildNoProviderMessage('claude-code', { 'claude-code': [], codex: [], cursor: [], pi: [] });
     expect(msg).toContain('Claude Code 当前没有可用的模型供应商');
     expect(msg).toContain('设置 → 模型供应商');
     expect(msg).not.toContain('改用');
@@ -2115,8 +2289,9 @@ describe('buildNoProviderMessage', () => {
           { id: 'xd', name: 'XD Gateway', models: ['gpt-5.5'] },
           { id: 'openai', name: 'OpenAI', models: ['gpt-5.5'] },
         ],
-      })),
-    });
+        cursor: [],
+    })),
+  });
 
     // 显式 model 且未显式来源时既有语义是强制默认路由(providerId=null);
     // 标准面板显式选定来源后必须原样生效,不再被强制回落。
@@ -2164,6 +2339,7 @@ describe('buildNoProviderMessage', () => {
         { id: 'xd', name: 'XD Gateway', models: ['gpt-5.5'], fastModels: [] },
         { id: 'openai', name: 'OpenAI', models: ['gpt-5.5'], fastModels: ['gpt-5.5'] },
       ],
+      cursor: [],
     });
     const supportsFastByUnion = (supported: boolean) => vi.fn((agent: AgentKind) => (
       agent === 'codex'
@@ -2231,6 +2407,7 @@ describe('buildNoProviderMessage', () => {
             },
           },
         ],
+        cursor: [],
       })),
     });
 
@@ -2263,7 +2440,8 @@ describe('buildNoProviderMessage', () => {
           effortMetaByModel: { 'gpt-5.5': { efforts: [], defaultEffort: null } },
         },
       ],
-    });
+        cursor: [],
+      });
 
     const rejected = createDeps({ getProviderRoutingContext: vi.fn(async () => routing()) });
     await expect(rejected.service.createWorker({
@@ -2313,6 +2491,7 @@ describe('buildNoProviderMessage', () => {
             'gpt-5.5': { efforts: ['low', 'medium', 'high', 'xhigh'], defaultEffort: 'high' },
           },
         }],
+        cursor: [],
       })),
     });
 
@@ -2360,6 +2539,7 @@ describe('buildNoProviderMessage', () => {
           models: ['gpt-5.5', 'gpt-5.4', 'gpt-5.4-mini', 'codex/budget'],
           effortMetaByModel: { 'gpt-5.5': { efforts: ['low'], defaultEffort: 'low' } },
         }],
+        cursor: [],
       })),
     });
 
@@ -2382,7 +2562,8 @@ describe('buildNoProviderMessage', () => {
           { id: 'xd', name: 'XD Gateway', models: ['gpt-5.5'] },
           { id: 'openai', name: 'OpenAI', models: ['gpt-5.4'] },
         ],
-      })),
+        cursor: [],
+    })),
     });
 
     await expect(service.createWorker({
@@ -2404,7 +2585,8 @@ describe('buildNoProviderMessage', () => {
       getProviderRoutingContext: vi.fn(async () => providerRoutingContext({
         'claude-code': [],
         codex: [{ id: 'custom-codex', name: 'Custom Codex', models: ['codex/budget'] }],
-      })),
+        cursor: [],
+    })),
       readClaudeApiKey: vi.fn((): string | null => null),
     });
 
@@ -2445,6 +2627,7 @@ describe('SSH remote worker model/provider compatibility gate (R23 P2)', () => {
       getProviderRoutingContext: vi.fn(async () => providerRoutingContext({
         'claude-code': [],
         codex: [{ id: 'chatgpt', name: 'ChatGPT Subscription', models: ['chatgpt/gpt-5.5'] }],
+        cursor: [],
       })),
     });
 
@@ -2473,6 +2656,7 @@ describe('SSH remote worker model/provider compatibility gate (R23 P2)', () => {
       getProviderRoutingContext: vi.fn(async () => providerRoutingContext({
         'claude-code': [],
         codex: [{ id: 'deepseek', name: 'DeepSeek', models: ['deepseek-v4'], chatBridgedCodex: true }],
+        cursor: [],
       })),
     });
 
@@ -2559,6 +2743,7 @@ describe('SSH remote worker model/provider compatibility gate (R23 P2)', () => {
       getProviderRoutingContext: vi.fn(async () => providerRoutingContext({
         'claude-code': [],
         codex: [{ id: 'deepseek', name: 'DeepSeek', models: ['deepseek-v4'], chatBridgedCodex: true }],
+        cursor: [],
       })),
     });
 
@@ -2601,6 +2786,7 @@ describe('SSH remote worker model/provider compatibility gate (R23 P2)', () => {
       getProviderRoutingContext: vi.fn(async () => providerRoutingContext({
         'claude-code': [],
         codex: [{ id: 'deepseek', name: 'DeepSeek', models: ['deepseek-v4'], chatBridgedCodex: true }],
+        cursor: [],
       })),
     });
 

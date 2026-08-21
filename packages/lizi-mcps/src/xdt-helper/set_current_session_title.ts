@@ -4,6 +4,7 @@ import { z } from 'zod';
 import type { XdtHelperToolRegistry } from '../lizi_xdtHelperToolRegistry.js';
 import type { ControlResult } from '../lizi_xdtHelperMcpServer.js';
 import { errorPayload, okPayload } from './_payload.js';
+import type { AgentKind } from '@cindy/maker-core';
 
 export type SetCurrentSessionTitleResult = ControlResult<
   {
@@ -16,7 +17,7 @@ export type SetCurrentSessionTitleResult = ControlResult<
 export interface SetCurrentSessionTitleDeps {
   getSessionContext: () => {
     sessionId?: string;
-    agentKind: 'claude-code' | 'codex' | 'pi';
+    agentKind: AgentKind;
     workingDir: string;
   };
   setCurrentSessionTitle(params: {

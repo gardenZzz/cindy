@@ -652,4 +652,16 @@ describe('isSelectedSourceDisconnected — 会话显式来源断连判定', () =
       }),
     ).toBe(true);
   });
+
+  it('agent=cursor 时恒 false —— 自动化会话带过来的残留 providerId 不判断开', () => {
+    expect(
+      isSelectedSourceDisconnected({
+        providers: [view('xd', true)],
+        agent: 'cursor',
+        modelId: 'grok-4.5',
+        selectedProviderId: 'cliproxyapi',
+        providersLoading: false,
+      }),
+    ).toBe(false);
+  });
 });

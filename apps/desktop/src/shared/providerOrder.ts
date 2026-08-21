@@ -32,12 +32,13 @@ export function normalizeProviderOrder(raw: unknown): string[] {
 /** Apply an explicit display order while appending unseen providers in source order. */
 export function applyProviderOrder<T extends { id: string }>(
   providers: readonly T[],
-  order: readonly string[],
+  order: readonly string[] | null | undefined,
 ): T[] {
   const byId = new Map(providers.map((provider) => [provider.id, provider]));
   const result: T[] = [];
   const included = new Set<string>();
-  for (const id of order) {
+  // 测试 mock / 旧快照可能缺 order;按空数组处理 = 保持源顺序。
+  for (const id of order ?? []) {
     const provider = byId.get(id);
     if (!provider || included.has(id)) continue;
     included.add(id);

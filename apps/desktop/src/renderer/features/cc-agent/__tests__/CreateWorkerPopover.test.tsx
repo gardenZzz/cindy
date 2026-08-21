@@ -216,6 +216,34 @@ vi.mock('../workerModelAvailability', () => ({
   selectWorkerModels: ({ agent }: { agent: 'codex' | 'claude-code' }) => mocks.modelsByAgent[agent],
 }));
 
+// MorphPopover 形变依赖 getBoundingClientRect / rAF,jsdom 下无意义;AgentSelect
+// 测例同口径只保留开合与内容渲染,方便点选项切引擎。
+vi.mock('@/components/ui/morph-popover', async () => {
+  const React = await vi.importActual<typeof import('react')>('react');
+  return {
+    MorphPopover: ({
+      open,
+      trigger,
+      children,
+    }: {
+      open: boolean;
+      trigger: React.ReactNode;
+      children: React.ReactNode;
+    }) => (
+      <div>
+        {trigger}
+        {open ? <div>{children}</div> : null}
+      </div>
+    ),
+  };
+});
+
+/** 打开 AgentSelect 下拉并点选引擎(vendor = MakerVendor: cc / codex / cursor / pi)。 */
+function selectWorkerAgent(vendor: 'cc' | 'codex' | 'cursor' | 'pi') {
+  fireEvent.click(screen.getByRole('button', { name: 'newChat.agentSelect.trigger.aria' }));
+  fireEvent.click(screen.getByTestId(`agent-select-option-${vendor}`));
+}
+
 describe('CreateWorkerPopover', () => {
   beforeEach(() => {
     window.localStorage.clear();
@@ -254,11 +282,11 @@ describe('CreateWorkerPopover', () => {
     expect(panel?.className).toContain('w-[500px]');
     expect(panel?.className).toContain('p-6');
 
-    const agentSwitcher = screen.getByRole('tablist', {
-      name: 'orca.createWorker.agentLabel',
+    const agentSelect = screen.getByRole('button', {
+      name: 'newChat.agentSelect.trigger.aria',
     });
-    const pairedFields = agentSwitcher.closest('.grid');
-    expect(pairedFields?.className).toContain('grid-cols-[220px_minmax(0,1fr)]');
+    const pairedFields = agentSelect.closest('.grid');
+    expect(pairedFields?.className).toContain('grid-cols-[auto_minmax(0,1fr)]');
     expect(pairedFields?.contains(screen.getByTestId('model-selector'))).toBe(true);
 
     const permissionMode = screen.getByTestId('worker-permission-mode');
@@ -588,7 +616,7 @@ describe('CreateWorkerPopover', () => {
     await waitFor(() =>
       expect(screen.getByTestId('model-selector').textContent).toBe('codex/gpt-5.5'),
     );
-    fireEvent.click(screen.getByRole('tab', { name: 'Claude' }));
+    selectWorkerAgent('cc');
 
     await waitFor(() =>
       expect(screen.getByTestId('model-selector').textContent).toBe('claude-sonnet-4-6'),
@@ -1074,11 +1102,11 @@ describe('CreateWorkerPopover', () => {
     );
     fireEvent.click(screen.getByTestId('pick-xd-row-bare'));
     fireEvent.click(screen.getByTestId('edit-active-effort'));
-    fireEvent.click(screen.getByRole('tab', { name: 'Claude' }));
+    selectWorkerAgent('cc');
     await waitFor(() =>
       expect(screen.getByTestId('model-selector').textContent).toContain('claude-opus-4-7'),
     );
-    fireEvent.click(screen.getByRole('tab', { name: 'Codex' }));
+    selectWorkerAgent('codex');
     await waitFor(() =>
       expect(screen.getByTestId('model-selector').dataset.currentProvider).toBe('xd'),
     );

@@ -9,6 +9,8 @@ import {
   subscribeOrcaWorkerChanged,
 } from '@/lib/makerTransport';
 import { isActiveWorkerStatus, type OrcaWorkerStatus } from '../../../../shared/orca-worker-status';
+import { normalizeOrcaDisplayAgentKind } from '../lib/orcaAgentDisplay';
+import type { AgentKind } from '@cindy/maker-core';
 
 const log = createLogger('workerProjectionStore');
 
@@ -16,7 +18,7 @@ export interface WorkerInfo {
   workerId: string;
   sessionId: string;
   role: string;
-  agent: 'claude-code' | 'codex' | 'pi';
+  agent: AgentKind;
   model: string;
   effort: string | null;
   label: string | null;
@@ -158,8 +160,7 @@ function mapWorkerRecord(raw: Record<string, unknown>): WorkerInfo {
     workerId: raw.id as string,
     sessionId: raw.sessionId as string,
     role: (raw.role as string) ?? 'developer',
-    agent:
-      session?.agentKind === 'codex' ? 'codex' : session?.agentKind === 'pi' ? 'pi' : 'claude-code',
+    agent: normalizeOrcaDisplayAgentKind(session?.agentKind),
     model: (session?.model as string) ?? 'claude-sonnet-4-6',
     effort: (session?.effort as string | null) ?? null,
     label: (raw.label as string | null) ?? null,

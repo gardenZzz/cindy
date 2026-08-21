@@ -5,7 +5,7 @@
  * 只把运行期 reviewer 切到 Cindy，不改用户设置、不广播 Auto→Ask，也不弹确认。
  */
 
-import type { PermissionMode } from '@cindy/maker-core';
+import type { PermissionMode, AgentKind } from '@cindy/maker-core';
 import type { ResponseObserver, ResponseObserverCtx } from '@cindy/anthropic-compat-proxy';
 
 const CLASSIFIER_SYSTEM_PREFIX = 'You are a security monitor for autonomous AI coding agents.';
@@ -14,7 +14,7 @@ const CLASSIFIER_SYSTEM_PREFIX = 'You are a security monitor for autonomous AI c
 export interface ClaudeAutoClassifierUnavailableSignal {
   sessionId: string;
   /** Legacy proxy signals omit this and default to Claude. */
-  agentKind?: 'claude-code' | 'codex';
+  agentKind?: AgentKind;
   status: number;
 }
 

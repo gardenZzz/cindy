@@ -8,8 +8,28 @@ import type {
 
 import type { MobileAgentCapabilities } from './agentCapabilities';
 import type { RemoteSession } from './types';
+import type { AgentKind } from '@cindy/maker-shared';
 
-export type MobileSessionAgentKind = 'claude-code' | 'codex' | 'pi';
+export type MobileSessionAgentKind = AgentKind;
+
+/** DB 会话行的 agent_kind 值域（与 desktop sessions.agent_kind 对齐）。 */
+export type DbSessionAgentKind = 'cc' | 'codex' | 'cursor' | 'pi';
+
+/** DB 'cc'/'codex'/'cursor'/'pi' → maker-core AgentKind。 */
+export function toMakerAgentKind(dbKind: string | null | undefined): MobileSessionAgentKind {
+  if (dbKind === 'codex') return 'codex';
+  if (dbKind === 'cursor') return 'cursor';
+  if (dbKind === 'pi') return 'pi';
+  return 'claude-code';
+}
+
+/** maker-core AgentKind → DB agent_kind。 */
+export function toDbAgentKind(kind: MobileSessionAgentKind): DbSessionAgentKind {
+  if (kind === 'codex') return 'codex';
+  if (kind === 'cursor') return 'cursor';
+  if (kind === 'pi') return 'pi';
+  return 'cc';
+}
 
 /** 将不可信 device-link payload 收窄为公开 intent；非法值按“无意图”处理。 */
 export function normalizeSessionAgentSwitchIntent(
@@ -20,8 +40,11 @@ export function normalizeSessionAgentSwitchIntent(
   if (
     item.targetAgentKind !== 'claude-code'
     && item.targetAgentKind !== 'codex'
+    && item.targetAgentKind !== 'cursor'
     && item.targetAgentKind !== 'pi'
-  ) return null;
+  ) {
+    return null;
+  }
   if (typeof item.model !== 'string' || item.model.length === 0) return null;
   // providerId 缺失(undefined)按 null 处理,与桌面 projectPendingAgentSwitchIntent 的
   // `providerId ?? null` 语义对齐——只有出现非 string / 非 null / 非 undefined 的脏值才判非法,
@@ -40,16 +63,19 @@ export function normalizeSessionAgentSwitchIntent(
   };
 }
 
-/** DB 会话行的 cc/codex 映射到 maker agent kind。 */
+/** DB 会话行的 cc/codex/cursor 映射到 maker agent kind。 */
 export function sessionAgentKind(session: Pick<RemoteSession, 'agentKind'>): MobileSessionAgentKind {
-  return session.agentKind === 'codex' || session.agentKind === 'pi'
-    ? session.agentKind
-    : 'claude-code';
+  return toMakerAgentKind(session.agentKind);
 }
 
-/** 手机是否应展示 Agent 分段；远程 SSH / Orca 会话继续保持单 Agent。 */
+/**
+ * 手机是否应展示 Agent 分段。四家(Claude Code / Codex / Pi / Cursor)同口径:
+ * 纯粹依赖被控端按当前任务真实 Agent 上报的 `supportsSessionAgentSwitch` 能力位,
+ * 不在控制端写死第二份「源是某 Agent 就隐藏」的判断;远程 SSH / Orca 任务继续排除。
+ * 老被控端对 Cursor 仍报 false -> 入口正确隐藏(优雅降级,升级后自然获得)。
+ */
 export function supportsMobileSessionAgentSwitch(
-  session: Pick<RemoteSession, 'remoteHostId' | 'orcaRole'>,
+  session: Pick<RemoteSession, 'remoteHostId' | 'orcaRole' | 'agentKind'>,
   capabilities: MobileAgentCapabilities | null,
 ): boolean {
   return capabilities?.supportsSessionAgentSwitch === true
@@ -58,13 +84,30 @@ export function supportsMobileSessionAgentSwitch(
 }
 
 export function mobileAgentLabel(agentKind: MobileSessionAgentKind): string {
-  return agentKind === 'codex' ? 'Codex' : agentKind === 'pi' ? 'Pi' : 'Claude Code';
+  if (agentKind === 'codex') return 'Codex';
+  if (agentKind === 'cursor') return 'Cursor';
+  if (agentKind === 'pi') return 'Pi';
+  return 'Claude Code';
+}
+
+/** 短标签（新建页 / 鉴权提示用；Claude Code → Claude）。 */
+export function mobileAgentShortLabel(agentKind: MobileSessionAgentKind): string {
+  if (agentKind === 'codex') return 'Codex';
+  if (agentKind === 'cursor') return 'Cursor';
+  if (agentKind === 'pi') return 'Pi';
+  return 'Claude';
 }
 
 export function mobileAgentLabelFromUnknown(agentKind: unknown): string {
-  return agentKind === 'codex' ? 'Codex' : agentKind === 'pi' ? 'Pi' : 'Claude Code';
+  if (agentKind === 'codex') return 'Codex';
+  if (agentKind === 'cursor') return 'Cursor';
+  if (agentKind === 'pi') return 'Pi';
+  return 'Claude Code';
 }
 
-export function mobileAgentVendor(agentKind: MobileSessionAgentKind): 'cc' | 'codex' | 'pi' {
-  return agentKind === 'claude-code' ? 'cc' : agentKind;
+export function mobileAgentVendor(agentKind: MobileSessionAgentKind): DbSessionAgentKind {
+  if (agentKind === 'codex') return 'codex';
+  if (agentKind === 'cursor') return 'cursor';
+  if (agentKind === 'pi') return 'pi';
+  return 'cc';
 }

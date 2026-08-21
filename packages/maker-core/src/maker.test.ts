@@ -149,22 +149,29 @@ describe('Maker Pi managed-package skill boundary', () => {
 function createHandle(args: {
   id: string;
   agentKind?: AgentKind;
+  model?: string;
+  startupEvents?: readonly AgentEvent[];
+  bootstrapReady?: Promise<void>;
+  close?: () => void | Promise<void>;
   delivery?: { threadId: string; historyHasProductPrompt: boolean };
 }): AgentSessionHandle {
-  return {
+  const handle: AgentSessionHandle & { startupEvents?: readonly AgentEvent[] } = {
     id: args.id,
     agentKind: args.agentKind ?? 'codex',
-    model: 'gpt-5.4',
+    model: args.model ?? 'gpt-5.4',
+    ...(args.startupEvents ? { startupEvents: args.startupEvents } : {}),
+    bootstrapReady: args.bootstrapReady,
     codexProductPromptDelivery: args.delivery,
     async send() {},
     async steer() {},
     async abort() {},
-    async close() {},
+    async close() { await args.close?.(); },
     async *events() { yield* neverEndingIterator(); },
     getUsageSnapshot: () => ({ tokenUsage: 0, contextTokens: 0, contextWindow: 0, costUsd: 0 }),
     setInteractionResolver() {},
     isTurnRunning: () => false,
   };
+  return handle;
 }
 
 function createDeferred<T = void>(): {
@@ -779,6 +786,293 @@ describe('Maker session creation singleflight', () => {
     const recovered = await maker.createSession(options('session-storage-recovered'));
     expect(startSession).toHaveBeenCalledTimes(2);
     await recovered.close();
+  });
+});
+
+describe('Maker Cursor session startup', () => {
+  it('createSession returns without awaiting bootstrap; startSession is fire-and-forget', async () => {
+    // 回退 ACP 预热后，createSession 不再 await prewarm.ready。
+    // startSession 立即返回 handle，bootstrapReady 仍 pending（后台进行）。
+    let resolveBootstrap!: () => void;
+    const bootstrapReady = new Promise<void>((resolve) => {
+      resolveBootstrap = resolve;
+    });
+    const startSession = vi.fn(async () =>
+      createHandle({ id: 'cursor-sdk', agentKind: 'cursor', model: 'auto', bootstrapReady }),
+    );
+    const maker = new Maker({
+      agents: { cursor: createAgent(startSession, 'cursor') },
+      storage: createStorage(),
+      logger: createLogger(),
+    });
+    const options: CreateSessionOptions = {
+      id: 'cursor-business',
+      agentKind: 'cursor',
+      workingDir: '/repo',
+      model: 'auto',
+    };
+
+    const session = await maker.createSession(options);
+
+    expect(startSession).toHaveBeenCalledTimes(1);
+    // createSession 已 resolve（不阻塞 bootstrap），但 bootstrapReady 仍 pending。
+    const settled = await Promise.race([
+      bootstrapReady.then(() => true).catch(() => true),
+      Promise.resolve(false),
+    ]);
+    expect(settled).toBe(false);
+    expect(session).toBeInstanceOf(Session);
+    resolveBootstrap();
+  });
+});
+
+describe('Maker Cursor prewarm (claim-if-ready)', () => {
+  function setup() {
+    let resolveBootstrap!: () => void;
+    const bootstrapReady = new Promise<void>((resolve) => {
+      resolveBootstrap = resolve;
+    });
+    const startSession = vi.fn(async () =>
+      createHandle({ id: 'cursor-sdk', agentKind: 'cursor', model: 'auto', bootstrapReady }),
+    );
+    const maker = new Maker({
+      agents: { cursor: createAgent(startSession, 'cursor') },
+      storage: createStorage(),
+      logger: createLogger(),
+    });
+    return { maker, startSession, bootstrapReady, resolveBootstrap };
+  }
+  const prewarmOpts = (id: string): CreateSessionOptions => ({
+    id,
+    agentKind: 'cursor',
+    workingDir: '/repo',
+    model: 'auto',
+  });
+
+  it('prewarmSession returns immediately without awaiting bootstrap; claim before ready is false and non-blocking', async () => {
+    const { maker, startSession, bootstrapReady, resolveBootstrap } = setup();
+
+    await maker.prewarmSession(prewarmOpts('cursor-business'));
+
+    expect(startSession).toHaveBeenCalledTimes(1);
+    // prewarm 已返回（不阻塞 bootstrap），但 bootstrapReady 仍 pending。
+    const settled = await Promise.race([
+      bootstrapReady.then(() => true).catch(() => true),
+      Promise.resolve(false),
+    ]);
+    expect(settled).toBe(false);
+
+    // claim 未就绪 → false，且不阻塞（无需等 bootstrap）。
+    const claimed = await maker.claimPrewarmedSession('cursor-business');
+    expect(claimed).toBe(false);
+    resolveBootstrap();
+  });
+
+  it('claim after ready is true and createSession adopts the prewarmed handle without a second spawn', async () => {
+    const { maker, startSession, resolveBootstrap } = setup();
+
+    await maker.prewarmSession(prewarmOpts('cursor-business'));
+    resolveBootstrap();
+    // 等 bootstrap 落定（ready 标记由后台 watcher 置位）。
+    await vi.waitFor(async () => {
+      expect(await maker.claimPrewarmedSession('cursor-business')).toBe(true);
+    });
+
+    const session = await maker.createSession(prewarmOpts('cursor-business'));
+    expect(startSession).toHaveBeenCalledTimes(1); // 复用预热句柄，不二次 spawn
+    expect(session).toBeInstanceOf(Session);
+    await session.close();
+  });
+
+  it('claim unknown id returns false; cancel is idempotent', async () => {
+    const { maker, resolveBootstrap } = setup();
+
+    expect(await maker.claimPrewarmedSession('missing')).toBe(false);
+    await expect(maker.cancelPrewarmedSession('missing')).resolves.toBeUndefined();
+    resolveBootstrap();
+  });
+
+  it('cancel closes the prewarmed handle', async () => {
+    const { maker, resolveBootstrap } = setup();
+    const close = vi.fn(async () => {});
+
+    let resolveBootstrapInner!: () => void;
+    const bootstrapReady = new Promise<void>((resolve) => {
+      resolveBootstrapInner = resolve;
+    });
+    const startSession = vi.fn(async () =>
+      createHandle({
+        id: 'cursor-sdk',
+        agentKind: 'cursor',
+        model: 'auto',
+        bootstrapReady,
+        close,
+      }),
+    );
+    const maker2 = new Maker({
+      agents: { cursor: createAgent(startSession, 'cursor') },
+      storage: createStorage(),
+      logger: createLogger(),
+    });
+
+    await maker2.prewarmSession(prewarmOpts('cursor-business'));
+    await maker2.cancelPrewarmedSession('cursor-business');
+    expect(close).toHaveBeenCalledTimes(1);
+    resolveBootstrapInner();
+    resolveBootstrap();
+  });
+
+  // ─── T2 池安全语义：TTL / 上限 1 / 已 claim 免疫 TTL / cancel 幂等 ───
+  function t2Setup() {
+    const closed: string[] = [];
+    let resolveBootstrap!: () => void;
+    const bootstrapReady = new Promise<void>((resolve) => {
+      resolveBootstrap = resolve;
+    });
+    const startSession = vi.fn(async (opts: { sessionId: string }) =>
+      createHandle({
+        id: 'cursor-sdk',
+        agentKind: 'cursor',
+        model: 'auto',
+        bootstrapReady,
+        close: vi.fn(async () => {
+          closed.push(opts.sessionId);
+        }),
+      }),
+    );
+    const maker = new Maker({
+      agents: { cursor: createAgent(startSession, 'cursor') },
+      storage: createStorage(),
+      logger: createLogger(),
+    });
+    return { maker, startSession, bootstrapReady, resolveBootstrap, closed };
+  }
+
+  it('TTL reaps an unclaimed prewarmed handle after 60s (process closed)', async () => {
+    vi.useFakeTimers();
+    try {
+      const { maker, startSession, closed, resolveBootstrap } = t2Setup();
+      await maker.prewarmSession(prewarmOpts('cursor-a'));
+      resolveBootstrap();
+      await vi.waitFor(() => expect(startSession).toHaveBeenCalledTimes(1));
+
+      // 60s TTL 到期前不被回收。
+      await vi.advanceTimersByTimeAsync(59_000);
+      expect(closed).toEqual([]);
+      // 到期后自动回收（进程关闭），claim 也返回 false。
+      await vi.advanceTimersByTimeAsync(2_000);
+      expect(closed).toEqual(['cursor-a']);
+      expect(await maker.claimPrewarmedSession('cursor-a')).toBe(false);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('claimed handles are immune to TTL', async () => {
+    vi.useFakeTimers();
+    try {
+      const { maker, closed, resolveBootstrap } = t2Setup();
+      await maker.prewarmSession(prewarmOpts('cursor-a'));
+      resolveBootstrap();
+      await vi.waitFor(async () => {
+        expect(await maker.claimPrewarmedSession('cursor-a')).toBe(true);
+      });
+
+      await vi.advanceTimersByTimeAsync(120_000);
+      expect(closed).toEqual([]); // 已 claim，TTL 不回收
+      // 且 createSession 仍能 0 等待接管。
+      const session = await maker.createSession(prewarmOpts('cursor-a'));
+      expect(session).toBeInstanceOf(Session);
+      await session.close();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('cap of one: a new prewarm preempts an older unclaimed one (old closed first)', async () => {
+    const { maker, startSession, closed, resolveBootstrap } = t2Setup();
+    await maker.prewarmSession(prewarmOpts('cursor-a'));
+    resolveBootstrap();
+    await vi.waitFor(() => expect(startSession).toHaveBeenCalledTimes(1));
+
+    // 新草稿触发预热 → 旧的未 claim 句柄先被回收。
+    await maker.prewarmSession(prewarmOpts('cursor-b'));
+    expect(closed).toEqual(['cursor-a']);
+    expect(startSession).toHaveBeenCalledTimes(2); // 第二个 spawn
+  });
+
+  it('cancel is idempotent: repeated cancels on the same handle do not explode', async () => {
+    const { maker, closed, resolveBootstrap } = t2Setup();
+    await maker.prewarmSession(prewarmOpts('cursor-a'));
+    resolveBootstrap();
+    await vi.waitFor(async () => {
+      expect(await maker.claimPrewarmedSession('cursor-a')).toBe(true);
+    });
+
+    await maker.cancelPrewarmedSession('cursor-a');
+    await maker.cancelPrewarmedSession('cursor-a');
+    await maker.cancelPrewarmedSession('cursor-a');
+    expect(closed).toEqual(['cursor-a']); // 只 close 一次
+  });
+});
+
+describe('Maker Cursor startup fallback', () => {
+  it('persists the active model and replays its warning to host listeners attached after creation', async () => {
+    const storage = createStorage();
+    await storage.create({
+      id: 'cursor-session',
+      agentKind: 'cursor',
+      workDir: '/repo',
+      title: 'Cursor session',
+      model: 'claude-opus-5',
+    });
+    const warning: AgentEvent = {
+      type: 'error',
+      data: {
+        message: '未能切换到 Cursor 模型 claude-opus-5，本次会话继续使用 auto。',
+        isTerminal: false,
+        reason: 'initial_model_unavailable',
+      },
+      source: 'cursor',
+    };
+    const maker = new Maker({
+      agents: {
+        cursor: createAgent(
+          async () => createHandle({
+            id: 'cursor-sdk-session',
+            agentKind: 'cursor',
+            model: 'auto',
+            startupEvents: [warning],
+          }),
+          'cursor',
+        ),
+      },
+      storage,
+      logger: createLogger(),
+    });
+
+    const session = await maker.createSession({
+      id: 'cursor-session',
+      agentKind: 'cursor',
+      workingDir: '/repo',
+      model: 'claude-opus-5',
+    });
+
+    expect((await storage.get('cursor-session'))?.model).toBe('auto');
+    expect(session.model).toBe('auto');
+
+    const seen: AgentEvent[] = [];
+    session.onEvent((event) => seen.push(event));
+    expect(seen).toEqual([warning]);
+
+    const seenBySecondHostListener: AgentEvent[] = [];
+    session.onEvent((event) => seenBySecondHostListener.push(event));
+    expect(seenBySecondHostListener).toEqual([warning]);
+
+    await expect(session.send('start first turn')).resolves.toEqual({ accepted: true });
+    const seenAfterFirstTurn: AgentEvent[] = [];
+    session.onEvent((event) => seenAfterFirstTurn.push(event));
+    expect(seenAfterFirstTurn).toEqual([]);
   });
 });
 
@@ -3299,6 +3593,45 @@ describe('Maker invalid-resume persistence bridge', () => {
     expect((await storage.get('session-1'))?.sdkSessionId).toBeUndefined();
   });
 
+  it('retries a failed sdkSessionId write within the same one-shot event', async () => {
+    // session_id 是一次性事件: 回写失败后没有「下一条同类事件」可以依赖, 不在写入处重试
+    // 就等于永久丢掉 resume 能力。所以这里只推**一次**事件, 首写失败仍必须落库。
+    const storage = createStorage();
+    const realUpdate = storage.update.bind(storage);
+    let sdkUpdateAttempts = 0;
+    storage.update = async (id, patch) => {
+      if (patch.sdkSessionId) {
+        sdkUpdateAttempts += 1;
+        if (sdkUpdateAttempts === 1) throw new Error('storage unavailable');
+      }
+      return realUpdate(id, patch);
+    };
+    const events = createAsyncQueue<AgentEvent>();
+    const handle = createHandle({ id: '<pending>', agentKind: 'claude-code' });
+    handle.events = () => events;
+    handle.close = vi.fn(async () => events.end());
+    const maker = new Maker({
+      agents: { 'claude-code': createAgent(async () => handle, 'claude-code') },
+      storage,
+      logger: createLogger(),
+    });
+
+    await maker.createSession({
+      id: 'session-retry',
+      agentKind: 'claude-code',
+      workingDir: '/repo',
+      model: 'claude-opus-4-6',
+    });
+
+    events.push({ type: 'session_id', data: 'sdk-1', source: 'claude-code' });
+    await vi.waitFor(async () =>
+      expect((await storage.get('session-retry'))?.sdkSessionId).toBe('sdk-1'),
+    );
+    // 恰好两次: 首写失败 + 重试成功。多于两次说明退避逻辑跑飞了。
+    expect(sdkUpdateAttempts).toBe(2);
+    await maker.closeSession('session-retry');
+  });
+
   it('injects a compare-and-clear callback for fresh (non-resume) Claude sessions too', async () => {
     // 全新会话(无 resumeSessionId)也可能把首个 turn 崩溃前落库的 fresh sdk id 变成幽灵 id,
     // 需要同一把 CAS 才能清掉。之前该回调只对 resume 会话装配,全新会话会漏。
@@ -3306,7 +3639,11 @@ describe('Maker invalid-resume persistence bridge', () => {
     let captured: CreateSessionOptions['onInvalidResumeSession'];
     const startSession = vi.fn(async (opts: CreateSessionOptions) => {
       captured = opts.onInvalidResumeSession;
-      return createHandle({ id: 'sdk-fresh', agentKind: 'claude-code' });
+      return createHandle({
+        id: 'sdk-fresh',
+        agentKind: 'claude-code',
+        startupEvents: [{ type: 'session_id', data: 'sdk-fresh', source: 'claude-code' }],
+      });
     });
     const maker = new Maker({
       agents: { 'claude-code': createAgent(startSession, 'claude-code') },
@@ -3341,29 +3678,38 @@ describe('Maker invalid-resume persistence bridge', () => {
       sdkSessionId: 'sdk-old',
     });
 
-    let releaseOldWrite!: () => void;
-    let markOldWriteStarted!: () => void;
-    const oldWriteStarted = new Promise<void>((resolve) => {
-      markOldWriteStarted = resolve;
+    let releaseOldRead!: () => void;
+    let markOldReadStarted!: () => void;
+    const oldReadStarted = new Promise<void>((resolve) => {
+      markOldReadStarted = resolve;
     });
-    const oldWriteGate = new Promise<void>((resolve) => {
-      releaseOldWrite = resolve;
+    const oldReadGate = new Promise<void>((resolve) => {
+      releaseOldRead = resolve;
     });
-    let shouldBlockOldWrite = true;
+    // 第 1 次 get('session-1' 且库内 sdk-old) 是 createSession 读 existingRow;
+    // 第 2 次 (getCountForSdkOld === 2) 才是 persistSdkSessionId 的判等 get。
+    // 用计数区分两者, 把 barrier 卡在第 2 次 -- 即 old query 的判等操作上。
+    let getCountForSdkOld = 0;
     const persistedSdkSessionIds: string[] = [];
     const compareAndClear = vi.fn((id: string, expectedSdkSessionId: string) =>
       baseStorage.compareAndClearSdkSessionId(id, expectedSdkSessionId),
     );
     const storage: SessionStorage = {
       ...baseStorage,
+      async get(id) {
+        const row = await baseStorage.get(id);
+        if (id === 'session-1' && row?.sdkSessionId === 'sdk-old') {
+          getCountForSdkOld += 1;
+          if (getCountForSdkOld === 2) {
+            markOldReadStarted();
+            await oldReadGate;
+          }
+        }
+        return row;
+      },
       async update(id, patch) {
         if (typeof patch.sdkSessionId === 'string') {
           persistedSdkSessionIds.push(patch.sdkSessionId);
-          if (patch.sdkSessionId === 'sdk-old' && shouldBlockOldWrite) {
-            shouldBlockOldWrite = false;
-            markOldWriteStarted();
-            await oldWriteGate;
-          }
         }
         return baseStorage.update(id, patch);
       },
@@ -3400,7 +3746,7 @@ describe('Maker invalid-resume persistence bridge', () => {
       resumeSessionId: 'sdk-old',
     });
     oldEvents.push({ type: 'session_id', data: 'sdk-old', source: 'claude-code' });
-    await oldWriteStarted;
+    await oldReadStarted;
     await maker.closeSession('session-1');
 
     const recoveredSessionPromise = maker.createSession({
@@ -3413,18 +3759,89 @@ describe('Maker invalid-resume persistence bridge', () => {
     await vi.waitFor(() => expect(startSession).toHaveBeenCalledTimes(2));
     expect(compareAndClear).not.toHaveBeenCalled();
 
-    releaseOldWrite();
+    releaseOldRead();
     await recoveredSessionPromise;
     expect(compareAndClear).toHaveBeenCalledTimes(1);
     expect((await storage.get('session-1'))?.sdkSessionId).toBeUndefined();
 
     // CAS 后晚到的旧 query 事件必须跳过；fresh query 的新 id 仍按原路径回填。
+    // old 的 sdk-old 因判等命中（库内已是 sdk-old）不再触发 update (#46)，
+    // 故持久化序列只剩 fresh query 的 sdk-fresh 一次写入。
     freshEvents.push({ type: 'session_id', data: 'sdk-old', source: 'claude-code' });
     freshEvents.push({ type: 'session_id', data: 'sdk-fresh', source: 'claude-code' });
     await vi.waitFor(async () =>
       expect((await storage.get('session-1'))?.sdkSessionId).toBe('sdk-fresh'),
     );
-    expect(persistedSdkSessionIds).toEqual(['sdk-old', 'sdk-fresh']);
+    expect(persistedSdkSessionIds).toEqual(['sdk-fresh']);
     await maker.closeSession('session-1');
+  });
+
+  it('injects a compare-and-clear callback for cursor sessions', async () => {
+    const storage = createStorage();
+    await storage.create({
+      id: 'session-cursor',
+      agentKind: 'cursor',
+      workDir: '/repo',
+      title: 'Cursor resume',
+      model: 'auto',
+      sdkSessionId: 'cursor-old',
+    });
+    const startSession = vi.fn(async (opts: CreateSessionOptions) => {
+      expect(await opts.onInvalidResumeSession?.('cursor-old')).toBe(true);
+      expect(await opts.onInvalidResumeSession?.('cursor-old')).toBe(false);
+      return createHandle({ id: '<pending>', agentKind: 'cursor' });
+    });
+    const maker = new Maker({
+      agents: { cursor: createAgent(startSession, 'cursor') },
+      storage,
+      logger: createLogger(),
+    });
+    await maker.createSession({
+      id: 'session-cursor',
+      agentKind: 'cursor',
+      workingDir: '/repo',
+      model: 'auto',
+      resumeSessionId: 'cursor-old',
+    });
+    expect((await storage.get('session-cursor'))?.sdkSessionId).toBeUndefined();
+  });
+
+  it('cursor CAS conflict refuses fresh create so Maker cannot overwrite a newer sdk id', async () => {
+    // 失败场景：load 旧 id A 失败时 DB 已被另一 actor 写成有效 B；无 CAS 会 fresh 出 C
+    // 并被 Maker update 无条件覆盖 B。有 CAS 时 compare-and-clear(A) 失败 → 抛错，B 保留。
+    const storage = createStorage();
+    await storage.create({
+      id: 'session-cursor',
+      agentKind: 'cursor',
+      workDir: '/repo',
+      title: 'Cursor',
+      model: 'auto',
+      sdkSessionId: 'sdk-B',
+    });
+
+    const startSession = vi.fn(async (opts: CreateSessionOptions) => {
+      expect(opts.onInvalidResumeSession).toBeDefined();
+      const cleared = await opts.onInvalidResumeSession?.('sdk-A');
+      expect(cleared).toBe(false);
+      throw new Error('CAS conflict: resume id no longer current');
+    });
+    const maker = new Maker({
+      agents: { cursor: createAgent(startSession, 'cursor') },
+      storage,
+      logger: createLogger(),
+    });
+
+    await expect(
+      maker.createSession({
+        id: 'session-cursor',
+        agentKind: 'cursor',
+        workingDir: '/repo',
+        model: 'auto',
+        resumeSessionId: 'sdk-A',
+      }),
+    ).rejects.toThrow(/CAS conflict/);
+
+    expect((await storage.get('session-cursor'))?.sdkSessionId).toBe('sdk-B');
+    expect(startSession).toHaveBeenCalledTimes(1);
   });
 });

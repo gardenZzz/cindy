@@ -2195,6 +2195,7 @@ describe('chatBridgeCapabilitiesForRoute', () => {
       host.setCodexProxyGatewayKeyReader(() => null);
     }
   });
+
 });
 
 describe('createModelRoutingTransform —— session-less 控制面请求(桶③)', () => {
@@ -3144,6 +3145,7 @@ describe('codex proxy host', () => {
     setCustomProviderKeyReader(() => null);
     setCustomProviders([]);
   });
+
 
   it('restores native web_search for Gateway GPT-5.6 when Codex omitted the declaration', async () => {
     const host = await freshCodexProxyHost();

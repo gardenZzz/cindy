@@ -72,7 +72,10 @@ export interface MessageDeleteHandlerDeps {
 }
 
 function engineLabel(agentKind: string): string {
-  return agentKind === 'codex' ? 'Codex' : agentKind === 'pi' ? 'Pi' : 'Claude Code';
+  if (agentKind === 'codex') return 'Codex';
+  if (agentKind === 'cursor') return 'Cursor';
+  if (agentKind === 'pi') return 'Pi';
+  return 'Claude Code';
 }
 
 export async function performMessageDeletion(

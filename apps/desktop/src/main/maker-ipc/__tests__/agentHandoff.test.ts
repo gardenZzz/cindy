@@ -122,6 +122,64 @@ describe('buildHandoffText', () => {
     expect(text).not.toContain('x'.repeat(200));
   });
 
+  it('工作状态提取覆盖 Pi(write/edit/bash)与 Cursor(edit/exec),键名按实机采样', () => {
+    // Pi 真实入参:write/edit 走 input.path,bash 走 input.command(见 pi auto-review-policy 测试)。
+    // Cursor(ACP)真实入参:edit 走 input.path/file_path,exec 走 input.command(经 rawInput 直传,
+    // 见 acp/permissions.ts sessionAllowKeyFromToolCall)。toolName 由 acp translator 小写化。
+    const text = buildHandoffText(
+      [
+        msg('user', 'Pi 改了两个文件并跑了测试'),
+        msg('tool_use', { toolUseId: 'p1', toolName: 'write', input: { path: '/src/pi-a.ts' } }),
+        msg('tool_use', { toolUseId: 'p2', toolName: 'edit', input: { path: '/src/pi-b.ts' } }),
+        msg('tool_use', { toolUseId: 'p3', toolName: 'bash', input: { command: 'pnpm test' } }),
+        msg('assistant', 'done'),
+        msg('user', 'Cursor 接手'),
+        msg('tool_use', { toolUseId: 'c1', toolName: 'edit', input: { path: '/src/cur.ts' } }),
+        msg('tool_use', { toolUseId: 'c2', toolName: 'exec', input: { command: 'git status' } }),
+      ],
+      opts,
+    );
+    // Pi 与 Cursor 改动的文件都进工作状态区(新 Agent 据此不重复改/改错地方)。
+    expect(text).toContain('- /src/pi-a.ts');
+    expect(text).toContain('- /src/pi-b.ts');
+    expect(text).toContain('- /src/cur.ts');
+    // Pi 与 Cursor 跑过的命令都进工作状态区(新 Agent 用同一套命令复验)。
+    expect(text).toContain('- pnpm test');
+    expect(text).toContain('- git status');
+    expect(text).toContain('Files changed:');
+    expect(text).toContain('Commands (most recent):');
+  });
+
+  it('Cursor edit 的 file_path 键名同样被提取(ACP rawInput 可能用 file_path)', () => {
+    const text = buildHandoffText(
+      [
+        msg('user', 'go'),
+        msg('tool_use', { toolUseId: 'c1', toolName: 'edit', input: { file_path: '/src/x.ts' } }),
+        msg('assistant', 'ok'),
+      ],
+      opts,
+    );
+    expect(text).toContain('- /src/x.ts');
+  });
+
+  it('Claude Code / Codex 既有提取结果不回归(Edit/Write/apply_patch/Bash 等)', () => {
+    const text = buildHandoffText(
+      [
+        msg('user', 'go'),
+        msg('tool_use', { toolUseId: 'a', toolName: 'Edit', input: { file_path: '/src/cc.ts' } }),
+        msg('tool_use', { toolUseId: 'b', toolName: 'Write', input: { file_path: '/src/cc2.ts' } }),
+        msg('tool_use', { toolUseId: 'c', toolName: 'apply_patch', input: { path: '/src/codex.ts' } }),
+        msg('tool_use', { toolUseId: 'd', toolName: 'Bash', input: { command: 'npm run build' } }),
+        msg('assistant', 'ok'),
+      ],
+      opts,
+    );
+    expect(text).toContain('- /src/cc.ts');
+    expect(text).toContain('- /src/cc2.ts');
+    expect(text).toContain('- /src/codex.ts');
+    expect(text).toContain('- npm run build');
+  });
+
   it('合成指令行([UI_ACTION_TRIGGER])不进交接', () => {
     const text = buildHandoffText(
       [msg('user', '正常消息'), msg('user', '[UI_ACTION_TRIGGER] resume'), msg('assistant', '好')],

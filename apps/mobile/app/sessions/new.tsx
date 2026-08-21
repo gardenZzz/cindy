@@ -67,7 +67,7 @@ import type {
   MobileSlashCommand,
   RemoteDirectoryEntry,
 } from '@/device-link/mobileMakerTransport';
-import { describeAgentAuthError, formatRemoteError } from '@/device-link/remoteStatus';
+import { describeAgentAuthError, describeCursorHostError, describeRemoteError, formatRemoteError } from '@/device-link/remoteStatus';
 import { agentAuthGateHint, agentAuthGateVerdict } from '@/session/agentAuthGate';
 import { connectedProvidersForAgent, getModel } from '@cindy/model-providers/registry';
 import { withTransientRemoteRetry } from '@/device-link/remoteRetry';
@@ -165,6 +165,7 @@ import {
   type NewSessionDeviceOption,
   type NewSessionStoredPreferences,
 } from '@/session/newSession';
+import { mobileAgentShortLabel } from '@/session/sessionAgentSwitch';
 import { isDefaultDraftSessionTitle } from '@cindy/maker-shared/session-title';
 import { newSessionText } from '@/session/newSessionMessages';
 import { i18n } from '@/i18n';
@@ -319,7 +320,7 @@ import {
   type NewSessionWorktreeEligibility,
   type NewSessionWorktreeProbeSnapshot,
 } from '@/session/newSessionWorktree';
-import { mobileAgentLabel, mobileAgentVendor } from '@/session/sessionAgentSwitch';
+import { mobileAgentVendor } from '@/session/sessionAgentSwitch';
 import { MobileModelIconMark } from '@/session/MobileProviderMark';
 import { draftModelMemoryFor, hydrateDraftModelMemory } from '@/session/draftModelMemory';
 import { rowFastEditable } from '@/session/modelPickerRows';
@@ -1080,7 +1081,7 @@ export default function NewRemoteSessionScreen() {
     [draft.workspaceKind, draft.workingDir, t],
   );
   const WorkspaceIcon = draft.workspaceKind === 'dialogue' ? MessageCircle : Folder;
-  const agentLabel = mobileAgentLabel(draft.agentKind);
+  const agentLabel = mobileAgentShortLabel(draft.agentKind);
   // effect 在 commit 后才会把旧探测结果重置为 probing；render 期先按设备 + cwd +
   // 连接代次同步对齐 target，切项目/设备或同目标重连后立即创建也拿不到旧结果。
   const worktreeTarget = {
@@ -1831,8 +1832,10 @@ export default function NewRemoteSessionScreen() {
         if (cancelled) return;
         setAvailableAgentKinds(
           new Set(
-            (Array.isArray(agents) ? agents : []).filter(
-              (a): a is NewSessionAgentKind => a === 'claude-code' || a === 'codex' || a === 'pi',
+            // 收敛到 NEW_SESSION_AGENT_OPTIONS 这一份正本：写死枚举会在新增 runtime
+            // 时漏项，被控端明明报了该 agent 也会被这里过滤掉（Cursor 就漏过一次）。
+            (Array.isArray(agents) ? agents : []).filter((a): a is NewSessionAgentKind =>
+              NEW_SESSION_AGENT_OPTIONS.some((option) => option.kind === a),
             ),
           ),
         );
@@ -4394,7 +4397,12 @@ export default function NewRemoteSessionScreen() {
       // agent 未鉴权(电脑端没配 key / 没登录)是新会话失败的高频原因,
       // 换成带引导的中文提示;其它错误维持原文。
       const raw = formatRemoteError(err);
-      setError(describeAgentAuthError(raw) ?? raw);
+      setError(
+        describeAgentAuthError(raw)
+          ?? describeCursorHostError(raw, draft.agentKind)
+          ?? describeRemoteError(raw)
+          ?? raw,
+      );
     } finally {
       releasePrecreatedRegistration?.();
       if (!handedOff) {

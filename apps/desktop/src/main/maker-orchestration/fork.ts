@@ -60,7 +60,9 @@ function normalizePositiveInt(value: unknown): number {
 
 const messageRowid = sql<number>`rowid`;
 
-type DbAgentKind = 'cc' | 'codex' | 'pi';
+// 与 shared/agentKindConversion 同源;fork 自身不支持 cursor 源会话,但 normalize
+// 返回的 union 含 cursor,本地类型必须覆盖以免赋值失败。
+type DbAgentKind = 'cc' | 'codex' | 'cursor' | 'pi';
 
 interface MessagePosition {
   createdAt: number;
@@ -173,6 +175,7 @@ function parseContextRebuildBoundary(content: string): ParsedContextRebuildBound
       reason: parsed.reason,
       ...(parsed.sourceAgentKind === 'cc' ||
       parsed.sourceAgentKind === 'codex' ||
+      parsed.sourceAgentKind === 'cursor' ||
       parsed.sourceAgentKind === 'pi'
         ? { sourceAgentKind: parsed.sourceAgentKind }
         : {}),
@@ -198,16 +201,22 @@ function parseContextRebuildReason(
 function parseAgentSwitchBoundary(content: string): ParsedAgentSwitchBoundary | null {
   try {
     const parsed = JSON.parse(content) as Record<string, unknown>;
+    // 边界元数据要认全 DbAgentKind（含 cursor），否则「Cursor → Claude Code」切换后，
+    // 对新 Claude 片段首条用户消息做编辑/Fork 时边界解析不出来，会误走 NO_PRIOR_ASSISTANT。
+    // 注意这里只是**认识**这条边界；真正以 Cursor 原生会话为 fork 源仍不支持，
+    // 由下游 fromSdkSessionId 缺失的既有分支拦截。
     if (
-      parsed.fromAgentKind !== 'cc' &&
-      parsed.fromAgentKind !== 'codex' &&
-      parsed.fromAgentKind !== 'pi'
-    )
-      return null;
-    const toAgentKind =
-      parsed.toAgentKind === 'cc' || parsed.toAgentKind === 'codex' || parsed.toAgentKind === 'pi'
-        ? parsed.toAgentKind
-        : undefined;
+      parsed.fromAgentKind !== 'cc'
+      && parsed.fromAgentKind !== 'codex'
+      && parsed.fromAgentKind !== 'cursor'
+      && parsed.fromAgentKind !== 'pi'
+    ) return null;
+    const toAgentKind = parsed.toAgentKind === 'cc'
+      || parsed.toAgentKind === 'codex'
+      || parsed.toAgentKind === 'cursor'
+      || parsed.toAgentKind === 'pi'
+      ? parsed.toAgentKind
+      : undefined;
     return {
       fromAgentKind: parsed.fromAgentKind,
       toAgentKind,

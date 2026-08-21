@@ -15,6 +15,7 @@ import {
   CONTINUE_AFTER_APP_EXIT_PROMPT,
   CONTINUE_AFTER_ERROR_PROMPT,
 } from '../../../shared/interruptedTurn.js';
+import type { AgentKind } from '@cindy/maker-core';
 import type { RecoveryContextSnapshot } from '../recoveryCoordinator.js';
 
 const mocks = vi.hoisted(() => {
@@ -174,7 +175,7 @@ function createHarness(opts?: {
   let turnGeneration = 0;
   let turnSessionIdentity: object = {};
   let pendingInteraction = false;
-  let agentKind: AgentInputCreateOpts['agentKind'] | null = 'claude-code';
+  let agentKind: AgentKind | null = 'claude-code';
   const projections: AgentInputProjection[] = [];
 
   const sendToAgent = vi.fn<AgentInputCoordinatorDeps['sendToAgent']>(
@@ -392,7 +393,7 @@ function createHarness(opts?: {
     setPendingInteraction(value: boolean) {
       pendingInteraction = value;
     },
-    setAgentKind(value: AgentInputCreateOpts['agentKind'] | null) {
+    setAgentKind(value: AgentKind | null) {
       agentKind = value;
     },
     setHasPendingCredentialSwitch(fn: (() => boolean) | null) {

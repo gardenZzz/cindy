@@ -14,9 +14,10 @@ import type {
   AgentCustomizationFile,
   ListCustomizationsResult,
 } from '../../types/customizations.js';
+import type { AgentKind } from '../../types/common.js';
 
 export interface SourceDef {
-  engine: 'claude-code' | 'codex' | 'pi';
+  engine: AgentKind;
   kind: 'skill' | 'command' | 'agent';
   scope: string;
   dir: string;

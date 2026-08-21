@@ -9,6 +9,7 @@ import { z } from 'zod';
 import type { XdtHelperToolRegistry } from '../lizi_xdtHelperToolRegistry.js';
 import type { ControlResult } from '../lizi_xdtHelperMcpServer.js';
 import { okPayload, errorPayload } from './_payload.js';
+import type { AgentKind } from '@cindy/maker-core';
 
 export interface ModelDescriptor {
   id: string;
@@ -61,24 +62,26 @@ function tagTier(models: ModelDescriptor[] | undefined): TaggedModel[] | undefin
 
 export interface ListAvailableModelsDeps {
   listAvailableModels: (params: {
-    agent?: 'claude-code' | 'codex' | 'pi';
+    agent?: AgentKind;
   }) => Promise<ControlResult<{
     codex?: ModelDescriptor[];
     claude_code?: ModelDescriptor[];
+    cursor?: ModelDescriptor[];
     pi?: ModelDescriptor[];
   }>>;
 }
 
 const DESCRIPTION = [
   '列出每个 agent 当前 host 支持的 model id 清单, 用于 create_worker 前确认 model 名拼写。',
-  'Codex 和 Claude Code 支持的 model 完全不同, 不可跨用。',
+  'Codex / Claude Code / Cursor 支持的 model 完全不同, 不可跨用。',
   '',
   '参数:',
-  '- agent: 可选, codex / claude-code / pi; 不传返三者',
+  '- agent: 可选, codex / claude-code / cursor / pi; 不传返四者',
   '',
   '返回值:',
   '- codex: Codex agent 的可用 model 列表 [{id, label, tier, providers, default_provider_id}]',
   '- claude_code: Claude Code agent 的可用 model 列表 [{id, label, tier, providers, default_provider_id}]',
+  '- cursor: Cursor agent 的可用 model 列表 [{id, label, tier}]; Cursor 走自己的登录态, 没有供应商维度, 默认档是 "auto"',
   '- pi: Pi agent 的可用 model 列表 [{id, label, tier, providers, default_provider_id}]',
   '- providers: 当前已连接且实际提供该模型的来源 [{provider_id, provider_name}]。创建 Worker 时把选定的 provider_id 原样传给 create_worker/create_workers。',
   '- default_provider_id: 未显式选择来源时 host 当前解析出的默认来源；providers 只有一项时直接使用该项。',
@@ -102,9 +105,9 @@ export function registerListAvailableModelsTool(
     description: DESCRIPTION,
     inputShape: {
       agent: z
-        .enum(['codex', 'claude-code', 'pi'])
+        .enum(['codex', 'claude-code', 'cursor', 'pi'])
         .optional()
-        .describe('可选, 只查某一 agent 的 model 列表; 不传返三者'),
+        .describe('可选, 只查某一 agent 的 model 列表; 不传返四者'),
     },
     handler: async ({ agent }) => {
       const result = await deps.listAvailableModels({ agent });
@@ -117,6 +120,7 @@ export function registerListAvailableModelsTool(
       return okPayload({
         codex: tagTier(result.codex),
         claude_code: tagTier(result.claude_code),
+        cursor: tagTier(result.cursor),
         pi: tagTier(result.pi),
       });
     },

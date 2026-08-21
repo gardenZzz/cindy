@@ -95,6 +95,12 @@ export function resolveFastSupported(params: {
   // agent 级粗粒度 gate（agent 运行时是否实现 fast 管道）。
   if (!capabilities?.hasFastMode) return false;
 
+  // Cursor 无 Cindy provider（ADR 0001，本机与被控端都没有）⇒ per-model 能力只在
+  // capabilities 目录里；走 per-provider 解析必然查不到来源、恒 false。
+  if (agentKind === 'cursor') {
+    return !!capabilities.availableModels.find((m) => m.id === modelId)?.supportsFastMode;
+  }
+
   const effectiveProviders = deviceId ? deviceProviders : localProviders;
 
   // 旧被控端（或 device providers 加载首帧）→ 无 per-provider 数据 → 回退拍平 caps。
@@ -203,7 +209,7 @@ export function deriveModelsFromProviders(
  *    含自定义供应商),与重构后的本地行为逐字节一致。
  *
  * `agentKind` 锁定时取单边;为 null 时 cc + codex 按 id 首见去重并集(与历史合并口径一致)。
- * device 侧两个数组由调用方传 `cc/codex.capabilities.availableModels ?? []`(可空 → 空数组)。
+ * device 侧数组由调用方传 `cc/codex/cursor.capabilities.availableModels ?? []`(可空 → 空数组)。
  */
 export function selectVisibleModels(params: {
   agentKind: AgentKind | null;
@@ -211,6 +217,8 @@ export function selectVisibleModels(params: {
   providers: ProviderView[];
   deviceCcModels: ModelDescriptor[];
   deviceCodexModels: ModelDescriptor[];
+  /** Cursor 无 Cindy provider 目录；本机/远程都走 capabilities.availableModels。 */
+  deviceCursorModels?: ModelDescriptor[];
   devicePiModels?: ModelDescriptor[];
   /**
    * SSH 远程会话(remoteHostId)传 true:订阅直连模型(chatgpt/ / xai/)不再被过滤,
@@ -236,6 +244,7 @@ export function selectVisibleModels(params: {
     providers,
     deviceCcModels,
     deviceCodexModels,
+    deviceCursorModels = [],
     devicePiModels = [],
     excludeSubscriptionDirect,
     excludeChatBridgedCodex,
@@ -248,6 +257,8 @@ export function selectVisibleModels(params: {
     : undefined;
   const cc = pass(deviceId ? deviceCcModels : deriveModelsFromProviders(providers, 'claude-code'));
   const codex = pass(deviceId ? deviceCodexModels : deriveModelsFromProviders(providers, 'codex', codexDeriveOpts));
+  // Cursor:本机也走 capabilities（无 provider.models.cursor）；远程同样用被控端 capabilities。
+  const cursor = pass(deviceCursorModels);
   const pi = pass(deviceId ? devicePiModels : deriveModelsFromProviders(providers, 'pi'))
     .filter((model) => !(
       excludeSubscriptionDirect === true &&
@@ -257,6 +268,7 @@ export function selectVisibleModels(params: {
     ));
   if (agentKind === 'claude-code') return cc;
   if (agentKind === 'codex') return codex;
+  if (agentKind === 'cursor') return cursor;
   if (agentKind === 'pi') return pi;
   const merged = [...cc];
   const seen = new Set(merged.map((m) => m.id));

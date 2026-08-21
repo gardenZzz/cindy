@@ -823,7 +823,7 @@ describe('ChatInput 的入口门控与调用路由', () => {
     expect(source).not.toContain('window.electronAPI.maker.switchSessionAgent(');
   });
 
-  it('入口按被控端能力位门控:device-link 不再被排除,SSH 远程仍排除', () => {
+  it('入口按被控端能力位门控:device-link 不再被排除,SSH 远程仍排除,四家同构', () => {
     // 2026-08-12 统一模型选择器(M6):会话内换引擎有了两种形态,门禁必须**逐字一致** ——
     //   · 统一面板(现在的常态):sessionEngineFilter 提供跨引擎入口;
     //   · 旧两步分段(仅 device-link 老被控端 capabilities-only 降级时还会渲染):agentSwitch。
@@ -834,15 +834,56 @@ describe('ChatInput 的入口门控与调用路由', () => {
     expect(source).toMatch(
       /!unifiedPanelActive &&\s*\n\s*sessionId &&\s*\n\s*vendorKey &&\s*\n\s*!remoteHostId &&\s*\n\s*sessionAgentSwitchSupported/,
     );
-    expect(source).toContain('ccCaps.capabilities?.supportsSessionAgentSwitch === true');
-    expect(source).toContain('ccCaps.capabilities.supportsSessionAgentSwitchCas === true');
-    expect(source).toContain('codexCaps.capabilities?.supportsSessionAgentSwitch === true');
-    expect(source).toContain('codexCaps.capabilities.supportsSessionAgentSwitchCas === true');
+    expect(source).toContain('resolveSessionAgentSwitchEntry');
+    expect(source).not.toContain("vendorKey !== 'cursor'");
+    expect(source).toContain('ccCaps.capabilities?.supportsSessionAgentSwitchCas === true');
+    expect(source).toContain('codexCaps.capabilities?.supportsSessionAgentSwitchCas === true');
     const hostSource = readFileSync(
       resolve(process.cwd(), 'src/main/maker-ipc/register.ts'),
       'utf8',
     );
     expect(hostSource).toContain('supportsSessionAgentSwitchCas: true');
+  });
+
+  it('resolveSessionAgentSwitchEntry 按任务真实 Agent 能力位判定(行为测试,四家同构)', async () => {
+    const { resolveSessionAgentSwitchEntry } = await import('@/components/new-chat/agentSwitchConfirmation');
+    const both = { supportsSessionAgentSwitch: true, supportsSessionAgentSwitchCas: true };
+    const capsOnlySwitch = { supportsSessionAgentSwitch: true, supportsSessionAgentSwitchCas: false };
+    const capsOnlyCas = { supportsSessionAgentSwitch: false, supportsSessionAgentSwitchCas: true };
+    // 本机会话恒可用(四家一致)。
+    for (const kind of ['claude-code', 'codex', 'cursor', 'pi'] as const) {
+      expect(resolveSessionAgentSwitchEntry({ agentKind: kind, isLocalSession: true, capabilities: {} })).toBe(true);
+    }
+    // 远程:按任务真实 Agent 取能力位;Cursor 任务 + 新被控端 -> 显示。
+    expect(resolveSessionAgentSwitchEntry({
+      agentKind: 'cursor',
+      isLocalSession: false,
+      capabilities: { 'claude-code': null, codex: capsOnlyCas, cursor: both, pi: null },
+    })).toBe(true);
+    // 远程 Cursor 任务 + 老被控端(switch=false) -> 不显示(优雅降级)。
+    expect(resolveSessionAgentSwitchEntry({
+      agentKind: 'cursor',
+      isLocalSession: false,
+      capabilities: { 'claude-code': both, codex: both, cursor: capsOnlySwitch, pi: null },
+    })).toBe(false);
+    // 远程 Cursor 任务 + 老被控端(CAS=false) -> 不显示。
+    expect(resolveSessionAgentSwitchEntry({
+      agentKind: 'cursor',
+      isLocalSession: false,
+      capabilities: { 'claude-code': both, codex: both, cursor: capsOnlyCas, pi: null },
+    })).toBe(false);
+    // Claude Code / Codex 既有判定不变:远程 + 两位齐 -> 显示。
+    expect(resolveSessionAgentSwitchEntry({
+      agentKind: 'claude-code',
+      isLocalSession: false,
+      capabilities: { 'claude-code': both, codex: both, cursor: null, pi: null },
+    })).toBe(true);
+    // agentKind 未锁定(undefined) -> fail-closed,冷启动不冒充支持。
+    expect(resolveSessionAgentSwitchEntry({
+      agentKind: undefined,
+      isLocalSession: false,
+      capabilities: { 'claude-code': both, codex: both, cursor: both, pi: both },
+    })).toBe(false);
   });
 
   it('lazy-create 从 DB 对齐原子模型选择的 effort 与 Fast,不复用旧排队快照', () => {

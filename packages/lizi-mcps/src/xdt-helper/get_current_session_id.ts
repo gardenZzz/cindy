@@ -1,11 +1,12 @@
 import { BRAND_NAME } from '@cindy/maker-shared/branding';
 import type { XdtHelperToolRegistry } from '../lizi_xdtHelperToolRegistry.js';
 import { errorPayload, okPayload } from './_payload.js';
+import type { AgentKind } from '@cindy/maker-core';
 
 export interface GetCurrentSessionIdDeps {
   getSessionContext: () => {
     sessionId?: string;
-    agentKind: 'claude-code' | 'codex' | 'pi';
+    agentKind: AgentKind;
     workingDir: string;
   };
 }

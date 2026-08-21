@@ -75,11 +75,13 @@ import { TopRightChipStack, TopRightChipStackProvider } from '@/components/chat/
 import { useProportionalWidth } from '@/hooks/useProportionalWidth';
 import { useCCSessions } from '@/hooks/useCCSessions';
 import { useVendorAuthGate } from '@/hooks/useVendorAuthGate';
+import { useCursorAvailability } from '@/hooks/useCursorAvailable';
 import { useAttachments } from '@/hooks/useAttachments';
 import {
   useNewMakerDraft,
   switchVendor,
   getDraft,
+  getCurrentVendorPrefs,
   patchDraft,
   patchCollab,
   patchCurrentVendorPrefs,
@@ -101,6 +103,7 @@ import {
 import {
   getProviderModelEffort,
   getProviderModelFast,
+  modelMemorySourceId,
   setProviderModelFast,
   useProviderModelMemoryVersion,
 } from '@/state/providerModelMemory';
@@ -158,6 +161,7 @@ import {
 } from './deferredUiAssignment';
 import { CrossAgentConvertDialog } from '@/components/ui/cross-agent-convert-dialog';
 import type { MakerVendor } from '@/lib/ccAgent.types';
+import { agentKindToDraftPushSlot } from '../../../shared/agentKindDraftVendor';
 import {
   ChevronDown,
   Code2,
@@ -266,6 +270,7 @@ import { resolveNewMakerDraftRightSidebar } from './newMakerDraftRightSidebar';
 import { resolveNewMakerDraftEffort } from './newMakerDraftModelPrefs';
 import { closeAllTabs as closeRightSidebarTabs } from '@/features/right-sidebar/store';
 import { revealOrcaWorkersTab } from '@/features/right-sidebar/plugins/orca-workers/actions';
+import type { AgentKind } from '@cindy/maker-core';
 import { normalizeProjectKey } from './lib/projectGrouping';
 import { requestSidebarProjectRestore } from './lib/sidebarProjectRestore';
 
@@ -402,8 +407,14 @@ function draftEnableOrcaOptions(
   providersReady: boolean,
   deferDelegateTask = false,
 ) {
-  const preferredAgent: 'claude-code' | 'codex' | 'pi' =
-    collab.worker === 'codex' ? 'codex' : collab.worker === 'pi' ? 'pi' : 'claude-code';
+  const preferredAgent: AgentKind =
+    collab.worker === 'codex'
+      ? 'codex'
+      : collab.worker === 'cursor'
+        ? 'cursor'
+        : collab.worker === 'pi'
+          ? 'pi'
+          : 'claude-code';
   // Worker 类型也是**设备作用域**的(codex review P2):在只连了 Codex 的设备 A 选了 Codex
   // Worker,切到只连 Claude 的设备 B 时,workerConfig 虽然被清了,collab.worker 仍是 codex,
   // 透传过去必撞被控端的 NO_PROVIDER_FOR_AGENT 预检,协同又静默降级成单会话。
@@ -411,7 +422,9 @@ function draftEnableOrcaOptions(
   // 没有已连接供应商、而另一个有,就改用另一个;两个都没有则原样透传,由 main 的精确
   // preflight 报可操作错误(不在这里编一个同样跑不起来的值)。
   // 仅在目录就绪时收窄,理由同下方 providerId:未就绪的空快照会误判成"都没有"。
-  const workerAgent: 'claude-code' | 'codex' | 'pi' = (() => {
+  // Cursor 不参与 cc↔codex 互退:device-link 创建面板不翻 Cursor 段,且 Cursor 只支持本地。
+  const workerAgent: AgentKind = (() => {
+    if (preferredAgent === 'cursor') return preferredAgent;
     if (!providersReady) return preferredAgent;
     if (connectedProvidersForAgent(providers, preferredAgent).length > 0) return preferredAgent;
     const fallback = (['claude-code', 'codex', 'pi'] as const).find(
@@ -600,6 +613,31 @@ interface DraftTargetRequest {
   };
 }
 
+/**
+ * 「这份草稿要跑在哪」的目标描述 —— 见组件内 applyDraftTarget。
+ *
+ * 刻意把 deviceId 与 workingDir 放在一起要求调用方**同时**给出:草稿的运行目标本来就是这个二元组,
+ * 而所有需要连带更新的状态(mention chip、路径型附件、能力/供应商快照、远程运行配置、worktree
+ * 三态、extraDirs)都能从「这个二元组的哪一半变了」推导出来。分开传就又回到了「某条路径记得改
+ * 设备、忘了清项目」那类缺陷。
+ */
+interface DraftTargetRequest {
+  /** 目标设备;null = 本机。 */
+  deviceId: string | null;
+  deviceName: string | null;
+  /** 目标工作区;null = 该设备上的「对话」(不绑项目)。 */
+  workingDir: string | null;
+  /**
+   * 已经 inline 拉到的被控端快照。只有「添加远程项目」那条路径有 —— 它为了验证设备可达,本来就
+   * 直接 invoke 过 capabilities / defaults,于是能立刻 seed,不必等 effect 再跑一轮隧道往返。
+   * 不给就把远程运行配置打回未加载,交给 seed effect 自己拉。
+   */
+  remoteSnapshot?: {
+    capabilities: AgentCapabilities;
+    defaults: RemoteDraftDefaults | null;
+  };
+}
+
 export function NewMakerDraftRoute() {
   const { t } = useTranslation();
   const { dataOwnerId } = useAuth();
@@ -635,6 +673,25 @@ export function NewMakerDraftRoute() {
   const { createSession, error: createSessionError } = useCCSessions();
   const vendorAuthGate = useVendorAuthGate();
   const refreshWorktrees = useRefreshWorktrees();
+  // T2: 仅本机已装 cursor-agent 时翻开 New Maker 的 Cursor 段。
+  // device-link 远程草稿不在控制端翻 Cursor 段:被控端是否装了 cursor-agent 是另一回事,
+  // 用本机能力判断被控端会为没装的设备建 Cursor 会话;能力应按被控端上报(留待 device-link
+  // 契约一期,本处先最小关掉)。见 issue #3 收尾。
+  // null = 探测未回;未知态**不能**当成「没装」——否则每次进新建页都会在探测回来前
+  // 把停在 cursor 的草稿翻成 cc(且不会翻回去),用户上次选的 Cursor 及其档位记忆全部作废。
+  // 远程草稿恒 false:不翻开 Cursor 段。
+  const cursorAvailability = useCursorAvailability();
+  const includeCursor: boolean | null =
+    draft.deviceLinkDeviceId != null ? false : cursorAvailability;
+  // 确认没装(探测已回且为 false)才把停在 cursor 的草稿回落到 cc,避免未注册 agent 建会话。
+  useEffect(() => {
+    if (includeCursor === false && draft.vendor === 'cursor') {
+      switchVendor('cc', getCurrentVendorPrefs());
+    }
+  }, [includeCursor, draft.vendor]);
+  // 探测期(null)只对「上次就停在 cursor」的草稿显示该段:避免没装 cursor 的用户每次进页闪一下,
+  // 也避免已选 cursor 的用户看到自己选中的段临时消失。
+  const showCursorSegment = includeCursor === true || draft.vendor === 'cursor';
 
   /** createSession 失败 toast:远端路由错误按 code 给可操作文案,其余回退通用文案。 */
   const toastCreateSessionFailed = (err?: unknown) => {
@@ -717,8 +774,8 @@ export function NewMakerDraftRoute() {
    * 并清掉 —— 持久化之后那等于一切引擎只能记住最后一次选择。
    */
   const draftFavoriteAnchor = useDraftFavoriteAnchor(normalizeDbAgentKind(draft.vendor));
-  const persistedAgentKind: 'cc' | 'codex' | 'pi' = normalizeDbAgentKind(draft.vendor);
-  const authVendor: 'cc' | 'codex' | 'pi' = persistedAgentKind;
+  const persistedAgentKind = normalizeDbAgentKind(draft.vendor);
+  const authVendor = persistedAgentKind;
   const capabilityAgentKind = dbToMakerAgentKind(persistedAgentKind);
 
   // 品牌区跟随当前主题；icon / logo 的固定布局统一由 ThemeBrandLockup 负责。
@@ -1340,17 +1397,23 @@ export function NewMakerDraftRoute() {
   // 由 CCAgentSessionView 的 live DB/runtime props 保护,不会走这里。
   const modelPresetVersion = useProviderModelMemoryVersion();
   const localDraftEffort = useMemo<Effort>(() => {
-    if (isDeviceLinkDraft || !effectiveSourceId) return chatPrefs.effort;
-    const provider = providers.find((item) => item.id === effectiveSourceId);
+    if (isDeviceLinkDraft) return chatPrefs.effort;
+    // 记忆槽来源:Cursor 无 provider,用合成槽读全局预设(与选择器非选中行对称)。
+    const memorySourceId = modelMemorySourceId(capabilityAgentKind, effectiveSourceId);
+    if (!memorySourceId) return chatPrefs.effort;
     // 按**校准后**的模型推导:effort 必须和最终提交的模型属于同一个能力集合。
+    // 无 provider 的 agent(Cursor)从 capabilities 目录取档位。
+    const provider = effectiveSourceId
+      ? providers.find((item) => item.id === effectiveSourceId)
+      : undefined;
     const model = provider
       ? getModel(provider, calibratedDraftModel, capabilityAgentKind)
-      : undefined;
+      : capabilities?.availableModels.find((m) => m.id === calibratedDraftModel);
     return resolveNewMakerDraftEffort({
       currentEffort: chatPrefs.effort,
       presetEffort: getProviderModelEffort(
         capabilityAgentKind,
-        effectiveSourceId,
+        memorySourceId,
         calibratedDraftModel,
       ),
       efforts: model?.efforts ?? [],
@@ -1360,6 +1423,7 @@ export function NewMakerDraftRoute() {
     isDeviceLinkDraft,
     effectiveSourceId,
     providers,
+    capabilities,
     capabilityAgentKind,
     calibratedDraftModel,
     chatPrefs.effort,
@@ -1371,8 +1435,9 @@ export function NewMakerDraftRoute() {
   // 不再是权威读源(retire 计划单列)。device-link 草稿不调本函数(以被控端镜像为准)。
   const resolveDraftFast = useCallback(
     (modelId: string): boolean => {
-      if (effectiveSourceId) {
-        const v = getProviderModelFast(capabilityAgentKind, effectiveSourceId, modelId);
+      const memorySourceId = modelMemorySourceId(capabilityAgentKind, effectiveSourceId);
+      if (memorySourceId) {
+        const v = getProviderModelFast(capabilityAgentKind, memorySourceId, modelId);
         if (v !== undefined) return v;
       }
       return getFastModeForModel(modelId);
@@ -1563,7 +1628,7 @@ export function NewMakerDraftRoute() {
   // (驱动镜像 effect + 选中行还原)。控制端是纯显示,这里只更新显示态、不回写被控端。
   useEffect(() => {
     if (!isDeviceLinkDraft || !effectiveDeviceLinkDeviceId) return;
-    const vendorSlot = capabilityAgentKind === 'claude-code' ? 'claudeCode' : capabilityAgentKind;
+    const vendorSlot = agentKindToDraftPushSlot(capabilityAgentKind);
     return window.electronAPI.deviceLink.onRemotePush((push, localOwnerStamp) => {
       if (push.deviceId !== effectiveDeviceLinkDeviceId) return;
       if (!isDeviceLinkRemotePushCurrent(push, localOwnerStamp)) return;
@@ -2014,6 +2079,118 @@ export function NewMakerDraftRoute() {
     capabilityAgentKind,
   ]);
 
+  // ─── 非阻塞预热（claim-if-ready）────────────────────────────────────────
+  // 本地普通 Cursor 草稿打开后，后台把 Cursor 会话完整 bootstrap（spawn + initialize +
+  // 首个 session/new + 档位下发），发送热路径**零 await 就绪**（ADR 0005；修复 ADR 0003
+  // 回退根因 —— 旧实现把「等待就绪」搬进了 IPC/发送路径，见 spec #74 / ticket #75）。
+  // 守卫与发送路径 claim 严格对齐：仅本地普通草稿（worktree / device-link / remote 不预热）。
+  // 回收：草稿关闭 / 切换 vendor / 发送失败 → cancel；已 claim 的句柄对 effect 重跑免疫。
+  const cursorPrewarmRef = useRef<{ sessionId: string; claimed: boolean } | null>(null);
+  // 从预热会话拿到 sessionId 并接管。返回 { sessionId, prewarmed }；未命中时回收预热并
+  // 回退普通创建。**本函数不 await 会话就绪** —— claim 只查就绪标志。
+  const claimCursorPrewarmSession = useCallback(async (): Promise<{
+    sessionId: string;
+    prewarmed: boolean;
+  }> => {
+    const prewarm = cursorPrewarmRef.current;
+    if (!prewarm) return { sessionId: makeDraftSessionId(), prewarmed: false };
+    try {
+      const res = await window.electronAPI.maker.claimPrewarmSession(prewarm.sessionId);
+      if (res.claimed) {
+        // 已就绪：标记 claimed（对迟到重预热 / effect cleanup 免疫），发送复用同一 id
+        // → createSession 内部 reusedPrewarm 分支 0 等待接管（maker-core）。
+        prewarm.claimed = true;
+        return { sessionId: prewarm.sessionId, prewarmed: true };
+      }
+    } catch (err) {
+      log.warn('[draft prewarm] claim failed; falling back to normal create', err);
+    }
+    // 未就绪 / 不存在：显式回收预热句柄，回退普通创建（行为与现状一致、不阻塞）。
+    await window.electronAPI.maker
+      .cancelPrewarmSession(prewarm.sessionId)
+      .catch((err) => log.warn('[draft prewarm] cancel after claim-miss failed', err));
+    cursorPrewarmRef.current = null;
+    return { sessionId: makeDraftSessionId(), prewarmed: false };
+  }, []);
+  // 预热 effect：草稿打开 + 400ms debounce（Q2）。配置/目录变化 → 回收旧预热、用最新档位
+  // 重新预热（与 Q8-B「配置预写联动草稿最新档位」一致，claim 不逐项 reconcile）。
+  useEffect(() => {
+    const canPrewarm =
+      persistedAgentKind === 'cursor' &&
+      includeCursor !== false &&
+      !isDeviceLinkDraft &&
+      !effectiveRemoteHostId &&
+      !wtEnabled;
+    if (!canPrewarm) {
+      // 守卫不满足（切 vendor / 开 worktree / device-link / remote）→ 回收未 claim 的预热。
+      const prewarm = cursorPrewarmRef.current;
+      if (prewarm && !prewarm.claimed) {
+        cursorPrewarmRef.current = null;
+        void window.electronAPI.maker
+          .cancelPrewarmSession(prewarm.sessionId)
+          .catch((err) => log.warn('[draft prewarm] cancel failed', err));
+      }
+      return;
+    }
+    const timer = setTimeout(async () => {
+      // 重新预热前，先回收上次未 claim 的预热（配置/目录变化 → 换新档位的新句柄）。
+      const previous = cursorPrewarmRef.current;
+      if (previous && !previous.claimed) {
+        cursorPrewarmRef.current = null;
+        await window.electronAPI.maker
+          .cancelPrewarmSession(previous.sessionId)
+          .catch(() => undefined);
+      }
+      const sessionId = makeDraftSessionId();
+      const workingDir = effectiveWorkingDir?.trim() || undefined;
+      cursorPrewarmRef.current = { sessionId, claimed: false };
+      try {
+        await window.electronAPI.maker.prewarmSession({
+          id: sessionId,
+          agentKind: 'cursor',
+          workingDir,
+          workspaceKind: workingDir ? 'project' : 'dialogue',
+          model: draftInitialModel,
+          effort: draftInitialEffort,
+          fastMode: effectiveFastMode,
+          permissionMode: chatInitialPermissionMode,
+          planMode: effectivePlanMode,
+          providerId: chatInitialProviderId,
+        });
+      } catch (err) {
+        // 预热失败（鉴权/网络/进程错误）→ 静默放弃，发送走普通创建（spec 验收标准）。
+        log.warn('[draft prewarm] prewarmSession failed; falling back to normal create', err);
+        if (cursorPrewarmRef.current?.sessionId === sessionId) {
+          cursorPrewarmRef.current = null;
+        }
+      }
+    }, 400);
+    return () => {
+      clearTimeout(timer);
+      // 草稿关闭 / 依赖变化：回收未 claim 的预热。已 claim（发送接管中）不动（Q10 不变量）。
+      const prewarm = cursorPrewarmRef.current;
+      if (prewarm && !prewarm.claimed) {
+        cursorPrewarmRef.current = null;
+        void window.electronAPI.maker
+          .cancelPrewarmSession(prewarm.sessionId)
+          .catch((err) => log.warn('[draft prewarm] cancel failed', err));
+      }
+    };
+  }, [
+    persistedAgentKind,
+    includeCursor,
+    isDeviceLinkDraft,
+    effectiveRemoteHostId,
+    effectiveWorkingDir,
+    wtEnabled,
+    draftInitialModel,
+    draftInitialEffort,
+    effectiveFastMode,
+    chatInitialPermissionMode,
+    effectivePlanMode,
+    chatInitialProviderId,
+  ]);
+
   // 收藏锚点的失效兜底:选中一条收藏后,如果草稿的 (模型, 来源) 又被别的路径改掉(引擎
   // 不可用 coerce、模型校准、浮层里换来源…),这个锚点就不再描述当前选择了 —— 靠**派生**让
   // 它不亮:比的是快照里的 (wire id, providerId) 与草稿当前值。wire id 不查收藏条目(它按
@@ -2052,7 +2229,7 @@ export function NewMakerDraftRoute() {
   const carryDraftFavoriteAnchorToSession = useCallback(
     (
       newSessionId: string,
-      engine: 'cc' | 'codex' | 'pi',
+      engine: 'cc' | 'codex' | 'cursor' | 'pi',
       model: string,
       providerId: string | null,
     ): void => {
@@ -2274,7 +2451,7 @@ export function NewMakerDraftRoute() {
   const handleRemoteProjectAdded = useCallback(
     async (target: RemoteProjectTarget) => {
       // vendor 由外层 VendorSegmentedSwitcher (draft.vendor) 单一决策 —— dialog 不再让用户选。
-      const draftVendor: 'cc' | 'codex' | 'pi' = normalizeDbAgentKind(draft.vendor);
+      const draftVendor = normalizeDbAgentKind(draft.vendor);
 
       if (target.kind === 'device-link') {
         // device-link:**不**像 SSH 立即建会话(会在被控端留空会话)。改为把当前草稿指向该被控
@@ -2586,8 +2763,9 @@ export function NewMakerDraftRoute() {
       // 写入键必须与 effectiveFastMode 的读取键同源:两者都用**校准后**的模型。若这里仍写
       // chatPrefs.model,种子默认被校准后用户切 fast 会写到一个当前根本没在用的模型上 ——
       // 开关看着没生效,旧模型却被静默改了偏好(PR #548 review)。
-      if (effectiveSourceId) {
-        setProviderModelFast(capabilityAgentKind, effectiveSourceId, calibratedDraftModel, enabled);
+      const memorySourceId = modelMemorySourceId(capabilityAgentKind, effectiveSourceId);
+      if (memorySourceId) {
+        setProviderModelFast(capabilityAgentKind, memorySourceId, calibratedDraftModel, enabled);
       }
       // per-model 旧库:保留为兜底(retire 计划单列),写入维持向后兼容。
       setFastModeForModel(calibratedDraftModel, enabled);
@@ -3422,6 +3600,10 @@ export function NewMakerDraftRoute() {
           // resolveDeviceLinkSubmission 会把 workspaceKind 派生成 'dialogue',被控端自行分配
           // 运行目录(隧道侧 path guard 对「缺 workingDir」本来就是放行的,不放宽任何边界)。
           if (isDeviceLinkDraft && effectiveDeviceLinkDeviceId) {
+            // Cursor 一期不做 device-link（ADR）。
+            if (persistedAgentKind === 'cursor') {
+              throw new Error('Cursor does not support remote projects yet');
+            }
             const deviceId = effectiveDeviceLinkDeviceId;
             const deviceName = effectiveDeviceLinkDeviceName ?? deviceId;
             const invokeRemote = async (channel: string, args: unknown[]) => {
@@ -3728,7 +3910,7 @@ export function NewMakerDraftRoute() {
             if (wd && !isRemoteProjectDraft && persistedAgentKind !== 'pi') {
               const r = await crossAgentConvertService.detect(
                 wd,
-                persistedAgentKind === 'cc' ? 'claude-code' : persistedAgentKind,
+                capabilityAgentKind,
               );
               if (r.items.length > 0) {
                 // 阻塞等弹窗关闭（用户点不要 / 完成转换 / 失败）—— 都视为流程结束
@@ -3744,7 +3926,19 @@ export function NewMakerDraftRoute() {
           // Send 流程会先 createSession (本段下方) 创建 Lead,然后立刻调 enableOrca
           // 拉起 Worker (见下方 "F-COLLAB: draft 阶段开了协同模式" 段)。
 
-          const sessionId = makeDraftSessionId();
+          // 非阻塞预热接管（claim-if-ready）：本地普通 Cursor 草稿已预热且就绪 → 复用其
+          // sessionId，createSession 内部 reusedPrewarm 分支 0 等待接管（maker-core）；
+          // 未就绪 / 无预热 / 非本地普通草稿（worktree / device-link / remote）→ 回退普通
+          // 创建。claim 只查就绪标志、**不 await 会话就绪**（ADR 0005 核心）。
+          const prewarmAble =
+            persistedAgentKind === 'cursor' &&
+            includeCursor !== false &&
+            !isDeviceLinkDraft &&
+            !effectiveRemoteHostId &&
+            !wtEnabled;
+          const { sessionId } = prewarmAble
+            ? await claimCursorPrewarmSession()
+            : { sessionId: makeDraftSessionId() };
           const optimisticTitle = optimisticFirstMessageTitle(
             message,
             files,
@@ -3808,7 +4002,7 @@ export function NewMakerDraftRoute() {
               log.warn('[draft worktree send] touchUserSend failed', err);
             });
             makerChatStore.setSessionRuntime(newSession.id, {
-              agentKind: persistedAgentKind === 'cc' ? 'claude-code' : persistedAgentKind,
+              agentKind: capabilityAgentKind,
               fastMode: effectiveFastMode,
               planModeEnabled: effectivePlanMode,
             });
@@ -4013,6 +4207,9 @@ export function NewMakerDraftRoute() {
             return;
           }
 
+          // 计时 createSession：内部走预热接管时应是毫秒级；若仍卡秒级，说明预热未命中
+          // （草稿抖动 cancel / worktree 不预热），据此时序再评估乐观跳页。
+          const _createSessionStartedAt = Date.now();
           const newSession = await createSession({
             id: sessionId,
             agentKind: persistedAgentKind,
@@ -4029,6 +4226,11 @@ export function NewMakerDraftRoute() {
             // extraDirs 是 vendor 无关字段；Claude 与 Codex 都按只读引用目录透传。
             extraDirs: effectiveExtraDirs,
             providerId,
+          });
+          log.info('[draft send] createSession resolved', {
+            sessionId,
+            agentKind: persistedAgentKind,
+            elapsedMs: Date.now() - _createSessionStartedAt,
           });
           if (!newSession) {
             if (optimisticTitleSessionId) emitAutoTitlePreviewCleared(optimisticTitleSessionId);
@@ -4104,6 +4306,10 @@ export function NewMakerDraftRoute() {
             text: message,
             files: rehydratedFiles,
             mentions,
+            // Cursor：种子 Auto 不是显式选择；只有 modelChosenByVendor 为真才强制 set_config_option。
+            ...(capabilityAgentKind === 'cursor' && draftModelChosenByUser
+              ? { vendorOptions: { cursorModelExplicit: true } }
+              : {}),
             ...(opts?.quotesEncoded ? { quotesEncoded: true } : {}),
             ...(opts?.agentReferences?.length ? { agentReferences: opts.agentReferences } : {}),
             ...(opts?.pastedTextRanges?.length ? { pastedTextRanges: opts.pastedTextRanges } : {}),
@@ -4112,6 +4318,7 @@ export function NewMakerDraftRoute() {
               : {}),
             ...(deferredUiAssignment ? { deferredUiAssignment } : {}),
           });
+          // 从这里起首条消息已交给 SessionView。
           opts?.onAccepted?.();
           // 草稿已经成功移交给新会话(setPending),清掉 NEW_MAKER_DRAFT_KEY
           // 下的 store 条目,防止下次回到 /cc-agent/new 还看到本次刚发送的内容。
@@ -4321,6 +4528,10 @@ export function NewMakerDraftRoute() {
           // 仍然保留 deviceId 缺失的报错:那才是真正的 partial state,静默落到本地会把目标建错机器。
           if (!effectiveDeviceLinkDeviceId) {
             throw new Error(t('ccAgent.draft.createSessionFailed'));
+          }
+          // Cursor 一期不做 device-link（ADR）。
+          if (persistedAgentKind === 'cursor') {
+            throw new Error('Cursor does not support remote projects yet');
           }
           const deviceId = effectiveDeviceLinkDeviceId;
           const deviceName = effectiveDeviceLinkDeviceName ?? deviceId;
@@ -5093,6 +5304,7 @@ export function NewMakerDraftRoute() {
                         <AgentSelect
                           value={draft.vendor}
                           onChange={handleVendorChange}
+                          maxLabelWidth={showCursorSegment ? 210 : 150}
                           visualVariant="create-agent"
                           className="shrink-0"
                           disabled={wtCreating}
@@ -5149,6 +5361,7 @@ export function NewMakerDraftRoute() {
                         <AgentSelect
                           value={draft.vendor}
                           onChange={handleVendorChange}
+                          maxLabelWidth={showCursorSegment ? 96 : 72}
                           iconOnly
                           visualVariant="create-agent"
                           className="shrink-0"
@@ -5326,7 +5539,13 @@ export function NewMakerDraftRoute() {
           onCreate={(form: CreateWorkerForm) => {
             patchCollab({
               enabled: true,
-              worker: form.agent === 'codex' ? 'codex' : form.agent === 'pi' ? 'pi' : 'cc',
+              worker: form.agent === 'codex'
+                ? 'codex'
+                : form.agent === 'cursor'
+                  ? 'cursor'
+                  : form.agent === 'pi'
+                    ? 'pi'
+                    : 'cc',
               workerConfig: {
                 role: form.role,
                 model: form.model,

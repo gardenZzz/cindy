@@ -9,6 +9,7 @@ import {
 describe('orca agent display fallback', () => {
   it('normalizes explicit Orca agent kinds', () => {
     expect(normalizeOrcaDisplayAgentKind('codex')).toBe('codex');
+    expect(normalizeOrcaDisplayAgentKind('cursor')).toBe('cursor');
     expect(normalizeOrcaDisplayAgentKind('cc')).toBe('claude-code');
     expect(normalizeOrcaDisplayAgentKind('claude-code')).toBe('claude-code');
   });
@@ -21,8 +22,10 @@ describe('orca agent display fallback', () => {
 
   it('formats display label and VendorIcon vendor from the normalized kind', () => {
     expect(orcaAgentLabel('codex')).toBe('Codex');
+    expect(orcaAgentLabel('cursor')).toBe('Cursor');
     expect(orcaAgentLabel('claude-code')).toBe('Claude');
     expect(orcaVendorForAgentKind('codex')).toBe('codex');
+    expect(orcaVendorForAgentKind('cursor')).toBe('cursor');
     expect(orcaVendorForAgentKind('claude-code')).toBe('cc');
   });
 });

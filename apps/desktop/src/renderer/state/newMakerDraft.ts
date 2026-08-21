@@ -83,7 +83,7 @@ export interface CollabWorkerConfig {
 
 export interface CollabDraft {
   enabled: boolean;
-  worker: 'cc' | 'codex' | 'pi';
+  worker: 'cc' | 'codex' | 'cursor' | 'pi';
   workerConfig?: CollabWorkerConfig;
 }
 
@@ -183,6 +183,17 @@ function defaultVendorPrefs(vendor: MakerVendor): VendorPrefs {
       providerId: null,
     };
   }
+  if (vendor === 'cursor') {
+    return {
+      // 种子默认 Auto 仅供 UI 展示；是否显式选过由 modelChosenByVendor.cursor 区分。
+      // CursorAgent 对未显式选择的 Auto 跟随 ACP current，不发 set_config_option（#8）。
+      model: 'auto',
+      effort: 'medium',
+      permissionMode: 'auto',
+      planMode: false,
+      providerId: null,
+    };
+  }
   return {
     model: getDefaultModelForVendor('cc').id,
     effort: 'medium',
@@ -218,6 +229,7 @@ function makeDefault(): NewMakerDraft {
       pi: defaultVendorPrefs('pi'),
       orca: defaultVendorPrefs('orca'),
       codex: defaultVendorPrefs('codex'),
+      cursor: defaultVendorPrefs('cursor'),
     },
     modelChosenByVendor: {},
   };
@@ -288,7 +300,10 @@ function sanitize(raw: unknown): NewMakerDraft {
   // collab 校验: 老版本无此字段 → 默认 OFF + codex worker。
   const collabRaw = (r as { collab?: Partial<CollabDraft> }).collab;
   const collabWorker: CollabDraft['worker'] =
-    collabRaw?.worker === 'cc' ? 'cc' : collabRaw?.worker === 'pi' ? 'pi' : 'codex';
+    collabRaw?.worker === 'cc' ? 'cc'
+      : collabRaw?.worker === 'cursor' ? 'cursor'
+      : collabRaw?.worker === 'pi' ? 'pi'
+      : 'codex';
   // remote 项目的协同 codex / cc draft 均放行:worker 创建已继承 remoteHostId
   // (在同一台远端主机 spawn,见 OrcaLeadSessionSnapshot.remoteHostId),两端
   // 远端 MCP 注入均已落地 (codex daemon config + cc per-query http 注入)。
@@ -347,7 +362,7 @@ function sanitize(raw: unknown): NewMakerDraft {
       ? (r.modelChosenByVendor as Record<string, unknown>)
       : {};
   const modelChosenByVendor: Partial<Record<MakerVendor, boolean>> = {};
-  for (const v of ['cc', 'orca', 'codex', 'pi'] as const) {
+  for (const v of ['cc', 'orca', 'codex', 'cursor', 'pi'] as const) {
     if (modelChosenRaw[v] === true) modelChosenByVendor[v] = true;
   }
   // 2026-07 已落盘但尚无显式标记的 true，只可能来自用户把当时默认 false 切到 true，
@@ -385,6 +400,7 @@ function sanitize(raw: unknown): NewMakerDraft {
       pi: sanitizeVendorPrefs(lastByVendorRaw.pi, 'pi'),
       orca: sanitizeVendorPrefs(lastByVendorRaw.orca, 'orca'),
       codex: sanitizeVendorPrefs(lastByVendorRaw.codex, 'codex'),
+      cursor: sanitizeVendorPrefs(lastByVendorRaw.cursor, 'cursor'),
     },
     modelChosenByVendor,
   };

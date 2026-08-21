@@ -540,8 +540,12 @@ export function CustomProviderDialog({
   const runtimeFillTriggerRef = useRef<HTMLButtonElement>(null);
   const modelPickerTriggerRef = useRef<HTMLButtonElement>(null);
   const modelFetchInFlightRef = useRef(false);
-  const scrimRef = useRef<HTMLDivElement>(null);
   const dialogPanelRef = useRef<HTMLDivElement>(null);
+  const overlayRef = useRef<HTMLDivElement>(null);
+  // 同一次遮罩 pointerdown：window capture 先记下当时是否有子层，再让 Radix
+  // document capture 关菜单。React 的 overlay handler 用这份快照，避免 flushSync
+  // 清掉 childLayer 后误关表单。只读快照，不 preventDefault / stopPropagation。
+  const overlayPointerHadChildLayerRef = useRef(false);
   // 原生 window listener 的生命周期不跟着每次 render 重绑；layout effect 只把
   // 已提交的层状态写入 ref，既避开 passive effect 延迟，也不暴露被放弃的并发 render。
   const childLayerRef = useRef(childLayer);
@@ -589,25 +593,16 @@ export function CustomProviderDialog({
       dismissTopmostLayer();
     };
     window.addEventListener('keydown', onKeyDown, { capture: true });
-    return () => window.removeEventListener('keydown', onKeyDown, true);
-  }, [dismissTopmostLayer]);
-
-  useEffect(() => {
-    const onPointerDown = (event: PointerEvent) => {
+    const snapshotOverlayChildLayer = (event: PointerEvent) => {
       if (event.button !== 0) return;
-      if (event.target !== scrimRef.current) return;
-      if (!childLayerRef.current && !runtimeFillRef.current) return;
-
-      // This must run before Radix's document-capture outside-dismiss. The
-      // scrim gesture belongs to the dialog's current child layer; consuming
-      // it here prevents Radix from committing a closed popover before the
-      // form can settle that layer exactly once.
-      event.preventDefault();
-      event.stopPropagation();
-      dismissTopmostLayer();
+      if (event.target !== overlayRef.current) return;
+      overlayPointerHadChildLayerRef.current = childLayerRef.current != null;
     };
-    window.addEventListener('pointerdown', onPointerDown, { capture: true });
-    return () => window.removeEventListener('pointerdown', onPointerDown, true);
+    window.addEventListener('pointerdown', snapshotOverlayChildLayer, { capture: true });
+    return () => {
+      window.removeEventListener('keydown', onKeyDown, true);
+      window.removeEventListener('pointerdown', snapshotOverlayChildLayer, true);
+    };
   }, [dismissTopmostLayer]);
 
   useEffect(() => {
@@ -784,7 +779,9 @@ export function CustomProviderDialog({
       // 的 runtime 上,handleSave 的守卫拦不住"用户已经看不到"的这条草稿,表单
       // 卡死报错却找不到对应输入框(review P1)。
       setWindowDrafts({});
-      const first = configuredPresetAgents(p)[0];
+      const first = configuredPresetAgents(p).find((agent): agent is DialogAgentKind =>
+        AGENTS.includes(agent as DialogAgentKind),
+      );
       if (first) setActiveTab(first);
     },
     [i18n.language, setRtSynced],
@@ -1484,8 +1481,9 @@ export function CustomProviderDialog({
     for (const [draftKey, draftText] of Object.entries(windowDrafts)) {
       if (isCommittableWindowText(draftText)) continue;
       const sep = draftKey.lastIndexOf(':');
-      const draftAgent = draftKey.slice(0, sep) as AgentKind;
-      if (!VISIBLE_AGENTS.includes(draftAgent)) continue;
+      const draftAgentRaw = draftKey.slice(0, sep);
+      if (!(VISIBLE_AGENTS as readonly string[]).includes(draftAgentRaw)) continue;
+      const draftAgent = draftAgentRaw as DialogAgentKind;
       // 该 runtime 未配置 baseUrl、或该行 id/name 为空:两者都会在下面序列化时
       // 被丢弃,不会写进最终配置,草稿再非法也不该挡住一个原本有效的保存
       // (review P1)。
@@ -1729,15 +1727,26 @@ export function CustomProviderDialog({
 
   return (
     <div
-      ref={scrimRef}
+      ref={overlayRef}
       data-custom-provider-dialog-scrim="true"
       className="fixed inset-0 z-[10000] flex items-center justify-center bg-[var(--overlay-modal)]"
       onPointerDown={(event) => {
         // pointerdown 时先按当前层级结算，避免 Popover 的 outside-dismiss 在随后
         // click 前把状态改成 closed，令同一次手势继续误关底层表单。
-        if (event.button === 0 && event.target === event.currentTarget && !saving && !runtimeFill) {
-          event.preventDefault();
-          event.stopPropagation();
+        // 只读子层快照，不 preventDefault / stopPropagation（Linux CI 上会弄崩 picker 打开）。
+        if (
+          event.button === 0 &&
+          event.target === event.currentTarget &&
+          !saving &&
+          !runtimeFill
+        ) {
+          const hadChildLayer =
+            overlayPointerHadChildLayerRef.current || childLayerRef.current != null;
+          overlayPointerHadChildLayerRef.current = false;
+          if (hadChildLayer) {
+            if (childLayerRef.current) dismissTopmostLayer();
+            return;
+          }
           dismissTopmostLayer();
         }
       }}

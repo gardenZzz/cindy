@@ -70,14 +70,15 @@ interface RegistryEffortMetadata {
 
 /**
  * 仅在模型能由当前 agent 的 Registry route 唯一识别时复用 effort 元数据。
- * 自定义 provider 的 id、model id 与路由保持原值；Pi 能力继续只认逐模型显式配置。
+ * 自定义 provider 的 id、model id 与路由保持原值；Pi / Cursor 不进 registry
+ * per-agent 覆盖，只认逐模型显式配置。
  */
 function registryEffortMetadata(
   registry: ModelRegistry | null | undefined,
   modelId: string,
   agent: AgentKind,
 ): RegistryEffortMetadata | undefined {
-  if (agent === "pi" || !registry) return undefined;
+  if (agent === 'pi' || agent === 'cursor' || !registry) return undefined;
 
   const candidates = new Set([modelId]);
   if (modelId.startsWith("chatgpt/")) {

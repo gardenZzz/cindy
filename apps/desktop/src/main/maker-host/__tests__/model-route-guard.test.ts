@@ -231,6 +231,7 @@ describe('checkModelRoute', () => {
     expect(checkModelRoute(v, 'claude-code', 'shared-id', 'openai')).toEqual({ kind: 'pass' });
   });
 
+
   it('能力模型分类按将要路由的拷贝判:未连接来源的对话拷贝不构成豁免', () => {
     // 同 id 在 xd 是图像模型、在用户自定义 mycorp 是对话模型,但 mycorp 未连接:
     // 实际路由永远不会落到未连接拷贝,隐式与点名 xd 都必须拒(PR #744 review 第六轮)。
@@ -252,6 +253,7 @@ describe('checkModelRoute', () => {
   });
 
   it('混源同 id 双连接:分类按选中来源 —— 显式选用户家对话拷贝放行,点名 XD 家能力拷贝拒,隐式默认改道到对话拷贝', () => {
+
     const catalog = {
       providers: [
         provider('xd', [model('gpt-image-2', { group: 'image' })]),
@@ -270,6 +272,7 @@ describe('checkModelRoute', () => {
     expect(checkModelRoute(v, 'claude-code', 'gpt-image-2', null)).toEqual({
       kind: 'reroute',
       providerId: 'mycorp',
+
     });
   });
 
@@ -496,6 +499,19 @@ describe('materializeExclusiveProviderRoute', () => {
   it('Claude/GPT 双来源保持 keep,不打断默认队列', () => {
     expect(materializeExclusiveProviderRoute(views(), 'claude-code', 'claude-opus-5', null))
       .toEqual({ kind: 'keep' });
+  });
+
+  it('cursor 无 Cindy provider 条目,独占 Grok 保持 keep(不误伤登录制 agent)', () => {
+    // cursor 不在 XD 目录:任何 provider 都不 agents.includes('cursor'),目录里有无 xai
+    // 都不改变结论 —— 独占守卫对它不适用,reject 会误伤 cursor 会话(#2898 回归)。
+    expect(materializeExclusiveProviderRoute(xaiViews(), 'cursor', 'grok-4.6', null))
+      .toEqual({ kind: 'keep' });
+    expect(materializeExclusiveProviderRoute(xaiViews({ xd: true, xai: false }), 'cursor', 'grok-4.6', null))
+      .toEqual({ kind: 'keep' });
+    expect(materializeExclusiveProviderRoute(views(), 'cursor', 'grok-4.5', null))
+      .toEqual({ kind: 'keep' });
+    expect(checkModelRoute(xaiViews({ xd: true, xai: false }), 'cursor', 'grok-4.6', null))
+      .toEqual({ kind: 'pass' });
   });
 
   it('裸 grok / xai/ 前缀在 xAI 已连接时钉死 xai', () => {

@@ -28,9 +28,10 @@ import { clearSessionAttentionMany } from '@/lib/sessionAttentionStore';
 
 import { useRuns } from '../hooks/useRuns';
 import { useSessionReferences } from '../hooks/useSessionReferences';
-import { cronToConfig, summarizeConfig } from '../lib/cronCodexPreset';
+import { cronToConfig, formatIntervalDuration, summarizeConfig } from '../lib/cronCodexPreset';
 import { basenameOf, describeDestination, humanizeAgentKind } from '../lib/formatters';
 import { groupRunsForHistory } from '../lib/runHistoryGrouping';
+import { sessionAgentKindToScheduleAgentKind } from '../lib/scheduleFormLogic';
 
 import { RunHistoryCard } from './RunHistoryCard';
 
@@ -58,7 +59,7 @@ export function RunHistoryPane({
   onDelete,
   runNowBusy = false,
 }: Props) {
-  const { t } = useTranslation();
+  const { t, i18n } = useTranslation();
   // 展示策略（避免切任务闪烁）：
   // - hasLoaded=false（应用启动后第一次都没拉过）→ 整块 run 区域不挂载
   // - hasLoaded=true 但 runsScheduleId !== s.id → 切任务过渡期，runs 还是上一个
@@ -77,7 +78,7 @@ export function RunHistoryPane({
   // ScheduleRun 没存 agentKind，但每条 run 关联一个 session（run.sessionId），
   // session 上有 agentKind。这里拉 'all' 桶（含 archived）建 sessionId → AgentKind 映射，
   // session 已被删 / 桶未加载完 时 fallback 到 schedule 当前 agentKind。
-  // Session.agentKind 是 'cc'|'codex'，scheduler 侧是 'claude-code'|'codex'，需要映射。
+  // Session.agentKind 是 'cc'|'codex'|'cursor'，scheduler 侧是 AgentKind，需要映射。
   const { sessions: allSessions } = useCCSessions({ includeArchived: 'all' });
   const runSessionIds = useMemo(
     () => runs.flatMap((run) => (run.sessionId ? [run.sessionId] : [])),
@@ -87,7 +88,7 @@ export function RunHistoryPane({
   const sessionAgentMap = useMemo(() => {
     const m = new Map<string, AgentKind>();
     for (const sess of allSessions) {
-      m.set(sess.id, sess.agentKind === 'cc' ? 'claude-code' : sess.agentKind === 'pi' ? 'pi' : 'codex');
+      m.set(sess.id, sessionAgentKindToScheduleAgentKind(sess.agentKind));
     }
     return m;
   }, [allSessions]);
@@ -97,7 +98,7 @@ export function RunHistoryPane({
       const referenceAgent = sessionReferences.get(run.sessionId)?.agentKind;
       return (
         sessionAgentMap.get(run.sessionId) ||
-        (referenceAgent === 'cc' ? 'claude-code' : referenceAgent) ||
+        (referenceAgent ? sessionAgentKindToScheduleAgentKind(referenceAgent) : undefined) ||
         s.agentKind
       );
     },
@@ -206,9 +207,15 @@ export function RunHistoryPane({
   // 用 summarizeConfig 复用创建对话框那套语义化摘要（"Daily at 09:00" / "Hourly" / "Weekly on Mon, Wed at 14:30" ...），
   // 跟 chip 文案 100% 对齐；不再用 cronToHuman 的 "At 09:00" 风格。
   // manual schedule 不参与 cron，cron 字段是占位 → header 显示 "Manual trigger"。
+  // 相对间隔任务的 cronExpr 同样只是占位（秒级间隔恒为 `* * * * *`），必须按
+  // intervalMs 呈现，否则每条秒级任务都会谎报成 "Every minute"。
   const cronText = s.manual
     ? t('scheduler.detail.manualTrigger')
-    : summarizeConfig(cronToConfig(s.cronExpr));
+    : s.intervalMs !== undefined
+      ? t('scheduler.chips.timingMode.intervalChip', {
+          schedule: formatIntervalDuration(s.intervalMs, i18n.resolvedLanguage ?? i18n.language),
+        })
+      : summarizeConfig(cronToConfig(s.cronExpr));
   const agentText = humanizeAgentKind(s.agentKind);
   const dest = describeDestination(s);
   // title 兜底显示完整路径，悬浮即可看到 — basename 视觉简洁，hover/title 看全量

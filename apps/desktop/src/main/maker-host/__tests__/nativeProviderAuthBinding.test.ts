@@ -387,3 +387,4 @@ describe('凭证来路(selfAuthorized)—— 显式授权 vs 自动继承', () =
     expect(isNativeProviderAuthSelfAuthorized('anthropic')).toBe(true);
   });
 });
+

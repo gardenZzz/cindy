@@ -16,6 +16,7 @@ export function makeAdapter(config: ConfigFile): AgentAdapter {
         command: config.agent_options?.command,
       });
     case 'codex':
+    case 'cursor':
     case 'custom':
       throw new Error(`agent "${config.agent}" is not implemented in MVP. Use "claude-code".`);
   }

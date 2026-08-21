@@ -65,6 +65,8 @@ export interface Capabilities {
    *            计划批准后 agent 自动退出计划模式并切回底层权限档。
    *  - Codex:  走 app-server experimental collaborationMode ({ mode:'plan' })，
    *            plan item 产出后由 agent 发起 plan_review，批准后自动发起实施 turn。
+   *  - Cursor: session/set_mode(plan) + cursor/create_plan → plan_review；
+   *            产品面不暴露 ask 模式；批准后 session/set_mode(agent)。
    * optional：device-link 老版本 host 序列化的 capabilities 没有此字段，
    * 消费方用 `capabilities?.planMode?.supported === true` 判定（缺省视为不支持）。
    */
@@ -246,6 +248,10 @@ export interface ModelDescriptor {
    * UI 据此显示 / 隐藏 Fast Mode 开关, 不再自己 startsWith 解析 model id。
    */
   supportsFastMode?: boolean;
+  /**
+   * Cursor ACP 参数化 `thinking` 开关（与 effort/fast 并列）。仅 Cursor 会填。
+   */
+  supportsThinkingMode?: boolean;
   /**
    * 厂商分组 id（纯展示元数据，源自目录 providers.json，host 派生时透传）。
    * 渲染层据此对模型分组；缺省时回退 id 前缀归类。maker-core 运行时不读它。

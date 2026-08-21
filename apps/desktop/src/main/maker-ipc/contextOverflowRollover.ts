@@ -236,13 +236,14 @@ function isExternalDispatchOwner(agentMeta: Record<string, unknown> | null | und
   return typeof kind === 'string' && kind.length > 0;
 }
 
-function normalizeOverflowDbAgentKind(value: string): 'cc' | 'codex' | 'pi' {
-  if (value === 'codex' || value === 'pi') return value;
+function normalizeOverflowDbAgentKind(value: string): 'cc' | 'codex' | 'cursor' | 'pi' {
+  if (value === 'codex' || value === 'cursor' || value === 'pi') return value;
   return 'cc';
 }
 
 export function engineLabelForOverflow(agentKind: string): string {
   if (agentKind === 'codex') return 'Codex';
+  if (agentKind === 'cursor') return 'Cursor';
   if (agentKind === 'pi') return 'Pi';
   return 'Claude Code';
 }
@@ -319,7 +320,7 @@ export interface ContextOverflowRolloverDeps {
     meta: {
       reason: 'context-overflow' | 'pi-prompt-timeout';
       sourceUserClientId: string | null;
-      sourceAgentKind?: 'cc' | 'codex' | 'pi';
+      sourceAgentKind?: 'cc' | 'codex' | 'cursor' | 'pi';
       sourceModel?: string | null;
       sourceProviderId?: string | null;
       expectedClearedAt?: number | null;

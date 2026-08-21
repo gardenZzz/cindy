@@ -72,6 +72,8 @@ const DEFAULT_CRON = '0 9 * * *';
 const DEFAULT_TIMEZONE = 'Asia/Shanghai';
 const DEFAULT_CLAUDE_MODEL = 'claude-sonnet-4-6';
 const DEFAULT_CODEX_MODEL = 'gpt-5.5';
+/** Cursor 产品面 Auto；与 desktop model-defaults / CURSOR_PRODUCT_AUTO_MODEL_ID 对齐。 */
+const DEFAULT_CURSOR_MODEL = 'auto';
 
 export function createMobileScheduleDraft(
   schedule?: RemoteSchedule | null,
@@ -330,9 +332,12 @@ export function buildMobileScheduleInput(draft: MobileScheduleDraft): RemoteSche
   if (model) input.model = model;
   const effort = draft.effort.trim();
   if (isMobileScheduleEffort(effort)) input.effort = effort;
-  // Fast 对 Codex 与 Pi 都生效(runner 对 claude-code 忽略此字段,并按模型 supportsFastMode
-  // 收口);只序列化 codex 会让 Pi 任务里开的 Fast 被静默丢弃。
-  if (draft.agentKind === 'codex' || draft.agentKind === 'pi') input.fastMode = draft.fastMode;
+  // Fast 对 Codex / Cursor / Pi 都生效(runner 对 claude-code 忽略此字段,并按模型
+  // supportsFastMode 收口);漏掉任一种,该 agent 表单里开的 Fast 都会被静默丢弃,
+  // 且**关闭**时因省略 key 让引擎保留旧的 true。写死开与关两个方向都要带上。
+  if (draft.agentKind === 'codex' || draft.agentKind === 'cursor' || draft.agentKind === 'pi') {
+    input.fastMode = draft.fastMode;
+  }
   return input;
 }
 
@@ -507,7 +512,8 @@ function hasTemplateParam(params: Record<string, string>, key: string): boolean 
 
 function defaultModelFor(agentKind: RemoteScheduleAgentKind): string {
   if (agentKind === 'codex') return DEFAULT_CODEX_MODEL;
-  // Pi 模型来自动态 BYOM 供应商目录,没有固定默认 id;留空 → 序列化时省略 → host 解析
+  if (agentKind === 'cursor') return DEFAULT_CURSOR_MODEL;
+  // Pi 模型来自动态 BYOM 供应商目录,没有固定默认 id;留空 -> 序列化时省略 -> host 解析
   // 该 Pi agent 的当前默认模型(用户仍可在自由文本模型框里显式指定)。
   if (agentKind === 'pi') return '';
   return DEFAULT_CLAUDE_MODEL;

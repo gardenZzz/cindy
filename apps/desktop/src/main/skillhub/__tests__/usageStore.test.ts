@@ -7,6 +7,7 @@ import {
   markSkillUsageSourceFailed,
   persistSkillUsageAnalysis,
 } from '../usageStore';
+import type { AgentKind } from '@cindy/maker-core';
 
 function createDb(): Database.Database {
   const db = new Database(':memory:');
@@ -90,7 +91,7 @@ function persistExposure(db: Database.Database, row: {
   skillDocumentHash: string | null;
   exposureContentHash?: string;
   documentHashSource?: string;
-  agentKind?: 'claude-code' | 'codex';
+  agentKind?: AgentKind;
   skillName?: string;
   skillPath?: string | null;
   source?: string;

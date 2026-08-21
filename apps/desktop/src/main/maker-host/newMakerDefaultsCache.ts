@@ -1,3 +1,9 @@
+import type { AgentKind } from '@cindy/maker-core';
+import {
+  agentKindToDraftVendor,
+  type DraftPushSlot,
+  type DraftVendorKey,
+} from '../../shared/agentKindDraftVendor.js';
 import {
   DEFAULT_ORCA_WORKER_PERMISSION_MODE,
   resolveOrcaWorkerPermissionMode,
@@ -14,10 +20,11 @@ import {
  * 不再用 hardcode 默认值,优先读这份缓存 —— worker 实际启动参数 = "用户在 New Maker
  * 面板里该 vendor 当前的选择";旧 renderer 未推 providerId 时,创建服务才回退 Lead 来源。
  *
- * Vendor 名称差异: renderer 用 'cc' / 'codex' / 'pi'; worker spawn 路径用
- * 'claude-code' / 'codex' / 'pi'。getWorkerDefaultsFromNewMaker 内部做映射。
+ * Vendor 名称差异: renderer 用 'cc' / 'codex' / 'cursor' / 'pi' / 'orca'; worker spawn 路径用
+ * 'claude-code' / 'codex' / 'cursor' / 'pi'。getWorkerDefaultsFromNewMaker 经
+ * agentKindToDraftVendor 做唯一映射（禁止再写二元 cc/codex 兜底）。
  */
-type VendorKey = 'cc' | 'codex' | 'pi';
+type VendorKey = DraftVendorKey;
 
 interface VendorPrefsSnapshot {
   model?: string;
@@ -103,7 +110,7 @@ export interface WorkerDefaultsFromNewMaker {
  * 未推送 / 未记录 → undefined，调用方保持模型默认（开）。
  */
 export function getThinkingEnabledFromMemory(
-  agentKind: 'claude-code' | 'codex' | 'pi',
+  agentKind: AgentKind,
   providerId: string | null | undefined,
   model: string | undefined,
 ): boolean | undefined {
@@ -116,10 +123,10 @@ export function getThinkingEnabledFromMemory(
  * 缓存未就绪 / 该 vendor 没有偏好 → 返回空对象, 调用方按自己的兜底规则处理。
  */
 export function getWorkerDefaultsFromNewMaker(
-  workerAgent: 'claude-code' | 'codex' | 'pi',
+  workerAgent: AgentKind,
 ): WorkerDefaultsFromNewMaker {
   if (!cache) return {};
-  const vendor: VendorKey = workerAgent === 'claude-code' ? 'cc' : workerAgent === 'pi' ? 'pi' : 'codex';
+  const vendor = agentKindToDraftVendor(workerAgent);
   const prefs = cache.lastByVendor[vendor];
   if (!prefs?.model) return {};
   const model = prefs.model;
@@ -168,10 +175,9 @@ export interface RemoteNewMakerDefaults {
 }
 
 export function getRemoteNewMakerDefaults(
-  agentKind: 'claude-code' | 'codex' | 'pi',
+  agentKind: AgentKind,
 ): RemoteNewMakerDefaults {
-  const vendor: VendorKey =
-    agentKind === 'claude-code' ? 'cc' : agentKind === 'pi' ? 'pi' : 'codex';
+  const vendor: VendorKey = agentKindToDraftVendor(agentKind);
   // providerModelMemory(草稿列表行真实读源)与「该 vendor 是否选过模型」无关:即便 cache 未就绪 /
   // 该 vendor 无选中模型(lastByVendor 空),只要被控端有模型级预设就要全量回给控制端,
   // 否则 req1「完整镜像被控端草稿模型列表」在这条边界上回落 capabilities 默认。故在所有早返回里都带上它。
@@ -200,15 +206,18 @@ export function getRemoteNewMakerDefaults(
   };
 }
 
-/** device-link push payload：一次广播携带所有可建草稿的 vendor，避免增量 push 丢槽。 */
-export function getRemoteNewMakerDefaultsByVendor(): {
-  claudeCode: RemoteNewMakerDefaults;
-  codex: RemoteNewMakerDefaults;
-  pi: RemoteNewMakerDefaults;
-} {
+/**
+ * device-link NEW_MAKER_DRAFT_CHANGED 的全量 per-agent 镜像。四槽齐全
+ * （claude-code / codex / cursor / pi）；旧控制端忽略未知键即可。
+ */
+export function buildNewMakerDraftChangedPayload(): Record<
+  DraftPushSlot,
+  RemoteNewMakerDefaults
+> {
   return {
     claudeCode: getRemoteNewMakerDefaults('claude-code'),
     codex: getRemoteNewMakerDefaults('codex'),
+    cursor: getRemoteNewMakerDefaults('cursor'),
     pi: getRemoteNewMakerDefaults('pi'),
   };
 }

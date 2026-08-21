@@ -27,6 +27,8 @@
 import { hasUserVisibleText } from '../../shared/visibleText.js';
 
 import {
+  CURSOR_STREAM_DISCONNECT_REASON,
+  CURSOR_TOOL_CALL_IDLE_TIMEOUT_REASON,
   isNetworkishErrorMessage,
   isOverloadErrorMessage,
   UPSTREAM_OVERLOAD_REASON,
@@ -103,8 +105,18 @@ function isStreamTruncationError(signals: InterruptedTurnErrorSignals): boolean 
  */
 export function isInterruptedTurnError(signals: InterruptedTurnErrorSignals): boolean {
   const reason = typeof signals.reason === 'string' ? signals.reason : '';
-  // 例外先行：`upstream-overload` 是**已归类为可重试**的 reason，它本身就是比文案更可靠的
-  // 权威判据（结构化优先于文案，与 overload-error.ts 的论证同源），直接放行、不再看文案。
+  // 例外先行：`upstream-overload` / `cursor-stream-disconnect` / `codex_reconnect_stalled`
+  // 是**已归类为可重试**的 reason，它们本身就是比文案更可靠的权威判据（结构化优先于文案，
+  // 与 overload-error.ts 的论证同源），直接放行、不再看文案。
+  //
+  // `tool_call_idle_timeout` 同理放行：Cursor ACP 不流式回传终端输出，长命令（跑 CI /
+  // 长构建 / 监听类工具）在整段等待期内零 session/update，看门狗按阈值判定超时。此前的
+  // 处理是直接取消并让用户手动补发下一条；现在纳入本白名单后改走有界续跑——退避 +
+  // 连续 5 次 / 每人话 10 次上限 + kill switch，且 `performRetryLastError` 对已有产出的
+  // turn 发**续跑指令**（非重放原文），由知道命令预期耗时的 Agent 决定是重挂、轮询还是
+  // 换招，而非盲目重放（重放才会重复副作用）。前置条件见 maker-core
+  // `toolIdleWatchdog.suspend/resume`：人机交互（审批 / 提问 / 计划审阅）期间看门狗
+  // 已暂停计时，等用户不算空闲配额，只有真正的工具静默才会触发本分支。
   //
   // `empty-response` 同理放行（#2320）：translator 的判据已经足够严格——本轮确实发起过
   // API 调用（apiCalls > 0）、无可见文本、无 result 兜底文本、无工具调用、无 compact
@@ -116,6 +128,8 @@ export function isInterruptedTurnError(signals: InterruptedTurnErrorSignals): bo
   // 硬上限 / 退避止损，预算耗尽后横幅交还用户，不会无界重试。
   if (
     reason === UPSTREAM_OVERLOAD_REASON ||
+    reason === CURSOR_STREAM_DISCONNECT_REASON ||
+    reason === CURSOR_TOOL_CALL_IDLE_TIMEOUT_REASON ||
     reason === 'codex_reconnect_stalled' ||
     reason === 'empty-response'
   ) {

@@ -9,6 +9,7 @@ vi.mock('react-i18next', () => ({
     t: (key: string, vars?: Record<string, unknown>) => {
       if (key === 'chat.agentTask.provider.claude') return 'Claude Code';
       if (key === 'chat.agentTask.provider.codex') return 'Codex';
+      if (key === 'chat.agentTask.provider.cursor') return 'Cursor';
       if (key === 'chat.agentTask.status.completed') return 'Completed';
       if (key === 'chat.agentTask.status.running') return 'Running';
       if (key === 'chat.agentTask.tokens') return `${vars?.count} tokens`;
@@ -66,6 +67,21 @@ const withPanelHost = (
   });
 
 describe('AgentTaskCard', () => {
+  it('renders Cursor provider label for cursor tasks', () => {
+    const { container } = render(
+      React.createElement(AgentTaskCard, {
+        update: {
+          provider: 'cursor',
+          taskId: 'c1',
+          status: 'completed',
+          title: 'Explore',
+        },
+      }),
+    );
+    expect(container.textContent).toContain('Cursor');
+    expect(container.textContent).not.toContain('Claude Code');
+  });
+
   it.each([
     ['failed', 'chat.agentTask.status.failed'],
     ['stopped', 'chat.agentTask.status.stopped'],

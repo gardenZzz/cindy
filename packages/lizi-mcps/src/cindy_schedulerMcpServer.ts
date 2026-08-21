@@ -41,6 +41,7 @@ import {
 } from './scheduler/index.js';
 import { resolveLiziMcpSessionContext } from './session-context.js';
 import type { LiziMcpSessionContext, SchedulerMcpDeps } from './types.js';
+import type { AgentKind } from '@cindy/maker-core';
 
 /**
  * Per-session 上下文(在 providers.ts 的 toClaudeSdkConfig(ctx) 时绑定到闭包,
@@ -51,7 +52,7 @@ import type { LiziMcpSessionContext, SchedulerMcpDeps } from './types.js';
  * resolveLiziMcpSessionContext 补回当前 thread 的 ctx。
  */
 export interface SchedulerMcpSessionCtx {
-  agentKind: 'claude-code' | 'codex' | 'pi';
+  agentKind: AgentKind;
   workingDir: string;
   getSessionContext?: () => LiziMcpSessionContext | undefined;
   sessionId?: string;

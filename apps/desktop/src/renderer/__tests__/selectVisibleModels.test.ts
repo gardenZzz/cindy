@@ -303,6 +303,33 @@ describe('selectVisibleModels — excludeChatBridgedCodex(SSH 远程隐藏 Chat 
   });
 });
 
+describe('selectVisibleModels — cursor capabilities catalog', () => {
+  it('cursor 本机/远程都走 capabilities，不读 providers', () => {
+    const cursorModels = [devModel('auto'), devModel('gpt-5.5')];
+    const out = selectVisibleModels({
+      agentKind: 'cursor',
+      deviceId: undefined,
+      providers: [provider('openai', 'codex', ['gpt-5.5'])],
+      deviceCcModels: [devModel('claude-opus-4-8')],
+      deviceCodexModels: [devModel('gpt-5.4')],
+      deviceCursorModels: cursorModels,
+    });
+    expect(ids(out)).toEqual(['auto', 'gpt-5.5']);
+  });
+
+  it('cursor 目录为空时返回空数组（调用方保留 Auto 兜底）', () => {
+    const out = selectVisibleModels({
+      agentKind: 'cursor',
+      deviceId: 'dev-1',
+      providers: [],
+      deviceCcModels: [],
+      deviceCodexModels: [],
+      deviceCursorModels: [],
+    });
+    expect(out).toEqual([]);
+  });
+});
+
 describe('filterChatBridgedCodexProviders — provider source sections', () => {
   const bridged = { ...codexProvider('bridged', ['deepseek-chat'], 'openai-chat'), connected: true };
   const native = { ...codexProvider('native', ['gpt-5.5'], 'openai-responses'), connected: true };

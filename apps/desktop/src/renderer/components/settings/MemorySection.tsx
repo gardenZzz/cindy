@@ -26,10 +26,9 @@ import { PiMark } from '@/components/icons/PiMark';
 import { createLogger } from '@/lib/logger';
 import { useMemorySettings } from '@/hooks/useMemorySettings';
 import { DefaultOverrideControls } from './DefaultOverrideControls';
+import type { AgentKind } from '@cindy/maker-core';
 
 const log = createLogger('MemorySection');
-
-type AgentKind = 'claude-code' | 'codex' | 'pi';
 
 interface AgentDescriptor {
   kind: AgentKind;
@@ -76,6 +75,8 @@ export function MemorySection() {
   const [slots, setSlots] = useState<Record<AgentKind, MemorySlotState>>({
     'claude-code': INITIAL,
     codex: INITIAL,
+    // Type-slot only (#5); AGENTS list above excludes cursor so UI is unchanged.
+    cursor: INITIAL,
     pi: INITIAL,
   });
   // pending 飞行中跳过 reload — 否则 toggle/reset 飞行期间 focus 触发 reload 会

@@ -591,7 +591,7 @@ export interface ChatMessage {
 export type AgentTaskStatus = 'running' | 'completed' | 'failed' | 'stopped';
 
 export interface AgentTaskUpdate {
-  provider: 'claude-code' | 'codex' | 'pi';
+  provider: AgentKind;
   taskId: string;
   parentToolUseId?: string;
   status: AgentTaskStatus;
@@ -2272,7 +2272,7 @@ export type MessageDeliveryMode = 'queue' | 'steer';
 
 /** 仅影响 selector/chip 的乐观展示；agentKind 始终保留真实 reducer 路由。 */
 export interface AgentSwitchIntentRecord {
-  target: 'claude-code' | 'codex' | 'pi';
+  target: AgentKind;
   model: string;
   providerId: string | null;
   effort?: string;
@@ -2288,7 +2288,7 @@ export interface SessionChatState {
    * Codex reducer。ensureInitialMessages 从 DB sessions.agent_kind 读出来灌进。
    * 默认 'claude-code' 兼容老路径(老 session row 没有此字段时按 Claude 处理)。
    */
-  agentKind: 'claude-code' | 'codex' | 'pi';
+  agentKind: AgentKind;
   /** 下一条消息发送时才由 main 应用的跨引擎切换意图。 */
   agentSwitchIntent: AgentSwitchIntentRecord | null;
   /**
@@ -2528,6 +2528,7 @@ export interface SessionChatState {
   queueExpanded: boolean;
   /** Fast Mode toggle state — session-level, OFF by default, only meaningful for supported models. */
   fastMode: boolean;
+  /** Cursor thinking 开关 — session-level, ON by default when model exposes it. */
   /**
    * 计划模式一级开关(与 permissionMode 正交)。开关入口在 composer「+」菜单;
    * 计划批准后 agent 自动退出, 经 plan_mode_changed → sessions:patched →
@@ -3712,7 +3713,11 @@ function upsertCodexReconnectPendingCard(
   return collapseConsecutiveAutoResumeRows([...messages, card]);
 }
 
-function isCodexUserActionableRetryError(data: unknown): boolean {
+/**
+ * 这条错误是不是「用户必须自己动手」（认证失效 / 额度耗尽）——判据与 agent 无关，
+ * 两个调用点（Codex 原生重连行、跨 agent 的自愈广播回声抑制）共用同一份。
+ */
+function isUserActionableRetryError(data: unknown): boolean {
   const root = data && typeof data === 'object' ? (data as Record<string, unknown>) : {};
   const message = typeof root.message === 'string' ? root.message : '';
   const sdkError = typeof root.sdkError === 'string' ? root.sdkError : '';
@@ -4390,13 +4395,15 @@ function normalizeAgentTaskUpdate(
       ? rawStatus
       : 'running';
   const provider =
-    raw.provider === 'codex' || raw.provider === 'claude-code' || raw.provider === 'pi'
+    raw.provider === 'codex' || raw.provider === 'claude-code' || raw.provider === 'cursor' || raw.provider === 'pi'
       ? raw.provider
       : source === 'codex'
         ? 'codex'
-        : source === 'pi'
-          ? 'pi'
-          : 'claude-code';
+        : source === 'cursor'
+          ? 'cursor'
+          : source === 'pi'
+            ? 'pi'
+            : 'claude-code';
   const usageRaw =
     raw.usage && typeof raw.usage === 'object' ? (raw.usage as Record<string, unknown>) : null;
   const usage = usageRaw
@@ -4667,7 +4674,7 @@ export function handleStreamEvent(
     event.source === 'codex' &&
     !isTerminalErrorData(event.data) &&
     reconnectAttempt !== null &&
-    !isCodexUserActionableRetryError(event.data);
+    !isUserActionableRetryError(event.data);
   const hasCodexReconnectRecoveryOutput = isCodexReconnectRecoveryOutput(event);
   const shouldClearCodexReconnectPendingCard =
     event.type === 'error' ? !isCodexReconnectProgress : hasCodexReconnectRecoveryOutput;
@@ -5383,9 +5390,16 @@ export function handleStreamEvent(
       }
       const finalized = finalizeStreamingInState(state);
       const derivedRetryText = deriveErrorRetryText(finalized);
+      // **刻意不看 event.source。** 接管是跨 agent 的（main 侧的判据、额度、落库抑制、
+      // 灵动岛抑制全都不看 agent kind，见 interruptedTurnAutoResume.ts），只有这里原先
+      // 写死了 `source === 'codex'`，于是 Cursor 的 `cursor-stream-disconnect`、
+      // Claude Code 的 SSE 截断、任何 agent 的 `empty-response` 走自愈时都会先闪一帧红
+      // 横幅、并把 projection 刚插进来的「重新连接中」活动行删掉，直到退避结束才复原。
+      // 门禁由 `hasMatchingAutoResumePendingError` 提供且本就与 agent 无关：它要求流里
+      // 已有接管卡、且卡上存的原始错误与本事件 message **完全相等** —— 那就是「main 已
+      // 接管的正是这一条错误」的证明，不会吞掉别的 turn 的失败。
       const suppressAutoResumeBroadcastError =
-        event.source === 'codex' &&
-        !isCodexUserActionableRetryError(event.data) &&
+        !isUserActionableRetryError(event.data) &&
         hasMatchingAutoResumePendingError(finalized.messages, event.data);
       // main coordinator 在终止型 error 时**先**同步 emit projection(errorRetryText
       // = projectionRetryText 的权威 retry token,active-turn 恢复恒非空)再 broadcast
@@ -6091,7 +6105,10 @@ function handleStatusUpdate(
       state.pendingTaskWakeStarted,
     turnStoppedByUser: isTurnStart ? false : state.turnStoppedByUser,
     agentStatus: {
-      status: update.status,
+      // update 来自未校验的 IPC / device-link 远端推送(`event.data as CCAgentStatusUpdate`),
+      // 上游漏字段时不能把 undefined 塞进 state —— 消费方(RunningStatusBar 的
+      // localizeAgentStatus 等)按 string 处理,会直接崩渲染树。
+      status: typeof update.status === 'string' ? update.status : state.agentStatus.status,
       tokenUsage: tu,
       costUsd: cu,
       contextTokens: ct,
@@ -6143,7 +6160,7 @@ type MakerEventPayload = {
   event?: {
     type: string;
     data: unknown;
-    source?: 'claude-code' | 'codex' | 'pi' | 'vision-bridge';
+    source?: AgentKind | 'vision-bridge';
     agentMeta?: Record<string, unknown>;
     turnContinuationId?: number;
     turnScope?: 'turn' | 'background';
@@ -6192,7 +6209,7 @@ type PendingTextDeltaBatch = {
   text: string;
   dataOwner: DataOwnerGeneration;
   ingress: LiveIngressContext;
-  source?: 'claude-code' | 'codex' | 'pi' | 'vision-bridge';
+  source?: AgentKind | 'vision-bridge';
   persistId?: string;
   agentMeta?: Record<string, unknown>;
 };
@@ -8579,7 +8596,7 @@ setRemoteTerminalErrorProbe(hasSessionTerminalError);
 
 interface ActiveSessionSnapshot {
   sessionId: string;
-  agentKind: 'claude-code' | 'codex' | 'pi';
+  agentKind: AgentKind;
   isTurnRunning: boolean;
 }
 
@@ -8588,7 +8605,7 @@ function isActiveSessionSnapshot(value: unknown): value is ActiveSessionSnapshot
   const item = value as Record<string, unknown>;
   return (
     typeof item.sessionId === 'string' &&
-    (item.agentKind === 'claude-code' || item.agentKind === 'codex' || item.agentKind === 'pi') &&
+    (item.agentKind === 'claude-code' || item.agentKind === 'codex' || item.agentKind === 'cursor' || item.agentKind === 'pi') &&
     typeof item.isTurnRunning === 'boolean'
   );
 }
@@ -9559,9 +9576,10 @@ function retryInvalidatedInitialHistoryFetchIfNeeded(
  */
 function dbAgentKindToMakerKind(
   dbKind: string | null | undefined,
-  fallback: 'claude-code' | 'codex' | 'pi' = 'claude-code',
-): 'claude-code' | 'codex' | 'pi' {
+  fallback: AgentKind = 'claude-code',
+): AgentKind {
   if (dbKind === 'codex') return 'codex';
+  if (dbKind === 'cursor') return 'cursor';
   if (dbKind === 'cc') return 'claude-code';
   if (dbKind === 'pi') return 'pi';
   return fallback;
@@ -11689,7 +11707,7 @@ function autoTitleFallbackLabels(): AutoTitleFallbackLabels {
 function scheduleAutoName(
   sessionId: string,
   text: string,
-  agentKind: 'claude-code' | 'codex' | 'pi',
+  agentKind: AgentKind,
   isUserText = true,
 ): void {
   // 与 main 共用 normalizeAutoTitle,两端算出的占位串逐字一致,回流时不跳变。
@@ -11805,7 +11823,7 @@ function clearAutoTitlePreviewSafely(sessionId: string): void {
 function maybeAutoNameUnnamedSession(
   sessionId: string,
   seed: AutoTitleSeed | null,
-  agentKind: 'claude-code' | 'codex' | 'pi',
+  agentKind: AgentKind,
 ): void {
   if (!seed?.isUserText) return;
   scheduleAutoName(sessionId, seed.text, agentKind, true);
@@ -12139,7 +12157,7 @@ async function sendMessageCore(
       // 用会话真实 agentKind 起名 — 之前写死 'claude-code',导致 Codex 会话也
       // 用 Claude haiku 起标题:纯 Codex 用户(无 Claude 鉴权)会 oneShot 失败 →
       // fallback 原话,表现为"Codex 会话标题没有智能总结"。current.agentKind 已是
-      // maker 格式('claude-code' | 'codex' | 'pi'),直接透传。起名走立即占位 + 后台覆盖。
+      // maker 格式(AgentKind),直接透传。起名走立即占位 + 后台覆盖。
       if (autoTitleSeed) {
         scheduleAutoName(
           sessionId,
@@ -12154,10 +12172,15 @@ async function sendMessageCore(
     // fork 出来的占位标题会话,都在第一条带文字的消息上把标题换成用户写的内容。
     maybeAutoNameUnnamedSession(sessionId, autoTitleSeed, current.agentKind);
   };
-  if (materializationPending && remoteRecord) {
-    remoteRecord.onMaterializationReady = commitAutoTitle;
-  } else {
-    commitAutoTitle();
+  // Cursor 标题另起 `cursor-agent -p`；先让 enqueue 建立/接管 ACP session，
+  // main 再等 session/new 就绪后起标题，避免两个冷启动同时争抢资源。
+  const deferAutoTitleForCursor = current.agentKind === 'cursor';
+  if (!deferAutoTitleForCursor) {
+    if (materializationPending && remoteRecord) {
+      remoteRecord.onMaterializationReady = commitAutoTitle;
+    } else {
+      commitAutoTitle();
+    }
   }
 
   if (deviceLinkRemote && remoteRecord) {
@@ -12184,6 +12207,10 @@ async function sendMessageCore(
       }
       const applied = applyInputProjectionOperationResponse(sessionId, operation, projection);
       if (applied) markSessionHasUserMessage(sessionId);
+      // RPC 已在发起时的设备上成功受理；origin 期间漂移只意味着旧 projection
+      // 不能写进当前镜像，不应向 composer 谎报发送失败并诱导用户重复发送。
+      // Cursor 起名延迟到 enqueue 成功后(ACP session 已建立)；非 cursor 已在上面跑过。
+      if (deferAutoTitleForCursor) commitAutoTitle();
       // 暂停 / 输入锁 / 凭证切换等待只把消息收下,不会马上派发。starting
       // 表示「预期会跑」,不能把明确未派发的任务标成运行中。
       if (
@@ -13921,8 +13948,7 @@ async function setFastMode(
       if (s.fastMode === enabled) return s;
       return { ...s, fastMode: enabled };
     });
-    // 无条件推 IPC:codex → agent setFastMode;claude-code → main 记 bridge 会话态
-    // (chatgpt/ 模型经订阅 handler 的 prefs 生效),其余在 main 侧安全 no-op。
+    // 无条件推 IPC；main 只对 codex/cursor live push，其余 agent 安全 no-op。
     await window.electronAPI.maker.setFastMode(sessionId, enabled).catch((err: unknown) => {
       log.warn('setFastMode IPC failed:', err);
     });
@@ -14277,7 +14303,7 @@ function sendUiTrigger(sessionId: string, prompt: string): Promise<void> {
  * sdkSessionId——否则 buildCreateOpts 会把旧引擎的原生会话 id 当 resume 目标
  * (main 侧 reconcileCreateOptsWithDb 是兜底,这里是第一现场收敛)。
  */
-function noteAgentSwitched(sessionId: string, agentKind: 'claude-code' | 'codex' | 'pi'): void {
+function noteAgentSwitched(sessionId: string, agentKind: AgentKind): void {
   if (!sessionId) return;
   setState(sessionId, (s) =>
     s.agentKind === agentKind && s.sdkSessionId === null && s.agentSwitchIntent === null
@@ -14303,7 +14329,7 @@ function noteAgentSwitched(sessionId: string, agentKind: 'claude-code' | 'codex'
  */
 function noteAgentSwitchIntent(
   sessionId: string,
-  target: 'claude-code' | 'codex' | 'pi',
+  target: AgentKind,
   opts: { model: string; providerId: string | null; effort?: string; fastMode?: boolean },
 ): void {
   if (!sessionId) return;
@@ -14349,14 +14375,16 @@ function getAgentSwitchIntentRev(sessionId: string): number {
 function normalizeAgentSwitchIntent(value: unknown): AgentSwitchIntentRecord | null {
   if (!value || typeof value !== 'object' || Array.isArray(value)) return null;
   const item = value as Record<string, unknown>;
-  // 轮 42 P1(codex-connector):pi 遗漏 —— main 的 performSessionAgentSwitch 与
-  // AgentSwitchIntentRecord.target 都支持 'pi', 这里收窄成 cc/codex 会把
-  // 等待下轮的 Pi switch 意图归一化成 null, pending 状态在 renderer 丢失。
+  // 恢复路径的运行时校验要与 noteAgentSwitchIntent 能保存的目标同集合：漏掉
+  // cursor 或 pi 时，Main 返回的 pending intent 会被归一成 null，选择器恢复
+  // 显示旧 Agent，而下一条消息仍按 Main 保留的意图切换 —— 界面与实际路由对不上。
   if (
-    item.targetAgentKind !== 'claude-code'
-    && item.targetAgentKind !== 'codex'
-    && item.targetAgentKind !== 'pi'
-  ) return null;
+    item.targetAgentKind !== 'claude-code' &&
+    item.targetAgentKind !== 'codex' &&
+    item.targetAgentKind !== 'cursor' &&
+    item.targetAgentKind !== 'pi'
+  )
+    return null;
   if (typeof item.model !== 'string' || item.model.length === 0) return null;
   // providerId 缺失按 null(与 main projectPendingAgentSwitchIntent 的 `?? null` 对齐);
   // 只有出现非 string / 非空值的脏值才判非法,避免协议演进时静默丢掉合法意图。
@@ -14412,11 +14440,7 @@ function mirrorAgentSwitchIntent(sessionId: string, value: unknown): void {
 
 function setSessionRuntime(
   sessionId: string,
-  opts: {
-    agentKind?: 'claude-code' | 'codex' | 'pi';
-    fastMode?: boolean;
-    planModeEnabled?: boolean;
-  },
+  opts: { agentKind?: AgentKind; fastMode?: boolean; planModeEnabled?: boolean },
 ): void {
   if (!sessionId) return;
   setState(sessionId, (s) => {
@@ -14493,7 +14517,7 @@ function mirrorSessionFields(
   // 新引擎的事件会被旧引擎 reducer 错误处理(2026-07-20 审计实锤)。随引擎翻转
   // 同步清 sdkSessionId(旧引擎的原生会话 id 对新引擎无意义,与 noteAgentSwitched
   // 口径一致)。幂等:发起窗口已 noteAgentSwitched → 同值 no-op。
-  if (patch.agentKind === 'cc' || patch.agentKind === 'codex' || patch.agentKind === 'pi') {
+  if (patch.agentKind === 'cc' || patch.agentKind === 'codex' || patch.agentKind === 'cursor' || patch.agentKind === 'pi') {
     const nextKind = dbToMakerAgentKind(patch.agentKind);
     setState(sessionId, (s) => {
       const intentApplied = s.agentSwitchIntent?.target === nextKind;

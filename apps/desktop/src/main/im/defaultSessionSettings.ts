@@ -25,6 +25,7 @@ import {
 import {
   IM_DEFAULT_EFFORT_OVERRIDES,
   IM_DEFAULT_SETTINGS,
+  type ImDefaultAgentKind,
   type ImDefaultAgentSettings,
   type ImDefaultSettingsChannel,
 } from '../../shared/imDefaultSettings.js';
@@ -122,11 +123,11 @@ export async function resolveDefaultProviderIdForModel(
 }
 
 function pickModel(
-  requestedAgent: AgentKind,
+  requestedAgent: ImDefaultAgentKind,
   settings: ImDefaultAgentSettings,
   config: ImOrchestratorConfig,
   providers: ProviderView[] | null,
-): { agentKind: AgentKind; modelId: string } {
+): { agentKind: ImDefaultAgentKind; modelId: string } {
   if (hasModel(requestedAgent, settings.model, providers)) {
     return { agentKind: requestedAgent, modelId: settings.model };
   }
@@ -188,12 +189,24 @@ function pickModel(
   return { agentKind: systemAgent, modelId: systemFallbackModel };
 }
 
+/**
+ * 该 agent 的可用模型是否来自 Cindy 供应商目录。
+ *
+ * Cursor 的模型由 cursor-agent 自己上报,没有任何 provider 声明 'cursor'
+ * (同 model-route-guard-live「cursor 无 Cindy provider」的约定)。按 provider 口径
+ * 判定会得出「一个可用模型都没有」,于是用户在 IM 设置里选的 Cursor 会被静默换成
+ * 别的 agent —— 这类降级恰恰是本文件其它分支要避免的。
+ */
+function hasProviderCatalog(agentKind: AgentKind): boolean {
+  return agentKind !== 'cursor';
+}
+
 function hasModel(
   agentKind: AgentKind,
   modelId: string,
   providers: ProviderView[] | null,
 ): boolean {
-  if (providers) {
+  if (providers && hasProviderCatalog(agentKind)) {
     // chatEligibleSourcesForModel(不是裸 sourcesForModel):否则一个已下架/从未是
     // 聊天模型的 id(image/embedding/...)会被判定为可用默认值(issue #882 第 3 点,
     // 2026-07 review)。
@@ -205,7 +218,7 @@ function hasModel(
 }
 
 function firstModel(agentKind: AgentKind, providers: ProviderView[] | null): string | null {
-  if (providers) {
+  if (providers && hasProviderCatalog(agentKind)) {
     // 兜底选模型与宽松降级同口径(pickEnabledFallbackModel):跳过停用条目与非聊天
     // 模型(图像/视频/TTS/STT/实时/Embedding/压缩等,issue #882 第 3 点),否则
     // 「保存的默认模型失效 → 取目录第一个」可能落在一份被停用或根本不是聊天模型
@@ -245,6 +258,9 @@ function resolveProviderId(
   modelId: string,
   providerId: string | null,
 ): string | null {
+  // 无供应商目录的 agent(Cursor)永远是隐式路由:目录里没有它的条目,任何显式
+  // providerId 都解析不出来,落 null 交给 agent 自己的路由。
+  if (!hasProviderCatalog(agentKind)) return null;
   if (!providerId) {
     if (!providers) return null;
     // 隐式默认(未选来源)同样过裁决:原生默认落点的拷贝被停用而有启用替代时,
@@ -327,7 +343,7 @@ function findModel(
   providers: ProviderView[] | null | undefined,
   providerId?: string | null,
 ) {
-  if (providers) {
+  if (providers && hasProviderCatalog(agentKind)) {
     // 显式来源由调用方(resolveProviderId)已经裁决过存在性/停用/chat 准入,这里
     // 直接取该来源自己的拷贝,不重复校验。
     if (providerId) {

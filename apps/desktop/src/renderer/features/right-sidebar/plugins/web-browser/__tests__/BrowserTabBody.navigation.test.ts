@@ -97,8 +97,9 @@ vi.mock('../useLocalHtmlAutoReload', () => ({
 vi.mock('../../../lib/browserWebviewPool', () => ({
   browserWebviewPool: {
     release: vi.fn(),
-    // Navigation tests do not create a real WebView. The wrapper is only used
-    // to verify that layout cleanup respects the current Pool generation.
+    // BrowserTabBody 还会调用 useBrowserComment；该 hook 经 peek 获取 webview
+    // 并监听 ipc-message。导航测试没有真 webview，wrapper 仅用于验证 layout
+    // cleanup 的 Pool 代际归属。
     peek: vi.fn(() => poolMocks.currentWrapper
       ? { wrapper: poolMocks.currentWrapper, webview: null }
       : null),

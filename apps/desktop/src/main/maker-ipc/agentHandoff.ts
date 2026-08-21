@@ -13,8 +13,8 @@
 
 import { projectPersistedAgentFacingUserText } from '@cindy/maker-shared/agent-input-projection';
 
-/** DB 层引擎标识(sessions.agent_kind / messages.agent_kind 的值域)。 */
-export type DbAgentKind = 'cc' | 'codex' | 'pi';
+import type { DbAgentKind } from '../../shared/agentKindConversion.js';
+export type { DbAgentKind };
 
 /** 构造交接文本所需的最小消息投影(content 已 JSON.parse,即 camel Message.content)。 */
 export interface HandoffSourceMessage {
@@ -86,7 +86,18 @@ const COMMANDS_CAP = 10;
 /** 工作状态区:单条命令摘要上限(字符)。 */
 const COMMAND_LINE_CAP = 120;
 
-/** 会写文件的工具名(Claude 系 + Codex 系),input 里带路径字段。 */
+/**
+ * 会写文件的工具名,四家同规格:
+ *  - Claude Code: Edit / Write / MultiEdit / NotebookEdit;
+ *  - Codex: apply_patch / str_replace_editor;
+ *  - Pi: write / edit(input.path);
+ *  - Cursor(ACP): edit(kind=edit,input.path / file_path 经 rawInput 直传)。
+ *
+ * 工具名取自持久化 tool_use 行的 toolName;Cursor 由 acp/permissions.ts 的
+ * toolNameFromAcpToolCall 把 ACP kind 映射成小写 toolName(edit / exec 等),Pi 同。
+ * 路径键名(file_path / path / notebook_path)按各家真实入参形态统一在下方取值,
+ * 不在 translator 侧打语义标签(读侧实现,对存量任务立即生效)。
+ */
 const FILE_EDIT_TOOL_NAMES = new Set([
   'Edit',
   'Write',
@@ -94,9 +105,27 @@ const FILE_EDIT_TOOL_NAMES = new Set([
   'NotebookEdit',
   'apply_patch',
   'str_replace_editor',
+  // Pi 与 Cursor(ACP),toolName 小写。
+  'write',
+  'edit',
 ]);
-/** 执行命令的工具名(Claude Bash / Codex shell 系)。 */
-const COMMAND_TOOL_NAMES = new Set(['Bash', 'shell', 'exec_command', 'local_shell']);
+/**
+ * 执行命令的工具名,四家同规格:
+ *  - Claude Code: Bash;
+ *  - Codex: shell / exec_command / local_shell;
+ *  - Pi: bash(input.command);
+ *  - Cursor(ACP): exec(kind=execute,input.command)。
+ * 命令键名统一取 input.command。
+ */
+const COMMAND_TOOL_NAMES = new Set([
+  'Bash',
+  'shell',
+  'exec_command',
+  'local_shell',
+  // Pi 与 Cursor(ACP)。
+  'bash',
+  'exec',
+]);
 
 function truncate(text: string, cap: number): string {
   if (text.length <= cap) return text;

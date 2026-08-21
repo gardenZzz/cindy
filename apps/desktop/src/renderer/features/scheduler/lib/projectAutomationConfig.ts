@@ -1,9 +1,14 @@
 import type { Schedule } from '@cindy/maker-scheduler';
 
-import { buildPreRunHook } from './scheduleFormLogic';
-import type { ScheduleFormState } from '../hooks/useScheduleForm';
+import {
+  buildPreRunHook,
+  resolvePersistedScheduleEffort,
+  type ScheduleFormState,
+  type ScheduleModelEfforts,
+} from './scheduleFormLogic';
 import { stripTrailingPathSeparators } from '../../../../shared/pathText';
 import { PROJECT_AUTOMATION_REL_SEGMENTS } from '../../../../shared/projectAutomationPaths';
+import type { AgentKind } from '@cindy/maker-core';
 
 export interface ProjectScheduleConfig {
   id: string;
@@ -14,7 +19,7 @@ export interface ProjectScheduleConfig {
   recurring?: boolean;
   manual?: boolean;
   intervalMs?: number;
-  agentKind?: 'claude-code' | 'codex' | 'pi';
+  agentKind?: AgentKind;
   model?: string;
   /** 显式来源(供应商)id;省略 = 使用该 Agent 的原生默认来源。 */
   providerId?: string;
@@ -75,6 +80,7 @@ export function scheduleToProjectConfig(
 export function formToProjectConfig(
   form: ScheduleFormState,
   id: string,
+  modelEfforts?: ScheduleModelEfforts,
 ): ProjectScheduleConfig {
   const cronExpr = form.cronExpr.trim();
   return {
@@ -89,9 +95,9 @@ export function formToProjectConfig(
     agentKind: form.agentKind,
     model: form.model.trim() || undefined,
     providerId: form.providerId.trim() || undefined,
-    effort: form.effort || undefined,
-    // Codex / Pi 都生效(runner.ts:665);只认 codex 会丢弃 Pi 任务的 Fast(codex review)。
-    fastMode: (form.agentKind === 'codex' || form.agentKind === 'pi') && form.fastMode ? true : undefined,
+    effort: resolvePersistedScheduleEffort(form, modelEfforts),
+    // Codex / Cursor / Pi 都生效;只认 codex 会丢弃 Cursor/Pi 任务的 Fast。
+    fastMode: (form.agentKind === 'codex' || form.agentKind === 'cursor' || form.agentKind === 'pi') && form.fastMode ? true : undefined,
     useWorktree: form.useWorktree,
     persistentSession: form.persistentSession,
     silentWhenIdle: form.silentWhenIdle,

@@ -189,6 +189,12 @@ export function isSelectedSourceDisconnected(args: {
 }): boolean {
   const { providers, agent, modelId, selectedProviderId, providersLoading } = args;
   if (providersLoading || !agent || !selectedProviderId) return false;
+  // Cursor 用本机 cursor-agent(ACP),不在 Cindy provider 目录里,providerId 对它不构成
+  // 路由(短路口径同 ChatInput hasConnectedSendSource)。会话上残留的 providerId ——
+  // 自动化任务把 schedule.providerId 原样落进 sessions.provider_id,切到 Cursor 的任务
+  // 会带着上一个 agent 的来源 —— 在这里恒查不到已连接来源,会把 trigger 钉死成红色
+  // 「已断开」错误态(图标退化成来源首字母方盒)并禁用 Send。
+  if (agent === 'cursor') return false;
   // chatEligibleSourcesForModel + includeDisabled:选中来源若还在但这个 id 在它上面
   // 已经不是聊天模型了(mode 变化),也要判"断连"——否则这里说"没断连"、
   // effectiveSourceIdForModel 却解析不出可用来源,界面显示能发、实际发不出去

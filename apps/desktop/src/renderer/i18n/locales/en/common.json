@@ -1672,6 +1672,70 @@
         "hintLoggedIn": "{{cli}} is signed in on this device — authorize to connect",
         "hintInstalled": "{{cli}} is installed on this device"
       },
+      "cursor": {
+        "title": "Cursor",
+        "installedDescription": "cursor-agent is installed on this device. You can use Cursor as an optional agent when available.",
+        "installedSignedOutDescription": "cursor-agent is installed, but you are not signed in to Cursor. Sign in to create sessions.",
+        "loggedInDescription": "Signed in to Cursor ({{identity}}). New sessions will use this login.",
+        "loggedInUnknown": "signed-in account",
+        "loginPendingDescription": "Waiting for browser sign-in to Cursor. Open or copy the link below — Cindy will not open a browser for you.",
+        "missingDescription": "Install the official cursor-agent to use Cursor in Cindy. Optional — other features keep working without it.",
+        "installedPill": "Installed",
+        "loggedInPill": "Signed in",
+        "signedOutPill": "Signed out",
+        "installCta": "Install",
+        "installing": "Installing…",
+        "loginCta": "Sign in",
+        "loggingIn": "Signing in…",
+        "logoutCta": "Sign out",
+        "cancelLogin": "Cancel sign-in",
+        "openLoginUrl": "Open sign-in page",
+        "copyLoginUrl": "Copy link",
+        "loginUrlHint": "Finish authorization in the browser, then return here. The link includes a one-time credential — do not share it.",
+        "loginUrlCopied": "Sign-in link copied",
+        "loginUrlCopyFailed": "Couldn't copy the sign-in link",
+        "loginSuccess": "Signed in to Cursor",
+        "loginFailed": "Couldn't sign in to Cursor",
+        "logoutSuccess": "Signed out of Cursor",
+        "logoutFailed": "Couldn't sign out of Cursor",
+        "logoutConfirmTitle": "Sign out of Cursor?",
+        "logoutConfirmDescription": "This clears the cursor-agent login on this device (managed by the Cursor CLI). You will need to sign in again to create Cursor sessions.",
+        "logoutConfirm": "Sign out",
+        "authRequiredTitle": "Sign in to Cursor",
+        "authRequiredDescription": "Sign in to Cursor under Settings → Model providers before creating a session.",
+        "optionalHint": "Cursor ACP",
+        "refreshAria": "Recheck Cursor installation",
+        "confirmTitle": "Install Cursor?",
+        "confirmDescription": "Cindy will run this official install command on your machine:\n\n{{command}}\n\nNothing runs until you confirm.",
+        "confirmInstall": "Install",
+        "confirmCancel": "Cancel",
+        "installSuccess": "Cursor installed. Restart Cindy to pick Cursor when starting a task.",
+        "installFailed": "Couldn't install Cursor",
+        "installNotDetected": "Install finished, but cursor-agent wasn't found. Try refreshing, or install from a terminal.",
+        "unsupportedPlatform": "The official cursor-agent installer supports macOS and Linux only.",
+        "models": {
+          "emptyState": "No Cursor model catalog yet. Click \"Refresh models\" to fetch one (requires Cursor sign-in).",
+          "refreshCta": "Refresh models",
+          "refreshing": "Probed {{done}} / {{total}}",
+          "refreshUnavailableInstalled": "Install cursor-agent first",
+          "refreshUnavailableAuth": "Sign in to Cursor first",
+          "autoHint": "fallback",
+          "autoAlwaysOn": "always shown",
+          "effortHint_one": "{{count}} effort tier",
+          "effortHint_other": "{{count}} effort tiers",
+          "cancelRefresh": "Cancel refresh",
+          "refreshFailed": "Could not refresh models. Try again later."
+        },
+        "groups": {
+          "cursor": "Cursor",
+          "anthropic": "Anthropic",
+          "openai": "OpenAI",
+          "google": "Google",
+          "xai": "xAI",
+          "domestic": "China",
+          "other": "Other"
+        }
+      },
       "wizard": {
         "title": "Add provider",
         "titleWith": "Add · {{name}}",
@@ -3484,7 +3548,8 @@
         "agents": {
           "claude-code": "Claude Code",
           "codex": "Codex",
-          "pi": "Pi"
+          "pi": "Pi",
+          "cursor": "Cursor"
         },
         "groupPermissionLabel": "Permission mode for new group tasks",
         "groupPermissionDescription": "Permission mode used for every task created in a group chat — @bot opening a topic, /new, and /ctr all use it; the permission mode above applies to direct messages only. Defaults to Auto approval. Group context can contain member-controlled content — choosing Full access executes actions without per-step confirmation, so only pick it for groups you trust. Changes apply to tasks created afterwards; switch an existing task with /permission in the group."
@@ -6208,7 +6273,8 @@
       "inlineSecretStoreFailed": "Failed to save credential",
       "targetNotFound": "The target plugin was uninstalled or is currently unavailable",
       "targetDisabled": "The target plugin has been disabled",
-      "targetDisabledInWorkdir": "The user has disabled this plugin in the current working directory; do not retry."
+      "targetDisabledInWorkdir": "The user has disabled this plugin in the current working directory; do not retry.",
+      "targetToolNotFound": "The target plugin no longer provides this tool"
     },
     "createAgent": {
       "quickStart": "Quick start",
@@ -6308,6 +6374,7 @@
         "agent": {
           "claudeCode": "Claude Code",
           "codex": "Codex",
+          "cursor": "Cursor",
           "pi": "Pi",
           "pending": "Next: {{agent}}"
         }
@@ -6411,6 +6478,20 @@
           "bypassPermissions": {
             "label": "Full access",
             "description": "Allows editing any file and running networked commands without another confirmation. Highest risk; use only for trusted tasks."
+          }
+        },
+        "cursor": {
+          "ask": {
+            "label": "Default permissions",
+            "description": "Asks before running tools that need approval. Cindy handles each permission prompt in the client."
+          },
+          "auto": {
+            "label": "Auto-review",
+            "description": "Automatically allows read, search, and think tools. Edit, execute, and other higher-risk tools still ask for confirmation."
+          },
+          "bypassPermissions": {
+            "label": "Full access",
+            "description": "Allows tool calls without prompting. Highest risk; use only for trusted tasks. Does not change your Cursor sandbox settings."
           }
         },
         "pi": {
@@ -6845,6 +6926,7 @@
       "provider": {
         "claude": "Claude Code",
         "codex": "Codex",
+        "cursor": "Cursor",
         "pi": "Pi",
         "workflow": "Workflow",
         "shell": "Background command"
@@ -7633,6 +7715,9 @@
       "waiting": "Just wait…",
       "working": "Working…",
       "running": "Running…",
+      "starting": "Starting…",
+      "cancelled": "Cancelled",
+      "error": "Failed",
       "turnStart": "{{status}}",
       "issueTip": "{{name}}, try /issue to send us feedback or suggestions",
       "runningTool": "{{tool}} running…"
@@ -7838,7 +7923,8 @@
       "filterVendor": {
         "all": "All",
         "cc": "Claude",
-        "codex": "Codex"
+        "codex": "Codex",
+        "cursor": "Cursor"
       },
       "filterGroupBy": {
         "project": "Group by project",
@@ -8723,13 +8809,14 @@
         "interval": "Relative interval",
         "cronHint": "Runs at calendar clock slots.",
         "intervalHint": "Waits this long after the previous run finishes.",
-        "intervalUnsupportedHint": "This exact interval is preserved. Choosing a minute or hour preset will replace it.",
+        "intervalUnsupportedHint": "This exact interval is preserved. Choosing a second, minute, or hour preset will replace it.",
         "currentExact": "Current · {{schedule}}",
-        "exactIntervalPanelHint": "Choose a minute or hour preset on the left only when you want to replace this exact interval.",
+        "exactIntervalPanelHint": "Choose a second, minute, or hour preset on the left only when you want to replace this exact interval.",
         "cronChip": "Cron · {{schedule}}",
         "intervalChip": "After completion · {{schedule}}"
       },
       "scheduleMenu": {
+        "intervalSeconds": "Seconds (every N seconds)",
         "intervalMinutes": "Minutes (every N minutes)",
         "interval": "Hourly (every N hours)",
         "daily": "Daily (every day)",
@@ -8738,12 +8825,15 @@
         "monthly": "Monthly (specific day)"
       },
       "schedulePreview": {
+        "everySecond": "Runs every second",
+        "everySeconds": "Runs every {{count}} seconds",
         "everyMinute": "Runs every minute",
         "everyMinutes": "Runs every {{count}} minutes",
         "everyHour": "Runs every 1 hour",
         "everyHours": "Runs every {{count}} hours"
       },
       "scheduleField": {
+        "secondsSuffix": "second(s)",
         "minutesSuffix": "minute(s)",
         "hoursSuffix": "hour(s)",
         "daySuffix": "Day",

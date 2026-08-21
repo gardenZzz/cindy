@@ -2021,14 +2021,23 @@ function isGenericRunningStatusDetail(detail: string): boolean {
     || normalized === 'still running';
 }
 
+/** 只是 agent 名字的标题不算信息量,退回项目名/会话号。 */
+const AGENT_NAME_PLACEHOLDER_TITLES = new Set([
+  'codex',
+  'claude',
+  'claude code',
+  'cursor',
+  'pi',
+  'agent',
+]);
+
 function meaningfulSessionTitle(session: AgentIslandSessionState): string | null {
   const title = normalizeInlineText(session.title ?? '');
   if (!title) return null;
   const normalized = title.toLowerCase();
   if (normalized === 'new maker' || normalized === 'untitled') return null;
-  if (normalized === 'codex' || normalized === 'claude' || normalized === 'claude code' || normalized === 'agent') {
-    return null;
-  }
+  // 与 helper 侧 isMeaningfulExpandedTitle 的名单保持一致(四家 + 通称)。
+  if (AGENT_NAME_PLACEHOLDER_TITLES.has(normalized)) return null;
   return title;
 }
 

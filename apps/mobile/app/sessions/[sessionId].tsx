@@ -80,6 +80,7 @@ import { useUnresponsiveDevices } from '@/device-link/unresponsiveDevicesStore';
 import {
   connectionRecoverySyncRetryDelayMs,
   connectionIssueHint,
+  describeCursorHostError,
   describeRemoteComposerBlockingError,
   describeRemoteError,
   formatRemoteError,
@@ -2275,7 +2276,12 @@ export default function SessionScreen() {
           existingSessionRoute: true,
         })
       : null,
-    [composerDeviceProviders.providers, composerDeviceProviders.modelVisibilityOverrides, currentSession],
+    [
+      composerDeviceProviders.providers,
+      composerDeviceProviders.modelVisibilityOverrides,
+      currentSession,
+      sessionAgentKind,
+    ],
   );
   // 模型列表元信息(单价 / 折扣版 key presence)—— 与新建会话页同一套隧道缓存 hook。
   const deviceModelPricing = useDeviceModelPricing(deviceId || undefined);
@@ -3532,7 +3538,7 @@ export default function SessionScreen() {
   }, [agentSwitchIntent, capabilities, currentSession, deviceId, sessionId]);
 
   useEffect(() => {
-    if (!deviceId || !sessionAgentSwitchSupported) {
+    if (!deviceId || !sessionAgentSwitchSupported || modelSheetAgentKind === sessionAgentKind) {
       alternateCapabilitiesLoadSeqRef.current += 1;
       setAlternateCapabilities(null);
       setAlternateCapabilitiesAgentKind(null);
@@ -3597,7 +3603,10 @@ export default function SessionScreen() {
         if (alternateCapabilitiesLoadSeqRef.current !== seq) return;
         if (!isAgentCapabilitiesGenerationCurrent(deviceId, generation)) return;
         if (!cached) setAlternateCapabilities(null);
-        setAlternateCapabilitiesError(formatRemoteError(err));
+        setAlternateCapabilitiesError(
+          describeCursorHostError(formatRemoteError(err), targetAgentKind)
+            ?? formatRemoteError(err),
+        );
       })
       .finally(() => {
         if (
@@ -3618,6 +3627,7 @@ export default function SessionScreen() {
     openLink,
     sessionAgentKind,
     sessionAgentSwitchSupported,
+    t,
   ]);
 
   useEffect(() => {
@@ -7666,7 +7676,10 @@ export default function SessionScreen() {
           remoteSessionStore.applySessionPatch(deviceId, sessionId, {
             agentSwitchIntent: authoritative,
           });
-          setError(formatRemoteError(err));
+          setError(
+            describeCursorHostError(formatRemoteError(err), nextIntent.targetAgentKind)
+              ?? formatRemoteError(err),
+          );
         }
       }
       return false;
@@ -9229,12 +9242,20 @@ export default function SessionScreen() {
                     onCopyMessageLink={copyMessageLink}
                     onAddMessageToComposer={canUseComposer ? addMessageToComposer : undefined}
                     onDeleteMessage={collaborationReadOnlyReason ? undefined : deleteMessage}
-                    onForkMessage={collaborationReadOnlyReason ? undefined : forkAtMessage}
+                    onForkMessage={
+                      collaborationReadOnlyReason || sessionAgentKind === 'cursor'
+                        ? undefined
+                        : forkAtMessage
+                    }
                     onLoadEarlier={loadEarlierMessages}
                     onOpenForkOrigin={forkOrigin ? openForkOrigin : undefined}
                     onBlockingOverlayChange={handleMessageBlockingOverlayChange}
                     onOpenSessionLink={openSessionLink}
-                    onPreviewRewind={collaborationReadOnlyReason ? undefined : previewRewindAtMessage}
+                    onPreviewRewind={
+                      collaborationReadOnlyReason || sessionAgentKind === 'cursor'
+                        ? undefined
+                        : previewRewindAtMessage
+                    }
                     onEnterShareSelection={enterShareSelection}
                     onVisibleShareableMessageIdsReaderChange={handleVisibleShareableMessageIdsReaderChange}
                     shareSelectionActive={shareSelectionActive}

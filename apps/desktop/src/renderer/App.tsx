@@ -33,8 +33,8 @@ import { installSystemNetworkErrorToastListener } from '@/lib/systemNetworkError
 import { installSilentInstallToastListener } from '@/lib/silentInstallToast';
 import { installProviderUpstreamErrorToastListener } from '@/lib/providerUpstreamErrorToast';
 import { installAutoPermissionFallbackToastListener } from '@/lib/autoPermissionFallbackToast';
-import { agentKindToVendor } from '@/components/sidebar/VendorIcon';
 import { installCcMgrUpgradeListener } from '@/state/ccMgrUpgradeStore';
+import { getCursorAvailability } from '@/state/cursorAvailability';
 import {
   preloadLocalCatalogSnapshot,
   refreshLocalCatalogSnapshot,
@@ -49,6 +49,7 @@ import {
   patchVendorPrefs,
   patchVendorPrefsPreservingModelChoice,
 } from '@/state/newMakerDraft';
+import { agentKindToDraftVendor } from '../shared/agentKindDraftVendor';
 import {
   snapshotForSeed,
   setProviderModelChoice,
@@ -96,6 +97,10 @@ function MakerBootstrap() {
 
   useEffect(() => {
     makerChatStore.syncActiveTurnsFromMain();
+    void preloadLocalCatalogSnapshot();
+    // cursor-agent 装没装:预热一次全局缓存,让后续消费点(New Maker vendor 分段、worker
+    // 面板、发送门禁)读到的是已解析值,不各自留一段「先当成没装」的窗口。
+    void getCursorAvailability();
     // main 先提交 active catalog + capabilities 再广播；renderer 收到任一目录/鉴权变化后
     // 联合重拉 providers 与两份 capabilities，整组成功且代际最新时才切换。
     const refresh = () => {
@@ -161,8 +166,8 @@ export function App() {
       });
       // main 缓存两用途:① collab worker spawn 读 model/effort/fastMode;② device-link 远程
       // 草稿镜像读全量(model/effort/fast/permission/source)+「是否显式选过模型」。故
-      // lastByVendor 覆盖 cc/codex/pi，并带上 permissionMode + providerId(worker spawn
-      // 不消费这两项,远程草稿镜像才用)。fire-and-forget。
+      // lastByVendor 覆盖 cc/codex/cursor/pi，并带上 permissionMode + providerId(worker
+      // spawn 不消费这两项,远程草稿镜像才用);不带 orca。fire-and-forget。
       window.electronAPI.syncNewMakerDraft({
         lastByVendor: {
           cc: {
@@ -177,6 +182,12 @@ export function App() {
             permissionMode: draft.lastByVendor.codex.permissionMode,
             providerId: draft.lastByVendor.codex.providerId ?? null,
           },
+          cursor: {
+            model: draft.lastByVendor.cursor.model,
+            effort: draft.lastByVendor.cursor.effort,
+            permissionMode: draft.lastByVendor.cursor.permissionMode,
+            providerId: draft.lastByVendor.cursor.providerId ?? null,
+          },
           pi: {
             model: draft.lastByVendor.pi.model,
             effort: draft.lastByVendor.pi.effort,
@@ -187,6 +198,7 @@ export function App() {
         modelChosenByVendor: {
           cc: draft.modelChosenByVendor.cc === true,
           codex: draft.modelChosenByVendor.codex === true,
+          cursor: draft.modelChosenByVendor.cursor === true,
           pi: draft.modelChosenByVendor.pi === true,
         },
         fastModeByModel: draft.fastModeByModel,
@@ -235,7 +247,7 @@ export function App() {
   useEffect(() => {
     const offDraft = window.electronAPI.onMakerDraftPrefApply(
       ({ agent, providerId, modelId, active, effort, fast, thinking, markModelChoice }) => {
-        const vendor = agentKindToVendor(agent);
+        const vendor = agentKindToDraftVendor(agent);
         if (active) {
           const patch =
             markModelChoice === false ? patchVendorPrefsPreservingModelChoice : patchVendorPrefs;

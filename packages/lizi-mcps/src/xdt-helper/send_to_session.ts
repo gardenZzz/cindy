@@ -154,7 +154,7 @@ export function registerSendToSessionTool(
           "仅 create 模式可选:新 session 的工作目录(绝对路径,目录须已存在)。缺省继承当前 session 的 workingDir;用于把任务 handoff 到另一个项目目录的全新对话。不合法返 INVALID_ARGS。jump 模式忽略。",
         ),
       agent_kind: z
-        .enum(["claude-code", "codex", "pi"])
+        .enum(["claude-code", "codex", "cursor", "pi"])
         .optional()
         .describe(
           "仅 create 模式可选:目标 Agent/harness。缺省继承 dispatcher；jump 模式忽略。",

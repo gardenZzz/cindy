@@ -35,6 +35,8 @@ import {
   parseDeviceProvidersPayload,
 } from '@/hooks/useDeviceProviders';
 import { remoteProjectsStore } from '@/features/device-link/remoteProjectsStore';
+import { peekCursorAvailability } from '@/state/cursorAvailability';
+import { peekCursorAuthState } from '@/state/cursorAuthState';
 import type { AgentKind } from '@/lib/ccAgent.types';
 
 interface DialogCopy {
@@ -260,6 +262,43 @@ export function useVendorAuthGate(): UseVendorAuthGateReturn {
         if (ok) {
           navigate(`/settings?tab=${readiness.settingsTab}`);
         }
+        return { proceed: false };
+      }
+
+      // Cursor:本机二进制 + cursor-agent 登录态（不走 Cindy provider 目录）。
+      if (vendor === 'cursor') {
+        if (options?.deviceId) {
+          await confirm({
+            title: t('settings.providers.cursor.title'),
+            description: t('settings.providers.cursor.authRequiredDescription'),
+            confirmText: t('logic.confirm.gotIt'),
+            showCancel: false,
+            autoFocusConfirm: true,
+          });
+          return { proceed: false };
+        }
+        // 发送热路径只读启动期缓存；未知态乐观放行，由已在途的 ACP session/new 权威裁决。
+        if (peekCursorAvailability() === false) {
+          const ok = await confirm({
+            title: t('settings.providers.cursor.title'),
+            description: t('settings.providers.cursor.missingDescription'),
+            confirmText: t('logic.confirm.goToSettings'),
+            cancelText: t('logic.confirm.cancel'),
+            autoFocusConfirm: true,
+          });
+          if (ok) navigate('/settings?tab=providers');
+          return { proceed: false };
+        }
+        // 设置页查询和 ACP 预热会更新这份快照；不在 Enter→气泡之前 spawn `cursor-agent status`。
+        if (peekCursorAuthState() !== false) return { proceed: true };
+        const ok = await confirm({
+          title: t('settings.providers.cursor.authRequiredTitle'),
+          description: t('settings.providers.cursor.authRequiredDescription'),
+          confirmText: t('logic.confirm.goToSettings'),
+          cancelText: t('logic.confirm.cancel'),
+          autoFocusConfirm: true,
+        });
+        if (ok) navigate('/settings?tab=providers');
         return { proceed: false };
       }
 

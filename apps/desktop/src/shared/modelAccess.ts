@@ -1,3 +1,4 @@
+import type { AgentKind } from '@cindy/maker-core';
 /**
  * modelAccess.ts — 网关凭据自动下发(model-access-server)的 main / renderer 共享类型。
  *
@@ -179,8 +180,8 @@ export interface ModelAccessGatewayModel extends ModelGroupPricing {
    * 消费方一律以本字段(或其派生的 currentLedgerCurrency)为准,不按区域推断。
    */
   currency?: 'USD' | 'CNY';
-  /** 进哪些 runtime tab；Desktop 固定使用 v3，本字段由服务端明确下发。 */
-  agents?: ('claude-code' | 'codex' | 'pi')[];
+  /** 进哪些 runtime tab；Desktop 固定使用 v3，本字段由服务端明确下发。缺省 = 仅 claude-code。 */
+  agents?: AgentKind[];
   name?: string;
   group?: string;
   description?: string;
@@ -207,7 +208,7 @@ export interface ModelAccessGatewayModel extends ModelGroupPricing {
    */
   icon?: string;
   /** per-tab 能力覆盖(基线字段之上按 agent 应用)。 */
-  perAgent?: Partial<Record<'claude-code' | 'codex' | 'pi', ModelAccessAgentOverride>>;
+  perAgent?: Partial<Record<AgentKind, ModelAccessAgentOverride>>;
 }
 
 /**

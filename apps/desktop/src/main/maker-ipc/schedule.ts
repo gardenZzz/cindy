@@ -441,6 +441,7 @@ export function registerScheduleHandlers(getMaker?: () => Maker | null): void {
     const workingDir = await resolveHookWorkingDir(body);
     const requestedAgentKind: AgentKind | undefined = body.agentKind === 'codex'
       || body.agentKind === 'claude-code'
+      || body.agentKind === 'cursor'
       || body.agentKind === 'pi'
       ? body.agentKind
       : undefined;

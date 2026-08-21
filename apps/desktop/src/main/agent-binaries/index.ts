@@ -50,16 +50,17 @@ import type {
 // ── kind 配置表 ──────────────────────────────────────────────────────────────
 //
 // agent-binaries 的 kind 直接复用 maker-core AgentKind 字面量
-// ('claude-code' | 'codex' | 'pi'), 跟 maker-core 保持同步; vendorKey 字段是给底层
-// createBinaryProvisioner 用的内部 enum, 历史叫 'claude' / 'codex' (factory 内部
-// 硬约定, 不改)。
+// ('claude-code' | 'codex' | 'cursor' | 'pi'), 跟 maker-core 保持同步; vendorKey
+// 字段是给底层 createBinaryProvisioner 用的内部 enum, 历史叫 'claude' / 'codex'
+// (factory 内部硬约定, 不改)。
 //
+// cursor 是 type-slot only(#5): 不随包分发二进制, 不进 CONFIG, prepare/peek 不可达。
 // pi 与 cc/codex 的差异:
 //   - artifactKind 'tar-gz-dir': pi 是整目录分发(主二进制 + theme/ 等运行时资产,
 //     只装主二进制会在 RPC 启动期崩溃), CDN 资产是整包 tar.gz, 归档根即完整目录
 //     (与 apps/pi-bin/<platform>/ 同布局)。
 //   - optionalAsset: pi 是可选实验 agent。manifest 缺 pi 字段 / 下载失败都不阻塞
-//     启动 —— check-environment 的 pi 段静默降级，本次不注册 pi。
+//     启动 -- check-environment 的 pi 段静默降级，本次不注册 pi。
 
 export type AgentBinaryKind = 'claude-code' | 'codex' | 'pi';
 

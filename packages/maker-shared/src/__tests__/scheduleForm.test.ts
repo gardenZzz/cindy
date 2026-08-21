@@ -243,6 +243,26 @@ describe('mobile schedule form model', () => {
     expect(buildMobileScheduleInput({ ...claude, name: 'Claude', prompt: 'run' })).not.toHaveProperty('fastMode');
   });
 
+  it('defaults cursor schedules to auto when switching agent kind', () => {
+    const draft = updateDraftAgentKind(createMobileScheduleDraft(null), 'cursor');
+    expect(buildMobileScheduleInput({ ...draft, name: 'Cursor', prompt: 'run' })).toMatchObject({
+      agentKind: 'cursor',
+      model: 'auto',
+    });
+  });
+
+  it('serializes cursor fast mode in both directions', () => {
+    // 表单有 Cursor Fast 开关但序列化漏了 cursor 的话:开启被丢弃,关闭因省略 key
+    // 让引擎保留旧的 true —— 两个方向都要断言。
+    const draft = updateDraftAgentKind(createMobileScheduleDraft(null), 'cursor');
+    expect(buildMobileScheduleInput({ ...draft, name: 'Cursor', prompt: 'run', fastMode: true }))
+      .toMatchObject({ agentKind: 'cursor', fastMode: true });
+
+    const off = buildMobileScheduleInput({ ...draft, name: 'Cursor', prompt: 'run', fastMode: false });
+    expect(hasOwn(off, 'fastMode')).toBe(true);
+    expect(off).toMatchObject({ agentKind: 'cursor', fastMode: false });
+  });
+
   it('supports Pi automations: blank default model (host-resolved) and explicit fast mode', () => {
     // Pi 模型来自动态 BYOM 目录:切到 Pi 时 model 留空 → 序列化省略 → host 解析默认。
     const draft = updateDraftAgentKind(createMobileScheduleDraft(null), 'pi');

@@ -43,7 +43,9 @@ import {
 import type { ScheduleFormState } from '../scheduleFormLogic';
 import {
   cronExprToIntervalMs,
+  INTERVAL_SECONDS_CRON_EXPR,
   intervalMsToCronExpr,
+  intervalMsToSeconds,
   resolveScheduleTimingPresentation,
   switchScheduleTimingMode,
 } from '../cronCodexPreset';
@@ -66,6 +68,119 @@ const tapsvcProvider: ProviderView = {
     }],
   },
 };
+
+/** Pi BYOM(CLIProxyAPI 这类自定义 API):用户逐模型勾了「支持推理」+ 两个档位。 */
+const cliProxyPiProvider: ProviderView = {
+  id: 'cliproxyapi',
+  name: 'CLIProxyAPI',
+  source: 'user',
+  connected: true,
+  agents: ['pi'],
+  auth: { method: 'apiKey' },
+  routing: { pi: { upstream: 'http://127.0.0.1:8317/v1', authStrategy: 'api-key-header' } },
+  models: {
+    pi: [{
+      id: 'gpt-5.5',
+      name: 'GPT-5.5 via proxy',
+      contextWindow: 200_000,
+      efforts: ['low', 'high'],
+      defaultEffort: 'high',
+    }],
+  },
+};
+
+/** 同一个 model id 也由内置来源提供 —— 扁平 capabilities 因此只能公布交集。 */
+const gatewayPiProvider: ProviderView = {
+  id: 'xd',
+  name: 'Cindy',
+  source: 'builtin',
+  connected: true,
+  agents: ['pi'],
+  auth: { method: 'oauth' },
+  routing: { pi: { upstream: 'https://gateway.example/v1', authStrategy: 'gateway-key' } },
+  models: {
+    pi: [{
+      id: 'gpt-5.5',
+      name: 'GPT-5.5',
+      contextWindow: 200_000,
+      efforts: ['medium', 'high', 'xhigh'],
+      defaultEffort: 'high',
+    }],
+  },
+};
+
+describe('resolveScheduleModelEfforts', () => {
+  // 用户实测:选 Pi 之后 CLIProxyAPI 的模型没有档位可选 —— 扁平 capabilities 里
+  // 这个 id 的 efforts 已被跨来源交集抹平(intersectPiEffortCapabilities)。
+  it('Pi 自定义 API:按该来源的目录条目给档位,不被扁平交集抹平', () => {
+    expect(resolveScheduleModelEfforts({
+      providers: [gatewayPiProvider, cliProxyPiProvider],
+      providerId: 'cliproxyapi',
+      model: 'gpt-5.5',
+      agentKind: 'pi',
+      fallback: { efforts: [], defaultEffort: null },
+    })).toEqual({ efforts: ['low', 'high'], defaultEffort: 'high', known: true });
+  });
+
+  it('Pi BYOM 不补 minimal(多宣称一个档会被 Pi 启动断言拒绝)', () => {
+    expect(resolveScheduleModelEfforts({
+      providers: [cliProxyPiProvider],
+      providerId: '',
+      model: 'gpt-5.5',
+      agentKind: 'pi',
+    }).efforts).toEqual(['low', 'high']);
+  });
+
+  it('Pi 非用户来源补 minimal(与 main 侧 descriptor 投影同规则)', () => {
+    expect(resolveScheduleModelEfforts({
+      providers: [gatewayPiProvider],
+      providerId: 'xd',
+      model: 'gpt-5.5',
+      agentKind: 'pi',
+    })).toEqual({
+      efforts: ['minimal', 'medium', 'high', 'xhigh'],
+      defaultEffort: 'high',
+      known: true,
+    });
+  });
+
+  it('非 Pi agent 原样取该来源条目的档位', () => {
+    expect(resolveScheduleModelEfforts({
+      providers: [tapsvcProvider],
+      providerId: '',
+      model: 'gpt-5.5',
+      agentKind: 'codex',
+    })).toEqual({ efforts: ['high'], defaultEffort: 'high', known: true });
+  });
+
+  it('取不到目录条目时回落扁平 descriptor;连兜底都没有则 known=false(调用方不得清空表单档位)', () => {
+    expect(resolveScheduleModelEfforts({
+      providers: [],
+      providerId: '',
+      model: 'auto',
+      agentKind: 'cursor',
+      fallback: { efforts: ['low', 'high'], defaultEffort: 'high' },
+    })).toEqual({ efforts: ['low', 'high'], defaultEffort: 'high', known: true });
+    expect(resolveScheduleModelEfforts({
+      providers: [],
+      providerId: '',
+      model: 'ghost-model',
+      agentKind: 'pi',
+    })).toEqual({ efforts: [], defaultEffort: null, known: false });
+  });
+
+  // providers 还在加载 / 该来源掉线时,Pi 的扁平交集不能当权威:否则编辑一个存量 Pi
+  // 任务会在来源到位前把存好的档位清成「默认」。
+  it('Pi 回落扁平表时 known=false,存量档位不被清掉', () => {
+    expect(resolveScheduleModelEfforts({
+      providers: [],
+      providerId: 'cliproxyapi',
+      model: 'gpt-5.5',
+      agentKind: 'pi',
+      fallback: { efforts: [], defaultEffort: null },
+    })).toEqual({ efforts: [], defaultEffort: null, known: false });
+  });
+});
 
 describe('resolveScheduleGenerationProviderId', () => {
   it('materializes the effective custom provider when the stored provider id is empty', () => {
@@ -117,8 +232,8 @@ describe('resolveScheduleModelEfforts', () => {
       providerId: 'tapsvc',
       model: 'gpt-5.5',
       agentKind: 'codex',
-      fallbackEfforts: ['low'],
-    })).toBeUndefined();
+      fallback: { efforts: ['low'], defaultEffort: null },
+    })).toEqual({ efforts: [], defaultEffort: null, known: false });
   });
 
   it('uses the effective fallback source only when providerId is empty', () => {
@@ -127,8 +242,8 @@ describe('resolveScheduleModelEfforts', () => {
       providerId: '',
       model: 'gpt-5.5',
       agentKind: 'codex',
-      fallbackEfforts: ['low'],
-    })).toEqual(['medium']);
+      fallback: { efforts: ['low'], defaultEffort: null },
+    })).toEqual({ efforts: ['medium'], defaultEffort: 'medium', known: true });
   });
 
   it('validates effort against a connected pinned provider', () => {
@@ -137,7 +252,7 @@ describe('resolveScheduleModelEfforts', () => {
       providerId: 'tapsvc',
       model: 'gpt-5.5',
       agentKind: 'codex',
-    })).toEqual(['high']);
+    })).toEqual({ efforts: ['high'], defaultEffort: 'high', known: true });
   });
 });
 
@@ -378,6 +493,31 @@ describe('schedule timing mode conversion', () => {
     });
   });
 
+  it('presents whole-second intervals as an editable seconds preset', () => {
+    expect(resolveScheduleTimingPresentation(INTERVAL_SECONDS_CRON_EXPR, 30_000)).toEqual({
+      kind: 'intervalSeconds',
+      seconds: 30,
+    });
+    expect(resolveScheduleTimingPresentation(INTERVAL_SECONDS_CRON_EXPR, 1_000)).toEqual({
+      kind: 'intervalSeconds',
+      seconds: 1,
+    });
+    // 60 秒是分钟预设的地盘，秒窗口只到 59；再往上（90s）/ 非整秒（1.5s）留给 exact。
+    expect(resolveScheduleTimingPresentation('* * * * *', 60_000)).toEqual({
+      kind: 'intervalPreset',
+      displayCronExpr: '* * * * *',
+    });
+    expect(intervalMsToSeconds(90_000)).toBeUndefined();
+    expect(intervalMsToSeconds(1_500)).toBeUndefined();
+  });
+
+  it('falls back to the every-minute placeholder when a seconds interval switches to cron', () => {
+    expect(switchScheduleTimingMode(INTERVAL_SECONDS_CRON_EXPR, 30_000, 'cron')).toEqual({
+      cronExpr: '* * * * *',
+      intervalMs: undefined,
+    });
+  });
+
   it('switches between cron and relative interval without reusing a stale cron value', () => {
     expect(switchScheduleTimingMode('*/5 * * * *', 10 * 60_000, 'cron')).toEqual({
       cronExpr: '*/10 * * * *',
@@ -442,7 +582,7 @@ describe('buildScheduleInput — heartbeat 分支', () => {
 });
 
 describe('buildScheduleInput — 非 heartbeat 分支(行为锁定,不动 create 路径)', () => {
-  it('空 model/effort 不带 key', () => {
+  it('空 model/effort 不带 key（未传入目录时不发明默认档）', () => {
     const input = buildScheduleInput(makeForm());
     expect(hasKey(input, 'model')).toBe(false);
     expect(hasKey(input, 'effort')).toBe(false);
@@ -461,6 +601,14 @@ describe('buildScheduleInput — 非 heartbeat 分支(行为锁定,不动 create
     expect(input.workingDir).toBe('/repo/project');
     expect(hasKey(input, 'fastMode')).toBe(true);
     expect(input.fastMode).toBe(false);
+  });
+
+  it('cursor 也带 fastMode（#25: 不再硬绑 codex）', () => {
+    const input = buildScheduleInput(
+      makeForm({ agentKind: 'cursor', fastMode: true }),
+    );
+    expect(hasKey(input, 'fastMode')).toBe(true);
+    expect(input.fastMode).toBe(true);
   });
 
   it('pi 也序列化 fastMode(runner 对 Codex/Pi 都生效,codex review)', () => {
@@ -604,17 +752,20 @@ describe('hasRealBinding / agentKind 映射', () => {
   it('sessionAgentKindToScheduleAgentKind 映射', () => {
     expect(sessionAgentKindToScheduleAgentKind('cc')).toBe('claude-code');
     expect(sessionAgentKindToScheduleAgentKind('codex')).toBe('codex');
+    expect(sessionAgentKindToScheduleAgentKind('cursor')).toBe('cursor');
   });
 });
 
 describe('resolveTemplateAgentFields', () => {
   const defaults = {
     getDefaultModel: (agentKind: ScheduleFormState['agentKind']) =>
-      agentKind === 'codex' ? 'gpt-5.5' : 'claude-sonnet-4-6',
+      agentKind === 'codex' ? 'gpt-5.5' : agentKind === 'cursor' ? 'auto' : 'claude-sonnet-4-6',
     getAgentPrefs: (agentKind: ScheduleFormState['agentKind']) =>
       agentKind === 'codex'
         ? { providerId: 'openai', effort: 'high' as const, fastMode: true }
-        : { providerId: 'anthropic', effort: 'medium' as const, fastMode: false },
+        : agentKind === 'cursor'
+          ? { providerId: '', effort: 'medium' as const, fastMode: false }
+          : { providerId: 'anthropic', effort: 'medium' as const, fastMode: false },
   };
 
   it('模板跨 agent 且未显式给 model 时,重建目标 agent 的 model/provider/effort/fast 组合', () => {

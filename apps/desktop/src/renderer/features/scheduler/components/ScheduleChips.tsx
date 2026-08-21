@@ -11,11 +11,25 @@ import {
   FolderPickerPopover,
   type FolderPickerOption,
 } from '@/components/new-chat/FolderPickerPopover';
+import { useCursorAvailable } from '@/hooks/useCursorAvailable';
 import { useDetectCwd } from '@/hooks/useWorktreeQueries';
 import { useAgentCapabilities, type ModelDescriptor } from '@/hooks/useAgentCapabilities';
 import { useProviders } from '@/hooks/useProviders';
-import { ModelIconMark, ModelSelectorContent } from '@/components/new-chat/ModelSelector';
+import { CursorMark } from '@/components/icons/CursorMark';
+import {
+  ModelIconMark,
+  ModelSelectorContent,
+  type ModelMemoryAccessors,
+} from '@/components/new-chat/ModelSelector';
 import { useModelDiscoveryPending } from '@/components/new-chat/useModelDiscoveryPending';
+import {
+  getProviderModelEffort,
+  getProviderModelFast,
+  modelMemorySourceId,
+  setProviderModelChoice,
+  setProviderModelEffort,
+  setProviderModelFast,
+} from '@/state/providerModelMemory';
 import {
   connectedProvidersForAgent,
   effectiveSourceIdForModel,
@@ -33,7 +47,11 @@ import {
   configToCron,
   cronExprToIntervalMs,
   cronToConfig,
+  DEFAULT_INTERVAL_SECONDS,
   DEFAULT_SCHEDULE_INTERVAL_MS,
+  formatIntervalDuration,
+  INTERVAL_SECONDS_CRON_EXPR,
+  MAX_INTERVAL_SECONDS,
   resolveScheduleTimingPresentation,
   summarizeConfig,
   switchScheduleTimingMode,
@@ -45,13 +63,14 @@ import { getScheduleDefaultModel, type EffortValue } from '../hooks/useScheduleF
 import {
   isFollowingSessionSelection,
   PENDING_SESSION_ID,
+  resolveScheduleModelEfforts,
   usesBoundSessionModel,
 } from '../lib/scheduleFormLogic';
 import type { SessionReference } from '../../../../shared/sessionReference';
 import { isReviewSessionSource } from '../../../../shared/sessionSource';
+import type { AgentKind } from '@cindy/maker-core';
 
 export type Destination = 'local' | 'worktree' | 'thread';
-export type AgentKind = 'claude-code' | 'codex' | 'pi';
 
 interface ChipButtonProps {
   icon?: React.ReactNode;
@@ -97,6 +116,12 @@ export const ChipButton = React.forwardRef<HTMLButtonElement, ChipButtonProps>(f
     </button>
   );
 });
+
+/** 时间编辑器右侧参数面板的统一容器（秒 / cron 预设两种面板共用）。 */
+const PANEL_CLASS = cn(
+  'min-w-0 flex-1 rounded-xl border p-2 shadow-lg',
+  'border-[var(--cmd-palette-border)] bg-[var(--cmd-palette-bg)] dark:border-[var(--cmd-palette-border)] dark:bg-[var(--cmd-palette-bg)]',
+);
 
 const POPOVER_BASE = cn(
   'z-[10010] rounded-xl border p-2 shadow-lg',
@@ -171,10 +196,16 @@ export function ProjectChip({
  * while sharing the same AgentSelect dropdown used by IM settings and chat.
  */
 export function AgentTabs({ value, onChange, disabled }: { value: AgentKind; onChange: (v: AgentKind) => void; disabled?: boolean }) {
+  // 本机没装 cursor-agent 还让选 Cursor，只会建出一条到触发时才失败的自动化
+  // （定时任务在 runner 里按 agentKind 起会话，那时才发现 agent 未注册）。
+  // 与 CreateWorkerPopover 同一处置；hook 内部 fail-closed（未知也不露出），
+  // 已选中的值由 AgentSelect 自身保留，不会把存量任务的 Cursor 选择抹掉。
+  const cursorAvailable = useCursorAvailable();
   return (
     <AgentSelect
       value={agentKindToVendor(value)}
       disabled={disabled}
+      hiddenVendors={cursorAvailable ? undefined : (['cursor'] as const)}
       side="top"
       // ScheduleFormDialog 是 Radix modal。MorphPopover 的 custom portal 不在
       // Dialog focus scope 内，动画结束聚焦选中项时会被拉回并立即自动收起；
@@ -182,7 +213,15 @@ export function AgentTabs({ value, onChange, disabled }: { value: AgentKind; onC
       useMorphPopover={false}
       overlayContentClassName="z-[10010]"
       onChange={(vendor) => {
-        onChange(vendor === 'cc' ? 'claude-code' : vendor === 'pi' ? 'pi' : 'codex');
+        onChange(
+          vendor === 'cc'
+            ? 'claude-code'
+            : vendor === 'cursor'
+              ? 'cursor'
+              : vendor === 'pi'
+                ? 'pi'
+                : 'codex',
+        );
       }}
     />
   );
@@ -294,7 +333,9 @@ type EditableScheduleMenuMode =
   | 'weekdays'
   | 'weekly'
   | 'monthly';
-type ScheduleMenuMode = EditableScheduleMenuMode | 'exactInterval';
+// 'intervalSeconds' 不进 EditableScheduleMenuMode：秒级间隔没有等价 cron，
+// 不参与 CodexScheduleConfig 那套 cron 往返，由 intervalMs 直接驱动。
+type ScheduleMenuMode = EditableScheduleMenuMode | 'exactInterval' | 'intervalSeconds';
 
 // Note: these mode strings mirror codex i18n keys (settings.automations.scheduleMode.*),
 // kept stable as IDs. Display labels are looked up via t('scheduler.chips.scheduleMenu.<mode>').
@@ -308,26 +349,12 @@ const SCHEDULE_MENU_MODES: ReadonlyArray<EditableScheduleMenuMode> = [
   'monthly',
 ];
 
-const INTERVAL_MENU_MODES: ReadonlyArray<EditableScheduleMenuMode> = [
+// 秒放最前 — 与 Minutes 同理由，粒度从细到粗。
+const INTERVAL_MENU_MODES: ReadonlyArray<ScheduleMenuMode> = [
+  'intervalSeconds',
   'intervalMinutes',
   'interval',
 ];
-
-function formatIntervalDuration(intervalMs: number, locale: string): string {
-  const units: ReadonlyArray<{ factor: number; unit: string }> = [
-    { factor: 24 * 60 * 60_000, unit: 'day' },
-    { factor: 60 * 60_000, unit: 'hour' },
-    { factor: 60_000, unit: 'minute' },
-    { factor: 1_000, unit: 'second' },
-    { factor: 1, unit: 'millisecond' },
-  ];
-  const selected = units.find(({ factor }) => intervalMs % factor === 0) ?? units[units.length - 1];
-  return new Intl.NumberFormat(locale, {
-    style: 'unit',
-    unit: selected.unit,
-    unitDisplay: 'long',
-  }).format(intervalMs / selected.factor);
-}
 
 const WEEKDAY_SHORT: Record<number, string> = {
   1: 'Mo',
@@ -354,9 +381,10 @@ export function ScheduleChip({
   const [open, setOpen] = useState(false);
   const timingMode = intervalMs === undefined ? 'cron' : 'interval';
   const timingPresentation = resolveScheduleTimingPresentation(cronExpr, intervalMs);
-  const displayCronExpr = timingPresentation.kind === 'intervalExact'
-    ? cronExpr
-    : timingPresentation.displayCronExpr;
+  const displayCronExpr =
+    timingPresentation.kind === 'cron' || timingPresentation.kind === 'intervalPreset'
+      ? timingPresentation.displayCronExpr
+      : cronExpr;
   const [config, setConfig] = useState<CodexScheduleConfig>(() => normalizeScheduleConfig(cronToConfig(displayCronExpr)));
 
   useEffect(() => {
@@ -369,7 +397,12 @@ export function ScheduleChip({
 
   const activeMode: ScheduleMenuMode = timingPresentation.kind === 'intervalExact'
     ? 'exactInterval'
-    : toMenuMode(config);
+    : timingPresentation.kind === 'intervalSeconds'
+      ? 'intervalSeconds'
+      : toMenuMode(config);
+  const intervalSeconds = timingPresentation.kind === 'intervalSeconds'
+    ? timingPresentation.seconds
+    : DEFAULT_INTERVAL_SECONDS;
   const availableModes: ReadonlyArray<ScheduleMenuMode> = timingMode === 'interval'
     ? (timingPresentation.kind === 'intervalExact'
       ? ['exactInterval', ...INTERVAL_MENU_MODES]
@@ -414,6 +447,23 @@ export function ScheduleChip({
       patch.intervalMinutes = config.mode === 'intervalMinutes' ? config.intervalMinutes : 5;
     }
     update(patch);
+  };
+
+  // 秒级间隔绕开 config/cron 往返：intervalMs 是权威值，cronExpr 只写占位。
+  const setIntervalSeconds = (seconds: number) => {
+    onChangeSchedule({
+      cronExpr: INTERVAL_SECONDS_CRON_EXPR,
+      intervalMs: clamp(seconds, 1, MAX_INTERVAL_SECONDS) * 1_000,
+    });
+  };
+
+  const selectMode = (mode: ScheduleMenuMode) => {
+    if (mode === 'exactInterval') return;
+    if (mode === 'intervalSeconds') {
+      setIntervalSeconds(intervalSeconds);
+      return;
+    }
+    setMode(mode);
   };
 
   return (
@@ -473,7 +523,7 @@ export function ScheduleChip({
                   <button
                     key={mode}
                     type="button"
-                    onClick={() => mode !== 'exactInterval' && setMode(mode)}
+                    onClick={() => selectMode(mode)}
                     className={cn(
                       'flex h-[34px] w-full items-center rounded-lg px-3 text-left text-sm font-medium transition-colors',
                       active
@@ -491,6 +541,8 @@ export function ScheduleChip({
             </div>
             {activeMode === 'exactInterval' ? (
               <ExactIntervalPanel summary={scheduleSummary} />
+            ) : activeMode === 'intervalSeconds' ? (
+              <IntervalSecondsPanel seconds={intervalSeconds} onChange={setIntervalSeconds} />
             ) : (
               <ScheduleConfigPanel
                 mode={activeMode}
@@ -520,6 +572,35 @@ function ExactIntervalPanel({ summary }: { summary: string }) {
   );
 }
 
+function IntervalSecondsPanel({
+  seconds,
+  onChange,
+}: {
+  seconds: number;
+  onChange: (seconds: number) => void;
+}) {
+  const { t } = useTranslation();
+  return (
+    <div className={PANEL_CLASS}>
+      <div className="flex flex-col gap-2">
+        <div className="flex min-h-[34px] w-full items-center gap-1.5">
+          <IntervalNumberInput value={seconds} max={MAX_INTERVAL_SECONDS} onChange={onChange} />
+          <span className="text-13 text-[var(--cmd-palette-item-meta)] dark:text-[var(--settings-section-desc)]">
+            {t('scheduler.chips.scheduleField.secondsSuffix')}
+          </span>
+        </div>
+        <PreviewPill
+          text={
+            seconds === 1
+              ? t('scheduler.chips.schedulePreview.everySecond')
+              : t('scheduler.chips.schedulePreview.everySeconds', { count: seconds })
+          }
+        />
+      </div>
+    </div>
+  );
+}
+
 function ScheduleConfigPanel({
   mode,
   config,
@@ -538,13 +619,14 @@ function ScheduleConfigPanel({
   };
 
   return (
-    <div className="min-w-0 flex-1 rounded-xl border border-[var(--cmd-palette-border)] bg-[var(--cmd-palette-bg)] p-2 shadow-lg dark:border-[var(--cmd-palette-border)] dark:bg-[var(--cmd-palette-bg)]">
+    <div className={PANEL_CLASS}>
       <div className="flex flex-col gap-2">
         {mode === 'intervalMinutes' && (
           <>
             <div className="flex min-h-[34px] w-full items-center gap-1.5">
-              <IntervalMinutesInput
+              <IntervalNumberInput
                 value={panelConfig.intervalMinutes}
+                max={59}
                 onFocus={commit}
                 onChange={(intervalMinutes) => onUpdate({ mode: 'intervalMinutes', intervalMinutes })}
               />
@@ -562,8 +644,9 @@ function ScheduleConfigPanel({
         {mode === 'interval' && (
           <>
             <div className="flex min-h-[34px] w-full items-center gap-1.5">
-              <IntervalHoursInput
+              <IntervalNumberInput
                 value={panelConfig.intervalHours}
+                max={23}
                 onFocus={commit}
                 onChange={(intervalHours) => onUpdate({ mode: 'interval', intervalHours })}
               />
@@ -597,13 +680,16 @@ function ScheduleConfigPanel({
   );
 }
 
-function IntervalHoursInput({
+/** 秒 / 分钟 / 小时三种间隔共用的 1..max 两位数输入。 */
+function IntervalNumberInput({
   value,
+  max,
   onFocus,
   onChange,
 }: {
   value: number;
-  onFocus: () => void;
+  max: number;
+  onFocus?: () => void;
   onChange: (value: number) => void;
 }) {
   const [draft, setDraft] = useState(String(value));
@@ -625,42 +711,7 @@ function IntervalHoursInput({
         const digits = e.target.value.replace(/\D/g, '').slice(0, 2);
         setDraft(digits);
         if (!digits) return;
-        onChange(clamp(Number(digits), 1, 23));
-      }}
-      className={inputPillClass('w-[68px] text-center')}
-    />
-  );
-}
-
-function IntervalMinutesInput({
-  value,
-  onFocus,
-  onChange,
-}: {
-  value: number;
-  onFocus: () => void;
-  onChange: (value: number) => void;
-}) {
-  const [draft, setDraft] = useState(String(value));
-
-  useEffect(() => {
-    setDraft(String(value));
-  }, [value]);
-
-  return (
-    <input
-      type="text"
-      inputMode="numeric"
-      pattern="[0-9]*"
-      maxLength={2}
-      value={draft}
-      onFocus={onFocus}
-      onBlur={() => setDraft(String(value))}
-      onChange={(e) => {
-        const digits = e.target.value.replace(/\D/g, '').slice(0, 2);
-        setDraft(digits);
-        if (!digits) return;
-        onChange(clamp(Number(digits), 1, 59));
+        onChange(clamp(Number(digits), 1, max));
       }}
       className={inputPillClass('w-[68px] text-center')}
     />
@@ -1043,6 +1094,27 @@ function previewConfigFor(mode: EditableScheduleMenuMode, current: CodexSchedule
   return { ...current, mode };
 }
 
+/**
+ * 模型 chip 的 trigger 图标口径:
+ *  - 跟随会话(未显式选模型)不显示身份图标;
+ *  - 解析出生效来源 → 来源 / 模型条目标(ModelIconMark);
+ *  - Cursor 是独立 Agent,没有 Cindy provider(ADR 0001),来源恒空 → 用 CursorMark 兜底,
+ *    否则 trigger 会空着一格(与聊天 trigger 同口径)。
+ */
+export function resolveModelChipIconKind({
+  followingSession,
+  activeSourceId,
+  agentKind,
+}: {
+  followingSession: boolean;
+  activeSourceId: string | null;
+  agentKind: AgentKind;
+}): 'none' | 'source' | 'cursor' {
+  if (followingSession) return 'none';
+  if (activeSourceId) return 'source';
+  return agentKind === 'cursor' ? 'cursor' : 'none';
+}
+
 export function ModelEffortChip({
   agentKind,
   modelValue,
@@ -1130,8 +1202,24 @@ export function ModelEffortChip({
   const followsSessionModel = usesBoundSessionModel({ followSession, model: modelValue });
   const effectiveId = followsSessionModel ? '' : modelValue || getScheduleDefaultModel(agentKind);
   const current = models.find((m) => m.id === effectiveId);
-  const allowedEfforts = (current?.efforts ?? []) as readonly EffortValue[];
-  const fallbackEffort = (current?.defaultEffort ?? 'high') as EffortValue;
+  // 档位能力按 (生效来源, 模型) 解析,不用扁平 capabilities:Pi + 自定义 API 同 id 时
+  // 扁平表给的是跨来源交集,会塌成空,chip 于是显示「默认档」且吃掉用户挑的档位
+  // (见 resolveScheduleModelEfforts)。
+  const modelEfforts = useMemo(
+    () =>
+      resolveScheduleModelEfforts({
+        providers,
+        providerId,
+        model: effectiveId,
+        agentKind,
+        fallback: current
+          ? { efforts: current.efforts, defaultEffort: current.defaultEffort }
+          : undefined,
+      }),
+    [providers, providerId, effectiveId, agentKind, current],
+  );
+  const allowedEfforts = modelEfforts.efforts;
+  const fallbackEffort = (modelEfforts.defaultEffort ?? 'high') as EffortValue;
   const effectiveEffort: EffortValue = effortValue && allowedEfforts.includes(effortValue) ? effortValue : fallbackEffort;
   const effortLabel = (e: EffortValue) => t(`effortLevels.${e}`);
   const display = followsSessionModel
@@ -1170,13 +1258,61 @@ export function ModelEffortChip({
     [providers, providerId, effectiveId, agentKind],
   );
   const activeProvider = providers.find((p) => p.id === activeSourceId);
+  const iconKind = resolveModelChipIconKind({
+    followingSession: isFollowingSession,
+    activeSourceId,
+    agentKind,
+  });
+
+  // 非选中模型行的档位 / Fast 走与聊天、Worker 创建同一份模型级全局预设
+  // (providerModelMemory)。不注入时 ModelSelectorContent 的 canConfigure 只对当前
+  // 选中行成立,自动化面板就只有已选中的那一行能挑档位,与新建任务面板不一致
+  // (2026-08 用户实测)。定时任务没有被控端形态,恒用本机预设。
+  const modelMemory = useMemo<ModelMemoryAccessors>(
+    () => ({
+      getEffort: getProviderModelEffort,
+      setEffort: setProviderModelEffort,
+      setChoice: setProviderModelChoice,
+      getFast: getProviderModelFast,
+      setFast: setProviderModelFast,
+    }),
+    [],
+  );
+
+  // 换模型时把目标模型的全局预设(档位 / Fast)一并落进任务表单。
+  // 少了这一步就会「显示≠运行」:列表行徽标读的是全局预设,选中后 chip 与实际 fire
+  // 用的却是上一个模型残留的档位;非选中行改档位也会因随后的选中回调丢失
+  // (ModelSelector 先写预设、再回调选中,故这里读回来的就是刚改的值)。
+  // 预设缺失 / 不被目标模型支持时落空值 = 跟随该模型默认档,与行徽标的回落口径一致。
+  const applyRememberedModelConfig = (nextModelId: string, nextProviderId: string | null) => {
+    if (!nextModelId) return;
+    // 行选中不带来源时(flat 列表)按模型解析生效来源,与聊天恢复预设同口径 ——
+    // 否则除 Cursor 合成槽以外的 agent 全都读不到记忆槽。
+    const nextSourceId =
+      nextProviderId ?? effectiveSourceIdForModel(providers, null, nextModelId, agentKind);
+    const memoryId = modelMemorySourceId(agentKind, nextSourceId);
+    if (!memoryId) return;
+    const target = models.find((m) => m.id === nextModelId);
+    const allowed = resolveScheduleModelEfforts({
+      providers,
+      providerId: nextSourceId ?? '',
+      model: nextModelId,
+      agentKind,
+      fallback: target ? { efforts: target.efforts, defaultEffort: target.defaultEffort } : undefined,
+    }).efforts as readonly string[];
+    const remembered = getProviderModelEffort(agentKind, memoryId, nextModelId);
+    onChangeEffort(
+      remembered && allowed.includes(remembered) ? (remembered as EffortValue) : '',
+    );
+    onChangeFast?.(getProviderModelFast(agentKind, memoryId, nextModelId) ?? false);
+  };
 
   return (
     <Popover open={open} onOpenChange={handleOpenChange}>
       <PopoverTrigger asChild>
         <ChipButton
           icon={
-            !isFollowingSession && activeSourceId ? (
+            iconKind === 'source' && activeSourceId ? (
               // 图标统一规则(与聊天 trigger 同口径):模型条目 icon(AI Gateway / 目录设定)
               // 优先,缺省回落来源供应商标。
               <ModelIconMark
@@ -1187,6 +1323,8 @@ export function ModelEffortChip({
                 colorClass=""
                 withMargin={false}
               />
+            ) : iconKind === 'cursor' ? (
+              <CursorMark size={13} className="shrink-0" />
             ) : undefined
           }
           label={display}
@@ -1215,10 +1353,14 @@ export function ModelEffortChip({
           vendorKey={vendorKey}
           modelId={effectiveId}
           effort={effectiveEffort}
-          onModelChange={onChangeModel}
+          onModelChange={(v) => {
+            onChangeModel(v);
+            applyRememberedModelConfig(v, null);
+          }}
           onEffortChange={(e) => onChangeEffort(e as EffortValue)}
           fastMode={fastMode}
           onFastModeChange={onChangeFast}
+          modelMemory={modelMemory}
           onDismiss={() => setOpenWithoutAutoRefresh(false)}
           currentProviderId={providerId || null}
           onProviderChange={(pid, reconciledModelId, reconciledEffort) => {
@@ -1226,6 +1368,8 @@ export function ModelEffortChip({
             if (reconciledModelId) onChangeModel(reconciledModelId);
             if (reconciledEffort !== undefined) {
               onChangeEffort(reconciledEffort as EffortValue | '');
+            } else if (reconciledModelId) {
+              applyRememberedModelConfig(reconciledModelId, pid);
             }
           }}
           onNavigateToProviders={onNavigateToProviders}
@@ -1334,7 +1478,14 @@ export function ThreadPickerInline({ value, onSelect, onOpen, reference }: {
             )}
             {sessions.map((s) => (
               <option key={s.id} value={s.id}>
-                {s.title} · {s.agentKind === 'cc' ? 'Claude Code' : s.agentKind === 'pi' ? 'Pi' : 'Codex'}
+                {s.title} ·{' '}
+                {s.agentKind === 'cc'
+                  ? 'Claude Code'
+                  : s.agentKind === 'cursor'
+                    ? 'Cursor'
+                    : s.agentKind === 'pi'
+                      ? 'Pi'
+                      : 'Codex'}
               </option>
             ))}
           </select>

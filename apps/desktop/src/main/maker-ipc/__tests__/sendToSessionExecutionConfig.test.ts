@@ -73,6 +73,8 @@ const providerRouting = (
         },
       },
     }],
+    // cursor 是登录制 agent，没有 Cindy provider 条目，可用集恒空。
+    cursor: [],
     pi: [{
       id: 'xd',
       name: 'Cindy AI',
@@ -310,6 +312,7 @@ describe('resolveSendToSessionExecutionConfig', () => {
               'codex/gpt-5.6-sol': { efforts: ['xhigh'], defaultEffort: 'xhigh' },
             },
           }],
+          cursor: [],
           pi: [],
         },
         resolveDefaultProviderIdForModel: () => 'xd',

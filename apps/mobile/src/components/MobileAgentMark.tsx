@@ -1,5 +1,5 @@
 /**
- * MobileAgentMark —— Claude Code / Codex CLI 的 Agent 身份 mark。
+ * MobileAgentMark —— Claude Code / Codex CLI / Cursor 的 Agent 身份 mark。
  * 不用于 Anthropic / OpenAI provider 或模型品牌；后两者由 MobileProviderMark 负责。
  */
 import Svg, { G, Path, Text as SvgText } from 'react-native-svg';
@@ -11,10 +11,12 @@ import {
   CLAUDE_AGENT_PATH,
   CODEX_AGENT_FLOWER_PATH,
   CODEX_AGENT_PROMPT_PATH,
+  CURSOR_AGENT_PATH,
 } from './vendorIconPaths';
+import type { AgentKind } from '@cindy/maker-shared';
 
 export interface MobileAgentMarkProps {
-  agentKind: 'claude-code' | 'codex' | 'pi';
+  agentKind: AgentKind;
   color: string;
   size?: number;
 }
@@ -43,6 +45,8 @@ export function MobileAgentMark({ agentKind, color, size = iconSize.sm }: Mobile
             strokeWidth={StyleSheet.hairlineWidth}
           />
         </G>
+      ) : agentKind === 'cursor' ? (
+        <Path d={CURSOR_AGENT_PATH} fill={color} />
       ) : (
         <Path clipRule="evenodd" d={CLAUDE_AGENT_PATH} fill={color} fillRule="evenodd" />
       )}

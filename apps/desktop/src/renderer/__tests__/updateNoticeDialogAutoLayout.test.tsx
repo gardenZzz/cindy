@@ -90,6 +90,7 @@ describe('UpdateNoticeDialog auto layout', () => {
     expect(screen.getAllByText('v0.1.21')).toHaveLength(2);
     // v0.1.20 appears only in its content block (header badge shows v0.1.21).
     expect(screen.getByText('v0.1.20')).toBeTruthy();
+    expect(screen.queryByText('v0.1.20 → v0.1.21')).toBeNull();
     expect(
       screen.getByText('update.notice.ariaDescriptionSpan(from=0.1.20,count=2)'),
     ).toBeTruthy();

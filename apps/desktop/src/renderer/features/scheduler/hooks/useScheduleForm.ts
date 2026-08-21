@@ -18,6 +18,7 @@ import {
   applyRunMode,
   buildScheduleInput,
   captureBinding,
+  type ScheduleModelEfforts,
   sessionAgentKindToScheduleAgentKind,
   PENDING_SESSION_ID,
   resolveTemplateAgentFields,
@@ -84,6 +85,7 @@ function defaultScheduleFormPrefs(): ScheduleFormPrefs {
     lastByAgent: {
       'claude-code': EMPTY_AGENT_PREFS,
       codex: EMPTY_AGENT_PREFS,
+      cursor: EMPTY_AGENT_PREFS,
       pi: EMPTY_AGENT_PREFS,
     },
   };
@@ -95,7 +97,14 @@ function loadScheduleFormPrefs(): ScheduleFormPrefs {
     const raw = window.localStorage.getItem(SCHEDULE_FORM_PREFS_KEY);
     if (!raw) return defaultScheduleFormPrefs();
     const parsed = JSON.parse(raw) as Partial<ScheduleFormPrefs>;
-    const agentKind = parsed.agentKind === 'codex' ? 'codex' : parsed.agentKind === 'pi' ? 'pi' : 'claude-code';
+    const agentKind =
+      parsed.agentKind === 'codex'
+        ? 'codex'
+        : parsed.agentKind === 'cursor'
+          ? 'cursor'
+          : parsed.agentKind === 'pi'
+            ? 'pi'
+            : 'claude-code';
     const workingDir = typeof parsed.workingDir === 'string' ? parsed.workingDir : '';
     const workspaceKind = normalizePrefsWorkspaceKind(parsed.workspaceKind, workingDir);
     return {
@@ -106,6 +115,7 @@ function loadScheduleFormPrefs(): ScheduleFormPrefs {
       lastByAgent: {
         'claude-code': sanitizeAgentPrefs(parsed.lastByAgent?.['claude-code']),
         codex: sanitizeAgentPrefs(parsed.lastByAgent?.codex),
+        cursor: sanitizeAgentPrefs(parsed.lastByAgent?.cursor),
         pi: sanitizeAgentPrefs(parsed.lastByAgent?.pi),
       },
     };
@@ -154,8 +164,11 @@ export function getScheduleAgentPrefs(agentKind: ScheduleFormState['agentKind'])
  * 的事故见 2026-06 踩坑:任务里看着选了 Opus 4.8,实际每次跑 4.7)。
  */
 export function schedulerFallbackModel(agentKind: ScheduleFormState['agentKind']): string {
+  if (agentKind === 'codex') return 'gpt-5.5';
+  if (agentKind === 'cursor') return 'auto';
   // Pi 的来源/模型来自动态连接目录；没有能与 providerId 解耦的静态默认。
-  return agentKind === 'codex' ? 'gpt-5.5' : agentKind === 'pi' ? '' : 'claude-sonnet-4-6';
+  if (agentKind === 'pi') return '';
+  return 'claude-sonnet-4-6';
 }
 
 /**
@@ -168,7 +181,9 @@ export function schedulerFallbackModel(agentKind: ScheduleFormState['agentKind']
 export function getScheduleDefaultModel(agentKind: ScheduleFormState['agentKind']): string {
   const prefs = getScheduleAgentPrefs(agentKind);
   if (prefs.model.trim()) return prefs.model;
-  const chatLast = getPersistedVendorModel(agentKind === 'codex' ? 'codex' : agentKind === 'pi' ? 'pi' : 'cc');
+  const chatVendor =
+    agentKind === 'codex' ? 'codex' : agentKind === 'cursor' ? 'cursor' : agentKind === 'pi' ? 'pi' : 'cc';
+  const chatLast = getPersistedVendorModel(chatVendor);
   if (chatLast.trim()) return chatLast;
   return schedulerFallbackModel(agentKind);
 }
@@ -275,8 +290,9 @@ export interface UseScheduleFormResult {
    * 把表单转成 CreateScheduleInput；
    * heartbeat 模式（targetSessionId 非空）只跳过 workingDir/useWorktree
    * （runner 从 SessionMeta 取，传了也被忽略）；model/effort 照常发送。
+   * 传入当前模型档位目录时，空 effort 会写成 chip 展示的 defaultEffort。
    */
-  toInput: () => CreateScheduleInput;
+  toInput: (modelEfforts?: ScheduleModelEfforts) => CreateScheduleInput;
   /**
    * 校验 + 返回错误 i18n key + 可选 interpolation values。null = 通过。
    * 调用方负责用 t() 翻译。
@@ -414,7 +430,11 @@ export function useScheduleForm(initial: Schedule | null = null): UseScheduleFor
 
   // 核心转换在 lib/scheduleFormLogic.buildScheduleInput(纯函数,node 单测覆盖);
   // heartbeat 分支 model/effort 恒带 key(空值 undefined → update patch 清列 = 跟随会话)。
-  const toInput = useCallback((): CreateScheduleInput => buildScheduleInput(form), [form]);
+  const toInput = useCallback(
+    (modelEfforts?: ScheduleModelEfforts): CreateScheduleInput =>
+      buildScheduleInput(form, modelEfforts),
+    [form],
+  );
 
   return { form, setField, setDestination, setRunMode, selectBoundSession, applyTemplateAgentFields, reset, toInput, validate };
 }

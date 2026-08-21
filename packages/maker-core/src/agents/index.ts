@@ -7,6 +7,46 @@ export type {
   ClaudeSubagentModelAccessStatus,
 } from './claude-code/subagent-model-access.js';
 export { CodexAgent } from './codex/index.js';
+export { CursorAgent } from './cursor/index.js';
+export {
+  classifyAcpAutoPermission,
+  isSensitiveAutoPermissionPath,
+  type AutoPermissionClassifyArgs,
+  type AutoPermissionVerdict,
+} from './acp/permissions.js';
+export {
+  createCursorIsolatedConfigDir,
+  removeCursorIsolatedConfigDir,
+  resolveCursorIsolatedConfigDir,
+} from './cursor/isolatedConfig.js';
+export type {
+  CursorIsolatedConfig,
+  CreateCursorIsolatedConfigOptions,
+} from './cursor/isolatedConfig.js';
+export type {
+  CursorListedModel,
+  CursorModelsListing,
+} from './cursor/models.js';
+export {
+  CURSOR_ACP_AUTO_MODEL_ID,
+  CURSOR_PRODUCT_AUTO_MODEL_ID,
+  cursorListingToDescriptors,
+  parseCursorModelsState,
+  toCursorAcpModelId,
+  toCursorProductModelId,
+} from './cursor/models.js';
+export { CURSOR_ONESHOT_DEFAULT_MODEL } from './cursor/oneShot.js';
+export {
+  CURSOR_STREAM_DISCONNECT_REASON,
+  isCursorStreamDisconnectError,
+} from './cursor/streamDisconnect.js';
+export {
+  CURSOR_TOOL_CALL_IDLE_TIMEOUT_REASON,
+  createToolIdleWatchdog,
+  formatCursorToolIdleMessage,
+  resolveCursorToolIdleMs,
+  type ToolIdleWatchdog,
+} from './cursor/toolIdleWatchdog.js';
 // host 导入本地 Codex rollout 历史时也要做 citation 归一化(流式路径在 translator
 // 内部做,导入路径拿到的是 rollout 原文),复用同一实现避免口径分叉。
 // finalizeCodexCitationText = 剥截断残尾 + 归一化(与流式 completed 完全同口径)。

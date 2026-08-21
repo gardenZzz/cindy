@@ -11,12 +11,13 @@ import { dailyModelUsage } from './schema.js';
 import { localDayKey } from './dailySpend.js';
 import { getDbClient } from './client/current.js';
 import { createLogger } from '../logger.js';
+import type { AgentKind } from '@cindy/maker-core';
 import { currentLedgerCurrency } from '../usage/ledgerCurrency.js';
 
 const log = createLogger('localDb/dailyModelUsage');
 
 export interface DailyModelUsageDelta {
-  agentKind: 'claude-code' | 'codex' | 'pi';
+  agentKind: AgentKind;
   model: string;
   money?: RegionalMoney | null;
   inputTokensDelta: number;

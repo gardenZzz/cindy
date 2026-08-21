@@ -163,6 +163,10 @@ export function isSelectedSourceDisconnected(args: {
   error: string | null;
 }): boolean {
   if (!args.providerId || args.loading || args.error !== null) return false;
+  // Cursor 不在 Cindy provider 目录里(本机 cursor-agent/ACP),providerId 对它不构成路由:
+  // 会话上残留的来源(如自动化任务从上一个 agent 带过来的)恒查不到已连接来源,不判断开。
+  // 口径同桌面 sourceSwitch.ts。
+  if (args.agentKind === 'cursor') return false;
   // chatEligibleSourcesForModel + includeDisabled(issue #882 第 3 点 与 PR #744
   // 停用轴合流,2026-07 review):与桌面 sourceSwitch.ts 的 isSelectedSourceDisconnected
   // 同一份口径——选中来源若还在但这个 id 在它上面已经不是聊天模型了,也要判"断连",

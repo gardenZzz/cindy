@@ -65,6 +65,31 @@ export interface ProviderModelChoice {
   effort: Effort;
 }
 
+/**
+ * Cursor 的合成记忆槽 id。与 agentKind 同字面量;Cindy 目录里没有同名可路由供应商,
+ * 所以不会与真实 `${agent}:${providerId}` 槽相撞。
+ */
+const CURSOR_MEMORY_SLOT_ID = 'cursor';
+
+/**
+ * 记忆槽来源 id —— 与「路由来源 id」分离。
+ *
+ * Cursor 是独立 Agent(ACP),没有 Cindy provider(ADR 0001),但 effort / Fast 仍要按
+ * (agent, model) 记住,否则模型行侧栏无处读写、永远不可配。给它一个合成槽即可。
+ * 其它 agent 无 provider 时仍返回 null,保持「flat 选择器无记忆」语义。
+ *
+ * 只用于:providerModelMemory 读写、ModelSelector 配置门控与非选中行 effort/Fast、
+ * ChatInput 切模型恢复。**绝不**用于 setModel / 会话 providerId 落盘 / 发送路由 /
+ * 供应商图标与价格解析。
+ */
+export function modelMemorySourceId(
+  agent: AgentKind | null | undefined,
+  providerId: string | null | undefined,
+): string | null {
+  if (providerId) return providerId;
+  return agent === 'cursor' ? CURSOR_MEMORY_SLOT_ID : null;
+}
+
 function keyOf(agent: AgentKind, providerId: string): string {
   return `${agent}:${providerId}`;
 }

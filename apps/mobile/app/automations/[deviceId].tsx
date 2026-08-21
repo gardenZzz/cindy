@@ -142,6 +142,14 @@ export default function AutomationsScreen() {
   const [openingRunId, setOpeningRunId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [lastSyncedAt, setLastSyncedAt] = useState<number | null>(null);
+  /**
+   * 被控端是否注册了 cursor agent。`null` = 未知（加载中 / 拉取失败）。
+   *
+   * 不过滤的话，用户能建出一条到触发时才因被控端 `requireAgent('cursor')` 失败的
+   * 自动化。与新建会话页同口径：未知一律 fail-open（不因一次隧道抖动抹掉合法 agent），
+   * 真正的兜底仍是被控端的 requireAgent。
+   */
+  const [cursorAvailable, setCursorAvailable] = useState<boolean | null>(null);
   const [formMode, setFormMode] = useState<'create' | 'edit' | null>(null);
   const [formDraft, setFormDraft] = useState<MobileScheduleDraft | null>(null);
   const [formScheduleId, setFormScheduleId] = useState<string | null>(null);
@@ -202,6 +210,31 @@ export default function AutomationsScreen() {
     }
   }, [deviceId, maker, openLink, subscribe]);
   const loadSchedules = useRemoteSyncTask(syncSchedules);
+
+  // 被控端 agent 清单：只用来决定表单里露不露 Cursor 段。设备切换时重拉，
+  // 让被控端后装的 cursor-agent 及时出现。
+  useEffect(() => {
+    if (!deviceId) {
+      setCursorAvailable(null);
+      return;
+    }
+    let cancelled = false;
+    setCursorAvailable(null);
+    void withTransientRemoteRetry(async () => {
+      await openLink(deviceId);
+      return maker.listAvailableAgents();
+    })
+      .then((agents) => {
+        if (cancelled) return;
+        setCursorAvailable(Array.isArray(agents) && agents.some((a) => a === 'cursor'));
+      })
+      .catch(() => {
+        /* fail-open：拉取失败保持 null（不过滤），兜底仍是被控端 requireAgent。 */
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [deviceId, maker, openLink]);
 
   const syncRuns = useCallback(async (scheduleId: string, options: { markRead?: boolean } = {}) => {
     if (!deviceId || !scheduleId) return;
@@ -836,6 +869,7 @@ export default function AutomationsScreen() {
         {formDraft && (
           <ScheduleFormCard
             busy={busyAction === 'create' || busyAction === `edit:${formScheduleId}`}
+            cursorAvailable={cursorAvailable}
             draft={formDraft}
             error={formError}
             mode={formMode ?? 'create'}
@@ -995,6 +1029,7 @@ export default function AutomationsScreen() {
 
 function ScheduleFormCard({
   busy,
+  cursorAvailable,
   draft,
   error,
   mode,
@@ -1013,6 +1048,8 @@ function ScheduleFormCard({
   sessions,
 }: {
   busy: boolean;
+  /** 被控端是否注册了 cursor；`null` = 未知（不过滤）。 */
+  cursorAvailable: boolean | null;
   draft: MobileScheduleDraft;
   error: string | null;
   mode: 'create' | 'edit';
@@ -1315,6 +1352,18 @@ function ScheduleFormCard({
             onPress={() => onChange(updateDraftAgentKind(draft, 'codex'))}
             testID="automations.form.agentCodex"
           />
+          {/* 被控端确认没装 cursor-agent 时不露出：选了只会建出一条到触发时才因
+              requireAgent('cursor') 失败的自动化。未知（加载中/拉取失败）不过滤；
+              已经选中 cursor 的存量任务照常显示，不把用户的既有选择悄悄抹掉。 */}
+          {cursorAvailable !== false || draft.agentKind === 'cursor' ? (
+            <SegmentButton
+              active={draft.agentKind === 'cursor'}
+              disabled={busy || hasRealBinding}
+              label="Cursor"
+              onPress={() => onChange(updateDraftAgentKind(draft, 'cursor'))}
+              testID="automations.form.agentCursor"
+            />
+          ) : null}
           <SegmentButton
             active={draft.agentKind === 'pi'}
             disabled={busy || hasRealBinding}
@@ -1331,7 +1380,7 @@ function ScheduleFormCard({
           autoCapitalize="none"
           editable={!busy}
           onChangeText={(value) => setField('model', value)}
-          placeholder={hasRealBinding ? t('devices.automations.form.modelPlaceholderBound') : draft.agentKind === 'codex' ? 'gpt-5.5' : draft.agentKind === 'pi' ? t('devices.automations.form.modelPlaceholderPiDefault') : 'claude-sonnet-4-6'}
+          placeholder={hasRealBinding ? t('devices.automations.form.modelPlaceholderBound') : draft.agentKind === 'codex' ? 'gpt-5.5' : draft.agentKind === 'cursor' ? 'auto' : draft.agentKind === 'pi' ? t('devices.automations.form.modelPlaceholderPiDefault') : 'claude-sonnet-4-6'}
           placeholderTextColor={colors.textTertiary}
           style={styles.input}
           testID="automations.form.modelInput"
@@ -1353,7 +1402,8 @@ function ScheduleFormCard({
         />
       </View>
 
-      {(draft.agentKind === 'codex' || draft.agentKind === 'pi') && !hideWorkspaceFields ? (
+      {(draft.agentKind === 'codex' || draft.agentKind === 'cursor' || draft.agentKind === 'pi')
+        && !hideWorkspaceFields ? (
         <ToggleRow
           active={draft.fastMode}
           disabled={busy}

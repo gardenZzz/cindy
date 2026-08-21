@@ -39,6 +39,7 @@
     "createFailedTitle": "세션 생성 실패",
     "createFailedDefault": "세션 생성에 실패했습니다.",
     "createFailedNotice": "세션 생성 실패: {{message}}",
+    "cursorUnsupportedOnDesktop": "이 컴퓨터 버전은 아직 Cursor를 지원하지 않습니다. 컴퓨터의 Cindy를 업데이트한 뒤 다시 시도하세요.",
     "backToEdit": "편집으로 돌아가기",
     "retry": "다시 시도",
     "firstMessageNotSent": "첫 메시지가 전송되지 않았습니다. 내용이 입력창에 복원되었습니다.",

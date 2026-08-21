@@ -28,7 +28,7 @@ import { sessions, messages } from '../localDb/schema';
 import { sessionToCamel } from '../localDb/mapper';
 import { getMaker } from '../maker-host/index.js';
 import type { Session } from '../../renderer/lib/ccAgent.types';
-import type { RewindFilesResult } from '@cindy/maker-core';
+import type { RewindFilesResult, AgentKind } from '@cindy/maker-core';
 
 import { createLogger } from '../logger';
 import { setLastAssistantTranscriptUuid } from '../messagePersistBroadcaster.js';
@@ -152,7 +152,7 @@ interface RewindContext {
   targetMessageId: string;
   targetClientId: string;
   /** 当前 agent kind；Claude checkpoint 与 conversation-tree rollback 机制不同。 */
-  agentKind: 'claude-code' | 'codex' | 'pi';
+  agentKind: AgentKind;
   /** prior assistant uuid（Claude 必填）——SDK resumeSessionAt 用。 */
   assistantUuid?: string;
   /** target user 消息的 SDK uuid——仅 preview 的 rewindFiles dryRun 用，老消息可能 NULL。 */

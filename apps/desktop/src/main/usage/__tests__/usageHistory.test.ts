@@ -133,6 +133,7 @@ import {
   type ModelPriceQuote,
   type RegionalMoney,
 } from '../../../shared/regionalMoney';
+import type { AgentKind } from '@cindy/maker-core';
 
 const TODAY = '2026-06-11';
 
@@ -171,7 +172,7 @@ function subscriptionQuote(
 
 function modelRow(
   day: string,
-  agentKind: 'claude-code' | 'codex' | 'pi',
+  agentKind: AgentKind,
   model: string,
   money: RegionalMoney,
   tokens: {

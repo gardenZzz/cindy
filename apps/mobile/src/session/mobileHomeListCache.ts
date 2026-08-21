@@ -208,7 +208,13 @@ function coerceCachedSession(item: unknown): RemoteSession | null {
     permissionMode: typeof item.permissionMode === 'string' ? item.permissionMode : '',
     fastMode: item.fastMode === true,
     status,
-    agentKind: item.agentKind === 'codex' || item.agentKind === 'pi' ? item.agentKind : 'cc',
+    agentKind: item.agentKind === 'codex'
+      ? 'codex'
+      : item.agentKind === 'cursor'
+        ? 'cursor'
+        : item.agentKind === 'pi'
+          ? 'pi'
+          : 'cc',
     userSendAt: typeof item.userSendAt === 'string' ? item.userSendAt : null,
     createdAt,
     updatedAt: typeof item.updatedAt === 'string' ? item.updatedAt : createdAt,

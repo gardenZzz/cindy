@@ -12,6 +12,7 @@ import {
   formatRemoteError,
   humanizeRemoteError,
   isAccessRevokedRemoteError,
+  isCursorUnsupportedRemoteError,
   isDeviceUnresponsiveRemoteError,
   isPreconditionFailedRemoteError,
   isMobileRemoteInvokeChannel,
@@ -94,7 +95,9 @@ describe('device-link shared contract', () => {
     expect(describeAgentAuthError('claude-code not authenticated: no_key')).toContain('Claude');
     expect(describeAgentAuthError('codex not authenticated: no_credentials'))
       .toContain('尚未登录 Codex');
-    // Pi 也走同一模板与映射(codex review):按 reason 引导,标签显示 Pi。
+    expect(describeAgentAuthError('cursor not authenticated: no_credentials'))
+      .toContain('尚未登录 Cursor');
+    // Pi 也走同一模板与映射(codex review):按 reason 引导,默认显示 Pi。
     expect(describeAgentAuthError('pi not authenticated: no_key')).toContain('API Key');
     expect(describeAgentAuthError('pi not authenticated: no_key')).toContain('Pi');
     expect(describeAgentAuthError('claude-code not authenticated: no_oauth')).toContain('账号授权');
@@ -112,6 +115,23 @@ describe('device-link shared contract', () => {
     expect(describeAgentAuthError(null)).toBeNull();
     // describeRemoteError 走同一映射
     expect(describeRemoteError('claude-code not authenticated: no_key')).toContain('API Key');
+  });
+
+  it('maps old-desktop Cursor rejections to a readable unsupported message', () => {
+    expect(isCursorUnsupportedRemoteError(
+      '[INVALID_PARAMS] targetAgentKind must be claude-code | codex',
+    )).toBe(true);
+    expect(isCursorUnsupportedRemoteError(
+      '[INVALID_PARAMS] agentKind required',
+      'cursor',
+    )).toBe(true);
+    expect(isCursorUnsupportedRemoteError(
+      '[INVALID_PARAMS] agentKind required',
+      'codex',
+    )).toBe(false);
+    expect(describeRemoteError(
+      '[INVALID_PARAMS] targetAgentKind must be claude-code | codex',
+    )).toContain('还不支持 Cursor');
   });
 
   it('maps connection issue kinds to actionable copy', () => {

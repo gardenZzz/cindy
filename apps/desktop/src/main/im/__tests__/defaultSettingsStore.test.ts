@@ -118,6 +118,30 @@ describe('im default settings store', () => {
     });
   });
 
+  it('persists a Cursor-specific default instead of dropping it from sparse overrides', () => {
+    writeImDefaultSettingsPatch({
+      agents: {
+        cursor: { providerId: null, model: 'composer-1', effort: 'high' },
+      },
+    });
+
+    const persisted = JSON.parse(fs.readFileSync(settingsFile(), 'utf-8'));
+    expect(persisted.global.agents.cursor).toEqual({
+      providerId: null,
+      model: 'composer-1',
+      effort: 'high',
+    });
+  });
+
+  it('round-trips Cursor as the selected agent of a channel', () => {
+    writeImDefaultSettingsPatch({ agentKind: 'cursor' }, 'telegram');
+
+    expect(readImDefaultSettings('telegram').agentKind).toBe('cursor');
+    expect(readImDefaultSettingsState('telegram').customizedKeys).toContain('agentKind');
+    // 渠道独立:另一个渠道不受影响。
+    expect(readImDefaultSettings('feishu').agentKind).toBe(IM_DEFAULT_SETTINGS.agentKind);
+  });
+
   it('preserves existing agent overrides when another agent is updated', () => {
     writeImDefaultSettingsPatch({
       agents: {
@@ -168,7 +192,12 @@ describe('im default settings store', () => {
         model: 'gpt-5.5',
         effort: 'high',
       },
-      // legacy root mirror 是 resolved 满射快照(global 才做 diff),pi 槽为系统默认。
+      // legacy root mirror 是 resolved 满射快照(global 才做 diff),pi / cursor 槽为系统默认。
+      cursor: {
+        providerId: null,
+        model: 'auto',
+        effort: 'high',
+      },
       pi: {
         providerId: null,
         model: 'claude-sonnet-5',

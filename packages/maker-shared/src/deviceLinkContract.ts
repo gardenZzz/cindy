@@ -1,4 +1,5 @@
 import { BRAND_NAME } from './branding.js';
+import type { AgentKind } from './scheduleTypes.js';
 
 export const DEVICE_LINK_SUBSCRIBE_CHANNEL = 'device-link:subscribe';
 export const DEVICE_LINK_UNSUBSCRIBE_CHANNEL = 'device-link:unsubscribe';
@@ -234,7 +235,7 @@ export interface MobileCodexRateLimitResetResult {
 
 /** 下一条消息发送时才会应用的跨 Agent 切换意图。 */
 export interface MobileSessionAgentSwitchIntent {
-  targetAgentKind: 'claude-code' | 'codex' | 'pi';
+  targetAgentKind: AgentKind;
   model: string;
   providerId: string | null;
   effort?: string;
@@ -244,7 +245,7 @@ export interface MobileSessionAgentSwitchIntent {
 /** desktop 登记 / 取消跨 Agent 意图后的稳定结果。 */
 export interface MobileSessionAgentSwitchResult {
   switched: boolean;
-  agentKind: 'claude-code' | 'codex' | 'pi';
+  agentKind: AgentKind;
   model: string;
   engineReady: boolean;
   deferred?: boolean;
@@ -491,14 +492,45 @@ export function connectionIssueHint(kind: DeviceLinkConnectionIssueKind): string
 }
 
 /**
- * agent 鉴权失败 message 的固定模板。maker-core 的 claude-code / codex 在
+ * agent 鉴权失败 message 的固定模板。maker-core 的 claude-code / codex / cursor / pi 在
  * startSession / 首次 send 的鉴权门禁抛 AgentNotAuthenticatedError 时统一用
  * `<agentKind> not authenticated: <reason>` 这个格式;reason(no_key 等)目前只
  * 存在于 message 字符串里,不随事件结构化下发,relay 又是哑中继原样透传——手机端
  * 要给出可读提示只能按模板识别。formatRemoteError / throwIpcError 会给部分链路的
  * message 加 `[CODE] ` 头,识别时一并容忍。
  */
-const AGENT_NOT_AUTHENTICATED_RE = /^(?:\[[A-Z_]+\] )?(claude-code|codex|pi) not authenticated: ?(.*)$/;
+const AGENT_NOT_AUTHENTICATED_RE =
+  /^(?:\[[A-Z_]+\] )?(claude-code|codex|cursor|pi) not authenticated: ?(.*)$/;
+
+/**
+ * 新版 mobile × 旧版 desktop：Cursor 新建 / 切换意图被 host 拒绝时的识别。
+ * `requestedAgentKind` 用于「错误原文未点名 cursor、但请求确是 cursor」的语境判定
+ * （旧 host `requireAgentKind` 只回 `agentKind required`）。
+ */
+export function isCursorUnsupportedRemoteError(
+  error: string | null | undefined,
+  requestedAgentKind?: string | null,
+): boolean {
+  if (!error) return false;
+  const text = error;
+  // 注:旧 host 的允许列表错误(`targetAgentKind must be claude-code | codex` 等)是对**任何**
+  // 后来新增 agent 的通用回绝,理论上新版 mobile 请求 Pi 也会收到同一句。这里仍然无条件判成
+  // 「不支持 Cursor」是有意的:无上下文的 describeRemoteError 只能二选一,而当前 fork 里
+  // 会撞上旧 host 允许列表的新 agent 只有 Cursor;两条既有用例(本包 deviceLinkContract.test
+  // 与 mobile cursorHostCompatibility.test)把该行为钉住了。要真正消歧义得让调用方带上
+  // requestedAgentKind —— 那条路径已由下面的 describeCursorHostError 提供。
+  if (/targetAgentKind must be claude-code\s*\|\s*codex/i.test(text)) return true;
+  if (/agent switch is not supported for Cursor/i.test(text)) return true;
+  if (/Cursor sessions do not support/i.test(text)) return true;
+  if (/does not support Cursor/i.test(text)) return true;
+  if (/agent must be claude-code\|codex/i.test(text)) return true;
+  if (requestedAgentKind === 'cursor') {
+    if (/agentKind required/i.test(text)) return true;
+    if (/INVALID_PARAMS/i.test(text) && /agentKind/i.test(text)) return true;
+    if (/targetAgentKind must be/i.test(text)) return true;
+  }
+  return false;
+}
 
 /**
  * agent 未鉴权错误 → 手机端直出文案(桌面端走 i18n,不用这组)。
@@ -511,7 +543,13 @@ export function describeAgentAuthError(error: string | null | undefined): string
   if (!error) return null;
   const matched = AGENT_NOT_AUTHENTICATED_RE.exec(error.trim());
   if (!matched) return null;
-  const agentLabel = matched[1] === 'claude-code' ? 'Claude' : matched[1] === 'pi' ? 'Pi' : 'Codex';
+  const agentLabel = matched[1] === 'claude-code'
+    ? 'Claude'
+    : matched[1] === 'cursor'
+      ? 'Cursor'
+      : matched[1] === 'pi'
+        ? 'Pi'
+        : 'Codex';
   const goSettings = `请在电脑端 ${BRAND_NAME} 的「设置 → 模型供应商」`;
   switch (matched[2]) {
     case 'no_key':
@@ -535,6 +573,9 @@ export function describeRemoteError(error: string | null): string | null {
   if (!error) return null;
   const agentAuth = describeAgentAuthError(error);
   if (agentAuth) return agentAuth;
+  if (isCursorUnsupportedRemoteError(error)) {
+    return `当前电脑端还不支持 Cursor。请升级电脑端 ${BRAND_NAME} 后再试。`;
+  }
   if (error.includes('REMOTE_DISABLED')) return '被控电脑已关闭允许远程控制。';
   if (error.includes('CHANNEL_NOT_ALLOWED')) return '当前电脑端版本不支持这个远程能力。';
   if (error.includes('ACCESS_REVOKED')) return '这台电脑已撤销手机访问权限。';

@@ -10,6 +10,19 @@ import {
   type OrcaWorkerPermissionMode,
 } from '../../shared/orca-worker-permission-mode.js';
 
+/**
+ * cursor 是登录制 agent：凭证在 cursor-agent 自己的 login 态里，模型目录来自 ACP
+ * `session/new`，model-providers 里没有它的供应商条目。所以整条「供应商可用性 →
+ * 来源解析 → 精确路由 preflight」链路对 cursor 不适用，必须整段跳过，否则 worker
+ * 创建会被恒空的 availability 拒成 NO_PROVIDER_FOR_AGENT。
+ */
+function isProviderRoutedAgent(agent: AgentKind): boolean {
+  return agent !== 'cursor';
+}
+
+/** cursor 的产品级 Auto 档（maker-core CURSOR_PRODUCT_AUTO_MODEL_ID），worker 兜底模型。 */
+const CURSOR_DEFAULT_WORKER_MODEL = 'auto';
+
 /** active team 的最小快照；创建 service 不直接持有 Drizzle row。 */
 export interface OrcaTeamSnapshot {
   id: string;
@@ -266,6 +279,8 @@ export interface OrcaWorkerCreationDeps {
 
 /** Orca worker 创建服务，只负责创建既有 team 下的新 worker，不负责 team lifecycle。 */
 export interface OrcaWorkerCreationService {
+  /** 只读返回当前 Lead workflow 的 Worker 数量闸快照，不创建或预留 Worker。 */
+  getWorkerLimitSnapshot(params: { leadSessionId: string }): Promise<OrcaWorkerLimitSnapshot>;
   createWorker(params: OrcaWorkerCreateParams): Promise<OrcaWorkerCreationResult>;
   createWorkerInTeam(params: OrcaWorkerCreateInTeamParams): Promise<OrcaWorkerCreationResult>;
 }
@@ -289,6 +304,18 @@ function normalizeRequiredText(value: string, field: string): { ok: true; value:
   const trimmed = value.trim();
   if (!trimmed) return { ok: false, message: `${field} required` };
   return { ok: true, value: trimmed };
+}
+
+/**
+ * worker agent 入参归一：所有创建入口共用一处，避免各自维护三元表达式后分叉
+ * （曾有 WORKER_CREATE 漏掉 'cursor' 导致静默降级成 claude-code，issue #18）。
+ * 缺省/异型值回落 claude-code，与既有入口语义一致。
+ */
+export function normalizeOrcaWorkerAgent(value: unknown): AgentKind {
+  if (value === 'codex') return 'codex';
+  if (value === 'cursor') return 'cursor';
+  if (value === 'pi') return 'pi';
+  return 'claude-code';
 }
 
 const ORCA_WORKER_LABEL_MAX_LENGTH = 32;
@@ -351,8 +378,10 @@ function selectWorkerModel(params: {
   return input.model
     ?? defaults.model
     // pi 显式列出(与 model-defaults.ts 对齐,避免将来改 cc 默认时 pi 静默跟随)。
+    // cursor 走 CURSOR_DEFAULT_WORKER_MODEL;其它回落 claude-sonnet-4-6。
     ?? (input.agent === lead.agentKind ? lead.model
         : input.agent === 'codex' ? 'gpt-5.5'
+        : input.agent === 'cursor' ? CURSOR_DEFAULT_WORKER_MODEL
         : input.agent === 'pi' ? 'claude-sonnet-4-6'
         : 'claude-sonnet-4-6');
 }
@@ -505,6 +534,7 @@ function resolveWorkerConfig(params: {
     // 来源的档位表裁决(见 pendingEffortError 注);其余字段照常解析。
     effort: normalizedEffort.ok ? normalizedEffort.effort : null,
     ...(normalizedEffort.ok ? {} : { pendingEffortError: normalizedEffort.message }),
+    // cursor 无供应商路由维度(见 isProviderRoutedAgent):调用方已把 providerId 置 null。
     providerId,
     fastMode: modelCapabilities.supportsFastMode === false
       ? false
@@ -524,16 +554,19 @@ export function budgetModelRequiresApiKeyMessage(model: string): string {
 
 /** agent 的人类可读名,用于 preflight 失败信息。 */
 function agentDisplayName(agent: AgentKind): string {
-  return agent === 'codex' ? 'Codex' : agent === 'pi' ? 'Pi' : 'Claude Code';
+  if (agent === 'codex') return 'Codex';
+  if (agent === 'cursor') return 'Cursor';
+  if (agent === 'pi') return 'Pi';
+  return 'Claude Code';
 }
 
 /**
- * 会消费显式 `fast` 输入的 agent:Codex 与 Pi(两者 agent 层都支持 Fast 模式)。
+ * 会消费显式 `fast` 输入的 agent:Codex / Cursor / Pi(三者 agent 层都支持 Fast 模式)。
  * claude-code 的 fast 在 agent 层是 no-op,故不接线。实际是否生效仍由该 (来源, 模型)
- * 的 `supportsFastMode` 收口 —— 与 Pi 自动任务路径同口径(runner 按模型能力裁决)。
+ * 的 `supportsFastMode` 收口 -- 与 Pi 自动任务路径同口径(runner 按模型能力裁决)。
  */
 function agentConsumesExplicitFast(agent: AgentKind): boolean {
-  return agent === 'codex' || agent === 'pi';
+  return agent === 'codex' || agent === 'cursor' || agent === 'pi';
 }
 
 /**
@@ -546,7 +579,7 @@ export function buildNoProviderMessage(
   availability: Record<AgentKind, OrcaWorkerProviderSnapshot[]>,
 ): string {
   const base = `${agentDisplayName(agent)} 当前没有可用的模型供应商(provider)。请在「设置 → 模型供应商」连接一个支持 ${agentDisplayName(agent)} 的供应商后重试`;
-  const others = (['claude-code', 'codex', 'pi'] as AgentKind[]).filter(
+  const others = (['claude-code', 'codex', 'cursor', 'pi'] as AgentKind[]).filter(
     (a) => a !== agent && (availability[a]?.length ?? 0) > 0,
   );
   if (others.length === 0) return `${base}。`;
@@ -605,6 +638,15 @@ export function createOrcaWorkerCreationService(deps: OrcaWorkerCreationDeps): O
     });
   }
 
+  async function getWorkerLimitSnapshot(params: { leadSessionId: string }): Promise<OrcaWorkerLimitSnapshot> {
+    const team = await deps.getActiveTeamByLead(params.leadSessionId);
+    if (!team) throw new Error('no active team for this lead');
+    const existing = await deps.listWorkersByLead(params.leadSessionId);
+    const settings = deps.readCollaborationSettings();
+    const activeCount = existing.filter((worker) => deps.isActiveWorkerStatus(worker.status)).length;
+    return limitSnapshot(settings.workerHardLimit, activeCount);
+  }
+
   async function createWorkerInTeam(params: OrcaWorkerCreateInTeamParams): Promise<OrcaWorkerCreationResult> {
     const role = normalizeRequiredText(params.role, 'role');
     if (!role.ok) return { ok: false, errorCode: 'INVALID_PARAMS', message: role.message };
@@ -630,17 +672,32 @@ export function createOrcaWorkerCreationService(deps: OrcaWorkerCreationDeps): O
       };
     }
     const availableModels = deps.getAvailableModels(params.agent);
+    // cursor 不走供应商路由(见 isProviderRoutedAgent):来源解析 / 路由 preflight 整段跳过,
+    // 显式 model 只按 capabilities 清单校验。
+    const providerRouted = isProviderRoutedAgent(params.agent);
+    if (!providerRouted && params.model) {
+      const validModels = availableModels.map((model) => model.id);
+      if (!validModels.includes(params.model)) {
+        return {
+          ok: false,
+          errorCode: 'INVALID_PARAMS',
+          message: `model "${params.model}" not available for ${params.agent}. valid: ${validModels.join(', ')}`,
+        };
+      }
+    }
     // 标准面板显式选定的来源(非空 string)直接生效,由下方精确 preflight 把关「已连接且
     // 提供该模型」;空串/null/undefined 一律按未显式处理(与 IPC 边界同口径,service 作为
     // 共用内核自防调用方漏归一)。
     const explicitSourceId =
-      typeof params.providerId === 'string' && params.providerId.trim().length > 0
+      providerRouted
+      && typeof params.providerId === 'string'
+      && params.providerId.trim().length > 0
         ? params.providerId.trim()
         : null;
     const providerRouting = await deps.getProviderRoutingContext();
     const providerAvailability = providerRouting.availability;
     const agentProviders = providerAvailability[params.agent] ?? [];
-    const explicitModelResolution = params.model !== undefined
+    const explicitModelResolution = providerRouted && params.model !== undefined
       ? resolveWorkerModelId({
           agent: params.agent,
           model: params.model,
@@ -669,7 +726,7 @@ export function createOrcaWorkerCreationService(deps: OrcaWorkerCreationDeps): O
     }
 
     // 先保留无 provider 的快速失败；精确的 provider + model 校验要等 Lead/defaults 解析完成。
-    if (agentProviders.length === 0) {
+    if (providerRouted && agentProviders.length === 0) {
       return {
         ok: false,
         errorCode: 'NO_PROVIDER_FOR_AGENT',
@@ -703,6 +760,7 @@ export function createOrcaWorkerCreationService(deps: OrcaWorkerCreationDeps): O
       lead,
       defaults,
     });
+    // cursor 恒不带来源(见 isProviderRoutedAgent),不参与 defaults / Lead 的来源继承。
     const leadProviderId =
       params.agent === lead.agentKind && typeof lead.providerId === 'string' && lead.providerId.trim()
         ? lead.providerId.trim()
@@ -710,7 +768,7 @@ export function createOrcaWorkerCreationService(deps: OrcaWorkerCreationDeps): O
     const leadProviderSnapshot = leadProviderId === null
       ? undefined
       : agentProviders.find((provider) => provider.id === leadProviderId);
-    const leadRouteModelResolution = explicitSourceId === null && leadProviderSnapshot
+    const leadRouteModelResolution = providerRouted && explicitSourceId === null && leadProviderSnapshot
       ? resolveWorkerModelId({
           agent: params.agent,
           model: selectedModel,
@@ -741,35 +799,41 @@ export function createOrcaWorkerCreationService(deps: OrcaWorkerCreationDeps): O
       ? null
       : leadProviderId;
     const inheritedLeadProviderUnusable =
-      explicitSourceId === null
+      providerRouted
+      && explicitSourceId === null
       && leadProviderId !== null
       && selectedModel === lead.model
       && routableLeadModelResolution === null;
     const inheritedProviderComesFromDefaults =
-      explicitSourceId === null
+      providerRouted
+      && explicitSourceId === null
       && compatibleLeadModelResolution === null
       && !inheritedLeadProviderUnusable
       && inheritedModelComesFromDefaults;
-    const inheritedProviderId = explicitSourceId
-      ?? compatibleLeadProviderId
-      ?? (inheritedLeadProviderUnusable
-        ? leadProviderId
-        : inheritedProviderComesFromDefaults
-          ? workerDefaultProviderId
-          : null);
+    const inheritedProviderId = !providerRouted
+      ? null
+      : explicitSourceId
+        ?? compatibleLeadProviderId
+        ?? (inheritedLeadProviderUnusable
+          ? leadProviderId
+          : inheritedProviderComesFromDefaults
+            ? workerDefaultProviderId
+            : null);
     const cachedProviderMayFallback =
       inheritedProviderComesFromDefaults
       && workerDefaultProviderId !== null;
-    const modelResolution = compatibleLeadModelResolution
-      ?? explicitModelResolution
-      ?? resolveWorkerModelId({
-        agent: params.agent,
-        model: selectedModel,
-        providerId: inheritedProviderId,
-        allowProviderFallback: cachedProviderMayFallback,
-        availableModels,
-        providers: agentProviders,
-      });
+    const modelResolution = !providerRouted
+      ? { ok: true as const, model: selectedModel }
+      : compatibleLeadModelResolution
+        ?? explicitModelResolution
+        ?? resolveWorkerModelId({
+          agent: params.agent,
+          model: selectedModel,
+          providerId: inheritedProviderId,
+          allowProviderFallback: cachedProviderMayFallback,
+          availableModels,
+          providers: agentProviders,
+        });
     if (!modelResolution.ok) {
       return { ok: false, errorCode: 'INVALID_PARAMS', message: modelResolution.message };
     }
@@ -784,11 +848,14 @@ export function createOrcaWorkerCreationService(deps: OrcaWorkerCreationDeps): O
     if (!resolvedConfig.ok) {
       return { ok: false, errorCode: 'INVALID_PARAMS', message: resolvedConfig.message };
     }
-    const defaultProviderId = providerRouting.resolveDefaultProviderIdForModel(
-      params.agent,
-      resolvedConfig.model,
-    );
-    const cachedProviderRouteIsStale = params.model === undefined
+    const defaultProviderId = providerRouted
+      ? providerRouting.resolveDefaultProviderIdForModel(
+          params.agent,
+          resolvedConfig.model,
+        )
+      : null;
+    const cachedProviderRouteIsStale = providerRouted
+      && params.model === undefined
       && inheritedProviderComesFromDefaults
       && workerDefaultProviderId !== null
       && !agentProviders.some(
@@ -877,6 +944,17 @@ export function createOrcaWorkerCreationService(deps: OrcaWorkerCreationDeps): O
     // (renderer/lib/providerModels.ts 同语义), worker 创建 (UI popover 与
     // MCP 调用) 在此统一拒绝, 失败提前到创建前而非远端运行期。
     if (lead.remoteHostId) {
+      // 远端只安装 cc / codex 两种 agent (maker-remote-ssh RemoteAgentKind)；
+      // cursor worker 会继承 remoteHostId 后在远端找不到二进制,创建前先拒。
+      if (params.agent === 'cursor') {
+        return {
+          ok: false,
+          errorCode: 'INVALID_PARAMS',
+          message:
+            'Cursor worker is not available for SSH remote leads: ' +
+            'the remote host only provisions Claude Code / Codex — pick another agent',
+        };
+      }
       if (isSubscriptionDirectModel(resolved.model)) {
         return {
           ok: false,
@@ -900,7 +978,8 @@ export function createOrcaWorkerCreationService(deps: OrcaWorkerCreationDeps): O
     }
 
     if (
-      params.model !== undefined
+      providerRouted
+      && params.model !== undefined
       && defaultProviderId === null
       && explicitSourceId === null
     ) {
@@ -947,7 +1026,8 @@ export function createOrcaWorkerCreationService(deps: OrcaWorkerCreationDeps): O
       }
     }
     if (
-      resolved.providerId === null
+      providerRouted
+      && resolved.providerId === null
       && !agentProviders.some((provider) => provider.models.includes(resolved.model))
     ) {
       return {
@@ -1101,6 +1181,7 @@ export function createOrcaWorkerCreationService(deps: OrcaWorkerCreationDeps): O
   }
 
   return {
+    getWorkerLimitSnapshot,
     createWorker,
     createWorkerInTeam,
   };

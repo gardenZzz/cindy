@@ -1061,8 +1061,16 @@ function isEnglishSourceHandoff(handoff: string): boolean {
 function AgentSwitchCard({ data }: { data?: Record<string, unknown> }) {
   const { t } = useTranslation();
   const [expanded, setExpanded] = useState(false);
+  // 与 main agentEngineLabel / mobile mobileAgentLabelFromUnknown 同口径;
+  // 漏掉 cursor 会把「从 Cursor 切走」显示成「已从 Claude Code 切换到 …」。
   const engineLabel = (kind: unknown): string =>
-    kind === 'codex' ? 'Codex' : kind === 'pi' ? 'Pi' : 'Claude Code';
+    kind === 'codex'
+      ? 'Codex'
+      : kind === 'cursor'
+        ? 'Cursor'
+        : kind === 'pi'
+          ? 'Pi'
+          : 'Claude Code';
   const fromLabel = engineLabel(data?.fromAgentKind);
   const toLabel = engineLabel(data?.toAgentKind);
   const toModel = typeof data?.toModel === 'string' ? data.toModel : '';

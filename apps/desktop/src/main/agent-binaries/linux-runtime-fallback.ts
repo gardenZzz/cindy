@@ -16,7 +16,7 @@ import { app } from 'electron';
 import claudeLatest from '../../../../../tools/claude/latest.json';
 import codexLatest from '../../../../../tools/codex/latest.json';
 import { download, type ProgressEvent } from '../downloader/index.js';
-
+// pi / cursor 都不进 Linux runtime fallback 安装面(pi 走独立 binary 分发,cursor 本机 ACP)。
 export type LinuxRuntimeFallbackKind = 'claude-code' | 'codex';
 
 interface RuntimeConfig {

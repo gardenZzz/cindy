@@ -736,6 +736,45 @@ export interface AgentDeps {
   ) => Promise<CodexExtraSpawnConfig>;
 
   /**
+   * ACP (Cursor) 专用钩子：产出 `session/new` / `session/load` 的 `mcpServers`。
+   *
+   * 与 codex 同因异形：cursor-agent 也是独立子进程，消费不了 in-process JS
+   * McpServer instance；ACP 只认 stdio / http / sse（cursor 的 initialize 回
+   * `mcpCapabilities: {http:true, sse:true}`），所以同样要经 host 的 HTTP bridge
+   * 暴露。桥接与鉴权细节留在 desktop host，maker-core 只透传结果。
+   *
+   * cleanup 必须在 session close 时调用（注销 bridge 上的 session ctx）。
+   * 缺省 / 返回空数组 → cursor 会话不带 MCP（仍能基础对话）。
+   */
+  prepareAcpMcpServers?: (ctx: {
+    sessionId?: string;
+    workingDir: string;
+    vendorOptions?: Record<string, unknown>;
+  }) => Promise<{ servers: unknown[]; cleanup?: () => void }>;
+
+  /**
+   * Cursor 专用：`cursor/generate_image` 入仓钩子（#50）。
+   *
+   * host 负责 realpath / 受控根 / regular file / magic MIME / 字节上限，并把
+   * 通过校验的字节写入 cindy-media。maker-core 在 ACK `generated` **之前**
+   * await 本钩子——失败则返回 `rejected` 并向会话推 isError tool_result，
+   * 绝不在持久化结果未知时宣称成功。
+   *
+   * 缺省 / undefined → 仅做路径前缀与 imageData 限长预检后推 image 事件
+   * （单测 FakeTransport）；生产 desktop 必须注入。
+   */
+  materializeCursorGeneratedImage?: (args: {
+    sessionId: string;
+    workingDir: string;
+    path?: string;
+    /** data: URL 或已带 data: 前缀的 imageData。 */
+    url?: string;
+  }) => Promise<
+    | { ok: true; url: string; filename: string }
+    | { ok: false; reason: string }
+  >;
+
+  /**
    * Codex-only host policy: disable local app-server plugin runtimes even when
    * dynamic spawn configuration degrades after a non-fatal preparation error.
    * Remote transports own their runtime and ignore this local policy.
@@ -779,11 +818,60 @@ export interface AgentDeps {
   ) => void | Promise<void>;
 
   /**
+   * Cursor 专用：session/new（及后续 set_config_option 丰富）上报的运行时模型目录。
+   * maker-core 只负责调用时机；如何映射进产品目录 / 广播由 host 决定。
+   */
+  onCursorLocalModelsListed?: (
+    listing: import('./cursor/models.js').CursorModelsListing,
+  ) => void | Promise<void>;
+
+  /**
+   * Cursor 用户全局 cli-config 的 network 读取器。缺省时由 CursorAgent 显式使用
+   * 生产读取器；单测应注入空读取器，避免接触开发者真实 HOME。
+   */
+  networkConfigReader?: import('./cursor/isolatedConfig.js').CursorNetworkConfigReader;
+
+  /**
+   * Cursor 用户全局 cli-config 的账号身份读取器。缺省时由 CursorAgent 显式使用
+   * 生产读取器；单测应注入空读取器，避免接触开发者真实 HOME。
+   */
+  accountIdentityReader?: import('./cursor/isolatedConfig.js').CursorAccountIdentityReader;
+
+  /**
+   * Host-owned Auto permission fallback. A vendor reviewer timeout/unavailable
+   * result has already blocked the current action; the host persists this session
+   * from Auto to Ask and broadcasts the selector/toast update. Fire-and-forget:
+   * classifier failure handling must never hold the vendor notification loop.
+   * @deprecated Kept until the Auto-review routing PR removes the persisted Auto→Ask fallback.
+   */
+  onAutoPermissionClassifierUnavailable?: (args: {
+    sessionId: string;
+    agentKind: AgentKind;
+    /** HTTP status when available; Codex reviewer timeout/failure use synthetic 408/500. */
+    status: number;
+  }) => void;
+
+  /**
+   * Cursor（及未来无 vendor reviewer 的 agent）Auto 档权限分类器。
+   * 必须看 tool 名与完整 input，不能只看 kind。
+   * 缺省 / undefined → Cursor Auto 对任何动作 Ask，并触发
+   * {@link onAutoPermissionClassifierUnavailable}。
+   */
+  classifyAutoPermission?: (args: {
+    toolName: string;
+    input: Record<string, unknown>;
+    kind?: string | null;
+    /** 会话工作区根；分类器据此判定目标是否在工作区内。 */
+    workspaceRoot?: string;
+  }) => Promise<'allow' | 'ask'>;
+
+  /**
    * Host-owned lightweight reviewer for routes without a healthy vendor-native
    * reviewer. The host must use this session's selected provider + model and pass
    * only the request supplied here; null/throw is treated as a silent block.
    */
   reviewAutoPermissionAction?: AutoReviewDelegate;
+
 
   /**
    * Codex-only: bind app-server thread ids back to xdt-maker session context
@@ -949,8 +1037,9 @@ export interface AgentDeps {
    *
    * 实现位置:
    *  - codex/index.ts mcpServerElicitation handler 在 dispatchInteraction 之前查这里;
-   *  - claude-code/index.ts canUseTool 对 `mcp__<server>__<tool>` 形态的工具查这里。
-   * 两侧同义: auto-approve 直接放行, prompt-each-time 禁掉 session persistence。
+   *  - claude-code/index.ts canUseTool 对 `mcp__<server>__<tool>` 形态的工具查这里;
+   *  - cursor/index.ts session/request_permission 对能归属到已注册 MCP server 的工具查这里。
+   * 三端同义: auto-approve 直接放行, prompt-each-time 禁掉 session persistence。
    *
    * 缺省 / undefined → 走原 dispatchInteraction (弹 UI), 行为与改动前一致。
    */
@@ -1579,6 +1668,13 @@ export interface AgentSessionHandle {
   readonly id: string;
   readonly agentKind: AgentKind;
   readonly model: string;
+  /**
+   * Agent 启动完成前产生、但必须等 Session 的 host listeners 挂载后再交付的事件。
+   * 仅用于启动期可恢复告警；普通流式事件继续走 events()。
+   */
+  readonly startupEvents?: readonly AgentEvent[];
+  /** 后台 bootstrap 就绪信号；仅支持后台启动的 agent 提供。 */
+  readonly bootstrapReady?: Promise<void>;
   /** Pi-only, per-session runtime command catalog. Undefined for other agents. */
   getRuntimeCapabilities?(): PiRuntimeCapabilityManifest | undefined;
   /** Subscribe to Pi runtime catalog replacement; returns an idempotent disposer. */
@@ -1749,6 +1845,7 @@ export interface AgentSessionHandle {
   setFastMode?(enabled: boolean): Promise<void>;
   /** Pi thinking-toggle 模型：运行时开关思考。 */
   setThinkingEnabled?(enabled: boolean): Promise<void>;
+
 
   /**
    * 运行时增删 extraDirs(覆盖式)。Claude 与 Codex 都更新 closure，在下一 turn 生效。

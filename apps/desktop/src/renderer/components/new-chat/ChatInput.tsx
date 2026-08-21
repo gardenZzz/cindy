@@ -131,6 +131,7 @@ import {
   isAgentSwitchEchoConfigConsistent,
   isAgentSwitchResponseFresh,
   resolveAgentSwitchAckAction,
+  resolveSessionAgentSwitchEntry,
 } from './agentSwitchConfirmation';
 import {
   beginAgentSwitchOperation,
@@ -259,6 +260,7 @@ import type { Effort, PermissionMode } from '@/lib/userPreferences.types';
 import { getAppShortcutCombos } from '@/lib/appShortcutStore';
 import { getNextPermissionMode } from '@/lib/permissionModeCycle';
 import { matchesKeyboardEvent } from '../../../shared/appShortcuts';
+import { agentKindToDraftVendor } from '../../../shared/agentKindDraftVendor';
 import {
   getComposerSendShortcutPreference,
   getComposerSendShortcutLabel,
@@ -289,6 +291,7 @@ import {
   stripHostCapabilityChips,
 } from '@/lib/composerListDocument';
 import { useAgentCapabilities, type AgentKind } from '@/hooks/useAgentCapabilities';
+import type { SelectableVendor } from '@/lib/agentVendors';
 import { useAvailableAgents } from '@/hooks/useAvailableAgents';
 import { useConnectedSource } from '@/hooks/useConnectedSource';
 import { useProviders } from '@/hooks/useProviders';
@@ -304,6 +307,7 @@ import {
   clearProviderModelEffort,
   clearProviderModelFast,
   getProviderModelEffort,
+  modelMemorySourceId,
   setProviderModelChoice,
   setProviderModelEffort,
   getProviderModelFast,
@@ -639,7 +643,7 @@ interface ChatInputProps {
    * M35: Vendor lock — when provided, ModelSelector only shows models
    * belonging to this vendor ('cc' for Claude, 'codex' for OpenAI Codex).
    */
-  vendorKey?: 'cc' | 'codex' | 'pi';
+  vendorKey?: 'cc' | 'codex' | 'cursor' | 'pi';
   /**
    * Optional override for the composerDraftStore key used to persist editor
    * content (and via attachmentState, attachments) across mount/unmount.
@@ -749,7 +753,7 @@ interface ChatInputProps {
    * `lastByVendor.model` 并原样进 createSession,写错就是首条请求路由到一个不存在的模型。
    */
   onUnifiedDraftSelect?: (selection: {
-    vendor: 'cc' | 'codex' | 'pi';
+    vendor: SelectableVendor;
     providerId: string;
     /** 选中引擎的 **wire model id**。 */
     modelId: string;
@@ -765,16 +769,20 @@ interface ChatInputProps {
 }
 
 /** 统一模型选择器联合列表的候选引擎全集(与 SELECTABLE_VENDORS 同一顺序)。 */
-const UNIFIED_AGENT_KINDS: readonly AgentKind[] = ['claude-code', 'codex', 'pi'];
+const UNIFIED_AGENT_KINDS: readonly AgentKind[] = ['claude-code', 'codex', 'cursor', 'pi'];
 
 /** AgentKind → NewMaker vendor(useAvailableAgents 用 vendor 口径)。 */
-function agentKindToVendor(kind: AgentKind): 'cc' | 'codex' | 'pi' {
-  return kind === 'codex' ? 'codex' : kind === 'pi' ? 'pi' : 'cc';
+function agentKindToVendor(kind: AgentKind): SelectableVendor {
+  if (kind === 'codex') return 'codex';
+  if (kind === 'cursor') return 'cursor';
+  if (kind === 'pi') return 'pi';
+  return 'cc';
 }
 
-function vendorKeyToAgentKind(v?: 'cc' | 'codex' | 'pi'): AgentKind | null {
+function vendorKeyToAgentKind(v?: 'cc' | 'codex' | 'cursor' | 'pi'): AgentKind | null {
   if (v === 'cc') return 'claude-code';
   if (v === 'codex') return 'codex';
+  if (v === 'cursor') return 'cursor';
   if (v === 'pi') return 'pi';
   return null;
 }
@@ -1289,6 +1297,15 @@ export function ChatInput({
       // 冷加载帧:runtimeAgentKind 尚未确认时就默认 claude-code,会将其他引擎的会话内容
       // 发给 Claude Code provider —— 跳过预测,等 agent 身份确认后再恢复。
       if (runtimeAgentKind == null) return;
+      // Cursor 走 ACP,不在 predictNextPrompt 的 provider catalog 三档里;
+      // 把 Cursor 会话转写送到 Claude/Codex/Pi provider 会错账。
+      if (
+        runtimeAgentKind !== 'claude-code' &&
+        runtimeAgentKind !== 'codex' &&
+        runtimeAgentKind !== 'pi'
+      ) {
+        return;
+      }
       const latestMessages = messagesRef.current;
       const ed = editorRef.current;
       if (
@@ -1632,8 +1649,15 @@ export function ChatInput({
   // initialModel/initialEffort 缺失的瞬态(会话快照未加载)兜底:读本地草稿 lastByVendor
   // (localStorage,按 agent 分槽、sanitize 恒有种子值)。默认模型/档位偏好已全量本地化,
   // 不再依赖服务端 UserPreferences(登录态失效/离线时模型与档位选择必须照常工作)。
-  const localVendorDefaults =
-    getDraft().lastByVendor[vendorKey === 'pi' ? 'pi' : vendorKey === 'codex' ? 'codex' : 'cc'];
+  const localVendorDefaults = getDraft().lastByVendor[
+    vendorKey === 'pi'
+      ? 'pi'
+      : vendorKey === 'codex'
+        ? 'codex'
+        : vendorKey === 'cursor'
+          ? 'cursor'
+          : 'cc'
+  ];
   // session-agent-switch 意图制:意图期内 chip / 选择器显示用户选择的目标
   // (model/effort/provider/fast),props(镜像 DB)仍是旧引擎值——真切换在下一条
   // 消息发送时刻 apply,patched 回流后意图清除、显示交回 props。意图存放在
@@ -1725,13 +1749,19 @@ export function ChatInput({
   // device-link 远程会话:能力(模型 / fast / effort)从被控端读;本地会话 deviceLinkDeviceId undefined → 本地。
   const ccCaps = useAgentCapabilities('claude-code', deviceLinkDeviceId ?? undefined);
   const codexCaps = useAgentCapabilities('codex', deviceLinkDeviceId ?? undefined);
+  const cursorCaps = useAgentCapabilities('cursor', deviceLinkDeviceId ?? undefined);
   const piCaps = useAgentCapabilities('pi', deviceLinkDeviceId ?? undefined);
+  // 必须显式路由 Cursor：回落到 ccCaps 会让 Shift+Tab 按 Claude 的权限列表轮切，
+  // 轮到 Cursor 不支持的 acceptEdits 时运行时又归一成 ask，快捷键显示与实际权限对不上，
+  // 也与已经正确读 Cursor 能力的 PermissionSelector 用了两份列表。
   const activeAgentCapabilities =
     agentKind === 'codex'
       ? codexCaps.capabilities
-      : agentKind === 'pi'
-        ? piCaps.capabilities
-        : ccCaps.capabilities;
+      : agentKind === 'cursor'
+        ? cursorCaps.capabilities
+        : agentKind === 'pi'
+          ? piCaps.capabilities
+          : ccCaps.capabilities;
 
   // session-agent-switch 入口门控。device-link 远程会话读**被控端**的值；除了基础
   // supportsSessionAgentSwitch，还必须有 v2 CAS 能力。同引擎 no-op 的安全收尾依赖 host
@@ -1741,21 +1771,28 @@ export function ChatInput({
   // SSH 远程(remoteHostId)是另一套引擎生命周期,继续不支持,由调用点单独排除。
   // Orca 会话(lead / worker)同样排除:被控端 handler 对带 orcaRole 的会话一律拒
   // UNSUPPORTED_CAPABILITY。角色未加载(undefined)也 fail-closed,避免冷启动短暂露出入口。
-  const ccSupportsSessionAgentSwitch =
-    ccCaps.capabilities?.supportsSessionAgentSwitch === true &&
-    ccCaps.capabilities.supportsSessionAgentSwitchCas === true;
-  const codexSupportsSessionAgentSwitch =
-    codexCaps.capabilities?.supportsSessionAgentSwitch === true &&
-    codexCaps.capabilities.supportsSessionAgentSwitchCas === true;
   // 此能力与原子 model-selection payload 同版发布。旧被控端会忽略 SET_MODEL 第 5 参，
   // 因此缺能力位时保留原来的 SET_MODEL → SET_EFFORT → SET_FAST 兼容链；同引擎
   // reselect 入口本就要求 CAS=true，不会退回这条非原子路径。
   const remoteAtomicModelSelectionSupported =
     ccCaps.capabilities?.supportsSessionAgentSwitchCas === true ||
     codexCaps.capabilities?.supportsSessionAgentSwitchCas === true;
+  // 四家(Claude Code / Codex / Pi / Cursor)同构:入口显示与否只取决于任务真实 Agent
+  // (agentKind)在被控端上报的能力位,不在组件里写死第二份「某 Agent 能/不能切」。本机
+  // 会话恒可用;device-link 远程读被控端真实 Agent 位(老被控端对 Cursor 报 false ->
+  // 入口正确隐藏)。判定收在纯函数 resolveSessionAgentSwitchEntry,由行为测试覆盖。
   const sessionAgentSwitchSupported =
     sessionOrcaRole === null &&
-    (!deviceLinkDeviceId || ccSupportsSessionAgentSwitch || codexSupportsSessionAgentSwitch);
+    resolveSessionAgentSwitchEntry({
+      agentKind,
+      isLocalSession: !deviceLinkDeviceId,
+      capabilities: {
+        'claude-code': ccCaps.capabilities,
+        codex: codexCaps.capabilities,
+        cursor: cursorCaps.capabilities,
+        pi: piCaps.capabilities,
+      },
+    });
 
   // 切换写入的串行链与写序号都按 session 存在**模块级**协调层(agentSwitchCoordinator),
   // 不放组件 ref:用户切走再切回时旧组件已卸载但 invoke 仍在飞,新组件若另起空队列 /
@@ -1870,6 +1907,7 @@ export function ChatInput({
     agentKind: currentModelAgentKind,
     cc: ccCaps,
     codex: codexCaps,
+    cursor: cursorCaps,
     pi: piCaps,
     providers: remoteProviders,
   });
@@ -1907,13 +1945,15 @@ export function ChatInput({
   const remoteModelListBlocked =
     !!deviceLinkDeviceId && enforceConnectedSourceGate && remoteModelListStatus !== 'ready';
   // chatEligibleSourcesForModel(不是裸 sourcesForModel):非聊天模型即便"存在于某个
-  // 已连接来源"也不算有可发送来源(issue #882 第 3 点,2026-07 review)——否则 Send
+  // 已连接来源"也不算有可发送来源(issue #882 第 3 点,2026-07 review)--否则 Send
   // 会对着一个 image/embedding 端点放行,而不是显示这里的"去连接"空态。已建会话
   // (sessionId 在)按实际路由口径判(includeDisabled):运行中的会话不因停用打断,
   // 请求仍走原路由,把停用当「无来源」会误禁 Send(PR #744 review 第十轮)。草稿是
   // 新路由选择,保持准入口径(停用拷贝不算可发送来源)。
+  // Cursor 用本机 cursor-agent(ACP),不在 Cindy provider 目录里 -- 短路放行。
   const hasConnectedSendSource = currentModelAgentKind
-    ? chatEligibleSourcesForModel(sendProviders, activeModel, currentModelAgentKind, {
+    ? currentModelAgentKind === 'cursor' ||
+      chatEligibleSourcesForModel(sendProviders, activeModel, currentModelAgentKind, {
         onlyConnected: true,
         includeDisabled: !!sessionId,
       }).length > 0
@@ -1953,6 +1993,14 @@ export function ChatInput({
     if (!kind) return null;
     return effectiveSourceIdForModel(providers, activeProviderId, activeModel, kind);
   }, [providers, currentModelAgentKind, activeProviderId, activeModel]);
+
+  // **记忆槽来源 id** —— 与上面的路由来源分离。Cursor 无 Cindy provider(effectiveSourceId
+  // 恒 null),但 effort / Fast 仍要按 (agent, model) 记住,故走合成槽。仅用于
+  // providerModelMemory 读写;setModel / sendProviderId / 路由一律仍用 effectiveSourceId。
+  const memorySourceId = useMemo<string | null>(
+    () => modelMemorySourceId(currentModelAgentKind, effectiveSourceId),
+    [currentModelAgentKind, effectiveSourceId],
+  );
 
   // 发送(草稿态建会话)时携带的**显式来源**:仅当本地选择仍在已连接来源栏内才带上
   // (与 effectiveSourceId 的高亮口径一致,即"所见即所得");否则带 null。
@@ -2000,15 +2048,15 @@ export function ChatInput({
   const rememberProviderChoice = useCallback(
     (modelId: string, eff: Effort) => {
       const kind = currentModelAgentKind;
-      if (kind && effectiveSourceId && modelId) {
+      if (kind && memorySourceId && modelId) {
         if (modelMemory?.setChoice) {
-          modelMemory.setChoice(kind, effectiveSourceId, modelId, eff);
+          modelMemory.setChoice(kind, memorySourceId, modelId, eff);
         } else if (!deviceLinkDeviceId) {
-          setProviderModelChoice(kind, effectiveSourceId, modelId, eff);
+          setProviderModelChoice(kind, memorySourceId, modelId, eff);
         }
       }
     },
-    [currentModelAgentKind, effectiveSourceId, modelMemory, deviceLinkDeviceId],
+    [currentModelAgentKind, memorySourceId, modelMemory, deviceLinkDeviceId],
   );
 
   const folderOpen = folderPickerOpen ?? internalFolderOpen;
@@ -5095,7 +5143,7 @@ export function ChatInput({
           return;
         }
 
-        // 预检:会话显式选中的来源已断开 → 发送前拦截。main 侧懒创建会从 DB 水合 providerId
+        // 预检:会话显式选中的来源已断开 -> 发送前拦截。main 侧懒创建会从 DB 水合 providerId
         // 直接 LAZY_CREATE_FAILED(renderer 的 sendProviderId=null 救不了已建会话),所以这里
         // 弹窗给出明确原因 + 去设置入口,而不是让请求出去撞一个原始错误码。
         // Send 按钮已被 selectedSourceDisconnected 禁用,此 guard 兜底覆盖间接派发路径。
@@ -5112,17 +5160,19 @@ export function ChatInput({
         }
 
         // 预检(通用、provider-aware): 当前模型在当前 agent 下「一个已连接来源都没有」
-        // 时,不把请求扔给 SDK 等 401,改弹确认框引导用户去「设置 → 模型供应商」连接。
-        // 取代过去仅 cc + 仅 api_key 的写法 —— 现在 OAuth / XD 网关 / 未来自定义供应商
+        // 时,不把请求扔给 SDK 等 401,改弹确认框引导用户去「设置 -> 模型供应商」连接。
+        // 取代过去仅 cc + 仅 api_key 的写法 -- 现在 OAuth / XD 网关 / 未来自定义供应商
         // 都按 ProviderView.connected 统一计入(chatEligibleSourcesForModel onlyConnected),
         // 未来加新供应商无需改这里。判定数据来自本地 IPC(useProviders),无网络往返、
         // ~ms 级。只有「确实零已连接来源」才拦截;≥1 个直接放行(无弹窗)。
         // currentModelAgentKind 解析不出(罕见:capabilities 未就绪)时不拦,交给下游
         // 处理,不误伤。用 chatEligibleSourcesForModel 而非裸 sourcesForModel:
         // 非聊天来源不该被当成"可以发"放行(issue #882 第 3 点,2026-07 review)。
+        // Cursor 用本机 cursor_login,不走 Cindy provider 目录。
         if (
           enforceConnectedSourceGate &&
           currentModelAgentKind &&
+          currentModelAgentKind !== 'cursor' &&
           // 旧被控端明确不支持 provider:list 时，控制端没有可检查的来源镜像；
           // 与模型列表一致交给 capabilities + 被控端发送链路做兼容回退。
           !(deviceLinkDeviceId && remoteProviders.unsupported)
@@ -5804,6 +5854,8 @@ export function ChatInput({
         capabilities:
           currentModelAgentKind === 'codex'
             ? codexCaps.capabilities
+            : currentModelAgentKind === 'cursor'
+              ? cursorCaps.capabilities
             : currentModelAgentKind === 'pi'
               ? piCaps.capabilities
               : ccCaps.capabilities,
@@ -5818,17 +5870,20 @@ export function ChatInput({
       currentModelAgentKind,
       ccCaps.capabilities,
       codexCaps.capabilities,
+      cursorCaps.capabilities,
       piCaps.capabilities,
     ],
   );
 
   const resolveFast = useCallback(
-    (targetModelId: string, providerId: string | null): boolean => {
+    (targetModelId: string, providerId: string | null): boolean | undefined => {
       if (!modelFastSupported(targetModelId, providerId)) return false;
-      // providerId 只用于来源 capability 与旧 v2 兼容回退;新预设按 (agent, model) 跨来源共享。
-      // 无 providerId / device-link(modelMemory 为 undefined)→ false,且不掺控制端本机记忆。
-      if (!currentModelAgentKind || !providerId || !modelMemory) return false;
-      return modelMemory.getFast(currentModelAgentKind, providerId, targetModelId) ?? false;
+      // 能力判定用**路由来源**(上一行);记忆读**记忆槽**(Cursor 无 provider 也能恢复)。
+      // providerId 只用于旧 v2 兼容回退;新预设按 (agent, model) 跨来源共享。
+      // 无记忆槽 / device-link(modelMemory 为 undefined)→ false,且不掺控制端本机记忆。
+      const memoryId = modelMemorySourceId(currentModelAgentKind, providerId);
+      if (!currentModelAgentKind || !memoryId || !modelMemory) return undefined;
+      return modelMemory.getFast(currentModelAgentKind, memoryId, targetModelId);
     },
     [currentModelAgentKind, modelMemory, modelFastSupported],
   );
@@ -5852,17 +5907,12 @@ export function ChatInput({
       const activeProviderId =
         opts.activeProviderId !== undefined ? opts.activeProviderId : selectedProviderId;
       const memoryProviderId =
-        opts.memoryProviderId !== undefined ? opts.memoryProviderId : effectiveSourceId;
+        opts.memoryProviderId !== undefined ? opts.memoryProviderId : memorySourceId;
       const remoteDeviceId =
         opts.remoteDeviceId ?? getSessionDeviceId(sessionId) ?? deviceLinkDeviceId;
       const markModelChoice = opts.markModelChoice === true;
       if (!remoteDeviceId) {
-        const vendor =
-          agentKind === 'codex'
-            ? 'codex'
-            : agentKind === 'pi'
-              ? 'pi'
-              : 'cc';
+        const vendor = agentKindToDraftVendor(agentKind);
         const persistPrefs = markModelChoice ? patchVendorPrefs : patchVendorPrefsPreservingModelChoice;
         persistPrefs(vendor, {
           // 换模才带配对并打标记。本机只改思考档 / Fast 不写回活动模型,
@@ -5900,7 +5950,7 @@ export function ChatInput({
           log.warn('session draft model preference sync failed:', err);
         });
     },
-    [sessionId, deviceLinkDeviceId, currentModelAgentKind, selectedProviderId, effectiveSourceId],
+    [sessionId, deviceLinkDeviceId, currentModelAgentKind, selectedProviderId, memorySourceId],
   );
 
   const persistFastModeChange = useCallback(
@@ -5935,7 +5985,7 @@ export function ChatInput({
       modelId = activeModel,
       effort = activeEffort,
       syncDraft = true,
-      memoryProviderId = effectiveSourceId,
+      memoryProviderId = memorySourceId,
     ): Promise<boolean> => {
       if (settingsLocked) return false;
       // 切换意图期:Fast 改动是"更新意图"而不是改当前会话实时状态(否则普通
@@ -5976,7 +6026,7 @@ export function ChatInput({
       activeModel,
       activeEffort,
       currentModelAgentKind,
-      effectiveSourceId,
+      memorySourceId,
       modelMemory,
       persistFastModeChange,
       syncSessionDraftModelPrefs,
@@ -6064,7 +6114,7 @@ export function ChatInput({
     ) => void | boolean | Promise<void | boolean>;
   }>({ byProvider: () => {}, byModel: () => {} });
   const confirmAgentBrowseSwitch = useCallback(
-    (targetAgent: 'claude-code' | 'codex' | 'pi' | null) =>
+    (targetAgent: AgentKind | null) =>
       confirmAgentSwitchRisk({
         // 只有「目标就是会话正在跑的真实引擎」才不必再问(回原引擎 = same-engine no-op,
         // 不重建上下文)。挂着的切换意图不算已经确认过(Chris 2026-08-20):Claude 任务里
@@ -6086,7 +6136,7 @@ export function ChatInput({
   );
   const performAgentSwitch = useCallback(
     async (
-      targetAgentKind: 'claude-code' | 'codex' | 'pi',
+      targetAgentKind: AgentKind,
       newModelId: string,
       providerId: string | null = null,
       // 意图期内的档位/Fast 改动经此显式覆盖(用户手选优先于记忆/默认解析)。
@@ -6143,8 +6193,7 @@ export function ChatInput({
         const targetFast =
           overrides?.fastMode !== undefined
             ? overrides.fastMode
-            : !!providerId &&
-              !!modelMemory &&
+            : !!modelMemory &&
               resolveFastSupported({
                 deviceId: deviceLinkDeviceId ?? undefined,
                 deviceProviders: remoteProviders.providers,
@@ -6152,14 +6201,23 @@ export function ChatInput({
                 capabilities:
                   targetAgentKind === 'codex'
                     ? codexCaps.capabilities
-                    : targetAgentKind === 'pi'
-                      ? piCaps.capabilities
-                      : ccCaps.capabilities,
+                    : targetAgentKind === 'cursor'
+                      ? cursorCaps.capabilities
+                      : targetAgentKind === 'pi'
+                        ? piCaps.capabilities
+                        : ccCaps.capabilities,
                 providerId,
                 modelId: newModelId,
                 agentKind: targetAgentKind,
               }) &&
-              (modelMemory.getFast(targetAgentKind, providerId, newModelId) ?? false);
+              (() => {
+                // 与 resolveFast 同口径但锚定**目标**引擎:cursor 无 provider 也按
+                // (agent,model) 合成槽恢复预设,不再被 !!providerId 短路成 false。
+                const memoryId = modelMemorySourceId(targetAgentKind, providerId);
+                return memoryId
+                  ? (modelMemory.getFast(targetAgentKind, memoryId, newModelId) ?? false)
+                  : false;
+              })();
 
         // 会话级操作按来源路由:device-link 远程会话隧道到被控端(意图注册表与引擎
         // 交接都在那边),本机会话零变化直连本机 maker。
@@ -6283,9 +6341,11 @@ export function ChatInput({
                 agent:
                   targetAgentKind === 'codex'
                     ? 'Codex'
-                    : targetAgentKind === 'pi'
-                      ? 'Pi'
-                      : 'Claude Code',
+                    : targetAgentKind === 'cursor'
+                      ? 'Cursor'
+                      : targetAgentKind === 'pi'
+                        ? 'Pi'
+                        : 'Claude Code',
                 model: newModelId,
               }),
               { duration: 4000 },
@@ -6370,6 +6430,7 @@ export function ChatInput({
       localProviders.providers,
       ccCaps.capabilities,
       codexCaps.capabilities,
+      cursorCaps.capabilities,
       piCaps.capabilities,
       syncSessionDraftModelPrefs,
     ],
@@ -6572,7 +6633,7 @@ export function ChatInput({
       /** 选中引擎的 **wire model id** —— 唯一可发送、可当记忆键的那个 id。 */
       modelId: string;
       effort?: Effort;
-      engine: 'cc' | 'codex' | 'pi';
+      engine: SelectableVendor;
       fast: boolean;
       favoriteUid: string | null;
       /** 行的归一化 id(面板行身份)。草稿层不消费,更不作为发送 id。 */
@@ -6654,8 +6715,8 @@ export function ChatInput({
         effectiveSourceId,
       );
       const providerEffort =
-        modelMemory && currentModelAgentKind && effectiveSourceId
-          ? modelMemory.getEffort(currentModelAgentKind, effectiveSourceId, newModelId)
+        modelMemory && currentModelAgentKind && memorySourceId
+          ? modelMemory.getEffort(currentModelAgentKind, memorySourceId, newModelId)
           : undefined;
       const newEffort = resolveEffort({
         efforts,
@@ -6668,7 +6729,7 @@ export function ChatInput({
         if (sessionId) {
           // 切模型时 fast 恢复该 (供应商, 模型) 的记忆值(对齐 effort);模型不支持 → false。
           // 已创建会话会在成功切换后同步 New Maker 草稿默认,使下一次新建聊天复用本次选择。
-          const restoredFast = resolveFast(newModelId, effectiveSourceId);
+          const restoredFast = resolveFast(newModelId, effectiveSourceId) ?? fastMode;
           if (sourceRemoteDeviceId) {
             // device-link 远程会话:控制端纯镜像。把 model/effort/fast 作为一个选择快照交给
             // 被控端 SET_MODEL；host 会在同一 session 锁内完成 runtime + DB 后才回 ack，避免
@@ -6835,6 +6896,7 @@ export function ChatInput({
       resolveFast,
       currentModelAgentKind,
       effectiveSourceId,
+      memorySourceId,
       modelMemory,
       modelFastSupported,
       syncSessionDraftModelPrefs,
@@ -7182,7 +7244,7 @@ export function ChatInput({
         // session 状态保护,只有切到目标 (来源, 模型) 时才应用这个预设。
         // resolveSwitchEffort / resolveFast 内部已按目标模型支持的档位校验、不支持 fast 的模型恒 false。
         const targetEffort = resolveSwitchEffort(targetModel, newProviderId, reconciledEffort);
-        const restoredFast = resolveFast(targetModel, newProviderId);
+        const restoredFast = resolveFast(targetModel, newProviderId) ?? fastMode;
         // 乐观显示目标 (model, effort, provider) + 置灰 selector,等被控端 echo 回流;失败回滚 provider/快照。
         setPendingRemoteSwitch({
           model: targetModel,
@@ -7261,7 +7323,7 @@ export function ChatInput({
       const applyModelAndEffort = async (modelId: string, eff: Effort) => {
         if (sessionId) {
           // 切来源+模型:fast 恢复目标 (供应商, 模型) 的记忆值(对齐 effort);不支持 → false。
-          const restoredFast = resolveFast(modelId, newProviderId);
+          const restoredFast = resolveFast(modelId, newProviderId) ?? fastMode;
           const switchSeqBySession = localRuntimeSwitchSeqBySessionRef.current;
           const rollbackSeq = (switchSeqBySession.get(sessionId) ?? 0) + 1;
           switchSeqBySession.set(sessionId, rollbackSeq);
@@ -8253,6 +8315,8 @@ export function ChatInput({
                     // 行浮层引擎胶囊」完整取代(见 ModelSelectorContentProps.sessionEngineFilter
                     // 的 prop 说明),两者同时传会得到一个永远不渲染的分段。
                     agentSwitch={
+                      // 统一面板下刻意不传旧两步分段;降级回旧面板时四家同构放行,
+                      // Cursor 与其它引擎一样按真实 Agent 能力位判定,不再单独排除。
                       !unifiedPanelActive &&
                       sessionId &&
                       vendorKey &&
@@ -8262,7 +8326,7 @@ export function ChatInput({
                             currentVendor: vendorKey,
                             // 两步分段的目标是 vendor 口径,确认门按 AgentKind 判(与意图
                             // 记录同形),在边界上转一次 —— 见 confirmAgentBrowseSwitch。
-                            confirmBrowseSwitch: (targetVendor: 'cc' | 'codex' | 'pi') =>
+                            confirmBrowseSwitch: (targetVendor: 'cc' | 'codex' | 'cursor' | 'pi') =>
                               confirmAgentBrowseSwitch(vendorKeyToAgentKind(targetVendor)),
                             onSwitch: performAgentSwitch,
                           }

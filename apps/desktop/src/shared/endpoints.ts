@@ -45,3 +45,6 @@ export const TAPDB_EVENT_URL_BY_REGION: Readonly<Record<CindyRegion, string>> = 
   global: 'https://e.tapdb.ap-sg.tapapis.com/event',
   dev: 'https://e.tapdb.com/event',
 });
+
+/** 旧版单区域 TapDB 端点常量;保留给尚未迁移到 BY_REGION 的消费方(test mock)。 */
+export const TAPDB_EVENT_URL = 'https://e.tapdb.com/event';

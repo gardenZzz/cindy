@@ -1,4 +1,4 @@
-export type ImDefaultAgentKind = 'claude-code' | 'codex' | 'pi';
+export type ImDefaultAgentKind = 'claude-code' | 'codex' | 'cursor' | 'pi';
 export type ImDefaultPermissionMode =
   'ask' | 'default' | 'acceptEdits' | 'plan' | 'auto' | 'bypassPermissions';
 export type ImDefaultEffort = 'minimal' | 'low' | 'medium' | 'high' | 'xhigh' | 'max' | 'ultra';
@@ -6,7 +6,7 @@ export type ImDefaultEffort = 'minimal' | 'low' | 'medium' | 'high' | 'xhigh' | 
  * IM channel scopes that keep independent new-conversation routing preferences.
  * 'telegram' 指个人 Telegram bot(main/im/telegram);官方 Telegram hook 通道
  * 刻意读 global(channel=undefined, 见 hook-control/session-runner.ts), 不落
- * 在这个键上 — 两者互不影响。
+ * 在这个键上 - 两者互不影响。
  */
 export type ImDefaultSettingsChannel =
   'feishu' | 'slack' | 'discord' | 'wechat' | 'telegram' | 'dingtalk' | 'wecom';
@@ -71,6 +71,13 @@ export const IM_DEFAULT_SETTINGS: ImDefaultSettings = {
       model: 'claude-sonnet-5',
       effort: 'high',
     },
+    // Cursor 的模型目录由 cursor-agent 自己上报（没有 Cindy 供应商条目），出厂默认
+    // 取产品级 'auto'（CURSOR_PRODUCT_AUTO_MODEL_ID），让选型跟随 Cursor 自己的路由。
+    cursor: {
+      providerId: null,
+      model: 'auto',
+      effort: 'high',
+    },
   },
 };
 
@@ -89,7 +96,7 @@ export const IM_DEFAULT_EFFORT_OVERRIDES: Readonly<Partial<Record<string, ImDefa
   'codex/gpt-5.5': 'high',
 };
 
-const AGENT_KINDS = new Set<ImDefaultAgentKind>(['claude-code', 'codex', 'pi']);
+const AGENT_KINDS = new Set<ImDefaultAgentKind>(['claude-code', 'codex', 'pi', 'cursor']);
 const EFFORTS = new Set<ImDefaultEffort>([
   'minimal',
   'low',
@@ -117,7 +124,7 @@ export const WECHAT_UNSUPPORTED_PERMISSION_MODES: readonly ImDefaultPermissionMo
  * 渠道对**任何消息**都挂 turnPermissionPolicy 的清单(与 main 侧 adapter 的
  * turnPermissionPolicy / turnPermissionPolicyFor 事实对齐):这些渠道把
  * 工具确认渲染成渠道文本提示,要求所选 Agent 声明 turnPermissionPolicy
- * capability。Pi 未声明该 capability,在这些渠道的任何权限模式下都不可用
+ * capability。Pi 与 Cursor 未声明该 capability,在这些渠道的任何权限模式下都不可用
  * (fail-closed);Claude Code / Codex 声明了,仅在个别权限模式不可用。
  *
  * 目前只有个人微信(WechatIM.turnPermissionPolicy)对每次 dispatch
