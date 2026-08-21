@@ -7789,7 +7789,7 @@ export function registerMakerIpc(maker: Maker, options: RegisterMakerIpcOptions)
       }
 
       return {
-        sourceAgentKind: source.agentKind as 'cc' | 'codex' | 'cursor' | 'pi',
+        sourceAgentKind: source.agentKind as 'cc' | 'codex' | 'pi',
         prompt: builtPrompt.prompt,
         targetKind: builtPrompt.targetKind,
         cleanup: async () => {
