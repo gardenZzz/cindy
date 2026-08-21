@@ -921,6 +921,99 @@ describe('Maker Cursor prewarm (claim-if-ready)', () => {
     resolveBootstrapInner();
     resolveBootstrap();
   });
+
+  // ─── T2 池安全语义：TTL / 上限 1 / 已 claim 免疫 TTL / cancel 幂等 ───
+  function t2Setup() {
+    const closed: string[] = [];
+    let resolveBootstrap!: () => void;
+    const bootstrapReady = new Promise<void>((resolve) => {
+      resolveBootstrap = resolve;
+    });
+    const startSession = vi.fn(async (opts: { sessionId: string }) =>
+      createHandle({
+        id: 'cursor-sdk',
+        agentKind: 'cursor',
+        model: 'auto',
+        bootstrapReady,
+        close: vi.fn(async () => {
+          closed.push(opts.sessionId);
+        }),
+      }),
+    );
+    const maker = new Maker({
+      agents: { cursor: createAgent(startSession, 'cursor') },
+      storage: createStorage(),
+      logger: createLogger(),
+    });
+    return { maker, startSession, bootstrapReady, resolveBootstrap, closed };
+  }
+
+  it('TTL reaps an unclaimed prewarmed handle after 60s (process closed)', async () => {
+    vi.useFakeTimers();
+    try {
+      const { maker, startSession, closed, resolveBootstrap } = t2Setup();
+      await maker.prewarmSession(prewarmOpts('cursor-a'));
+      resolveBootstrap();
+      await vi.waitFor(() => expect(startSession).toHaveBeenCalledTimes(1));
+
+      // 60s TTL 到期前不被回收。
+      await vi.advanceTimersByTimeAsync(59_000);
+      expect(closed).toEqual([]);
+      // 到期后自动回收（进程关闭），claim 也返回 false。
+      await vi.advanceTimersByTimeAsync(2_000);
+      expect(closed).toEqual(['cursor-a']);
+      expect(await maker.claimPrewarmedSession('cursor-a')).toBe(false);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('claimed handles are immune to TTL', async () => {
+    vi.useFakeTimers();
+    try {
+      const { maker, closed, resolveBootstrap } = t2Setup();
+      await maker.prewarmSession(prewarmOpts('cursor-a'));
+      resolveBootstrap();
+      await vi.waitFor(async () => {
+        expect(await maker.claimPrewarmedSession('cursor-a')).toBe(true);
+      });
+
+      await vi.advanceTimersByTimeAsync(120_000);
+      expect(closed).toEqual([]); // 已 claim，TTL 不回收
+      // 且 createSession 仍能 0 等待接管。
+      const session = await maker.createSession(prewarmOpts('cursor-a'));
+      expect(session).toBeInstanceOf(Session);
+      await session.close();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('cap of one: a new prewarm preempts an older unclaimed one (old closed first)', async () => {
+    const { maker, startSession, closed, resolveBootstrap } = t2Setup();
+    await maker.prewarmSession(prewarmOpts('cursor-a'));
+    resolveBootstrap();
+    await vi.waitFor(() => expect(startSession).toHaveBeenCalledTimes(1));
+
+    // 新草稿触发预热 → 旧的未 claim 句柄先被回收。
+    await maker.prewarmSession(prewarmOpts('cursor-b'));
+    expect(closed).toEqual(['cursor-a']);
+    expect(startSession).toHaveBeenCalledTimes(2); // 第二个 spawn
+  });
+
+  it('cancel is idempotent: repeated cancels on the same handle do not explode', async () => {
+    const { maker, closed, resolveBootstrap } = t2Setup();
+    await maker.prewarmSession(prewarmOpts('cursor-a'));
+    resolveBootstrap();
+    await vi.waitFor(async () => {
+      expect(await maker.claimPrewarmedSession('cursor-a')).toBe(true);
+    });
+
+    await maker.cancelPrewarmedSession('cursor-a');
+    await maker.cancelPrewarmedSession('cursor-a');
+    await maker.cancelPrewarmedSession('cursor-a');
+    expect(closed).toEqual(['cursor-a']); // 只 close 一次
+  });
 });
 
 describe('Maker Cursor startup fallback', () => {

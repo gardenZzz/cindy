@@ -8,7 +8,7 @@ Date: 2026-08-21
 
 ## Status
 
-Accepted — 修订 ADR 0003 的「本仓不预热」表述。非阻塞预热（claim-if-ready）是 ADR 0001 / ADR 0003 已批准的「bootstrap 后台化」之上的**叠加允许项**：预热仍在草稿期后台完成，发送热路径不等待就绪，故不构成 ADR 0003 回退对象的「把等待搬进发送热路径」回归。实现见 spec #74 / ticket T1 #75（PR #79），池安全语义（TTL / 上限 1 / 已 claim 免疫 / cancel 幂等）为 T2 #77，配置预写联动为 T3 #78。
+Accepted — 修订 ADR 0003 的「本仓不预热」表述。非阻塞预热（claim-if-ready）是 ADR 0001 / ADR 0003 已批准的「bootstrap 后台化」之上的**叠加允许项**：预热仍在草稿期后台完成，发送热路径不等待就绪，故不构成 ADR 0003 回退对象的「把等待搬进发送热路径」回归。实现见 spec #74 / ticket T1 #75（PR #79），池安全语义（TTL / 上限 1 / 已 claim 免疫 / cancel 幂等）为 T2 #77（已实现），配置预写联动为 T3 #78。
 
 ## Context
 
@@ -43,19 +43,24 @@ ADR 0004 已把冷目录的账号身份段预置热，新建会话的 `session/n
 - **覆盖入口 = 仅本地普通草稿**：非 device-link / remote / worktree 的 Cursor 分支。
 - **触发时机 = 草稿打开 + 400ms debounce**（草稿期打字不触发重复预热）。
 - **预热深度 = 完整 bootstrap**，等于普通会话创建的 bootstrap 全流程。
-- **回收 = 显式事件回收（离开路由 / 切 vendor / 发送失败）**；TTL 兜底（60s）为 T2。
-- **并发上限 = 同一时刻最多一个预热句柄**，新草稿抢占旧的（先回收再起新）——上限 1 为 T2 落地的完整语义；T1 已实现的池层天然支持。
+- **回收 = 显式事件回收（离开路由 / 切 vendor / 发送失败）+ TTL 兜底（60s，T2 已实现）**。
+- **并发上限 = 同一时刻最多一个预热句柄**，新草稿抢占旧的（先回收再起新）——T2 已实现。
 
-### 池安全语义（T1 已实现；TTL / 上限 / 免疫归 T2）
+### 池安全语义（T1 + T2 已全部实现）
 
-T1 池层已实现：
+T1 池层：
 
 1. `prewarmSession` 立即返回（不 await bootstrap，后台 watcher 置 ready 标记，失败静默回收）；
 2. `claimPrewarmedSession` 只查就绪标志、非阻塞返回布尔，已 claim 的句柄对迟到重预热免疫；
 3. `cancelPrewarmedSession` 幂等；
 4. `createSessionOnce` 的 reusedPrewarm 接管分支（同 id / 同 workingDir / 已 claim / 已就绪才 0 等待接管）。
 
-T2（#77）补：TTL 60s 兜底、全局上限 1 抢占、已 claim 免疫 TTL 的显式断言。
+T2（#77）补齐：
+
+5. TTL 60s 兜底：未 claim 句柄到期自动回收（进程关闭，防孤儿 cursor-agent）；
+6. 全局上限 1：新草稿触发预热时先回收旧的未 claim 句柄再起新；
+7. 已 claim 免疫 TTL：claim 时清掉兜底定时器，TTL 不回收已接管句柄；
+8. cancel 幂等：同一句柄多次 cancel 只 close 一次、不报错。
 
 ### 配置预写联动（claim 不 reconcile）
 

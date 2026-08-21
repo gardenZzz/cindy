@@ -155,7 +155,12 @@ interface PrewarmedSessionHandle {
   claimed: boolean;
   /** bootstrap 已就绪（后台 watcher 置位）。claim 据此非阻塞判定。 */
   ready: boolean;
+  /** TTL 兜底回收定时器（未 claim 句柄到期自动 close，防孤儿进程）。 */
+  ttlTimer?: ReturnType<typeof setTimeout>;
 }
+
+/** 未 claim 预热句柄的 TTL 兜底（ADR 0005 / T2 #77）。 */
+const PREWARM_TTL_MS = 60_000;
 
 function capabilitiesForSession(
   agentKind: AgentKind,
@@ -597,11 +602,11 @@ export class Maker {
     if (this.activeSessions.has(opts.id) || this.inFlightSessionCreations.has(opts.id)) return;
 
     const sessionId = opts.id;
-    const previous = this.prewarmedSessionHandles.get(sessionId);
-    if (previous?.claimed) return;
-    if (previous) {
-      this.prewarmedSessionHandles.delete(sessionId);
-      void previous.handle.then((handle) => handle.close()).catch(() => undefined);
+    // 全局上限 1（T2）：新草稿抢占旧的。先回收**所有**未 claim 的预热句柄（含同 id 的
+    // 旧条目），已 claim 的不动——同一时刻最多一个预热句柄在跑。回收是幂等的。
+    for (const [candidateId, entry] of Array.from(this.prewarmedSessionHandles)) {
+      if (entry.claimed) continue;
+      this.closePrewarmedEntry(candidateId, entry, 'preempted-by-new-prewarm');
     }
 
     const agent = this.requireAgent('cursor');
@@ -611,6 +616,10 @@ export class Maker {
       claimed: false,
       ready: false,
     };
+    // TTL 兜底：未 claim 句柄到期自动回收（防孤儿进程）。claim 时清掉此定时器。
+    entry.ttlTimer = setTimeout(() => {
+      this.closePrewarmedEntry(sessionId, entry, 'ttl-expired');
+    }, PREWARM_TTL_MS);
     this.prewarmedSessionHandles.set(sessionId, entry);
     // 不 await bootstrap：预热在后台进行。就绪后置 ready 标记供非阻塞 claim 判定；
     // bootstrap 失败时静默回收（claim 自会返回 false，发送走普通创建）。
@@ -624,9 +633,30 @@ export class Maker {
       .catch((err) => {
         if (this.prewarmedSessionHandles.get(sessionId) === entry) {
           this.prewarmedSessionHandles.delete(sessionId);
+          if (entry.ttlTimer) clearTimeout(entry.ttlTimer);
         }
         this.logger.debug('prewarm bootstrap failed; discarding prewarmed handle', {
           sessionId,
+          error: String(err),
+        });
+      });
+  }
+
+  /** 关闭并移除一个预热句柄（幂等）。TTL / 抢占 / cancel 共用。 */
+  private closePrewarmedEntry(
+    id: string,
+    entry: PrewarmedSessionHandle,
+    reason: string,
+  ): void {
+    if (this.prewarmedSessionHandles.get(id) !== entry) return;
+    this.prewarmedSessionHandles.delete(id);
+    if (entry.ttlTimer) clearTimeout(entry.ttlTimer);
+    void entry.handle
+      .then((handle) => handle.close())
+      .catch((err) => {
+        this.logger.warn('failed to close prewarmed handle', {
+          sessionId: id,
+          reason,
           error: String(err),
         });
       });
@@ -642,6 +672,11 @@ export class Maker {
     if (!entry) return false;
     if (!entry.ready) return false;
     entry.claimed = true;
+    // 已 claim 免疫 TTL：清掉兜底定时器，防 TTL 回收已接管的句柄。
+    if (entry.ttlTimer) {
+      clearTimeout(entry.ttlTimer);
+      entry.ttlTimer = undefined;
+    }
     return true;
   }
 
@@ -649,8 +684,7 @@ export class Maker {
   async cancelPrewarmedSession(id: string): Promise<void> {
     const entry = this.prewarmedSessionHandles.get(id);
     if (!entry) return;
-    this.prewarmedSessionHandles.delete(id);
-    await entry.handle.then((handle) => handle.close()).catch(() => undefined);
+    this.closePrewarmedEntry(id, entry, 'cancel');
   }
 
   private canAdoptPrewarmedSession(
@@ -749,7 +783,10 @@ export class Maker {
     if (prewarmed && reusedPrewarm) {
       // 非阻塞预热命中：同 id、同 workingDir、已 claim、已就绪 → 直接接管，0 等待。
       // 配置预写已按草稿最新档位联动（Q8-B），claim 不逐项 reconcile。
-      if (prewarmSessionId) this.prewarmedSessionHandles.delete(prewarmSessionId);
+      if (prewarmSessionId && this.prewarmedSessionHandles.get(prewarmSessionId) === prewarmed) {
+        this.prewarmedSessionHandles.delete(prewarmSessionId);
+        if (prewarmed.ttlTimer) clearTimeout(prewarmed.ttlTimer);
+      }
       handle = await prewarmed.handle;
     } else {
       // 池里确有该 id 的预热条目但不可接管（未 claim / workingDir 不符等）→ 回收。
