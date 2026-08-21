@@ -2079,6 +2079,118 @@ export function NewMakerDraftRoute() {
     capabilityAgentKind,
   ]);
 
+  // ─── 非阻塞预热（claim-if-ready）────────────────────────────────────────
+  // 本地普通 Cursor 草稿打开后，后台把 Cursor 会话完整 bootstrap（spawn + initialize +
+  // 首个 session/new + 档位下发），发送热路径**零 await 就绪**（ADR 0005；修复 ADR 0003
+  // 回退根因 —— 旧实现把「等待就绪」搬进了 IPC/发送路径，见 spec #74 / ticket #75）。
+  // 守卫与发送路径 claim 严格对齐：仅本地普通草稿（worktree / device-link / remote 不预热）。
+  // 回收：草稿关闭 / 切换 vendor / 发送失败 → cancel；已 claim 的句柄对 effect 重跑免疫。
+  const cursorPrewarmRef = useRef<{ sessionId: string; claimed: boolean } | null>(null);
+  // 从预热会话拿到 sessionId 并接管。返回 { sessionId, prewarmed }；未命中时回收预热并
+  // 回退普通创建。**本函数不 await 会话就绪** —— claim 只查就绪标志。
+  const claimCursorPrewarmSession = useCallback(async (): Promise<{
+    sessionId: string;
+    prewarmed: boolean;
+  }> => {
+    const prewarm = cursorPrewarmRef.current;
+    if (!prewarm) return { sessionId: makeDraftSessionId(), prewarmed: false };
+    try {
+      const res = await window.electronAPI.maker.claimPrewarmSession(prewarm.sessionId);
+      if (res.claimed) {
+        // 已就绪：标记 claimed（对迟到重预热 / effect cleanup 免疫），发送复用同一 id
+        // → createSession 内部 reusedPrewarm 分支 0 等待接管（maker-core）。
+        prewarm.claimed = true;
+        return { sessionId: prewarm.sessionId, prewarmed: true };
+      }
+    } catch (err) {
+      log.warn('[draft prewarm] claim failed; falling back to normal create', err);
+    }
+    // 未就绪 / 不存在：显式回收预热句柄，回退普通创建（行为与现状一致、不阻塞）。
+    await window.electronAPI.maker
+      .cancelPrewarmSession(prewarm.sessionId)
+      .catch((err) => log.warn('[draft prewarm] cancel after claim-miss failed', err));
+    cursorPrewarmRef.current = null;
+    return { sessionId: makeDraftSessionId(), prewarmed: false };
+  }, []);
+  // 预热 effect：草稿打开 + 400ms debounce（Q2）。配置/目录变化 → 回收旧预热、用最新档位
+  // 重新预热（与 Q8-B「配置预写联动草稿最新档位」一致，claim 不逐项 reconcile）。
+  useEffect(() => {
+    const canPrewarm =
+      persistedAgentKind === 'cursor' &&
+      includeCursor !== false &&
+      !isDeviceLinkDraft &&
+      !effectiveRemoteHostId &&
+      !wtEnabled;
+    if (!canPrewarm) {
+      // 守卫不满足（切 vendor / 开 worktree / device-link / remote）→ 回收未 claim 的预热。
+      const prewarm = cursorPrewarmRef.current;
+      if (prewarm && !prewarm.claimed) {
+        cursorPrewarmRef.current = null;
+        void window.electronAPI.maker
+          .cancelPrewarmSession(prewarm.sessionId)
+          .catch((err) => log.warn('[draft prewarm] cancel failed', err));
+      }
+      return;
+    }
+    const timer = setTimeout(async () => {
+      // 重新预热前，先回收上次未 claim 的预热（配置/目录变化 → 换新档位的新句柄）。
+      const previous = cursorPrewarmRef.current;
+      if (previous && !previous.claimed) {
+        cursorPrewarmRef.current = null;
+        await window.electronAPI.maker
+          .cancelPrewarmSession(previous.sessionId)
+          .catch(() => undefined);
+      }
+      const sessionId = makeDraftSessionId();
+      const workingDir = effectiveWorkingDir?.trim() || undefined;
+      cursorPrewarmRef.current = { sessionId, claimed: false };
+      try {
+        await window.electronAPI.maker.prewarmSession({
+          id: sessionId,
+          agentKind: 'cursor',
+          workingDir,
+          workspaceKind: workingDir ? 'project' : 'dialogue',
+          model: draftInitialModel,
+          effort: draftInitialEffort,
+          fastMode: effectiveFastMode,
+          permissionMode: chatInitialPermissionMode,
+          planMode: effectivePlanMode,
+          providerId: chatInitialProviderId,
+        });
+      } catch (err) {
+        // 预热失败（鉴权/网络/进程错误）→ 静默放弃，发送走普通创建（spec 验收标准）。
+        log.warn('[draft prewarm] prewarmSession failed; falling back to normal create', err);
+        if (cursorPrewarmRef.current?.sessionId === sessionId) {
+          cursorPrewarmRef.current = null;
+        }
+      }
+    }, 400);
+    return () => {
+      clearTimeout(timer);
+      // 草稿关闭 / 依赖变化：回收未 claim 的预热。已 claim（发送接管中）不动（Q10 不变量）。
+      const prewarm = cursorPrewarmRef.current;
+      if (prewarm && !prewarm.claimed) {
+        cursorPrewarmRef.current = null;
+        void window.electronAPI.maker
+          .cancelPrewarmSession(prewarm.sessionId)
+          .catch((err) => log.warn('[draft prewarm] cancel failed', err));
+      }
+    };
+  }, [
+    persistedAgentKind,
+    includeCursor,
+    isDeviceLinkDraft,
+    effectiveRemoteHostId,
+    effectiveWorkingDir,
+    wtEnabled,
+    draftInitialModel,
+    draftInitialEffort,
+    effectiveFastMode,
+    chatInitialPermissionMode,
+    effectivePlanMode,
+    chatInitialProviderId,
+  ]);
+
   // 收藏锚点的失效兜底:选中一条收藏后,如果草稿的 (模型, 来源) 又被别的路径改掉(引擎
   // 不可用 coerce、模型校准、浮层里换来源…),这个锚点就不再描述当前选择了 —— 靠**派生**让
   // 它不亮:比的是快照里的 (wire id, providerId) 与草稿当前值。wire id 不查收藏条目(它按
@@ -3814,7 +3926,19 @@ export function NewMakerDraftRoute() {
           // Send 流程会先 createSession (本段下方) 创建 Lead,然后立刻调 enableOrca
           // 拉起 Worker (见下方 "F-COLLAB: draft 阶段开了协同模式" 段)。
 
-          const sessionId = makeDraftSessionId();
+          // 非阻塞预热接管（claim-if-ready）：本地普通 Cursor 草稿已预热且就绪 → 复用其
+          // sessionId，createSession 内部 reusedPrewarm 分支 0 等待接管（maker-core）；
+          // 未就绪 / 无预热 / 非本地普通草稿（worktree / device-link / remote）→ 回退普通
+          // 创建。claim 只查就绪标志、**不 await 会话就绪**（ADR 0005 核心）。
+          const prewarmAble =
+            persistedAgentKind === 'cursor' &&
+            includeCursor !== false &&
+            !isDeviceLinkDraft &&
+            !effectiveRemoteHostId &&
+            !wtEnabled;
+          const { sessionId } = prewarmAble
+            ? await claimCursorPrewarmSession()
+            : { sessionId: makeDraftSessionId() };
           const optimisticTitle = optimisticFirstMessageTitle(
             message,
             files,

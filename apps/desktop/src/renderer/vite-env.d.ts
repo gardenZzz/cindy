@@ -5122,6 +5122,23 @@ interface ElectronAPI {
       usedProjectContext?: boolean;
     }>;
 
+    /** 非阻塞预热（claim-if-ready）：立即返回，不 await bootstrap。 */
+    prewarmSession: (opts: {
+      id: string;
+      agentKind: AgentKind;
+      workingDir?: string;
+      workspaceKind?: 'project' | 'dialogue';
+      model: string;
+      effort?: string;
+      fastMode?: boolean;
+      permissionMode?: string;
+      planMode?: boolean;
+      providerId?: string | null;
+    }) => Promise<{ accepted: true }>;
+    /** 已就绪的预热会话才返回 true；未就绪返回 false 由发送回退普通创建。 */
+    claimPrewarmSession: (sessionId: string) => Promise<{ claimed: boolean }>;
+    cancelPrewarmSession: (sessionId: string) => Promise<void>;
+
     markOrcaRole: (
       sessionId: string,
       role: import('@/lib/ccAgent.types').OrcaRole,

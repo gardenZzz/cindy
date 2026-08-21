@@ -717,7 +717,11 @@ import { hydrateQueuedAgentReferences } from './agentInputReferences.js';
 import { agentHandoffPending } from './agentHandoffPendingSingleton.js';
 import { clearSealedCodexPlanState, readCodexPlanState } from '../localDb/codexPlanState.js';
 import { buildCompletedPlanGuardNote, buildPlanReconcileNote } from './planReconcile.js';
-import { type MakerSessionCreateOpts, withCreateSessionStderr } from './sessionRequest.js';
+import {
+  type MakerSessionCreateOpts,
+  readCreateSessionOpts,
+  withCreateSessionStderr,
+} from './sessionRequest.js';
 import { persistAndHydrateSessionProvider } from './sessionProviderBootstrap.js';
 import { registerMakerSessionSendHandler } from './sessionSendHandler.js';
 import {
@@ -7526,6 +7530,51 @@ export function registerMakerIpc(maker: Maker, options: RegisterMakerIpcOptions)
     broadcastSessionCreated,
     logCreateSession: (fields) => log.info('create-session invoked', fields),
     warnStderr: (agentKind, line) => log.warn(`[${agentKind}/stderr] ${line}`),
+  });
+
+  // ── 非阻塞预热（claim-if-ready）三通道 ────────────────────────────────
+  // prewarm 只接受请求并立即返回（maker.prewarmSession 不 await bootstrap），
+  // claim 返回已就绪布尔，发送热路径零 await 就绪（ADR 0005；ADR 0003 回退根因
+  // 是 IPC/发送路径 await prewarm.ready）。
+  makerSessionRegistry.handle(MAKER_INVOKE.PREWARM_SESSION, async (event, opts: unknown) => {
+    assertTrustedAppRendererEvent(
+      event as Parameters<typeof assertTrustedAppRendererEvent>[0],
+    );
+    const o = withCreateSessionStderr(
+      readCreateSessionOpts(opts, {
+        allocateDialogueWorkspace: ensureDialogueWorkspaceDir,
+        createSessionId: createId,
+        now: Date.now,
+      }),
+      (agentKind, line) => log.warn(`[${agentKind}/stderr] ${line}`),
+    );
+    if (o.agentKind !== 'cursor' || !o.id || o.remoteHostId || o.resumeSessionId) {
+      throwIpcError('INVALID_PARAMS', 'Cursor prewarm requires a new local session with an explicit id');
+    }
+    const reroute = await assertModelRouteUsable('cursor', o.model, o.providerId ?? null);
+    if (reroute && !o.providerId) o.providerId = reroute;
+    await maker.prewarmSession(o);
+    return { accepted: true as const };
+  });
+
+  makerSessionRegistry.handle(MAKER_INVOKE.CLAIM_PREWARM_SESSION, async (event, sessionId: unknown) => {
+    assertTrustedAppRendererEvent(
+      event as Parameters<typeof assertTrustedAppRendererEvent>[0],
+    );
+    if (typeof sessionId !== 'string' || !sessionId || sessionId.length > 256) {
+      throwIpcError('INVALID_PARAMS', 'sessionId must be a non-empty string');
+    }
+    return { claimed: await maker.claimPrewarmedSession(sessionId) };
+  });
+
+  makerSessionRegistry.handle(MAKER_INVOKE.CANCEL_PREWARM_SESSION, async (event, sessionId: unknown) => {
+    assertTrustedAppRendererEvent(
+      event as Parameters<typeof assertTrustedAppRendererEvent>[0],
+    );
+    if (typeof sessionId !== 'string' || !sessionId || sessionId.length > 256) {
+      throwIpcError('INVALID_PARAMS', 'sessionId must be a non-empty string');
+    }
+    await maker.cancelPrewarmedSession(sessionId);
   });
 
   const reconcileInterruptedReviews = async (): Promise<void> => {
