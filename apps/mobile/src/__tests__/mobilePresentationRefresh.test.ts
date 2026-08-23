@@ -70,7 +70,9 @@ describe('mobile localized presentation refresh', () => {
     const source = read('app/sessions/new.tsx');
 
     expect(source).toContain('setError(raw)');
-    expect(source).toContain('{describeAgentAuthError(error) ?? error}');
+    expect(source).toContain('describeAgentAuthError(error)');
+    expect(source).toContain('describeCursorHostError(error, draft.agentKind)');
+    expect(source).toContain('describeRemoteError(error)');
   });
 
   it('keeps schedule validation metadata until render time', () => {
