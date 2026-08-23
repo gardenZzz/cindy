@@ -234,6 +234,7 @@
           "all": "All",
           "cc": "Claude Code",
           "codex": "Codex",
+          "cursor": "Cursor",
           "pi": "Pi"
         },
         "lastActivity": {
