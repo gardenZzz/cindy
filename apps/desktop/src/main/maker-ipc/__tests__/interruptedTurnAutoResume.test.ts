@@ -4,7 +4,8 @@ import { CURSOR_STREAM_DISCONNECT_REASON, CURSOR_TOOL_CALL_IDLE_TIMEOUT_REASON }
 
 import {
   INTERRUPTED_TURN_MAX_CONSECUTIVE_ATTEMPTS,
-  INTERRUPTED_TURN_MAX_EPISODE_ATTEMPTS,
+  INTERRUPTED_TURN_MAX_WINDOW_ATTEMPTS,
+  INTERRUPTED_TURN_RESUME_WINDOW_MS,
   InterruptedTurnAutoResumeGuard,
   interruptedTurnResumeDelayMs,
   isAutoResumeUserMessage,
@@ -307,16 +308,17 @@ describe('interruptedTurnResumeDelayMs', () => {
 
 function createGuard(opts?: { enabled?: boolean }) {
   let nowMs = 1_000_000;
+  const warn = vi.fn();
   const guard = new InterruptedTurnAutoResumeGuard({
     isEnabled: () => opts?.enabled ?? true,
-    log: { debug: vi.fn(), warn: vi.fn() },
+    log: { debug: vi.fn(), warn },
     now: () => nowMs,
     random: () => 0.5,
   });
   const tick = (ms: number) => {
     nowMs += ms;
   };
-  return { guard, tick, now: () => nowMs };
+  return { guard, tick, now: () => nowMs, warn };
 }
 
 const SID = 'session-1';
@@ -328,8 +330,8 @@ function runInterruptedTurn(g: ReturnType<typeof createGuard>): number {
   return g.now();
 }
 
-// 额度模型的核心不变量:连续 N 次零产出会停；即使每次都有一点产出，同一次真人介入
-// 之后也受 episode 硬上限保护，绝不无限自动循环。
+// 额度模型的核心不变量:连续 N 次零产出会停；即使每次都有一点产出，滑动时间窗内
+// 也受硬上限保护，不会无界连发。窗口滑动后额度自动回血，打满不再是永久锁死。
 describe('InterruptedTurnAutoResumeGuard', () => {
   it('grants up to MAX consecutive attempts, then stops and waits for the user', () => {
     const g = createGuard();
@@ -346,7 +348,7 @@ describe('InterruptedTurnAutoResumeGuard', () => {
       action: 'exhausted',
       reason: 'consecutive',
       consecutiveAttempts: INTERRUPTED_TURN_MAX_CONSECUTIVE_ATTEMPTS,
-      episodeAttempts: INTERRUPTED_TURN_MAX_CONSECUTIVE_ATTEMPTS,
+      windowAttempts: INTERRUPTED_TURN_MAX_CONSECUTIVE_ATTEMPTS,
     });
   });
 
@@ -375,7 +377,7 @@ describe('InterruptedTurnAutoResumeGuard', () => {
       action: 'exhausted',
       reason: 'consecutive',
       consecutiveAttempts: INTERRUPTED_TURN_MAX_CONSECUTIVE_ATTEMPTS,
-      episodeAttempts: INTERRUPTED_TURN_MAX_CONSECUTIVE_ATTEMPTS,
+      windowAttempts: INTERRUPTED_TURN_MAX_CONSECUTIVE_ATTEMPTS,
     });
   });
 
@@ -401,23 +403,53 @@ describe('InterruptedTurnAutoResumeGuard', () => {
     }
   });
 
-  it('即使每次都有进展,同一人工介入周期仍受硬总上限保护', () => {
+  it('即使每次都有进展,滑动窗口内仍受硬上限保护', () => {
     const g = createGuard();
-    for (let round = 0; round < INTERRUPTED_TURN_MAX_EPISODE_ATTEMPTS; round++) {
+    for (let round = 0; round < INTERRUPTED_TURN_MAX_WINDOW_ATTEMPTS; round++) {
       const decision = g.guard.onInterruptedTurn(SID, runInterruptedTurn(g));
       expect(decision.action).toBe('resume');
       if (decision.action === 'resume') {
-        expect(decision.episodeAttempt).toBe(round + 1);
+        expect(decision.windowAttempt).toBe(round + 1);
         expect(decision.sessionTotal).toBe(round + 1);
         expect(g.guard.noteProgress(SID, decision.attemptToken)).toBe(true);
       }
     }
     expect(g.guard.onInterruptedTurn(SID, runInterruptedTurn(g))).toEqual({
       action: 'exhausted',
-      reason: 'episode',
+      reason: 'window',
       consecutiveAttempts: 0,
-      episodeAttempts: INTERRUPTED_TURN_MAX_EPISODE_ATTEMPTS,
+      windowAttempts: INTERRUPTED_TURN_MAX_WINDOW_ATTEMPTS,
     });
+  });
+
+  it('窗口滑动后额度自动回血,再次打满会重新告警(不需要真人介入)', () => {
+    const g = createGuard();
+    const fillWindow = (startRound: number) => {
+      for (let round = startRound; round < INTERRUPTED_TURN_MAX_WINDOW_ATTEMPTS; round++) {
+        const decision = g.guard.onInterruptedTurn(SID, runInterruptedTurn(g));
+        expect(decision.action).toBe('resume');
+        if (decision.action === 'resume') {
+          expect(g.guard.noteProgress(SID, decision.attemptToken)).toBe(true);
+        }
+      }
+    };
+    fillWindow(0);
+    expect(g.guard.onInterruptedTurn(SID, runInterruptedTurn(g)).action).toBe('exhausted');
+    // 同一段 exhausted 期内反复撞墙只告警一次,不刷屏。
+    expect(g.guard.onInterruptedTurn(SID, g.now()).action).toBe('exhausted');
+    expect(g.warn).toHaveBeenCalledTimes(1);
+    // 窗口滑过去后配额自己回来 —— 修的正是「打满后无人充值、挂一整天零重试」那一格。
+    g.tick(INTERRUPTED_TURN_RESUME_WINDOW_MS);
+    const refilled = g.guard.onInterruptedTurn(SID, runInterruptedTurn(g));
+    expect(refilled.action).toBe('resume');
+    if (refilled.action === 'resume') {
+      expect(refilled.windowAttempt, '窗口外的旧记录已全部剔除').toBe(1);
+      expect(g.guard.noteProgress(SID, refilled.attemptToken)).toBe(true);
+    }
+    // 回血后再打满 → 新的一段 exhausted 期重新告警恰好一次(不哑火)。
+    fillWindow(1);
+    expect(g.guard.onInterruptedTurn(SID, runInterruptedTurn(g)).action).toBe('exhausted');
+    expect(g.warn).toHaveBeenCalledTimes(2);
   });
 
   it('noteProgress 在没有失败计数时是 no-op(热路径每条消息都会调)', () => {
@@ -429,9 +461,9 @@ describe('InterruptedTurnAutoResumeGuard', () => {
     if (decision.action === 'resume') expect(decision.attempt).toBe(1);
   });
 
-  it('真实用户消息也重置连续计数(人工介入是新起点)', () => {
+  it('真实用户消息立即清零全部额度,不用等窗口滑动(人工介入是新起点)', () => {
     const g = createGuard();
-    for (let i = 0; i < INTERRUPTED_TURN_MAX_EPISODE_ATTEMPTS; i++) {
+    for (let i = 0; i < INTERRUPTED_TURN_MAX_WINDOW_ATTEMPTS; i++) {
       const decision = g.guard.onInterruptedTurn(SID, runInterruptedTurn(g));
       expect(decision.action).toBe('resume');
       if (decision.action === 'resume') {
@@ -443,7 +475,7 @@ describe('InterruptedTurnAutoResumeGuard', () => {
     const decision = g.guard.onInterruptedTurn(SID, runInterruptedTurn(g));
     expect(decision.action).toBe('resume');
     if (decision.action === 'resume') {
-      expect(decision.episodeAttempt).toBe(1);
+      expect(decision.windowAttempt).toBe(1);
       expect(decision.attempt).toBe(1);
     }
   });
@@ -461,7 +493,7 @@ describe('InterruptedTurnAutoResumeGuard', () => {
     expect(next.action).toBe('resume');
     if (next.action === 'resume') {
       expect(next.attempt).toBe(1);
-      expect(next.episodeAttempt).toBe(1);
+      expect(next.windowAttempt).toBe(1);
     }
   });
 
