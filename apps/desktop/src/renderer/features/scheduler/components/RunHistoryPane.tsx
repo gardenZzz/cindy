@@ -215,9 +215,9 @@ export function RunHistoryPane({
       ? t('scheduler.chips.timingMode.intervalChip', {
           schedule: formatIntervalDuration(s.intervalMs, i18n.resolvedLanguage ?? i18n.language),
         })
-      : summarizeConfig(cronToConfig(s.cronExpr));
+      : summarizeConfig(cronToConfig(s.cronExpr), t);
   const agentText = humanizeAgentKind(s.agentKind);
-  const dest = describeDestination(s);
+  const dest = describeDestination(s, t);
   // title 兜底显示完整路径，悬浮即可看到 — basename 视觉简洁，hover/title 看全量
   const titleText = `${cronText} · ${agentText} · ${dest.prefix}${dest.workingDir ?? ''}`;
 

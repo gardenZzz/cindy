@@ -137,6 +137,7 @@ const AGENT_OPTIONS: ReadonlyArray<Option<ConversationSearchAgentFilter>> = [
   { value: 'cc', labelKey: 'ccAgent.sidebar.filterVendor.cc' },
   { value: 'codex', labelKey: 'ccAgent.sidebar.filterVendor.codex' },
   { value: 'cursor', labelKey: 'ccAgent.sidebar.filterVendor.cursor' },
+  { value: 'pi', labelKey: 'ccAgent.sidebar.filterVendor.pi' },
 ];
 
 const LAST_ACTIVITY_OPTIONS: ReadonlyArray<Option<ConversationSearchLastActivityFilter>> = [

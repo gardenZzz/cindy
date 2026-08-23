@@ -1,6 +1,11 @@
 import { contextBridge, ipcRenderer, webUtils } from 'electron';
 import type { MobileCodexRateLimitsResult } from '@cindy/maker-shared/device-link-contract';
 import type { AppearanceSettings } from '../shared/appearanceSettings';
+import {
+  isWindowsBackdropMaterial,
+  readWindowBackdropMaterialFromArgv,
+  WINDOW_BACKDROP_MATERIAL_CHANGED_CHANNEL,
+} from '../shared/windowBackdrop';
 import { isDeepLinkProviderConnectId } from '../shared/deepLinkSchemes';
 import {
   parseProjectOrderSnapshot,
@@ -53,6 +58,18 @@ import {
   type WorkLouderCodexSettingsPatch,
   type WorkLouderCodexState,
 } from '../shared/workLouderCodex';
+import {
+  XBOX_GAMEPAD_GET_STATE_CHANNEL,
+  XBOX_GAMEPAD_PREVIEW_INPUT_CHANNEL,
+  XBOX_GAMEPAD_PROBE_CHANNEL,
+  XBOX_GAMEPAD_RESET_SETTINGS_CHANNEL,
+  XBOX_GAMEPAD_SET_LAYOUT_PREVIEW_CHANNEL,
+  XBOX_GAMEPAD_SET_SETTINGS_CHANNEL,
+  XBOX_GAMEPAD_STATE_CHANGED_CHANNEL,
+  type XboxGamepadPreviewInput,
+  type XboxGamepadSettingsPatch,
+  type XboxGamepadState,
+} from '../shared/xboxGamepad';
 import {
   ANALYTICS_SETTINGS_CHANGE_CHANNEL,
   type AnalyticsSettingsPayload,
@@ -411,6 +428,9 @@ function createIpcFanOut(channel: string): FanOut {
 // 老 7 个 fanOut + fanOutUserMessagePersisted 一起拿掉。
 const fanOutUpdateStatus = createIpcFanOut('update-status');
 const fanOutUpdateChannelSettings = createIpcFanOut('update-channel-settings');
+const fanOutWindowBackdropMaterialChanged = createIpcFanOut(
+  WINDOW_BACKDROP_MATERIAL_CHANGED_CHANNEL,
+);
 const fanOutOrcaWorkerChanged = createIpcFanOut('maker:orca:worker-changed');
 // 右侧栏独立子窗口(RSB window)状态 / 上下文 / 命令推送
 const fanOutRsbWindowStateChanged = createIpcFanOut('maker:rsb-window:state-changed');
@@ -895,6 +915,15 @@ type CindyMediaPreferenceKind = {
 
 contextBridge.exposeInMainWorld('electronAPI', {
   platform: process.platform,
+  windowBackdropMaterial: readWindowBackdropMaterialFromArgv(process.argv),
+  onWindowBackdropMaterialChanged: (
+    cb: (material: import('../shared/windowBackdrop').WindowsBackdropMaterial) => void,
+  ) =>
+    fanOutWindowBackdropMaterialChanged((material) => {
+      if (typeof material === 'string' && isWindowsBackdropMaterial(material)) {
+        cb(material);
+      }
+    }),
   osRelease: ipcRenderer.sendSync('get-os-release') as string,
   appVersion: ipcRenderer.sendSync('get-app-version') as string,
   clientEndpoints: { websiteUrl: clientEndpointsInfo?.websiteUrl ?? '' },
@@ -1481,6 +1510,8 @@ contextBridge.exposeInMainWorld('electronAPI', {
       ipcRenderer.invoke('voice-input:dictionary:import-entries', texts),
     renameDictionaryEntry: (entryId: string, text: string): Promise<unknown> =>
       ipcRenderer.invoke('voice-input:dictionary:rename-entry', { entryId, text }),
+    editDictionaryEntry: (entryId: string, text: string, aliases: string[]): Promise<unknown> =>
+      ipcRenderer.invoke('voice-input:dictionary:edit-entry', { entryId, text, aliases }),
     recordDictionaryLearningActions: (actions: unknown[]): Promise<unknown> =>
       ipcRenderer.invoke('voice-input:dictionary-learning:record-actions', actions),
     getHistory: (limit?: number): unknown => {
@@ -1624,17 +1655,47 @@ contextBridge.exposeInMainWorld('electronAPI', {
     },
   },
 
+  xboxGamepad: {
+    getState: (): Promise<XboxGamepadState> => ipcRenderer.invoke(XBOX_GAMEPAD_GET_STATE_CHANNEL),
+    setSettings: (patch: XboxGamepadSettingsPatch): Promise<XboxGamepadState> =>
+      ipcRenderer.invoke(XBOX_GAMEPAD_SET_SETTINGS_CHANNEL, patch),
+    resetSettings: (): Promise<XboxGamepadState> =>
+      ipcRenderer.invoke(XBOX_GAMEPAD_RESET_SETTINGS_CHANNEL),
+    probe: (): Promise<XboxGamepadState> => ipcRenderer.invoke(XBOX_GAMEPAD_PROBE_CHANNEL),
+    setLayoutPreviewActive: (active: boolean): Promise<void> =>
+      ipcRenderer.invoke(XBOX_GAMEPAD_SET_LAYOUT_PREVIEW_CHANNEL, active),
+    onStateChanged: (callback: (state: XboxGamepadState) => void): (() => void) => {
+      const listener = (_event: Electron.IpcRendererEvent, state: XboxGamepadState): void => {
+        callback(state);
+      };
+      ipcRenderer.on(XBOX_GAMEPAD_STATE_CHANGED_CHANNEL, listener);
+      return () => ipcRenderer.removeListener(XBOX_GAMEPAD_STATE_CHANGED_CHANNEL, listener);
+    },
+    onPreviewInput: (callback: (input: XboxGamepadPreviewInput) => void): (() => void) => {
+      const listener = (
+        _event: Electron.IpcRendererEvent,
+        input: XboxGamepadPreviewInput,
+      ): void => callback(input);
+      ipcRenderer.on(XBOX_GAMEPAD_PREVIEW_INPUT_CHANNEL, listener);
+      return () => ipcRenderer.removeListener(XBOX_GAMEPAD_PREVIEW_INPUT_CHANNEL, listener);
+    },
+  },
+
   // ── 右侧栏独立子窗口(RSB window)──────────────────────────────────────
   // 「侧边栏在新窗口中显示」偏好 + 子窗口生命周期。状态机在 main
   // (right-sidebar-window/controller.ts),renderer 只 invoke + 订阅广播。
   rightSidebarWindow: {
-    getState: (): Promise<{ detached: boolean; lastOpen: boolean; open: boolean }> =>
-      ipcRenderer.invoke('maker:rsb-window:get-state'),
+    getState: (): Promise<{
+      detached: boolean;
+      lastOpen: boolean;
+      open: boolean;
+      hostSessionId?: string | null;
+    }> => ipcRenderer.invoke('maker:rsb-window:get-state'),
     /**
      * 幂等开窗。缺省(用户手势)已开则 show + focus;
      * userInitiated:false(启动恢复 / 插件 / agent 自发)已开则完全不动窗口。
      */
-    open: (options?: { userInitiated?: boolean }): Promise<void> =>
+    open: (options?: { userInitiated?: boolean; sessionId?: string }): Promise<void> =>
       ipcRenderer.invoke('maker:rsb-window:open', options),
     close: (): Promise<void> => ipcRenderer.invoke('maker:rsb-window:close'),
     /** 写偏好;true 附带开窗,false 附带关窗。返回新 state。 */
@@ -1649,6 +1710,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
       workdir: string | null;
       remoteHostId: string | null;
       deviceLinkDeviceId?: string | null;
+      subagentsAvailable?: boolean;
       available: boolean;
     } | null> => ipcRenderer.invoke('maker:rsb-window:get-context'),
     /** 子窗口根组件挂载握手(main 侧 ensureOpen 等它)。 */
@@ -1662,6 +1724,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
       workdir: string | null;
       remoteHostId: string | null;
       deviceLinkDeviceId?: string | null;
+      subagentsAvailable?: boolean;
       available: boolean;
     }): void => ipcRenderer.send('maker:rsb-window:set-context', ctx),
     onStateChanged: fanOutRsbWindowStateChanged,
@@ -2368,8 +2431,18 @@ contextBridge.exposeInMainWorld('electronAPI', {
 
   // E4D 毛玻璃:family 切换/启动时通知 main 开关 macOS vibrancy(仅 CINDY 透壁纸)
   theme: {
-    applyVibrancy: (familyId: string, isDark: boolean): void => {
-      ipcRenderer.send('theme:apply-vibrancy', { familyId, isDark });
+    applyVibrancy: (
+      familyId: string,
+      isDark: boolean,
+      mode: 'system' | 'light' | 'dark',
+      systemModeFollowsSystem: boolean,
+    ): void => {
+      ipcRenderer.send('theme:apply-vibrancy', {
+        familyId,
+        isDark,
+        mode,
+        systemModeFollowsSystem,
+      });
     },
   },
   onAppUpdateProgress: fanOutAppUpdateProgress,
@@ -3886,6 +3959,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
   // Fullscreen state
   onFullscreenChange: fanOutFullscreenChange,
   getFullscreenState: (): Promise<boolean> => ipcRenderer.invoke('get-fullscreen-state'),
+  toggleFullscreen: (): Promise<boolean> => ipcRenderer.invoke('toggle-fullscreen'),
 
   // 窗口是否对用户不可见(最小化 / hide)。装饰动画闸门订阅它来决定要不要冻结常驻动画;
   // 关掉 backgroundThrottling 的窗口里 document.visibilityState 不可信,只能靠这条。
@@ -4811,6 +4885,10 @@ contextBridge.exposeInMainWorld('electronAPI', {
       detail: (
         input: import('@cindy/maker-shared/subagent-workspace').SubagentRunDetailRequest,
       ): Promise<unknown> => ipcRenderer.invoke('local-db:subagent-runs:detail', input),
+      /** Lazy bounded pages of one durable child transcript. */
+      transcript: (
+        input: import('@cindy/maker-shared/subagent-workspace').SubagentTranscriptPageRequest,
+      ): Promise<unknown> => ipcRenderer.invoke('local-db:subagent-runs:transcript', input),
       /** Small invalidation push; consumers re-read through list/detail. */
       onChanged: createIpcFanOut('local-db:subagent-runs:changed'),
     },
@@ -5293,11 +5371,25 @@ contextBridge.exposeInMainWorld('electronAPI', {
     /** 精确停止会话内单个后台任务(不中断当前 turn;任务已结束幂等成功)。 */
     stopAgentTask: (sessionId: string, taskId: string): Promise<{ ok: true }> =>
       ipcRenderer.invoke('maker:agent-task:stop', sessionId, taskId),
+    controlPiSubagent: (input: {
+      sessionId: string;
+      taskId: string;
+      action: 'stop' | 'steer' | 'follow_up' | 'resume';
+      message?: string;
+      childId?: string;
+    }): Promise<{ ok: boolean; controlled: number }> =>
+      ipcRenderer.invoke('maker:pi-subagent:control', input),
     /** 会话仍在运行的后台任务快照(挂载 / 重载后补回存量;实时增量走事件流)。 */
     listSessionBackgroundTasks: (
       sessionId: string,
     ): Promise<{
-      tasks: Array<{ taskId: string; taskType?: string; toolUseId?: string; title?: string }>;
+      tasks: Array<{
+        taskId: string;
+        taskType?: string;
+        toolUseId?: string;
+        title?: string;
+        provider?: 'pi' | 'claude-code';
+      }>;
       /** 「任务已终态、wake turn 尚未启动或仍在跑」的 continuation claim 数(桥接对账收口权威依据)。 */
       pendingContinuations?: number;
     }> => ipcRenderer.invoke('maker:session-background-tasks:list', sessionId),
@@ -6404,6 +6496,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
       messages: Array<{ role: string; content: string }>;
       workingDir?: string;
       turnGen: number;
+      completionRevision: number;
     }): Promise<{ prompt: string | null }> => ipcRenderer.invoke('maker:predict-prompt', request),
     helpAsk: (
       request: import('../shared/helpTypes').HelpAskRequest,

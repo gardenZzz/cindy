@@ -49,7 +49,7 @@ function frequencyText(
       schedule: formatIntervalDuration(schedule.intervalMs, locale),
     });
   }
-  return summarizeConfig(cronToConfig(schedule.cronExpr));
+  return summarizeConfig(cronToConfig(schedule.cronExpr), t);
 }
 
 export function ScheduleBindingBadge({
