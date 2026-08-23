@@ -112,7 +112,7 @@ export function isInterruptedTurnError(signals: InterruptedTurnErrorSignals): bo
   // `tool_call_idle_timeout` 同理放行：Cursor ACP 不流式回传终端输出，长命令（跑 CI /
   // 长构建 / 监听类工具）在整段等待期内零 session/update，看门狗按阈值判定超时。此前的
   // 处理是直接取消并让用户手动补发下一条；现在纳入本白名单后改走有界续跑——退避 +
-  // 连续 5 次 / 每人话 10 次上限 + kill switch，且 `performRetryLastError` 对已有产出的
+  // 连续 5 次 / 滑动时间窗上限 + kill switch，且 `performRetryLastError` 对已有产出的
   // turn 发**续跑指令**（非重放原文），由知道命令预期耗时的 Agent 决定是重挂、轮询还是
   // 换招，而非盲目重放（重放才会重复副作用）。前置条件见 maker-core
   // `toolIdleWatchdog.suspend/resume`：人机交互（审批 / 提问 / 计划审阅）期间看门狗
@@ -124,8 +124,8 @@ export function isInterruptedTurnError(signals: InterruptedTurnErrorSignals): bo
   // 同属连接层故障，续跑一次通常就能过去。此前按「零产出无可续」排除，但 coordinator 的
   // auto 路径对零产出 turn 本就走**克隆重发原文**（active-turn recovery 已落库，重发安全；
   // 见 performRetryLastError），对已有 durable progress 的长任务则带 RecoveryCheckpoint
-  // 续跑——两种形态都有安全动作可执行。连续空响应仍由同一份连续失败上限 / 人工介入周期
-  // 硬上限 / 退避止损，预算耗尽后横幅交还用户，不会无界重试。
+  // 续跑——两种形态都有安全动作可执行。连续空响应仍由同一份连续失败上限 / 滑动时间窗
+  // 限速 / 退避止损，窗口打满后横幅交还用户，不会无界连发。
   if (
     reason === UPSTREAM_OVERLOAD_REASON ||
     reason === CURSOR_STREAM_DISCONNECT_REASON ||
@@ -193,22 +193,32 @@ export function isSubstantiveProgressEvent(event: {
 /**
  * 一次中断事件里最多连续自动重连几次。
  *
- * 额度模型是「连续失败上限 + 人工介入周期硬上限」两层：
+ * 额度模型是「连续失败上限 + 滑动时间窗限速」两层：
  *  - 连续 5 次重连都没能让模型产出任何东西 → 判定真的连不上，停下等人。
  *  - 中间只要有一次**模型有实质产出**（assistant 文本 / 工具调用），计数归零，
  *    后面又可以再来 5 次。
- *  - 但同一次人工介入之后最多自动重连 10 次；只有真人再发消息、手动 Retry 或重置
- *    会话才重新充值。这样「每次只产出一点又断」也不可能无止境循环。
- *  - 会话累计仍只用于展示，不直接做限制；真正的硬边界是本次人工介入周期。
+ *  - 同时最近一个窗口内最多自动重连 `INTERRUPTED_TURN_MAX_WINDOW_ATTEMPTS` 次：
+ *    病态的连环断流几分钟就会打满窗口、停下等人；偶发断一两次的整夜长任务永远碰
+ *    不到顶。窗口滑动后额度自动回来——旧的「一次人工介入最多 10 次、打满永久锁死」
+ *    正是让 scheduler / goal 驱动的会话（没人充值）挂掉一整天的原因。真人介入仍
+ *    立即全额清零。
+ *  - 会话累计仍只用于展示，不直接做限制。
  *
  * 为什么这样比「按人话充值」对：判据落在「是否在推进」而不是「人说了几句话」。长
  * 任务跑一小时不说话时不该被扣光额度；而真正连不上时，5 次退避（约 3+6+12+20+20
  * ≈ 61 秒）已经足够穿过瞬时抖动，再试下去只是烧钱。
+ *
+ * 已知取舍：成本上界从「每次介入 ≤10 次然后停」变成「每小时 ≤10 次、无限期」。一个
+ * 被遗忘的会话在上游整夜挂掉时最多烧 ~10 次/小时；即时止损仍有 stop / clear /
+ * kill switch。刻意不叠总量天花板——那会把「永久锁死」以更高阈值请回来。
  */
 export const INTERRUPTED_TURN_MAX_CONSECUTIVE_ATTEMPTS = 5;
 
-/** 一次真人介入之后最多允许多少次自动重连；有模型产出也不会重置。 */
-export const INTERRUPTED_TURN_MAX_EPISODE_ATTEMPTS = 10;
+/** 滑动窗口长度：只统计最近这段时间内的自动重连。 */
+export const INTERRUPTED_TURN_RESUME_WINDOW_MS = 3_600_000;
+
+/** 窗口内最多允许多少次自动重连；有模型产出也不消减，窗口滑动才回血。 */
+export const INTERRUPTED_TURN_MAX_WINDOW_ATTEMPTS = 10;
 
 /** 首次续跑前的退避基数。 */
 const RESUME_BACKOFF_BASE_MS = 3_000;
@@ -253,19 +263,19 @@ export interface InterruptedTurnResumeProgress {
   sessionTotal: number;
   /** 当前自动重连 attempt 的进程内单调 token；只用于异步生命周期归属，不展示。 */
   attemptToken: number;
-  /** 本次人工介入周期内第几次自动重连。 */
-  episodeAttempt: number;
-  /** 本次人工介入周期的硬上限。 */
-  maxEpisodeAttempts: number;
+  /** 滑动窗口内第几次自动重连。 */
+  windowAttempt: number;
+  /** 窗口内硬上限。 */
+  maxWindowAttempts: number;
 }
 
 export type InterruptedTurnResumeDecision =
   | ({ action: 'resume'; delayMs: number } & InterruptedTurnResumeProgress)
   | {
       action: 'exhausted';
-      reason: 'consecutive' | 'episode';
+      reason: 'consecutive' | 'window';
       consecutiveAttempts: number;
-      episodeAttempts: number;
+      windowAttempts: number;
     }
   | { action: 'skip'; why: 'disabled' | 'superseded' | 'pending' };
 
@@ -277,8 +287,8 @@ interface GuardLogger {
 interface SessionGuardState {
   /** 本轮连续重连次数（模型有产出 / 人工介入即归零）。 */
   consecutiveAttempts: number;
-  /** 自上一次真人介入起的自动重连总数；模型有产出也不归零。 */
-  episodeAttempts: number;
+  /** 滑动窗口内每次自动重连的授予时刻；决策时先剔除窗口外的。 */
+  windowAttemptTimes: number[];
   /** 会话累计自动重连次数（只增，仅展示）。 */
   sessionTotalResumes: number;
   lastTurnStartAt: number;
@@ -304,8 +314,9 @@ export interface InterruptedTurnAutoResumeGuardDeps {
  * 中断自动续跑的决策器。
  *
  * 与 `SilentStopAutoResumeGuard` 保持相似形状（pending attempt 去重、陈旧保护、
- * 可注入依赖）好让两处一起读，但额度语义完全不同：这里同时限制连续失败与一次
- * 人工介入周期的总次数，后者保证自动续跑绝对有限。
+ * 可注入依赖）好让两处一起读，但额度语义完全不同：这里同时限制连续失败与滑动
+ * 时间窗内的总次数。窗口打满会随时间自动回血——任一时刻的重试**速率**有界，但
+ * 不再有跨窗口的绝对总量上限，即时止损靠真人介入、stop / clear 与 kill switch。
  *
  * 纯内存状态（app 重启即复位），无 IO；全部依赖可注入，便于单测。
  */
@@ -323,7 +334,7 @@ export class InterruptedTurnAutoResumeGuard {
     if (!s) {
       s = {
         consecutiveAttempts: 0,
-        episodeAttempts: 0,
+        windowAttemptTimes: [],
         sessionTotalResumes: 0,
         lastTurnStartAt: 0,
         lastUserSendAt: 0,
@@ -362,14 +373,14 @@ export class InterruptedTurnAutoResumeGuard {
   }
 
   /**
-   * 真实用户消息发出 → 连续失败计数归零（人工介入是新起点）。
+   * 真实用户消息发出 → 全部额度清零（连续计数 + 时间窗；人工介入是新起点）。
    * 自动补发的续跑指令**绝不能**调用本方法（调用方靠 `isAutoResumeUserMessage`
    * 排除），否则等于自己给自己重置，连续失败上限就形同虚设。
    */
   noteUserSend(sessionId: string): void {
     const s = this.state(sessionId);
     s.consecutiveAttempts = 0;
-    s.episodeAttempts = 0;
+    s.windowAttemptTimes = [];
     s.currentAttemptToken = null;
     s.pendingAttemptToken = null;
     s.exhaustedWarned = false;
@@ -454,7 +465,7 @@ export class InterruptedTurnAutoResumeGuard {
     s.currentAttemptToken = null;
     s.pendingAttemptToken = null;
     s.consecutiveAttempts = 0;
-    s.episodeAttempts = 0;
+    s.windowAttemptTimes = [];
     s.exhaustedWarned = false;
     s.lastUserSendAt = this.now();
   }
@@ -490,9 +501,13 @@ export class InterruptedTurnAutoResumeGuard {
       });
       return { action: 'skip', why: 'superseded' };
     }
+    const now = this.now();
+    s.windowAttemptTimes = s.windowAttemptTimes.filter(
+      (t) => now - t < INTERRUPTED_TURN_RESUME_WINDOW_MS,
+    );
     const exhaustedReason =
-      s.episodeAttempts >= INTERRUPTED_TURN_MAX_EPISODE_ATTEMPTS
-        ? 'episode'
+      s.windowAttemptTimes.length >= INTERRUPTED_TURN_MAX_WINDOW_ATTEMPTS
+        ? 'window'
         : s.consecutiveAttempts >= INTERRUPTED_TURN_MAX_CONSECUTIVE_ATTEMPTS
           ? 'consecutive'
           : null;
@@ -505,7 +520,8 @@ export class InterruptedTurnAutoResumeGuard {
             sessionId,
             reason: exhaustedReason,
             consecutiveAttempts: s.consecutiveAttempts,
-            episodeAttempts: s.episodeAttempts,
+            windowAttempts: s.windowAttemptTimes.length,
+            windowMs: INTERRUPTED_TURN_RESUME_WINDOW_MS,
           },
         );
       }
@@ -513,12 +529,15 @@ export class InterruptedTurnAutoResumeGuard {
         action: 'exhausted',
         reason: exhaustedReason,
         consecutiveAttempts: s.consecutiveAttempts,
-        episodeAttempts: s.episodeAttempts,
+        windowAttempts: s.windowAttemptTimes.length,
       };
     }
     s.consecutiveAttempts += 1;
-    s.episodeAttempts += 1;
+    s.windowAttemptTimes.push(now);
     s.sessionTotalResumes += 1;
+    // 打满不再是永久态：窗口滑动回血后重新放行，这里清掉告警抑制位，下一次真打满
+    // 才会再 warn 一次（每段连续 exhausted 期恰好告警一次，不刷屏也不哑火）。
+    s.exhaustedWarned = false;
     const attemptToken = s.sessionTotalResumes;
     s.currentAttemptToken = attemptToken;
     s.pendingAttemptToken = attemptToken;
@@ -528,8 +547,9 @@ export class InterruptedTurnAutoResumeGuard {
       sessionId,
       attempt,
       maxAttempts: INTERRUPTED_TURN_MAX_CONSECUTIVE_ATTEMPTS,
-      episodeAttempt: s.episodeAttempts,
-      maxEpisodeAttempts: INTERRUPTED_TURN_MAX_EPISODE_ATTEMPTS,
+      windowAttempt: s.windowAttemptTimes.length,
+      maxWindowAttempts: INTERRUPTED_TURN_MAX_WINDOW_ATTEMPTS,
+      windowMs: INTERRUPTED_TURN_RESUME_WINDOW_MS,
       sessionTotal: s.sessionTotalResumes,
       attemptToken,
       delayMs,
@@ -538,8 +558,8 @@ export class InterruptedTurnAutoResumeGuard {
       action: 'resume',
       attempt,
       maxAttempts: INTERRUPTED_TURN_MAX_CONSECUTIVE_ATTEMPTS,
-      episodeAttempt: s.episodeAttempts,
-      maxEpisodeAttempts: INTERRUPTED_TURN_MAX_EPISODE_ATTEMPTS,
+      windowAttempt: s.windowAttemptTimes.length,
+      maxWindowAttempts: INTERRUPTED_TURN_MAX_WINDOW_ATTEMPTS,
       sessionTotal: s.sessionTotalResumes,
       attemptToken,
       delayMs,
