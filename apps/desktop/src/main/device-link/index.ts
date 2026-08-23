@@ -26,6 +26,7 @@ import {
   type DeviceLinkConnectionIssue,
   type DeviceLinkStatus,
   type DeviceInfo,
+  type DeviceView,
   type HelloPayload,
   type PresenceSnapshot,
   type InvokeResultPayload,
@@ -36,6 +37,7 @@ import {
   DeviceLinkError,
   INVOKE_TIMEOUT_OVERRIDES_MS,
 } from '@cindy/device-link';
+import { DEVICE_LINK_VOICE_DICTIONARY_SNAPSHOT_CHANNEL } from '@cindy/maker-shared/device-link-contract';
 import * as authManager from '../authManager';
 import { getActiveDataOwnerPushStamp } from '../appSessionState.js';
 import { createLogger } from '../logger';
@@ -84,6 +86,7 @@ import {
 import {
   clearControllerPlatforms,
   getControllerPlatform,
+  isMobilePlatform,
   setControllerPlatform,
 } from './controllerPlatform';
 import {
@@ -97,12 +100,20 @@ import {
   seedControllerDisplayNamesFromCache,
   type ControllerDisplayNameDirectoryDevice,
 } from './controllerDisplayNameFreshness';
+import {
+  applyControllerPresenceDirectorySnapshot,
+  createControllerPresenceFreshnessTracker,
+  markControllerPresenceFresh,
+  resetControllerPresenceFreshness,
+  type ControllerPresenceDirectoryDevice,
+} from './controllerPresenceDirectory';
 import { setBusyProbe, helloBusy, pollBusyChange, resetBusyDedupe } from './busyReporter';
 import {
   DL_VOICE_DICTIONARY_SYNC_CHANNEL,
   broadcastDictionaryNow,
   handleDesktopPeerOnline,
   handleIncomingDictionaryState,
+  handleMobilePeerOnline,
   initVoiceDictionarySync,
   notifyLocalDictionaryChanged,
   shouldExchangeDictionaryWith,
@@ -133,6 +144,7 @@ import {
 } from './linkRecovery';
 import {
   createResponsivenessTracker,
+  isDeviceResponsivenessProbeEligible,
   OPEN_LINK_OBSERVATION_CHANNEL,
   type DeviceResponsivenessTracker,
 } from './responsivenessTracker';
@@ -155,10 +167,11 @@ export function deviceLinkApiBase(): string {
 }
 
 type DeviceDirectoryResponse = {
-  devices?: Array<{ deviceId?: unknown; name?: unknown }>;
+  devices?: DeviceView[];
 };
 let controllerDisplayNameRefreshGeneration = 0;
 const controllerDisplayNameFreshness = createControllerDisplayNameFreshnessTracker();
+const controllerPresenceFreshness = createControllerPresenceFreshnessTracker();
 let latestControllerDisplayNameDirectoryRefresh: {
   sequence: number;
   promise: Promise<void>;
@@ -166,6 +179,10 @@ let latestControllerDisplayNameDirectoryRefresh: {
 
 export function captureControllerDisplayNameRequestEpoch(): number {
   return controllerDisplayNameFreshness.epoch;
+}
+
+export function captureControllerPresenceRequestEpoch(): number {
+  return controllerPresenceFreshness.epoch;
 }
 
 export function beginControllerDisplayNameDirectoryRefresh(): number {
@@ -223,6 +240,41 @@ export function applyControllerDisplayNameListSnapshot(
   });
 }
 
+/**
+ * Renderer 主动刷新设备列表时也会拿到同一份权威目录。复用这份快照补齐当前
+ * relay 连接代的 peer 视图，避免自动刷新失败后必须等下一次重连才同步词典。
+ */
+export function applyControllerPresenceListSnapshot(
+  devices: readonly ControllerPresenceDirectoryDevice[],
+  requestEpoch: number,
+): void {
+  if (linkTornDown || client?.getStatus() !== 'online') return;
+  applyControllerPresenceDirectorySnapshot({
+    devices,
+    requestEpoch,
+    selfDeviceId: client.getSelfDeviceId(),
+    freshness: controllerPresenceFreshness,
+    getOnline: (deviceId) => presenceOnlineByDevice.get(deviceId),
+    setOnline: (deviceId, online) => presenceOnlineByDevice.set(deviceId, online),
+    forgetOnline: (deviceId) => presenceOnlineByDevice.delete(deviceId),
+    setPlatform: setControllerPlatform,
+    setName: (deviceId, name) => presenceNameByDevice.set(deviceId, name),
+    shouldNotifyPeerOnline: ({ deviceId, online, platform }) =>
+      online &&
+      !isDeviceRevoked(deviceId) &&
+      (isMobilePlatform(platform) ||
+        shouldExchangeDictionaryWith({
+          online,
+          platform,
+          revoked: false,
+        })),
+    onPeerBecameOnline: (deviceId, platform) => {
+      if (isMobilePlatform(platform)) handleMobilePeerOnline(deviceId);
+      else handleDesktopPeerOnline(deviceId);
+    },
+  });
+}
+
 function seedControllerDisplayNamesFromLastKnown(): void {
   seedControllerDisplayNamesFromCache(
     readLastKnownDeviceNames(),
@@ -233,12 +285,14 @@ function seedControllerDisplayNamesFromLastKnown(): void {
 
 /**
  * presence 是增量流，新建连接不会收到已在线设备的历史快照；每个 relay 连接代
- * 上线时从现有设备目录补齐展示名，避免 link-open 抢先时长期停在主机名回退。
+ * 上线时从现有设备目录补齐展示名与 peer 状态，让已在线桌面立即交换词典、
+ * 已在线手机立即收到只读投影。
  */
 async function runControllerDisplayNamesFromDirectory(
   generation: number,
   directoryRequestSequence: number,
-  requestEpoch: number,
+  displayNameRequestEpoch: number,
+  presenceRequestEpoch: number,
 ): Promise<void> {
   try {
     const result = await serverApiFetch<DeviceDirectoryResponse>('/api/device-link/devices', {
@@ -258,7 +312,7 @@ async function runControllerDisplayNamesFromDirectory(
       devices: result.devices ?? [],
       cachedNames,
       freshness: controllerDisplayNameFreshness,
-      requestEpoch,
+      requestEpoch: displayNameRequestEpoch,
       normalizeName: normalizeCachedDeviceName,
       setDisplayName: setControllerDisplayName,
       rememberName: (deviceId, name) => {
@@ -268,19 +322,22 @@ async function runControllerDisplayNamesFromDirectory(
         void forgetLastKnownDeviceName(deviceId);
       },
     });
+    applyControllerPresenceListSnapshot(result.devices ?? [], presenceRequestEpoch);
   } catch (err) {
-    // 目录补齐是展示层 best-effort；失败时保留控制帧自报名 / 短 ID 回退，不影响建链。
-    log.warn(`device directory display-name refresh failed (non-fatal): ${String(err)}`);
+    // 目录补齐是 best-effort；失败时展示名仍有回退，peer 状态仍可由后续 presence 补上。
+    log.warn(`device directory peer refresh failed (non-fatal): ${String(err)}`);
   }
 }
 
 function refreshControllerDisplayNamesFromDirectory(generation: number): Promise<void> {
   const directoryRequestSequence = beginControllerDisplayNameDirectoryRefresh();
-  const requestEpoch = controllerDisplayNameFreshness.epoch;
+  const displayNameRequestEpoch = controllerDisplayNameFreshness.epoch;
+  const presenceRequestEpoch = controllerPresenceFreshness.epoch;
   const promise = runControllerDisplayNamesFromDirectory(
     generation,
     directoryRequestSequence,
-    requestEpoch,
+    displayNameRequestEpoch,
+    presenceRequestEpoch,
   );
   latestControllerDisplayNameDirectoryRefresh = {
     sequence: directoryRequestSequence,
@@ -612,13 +669,16 @@ export function initDeviceLinkService(options: DeviceLinkServiceOptions = {}): v
         replayActiveSubscriptions(`responsiveness-recovered:${deviceId.slice(0, 8)}`, deviceId);
       }
     },
-    // 探测同样遵守本机「关闭对该设备的控制」的 fail-closed 偏好,不给禁用目标发任何帧。
-    isProbeEligible: (deviceId) =>
-      client?.getStatus() === 'online' &&
-      arbiter?.isOwner() === true &&
-      presenceAvailableByDevice.get(deviceId) === true &&
-      !revokedByRemote.has(deviceId) &&
-      !readDeviceLinkSettings().disabledControlDeviceIds.includes(deviceId),
+    // 探测只在熔断器已经放行 half-open 单飞席位后到达这里；presence 的未知态
+    // 必须允许这一个探测穿过，否则 relay 重连清空 presence 后熔断会永久自锁。
+    // 只有当代 presence 明确为 false 才阻止，且仍叠加 relay/owner/撤权/本机禁用门。
+    isProbeEligible: (deviceId) => isDeviceResponsivenessProbeEligible({
+      relayOnline: client?.getStatus() === 'online',
+      ownsRelay: arbiter?.isOwner() === true,
+      presenceAvailable: presenceAvailableByDevice.get(deviceId),
+      revoked: revokedByRemote.has(deviceId),
+      locallyDisabled: readDeviceLinkSettings().disabledControlDeviceIds.includes(deviceId),
+    }),
     // observed:false 且是唯一豁免熔断快速拒绝的建链入口:recoverLink 是探测
     // 周期的延伸(业务/探测超时已由 tracker 记账,不重复观测),且 open 期间
     // 必须真正上线重建 link——否则「探测超时→重开 link→下次探测走新链路」的
@@ -667,6 +727,9 @@ export function initDeviceLinkService(options: DeviceLinkServiceOptions = {}): v
       presenceOnlineByDevice.clear();
       presenceAvailableByDevice.clear();
       resetControllerDisplayNameFreshness(controllerDisplayNameFreshness);
+      resetControllerPresenceFreshness(controllerPresenceFreshness);
+      clearControllerPlatforms();
+      presenceNameByDevice.clear();
     }
     broadcast(DEVICE_LINK_PUSH.STATUS_CHANGED, { status });
     handleContactsDeviceLinkStatusChanged(status === 'online');
@@ -710,6 +773,7 @@ export function initDeviceLinkService(options: DeviceLinkServiceOptions = {}): v
     transportTimeoutReopen.trigger(deviceId);
   });
   client.onPresenceChanged((snap: PresenceSnapshot) => {
+    markControllerPresenceFresh(controllerPresenceFreshness, snap.deviceId);
     const wasAvailable = presenceAvailableByDevice.get(snap.deviceId);
     const available = snap.online && snap.remoteControlEnabled;
     const wasOnline = presenceOnlineByDevice.get(snap.deviceId);
@@ -765,6 +829,16 @@ export function initDeviceLinkService(options: DeviceLinkServiceOptions = {}): v
       })
     ) {
       handleDesktopPeerOnline(snap.deviceId);
+    }
+    // 手机只接收只读投影:push 不属于 relay 的 CONTROL_KINDS,因此不要求桌面
+    // 打开「允许被控」。来源平台只用于体验分流,撤销状态仍是实际准入边界。
+    if (
+      wasOnline !== true &&
+      snap.online &&
+      isMobilePlatform(snap.platform) &&
+      !isDeviceRevoked(snap.deviceId)
+    ) {
+      handleMobilePeerOnline(snap.deviceId);
     }
   });
 
@@ -883,6 +957,17 @@ export function initDeviceLinkService(options: DeviceLinkServiceOptions = {}): v
             platform: getControllerPlatform(deviceId),
             revoked: isDeviceRevoked(deviceId),
           }),
+        )
+        .map(([deviceId]) => deviceId),
+    sendMobileSnapshot: (deviceId, payload) => {
+      client?.sendPush(deviceId, DEVICE_LINK_VOICE_DICTIONARY_SNAPSHOT_CHANNEL, payload);
+    },
+    listOnlineMobileDevices: () =>
+      [...presenceOnlineByDevice.entries()]
+        .filter(([deviceId, online]) =>
+          online &&
+          isMobilePlatform(getControllerPlatform(deviceId)) &&
+          !isDeviceRevoked(deviceId),
         )
         .map(([deviceId]) => deviceId),
   });
@@ -1134,6 +1219,7 @@ function teardownActiveLink(): void {
   // client 为 null 时 sendPush 也是 no-op。
   presenceOnlineByDevice.clear();
   resetControllerDisplayNameFreshness(controllerDisplayNameFreshness);
+  resetControllerPresenceFreshness(controllerPresenceFreshness);
   clearControllerPlatforms();
   clearControllerDisplayNames();
   presenceNameByDevice.clear();

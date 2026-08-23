@@ -671,7 +671,7 @@ interface CodexUsageSnapshot {
   completionTokens: number;
   reasoningTokens: number;
   cachedTokens: number;
-  /** = prompt + completion + reasoning + cached */
+  /** = prompt + completion + cached; reasoning is a diagnostic subset of completion */
   total: number;
 }
 
@@ -1106,6 +1106,10 @@ type CindyMediaPreferenceKind = {
 
 interface ElectronAPI {
   platform: string;
+  windowBackdropMaterial: import('../shared/windowBackdrop').WindowsBackdropMaterial;
+  onWindowBackdropMaterialChanged?: (
+    cb: (material: import('../shared/windowBackdrop').WindowsBackdropMaterial) => void,
+  ) => () => void;
   osRelease: string;
   appVersion: string;
   /** 运行期端点清单(main 启动时远程 → 缓存 → 烘焙解析;重启生效)。 */
@@ -1756,6 +1760,11 @@ interface ElectronAPI {
     addDictionaryEntry: (text: string) => Promise<VoiceInputSettingsData>;
     importDictionaryEntries: (texts: string[]) => Promise<VoiceInputSettingsData>;
     renameDictionaryEntry: (entryId: string, text: string) => Promise<VoiceInputSettingsData>;
+    editDictionaryEntry: (
+      entryId: string,
+      text: string,
+      aliases: string[],
+    ) => Promise<VoiceInputSettingsData>;
     recordDictionaryLearningActions: (actions: VoiceInputDictionaryLearningAction[]) => Promise<{
       settings: VoiceInputSettingsData;
       newAutomaticEntries: Array<{ id: string; text: string }>;
@@ -1858,15 +1867,36 @@ interface ElectronAPI {
     ) => () => void;
   };
 
+  xboxGamepad: {
+    getState: () => Promise<import('../shared/xboxGamepad').XboxGamepadState>;
+    setSettings: (
+      patch: import('../shared/xboxGamepad').XboxGamepadSettingsPatch,
+    ) => Promise<import('../shared/xboxGamepad').XboxGamepadState>;
+    resetSettings: () => Promise<import('../shared/xboxGamepad').XboxGamepadState>;
+    probe: () => Promise<import('../shared/xboxGamepad').XboxGamepadState>;
+    setLayoutPreviewActive: (active: boolean) => Promise<void>;
+    onStateChanged: (
+      callback: (state: import('../shared/xboxGamepad').XboxGamepadState) => void,
+    ) => () => void;
+    onPreviewInput: (
+      callback: (input: import('../shared/xboxGamepad').XboxGamepadPreviewInput) => void,
+    ) => () => void;
+  };
+
   // ── 右侧栏独立子窗口(RSB window)──────────────────────────────────────
   // 「侧边栏在新窗口中显示」偏好 + 子窗口生命周期(main: right-sidebar-window/)。
   rightSidebarWindow: {
-    getState: () => Promise<{ detached: boolean; lastOpen: boolean; open: boolean }>;
+    getState: () => Promise<{
+      detached: boolean;
+      lastOpen: boolean;
+      open: boolean;
+      hostSessionId?: string | null;
+    }>;
     /**
      * 幂等开窗。缺省(用户手势)已开则 show + focus;
      * userInitiated:false(启动恢复 / 插件 / agent 自发)已开则完全不动窗口。
      */
-    open: (options?: { userInitiated?: boolean }) => Promise<void>;
+    open: (options?: { userInitiated?: boolean; sessionId?: string }) => Promise<void>;
     close: () => Promise<void>;
     /** 写偏好;true 附带开窗,false 附带关窗。返回新 state。 */
     setDetached: (
@@ -1879,6 +1909,7 @@ interface ElectronAPI {
       workdir: string | null;
       remoteHostId: string | null;
       deviceLinkDeviceId?: string | null;
+      subagentsAvailable?: boolean;
       available: boolean;
     } | null>;
     /** 子窗口根组件挂载握手。 */
@@ -1898,15 +1929,22 @@ interface ElectronAPI {
       workdir: string | null;
       remoteHostId: string | null;
       deviceLinkDeviceId?: string | null;
+      subagentsAvailable?: boolean;
       available: boolean;
     }) => void;
-    onStateChanged: (cb: (state: { detached: boolean; open: boolean }) => void) => () => void;
+    onStateChanged: (cb: (state: {
+      detached: boolean;
+      open: boolean;
+      hostSessionId?: string | null;
+      userClose?: boolean;
+    }) => void) => () => void;
     onContextChanged: (
       cb: (ctx: {
         sessionId: string | null;
         workdir: string | null;
         remoteHostId: string | null;
         deviceLinkDeviceId?: string | null;
+        subagentsAvailable?: boolean;
         available: boolean;
       }) => void,
     ) => () => void;
@@ -3502,7 +3540,14 @@ interface ElectronAPI {
   ) => () => void;
   setUpdateRelaunchTheme: (theme: 'light' | 'dark') => void;
   // E4D 毛玻璃:family 切换/启动通知 main 开关 vibrancy(仅 CINDY 透壁纸)
-  theme: { applyVibrancy: (familyId: string, isDark: boolean) => void };
+  theme: {
+    applyVibrancy: (
+      familyId: string,
+      isDark: boolean,
+      mode: 'system' | 'light' | 'dark',
+      systemModeFollowsSystem: boolean,
+    ) => void;
+  };
   /**
    * Manually trigger an update check. Returns the resolved state so the
    * renderer can show the appropriate toast:
@@ -3543,6 +3588,7 @@ interface ElectronAPI {
   /** Query current fullscreen state synchronously on mount (covers IPC events
    *  that fired before the renderer had a chance to subscribe). */
   getFullscreenState: () => Promise<boolean>;
+  toggleFullscreen: () => Promise<boolean>;
 
   /** 窗口是否对用户不可见(最小化 / hide)。装饰动画闸门用它兜底 ——
    *  backgroundThrottling 关闭时 document.visibilityState 会一直停在 visible。 */
@@ -4334,6 +4380,9 @@ interface ElectronAPI {
       detail: (
         input: import('@cindy/maker-shared/subagent-workspace').SubagentRunDetailRequest,
       ) => Promise<import('@cindy/maker-shared/subagent-workspace').SubagentRunDetailResponse>;
+      transcript: (
+        input: import('@cindy/maker-shared/subagent-workspace').SubagentTranscriptPageRequest,
+      ) => Promise<import('@cindy/maker-shared/subagent-workspace').SubagentTranscriptPageResponse>;
       onChanged: (
         callback: (
           payload: import('@cindy/maker-shared/subagent-workspace').SubagentRunsChangedPayload,
@@ -4891,9 +4940,22 @@ interface ElectronAPI {
     ) => () => void;
     /** 精确停止会话内单个后台任务(不中断当前 turn;任务已结束幂等成功)。 */
     stopAgentTask: (sessionId: string, taskId: string) => Promise<{ ok: true }>;
+    controlPiSubagent: (input: {
+      sessionId: string;
+      taskId: string;
+      action: 'stop' | 'steer' | 'follow_up' | 'resume';
+      message?: string;
+      childId?: string;
+    }) => Promise<{ ok: boolean; controlled: number }>;
     /** 会话仍在运行的后台任务快照(挂载 / 重载后补回存量;实时增量走事件流)。 */
     listSessionBackgroundTasks: (sessionId: string) => Promise<{
-      tasks: Array<{ taskId: string; taskType?: string; toolUseId?: string; title?: string }>;
+      tasks: Array<{
+        taskId: string;
+        taskType?: string;
+        toolUseId?: string;
+        title?: string;
+        provider?: 'pi' | 'claude-code';
+      }>;
       /** 「任务已终态、wake turn 尚未启动或仍在跑」的 continuation claim 数(桥接对账收口权威依据)。 */
       pendingContinuations?: number;
     }>;
@@ -5754,6 +5816,7 @@ interface ElectronAPI {
       messages: Array<{ role: string; content: string }>;
       workingDir?: string;
       turnGen: number;
+      completionRevision: number;
     }) => Promise<{ prompt: string | null }>;
     helpAsk: (
       request: import('../shared/helpTypes').HelpAskRequest,
