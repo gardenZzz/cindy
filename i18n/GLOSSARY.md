@@ -275,6 +275,10 @@ issue #882：模型管理/新对话选择器的分类标签，对应 Gateway mod
 
 腾讯授权页可能展示的外部产品名称，客户端仅按原品牌名展示；先登记为 proposed，待产品术语评审后再决定是否固化。
 
+### Overview
+
+插件页二级 tab 的总览入口，承载已安装与推荐内容，与「我的发布」并列。该词不重复页面标题「插件」，并保持弱于一级 Plugin / Skill pill 的层级。
+
 ### Passkey
 
 WebAuthn 可发现凭证的用户可见名称，采用 Apple、Google 与 Microsoft 平台常见译法；先登记为 proposed，待产品术语评审后固化。
@@ -286,6 +290,10 @@ WebAuthn 可发现凭证的用户可见名称，采用 Apple、Google 与 Micros
 ### Pin
 
 右侧栏插件面板页签的图钉:钉住 = 面板在所有对话中保留。动词对:Pin=钉住 / Unpin=取消钉住。2026-07-31 随图钉功能提出,待裁决。
+
+### Main view
+
+Plugin 声明的应用级完整页面能力；区别于会话内 Panel。V1 由 Cindy 侧边栏入口打开，manifest/代码标识固定为 main-view。
 
 ### Manual
 

@@ -27,11 +27,11 @@ import { getDbClient } from '../localDb/client/current.js';
 import { sessions } from '../localDb/schema.js';
 import { getMakerIfReady } from '../maker-host/index.js';
 import { getDesktopProviderService } from '../maker-host/createDesktopProviderService.js';
+import type { TitleOneShotResult } from '../maker-host/title-one-shot.js';
 import {
-  generateTitleViaProvider,
-  generateTitleViaProviderResult,
-  type TitleOneShotResult,
-} from '../maker-host/title-one-shot.js';
+  generateTitleWithAuxiliaryModel,
+  generateTitleWithAuxiliaryModelResult,
+} from '../maker-host/auxiliary-title-one-shot.js';
 import { validateTitleOutput } from '../maker-host/title-output-validation.js';
 import {
   regenerateTitleMaterial,
@@ -121,7 +121,7 @@ export async function generateMakerSessionTitle(
       sessionId,
     );
   }
-  return generateTitleViaProvider(
+  return generateTitleWithAuxiliaryModel(
     {
       sessionId: sessionId ?? '',
       agentKind,
@@ -207,7 +207,7 @@ const defaultRegenerateDeps: RegenerateTitleDeps = {
       const title = await generateCursorSessionTitle(prompt, sessionId);
       return title ? { status: 'ok' as const, title } : { status: 'failed' as const };
     }
-    return generateTitleViaProviderResult(
+    return generateTitleWithAuxiliaryModelResult(
       { sessionId, agentKind, prompt },
       {
         readSessionProviderId: readSessionProviderIdFromDb,

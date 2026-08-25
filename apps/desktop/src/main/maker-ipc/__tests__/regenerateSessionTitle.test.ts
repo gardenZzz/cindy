@@ -31,6 +31,9 @@ vi.mock('../../maker-host/title-one-shot.js', () => ({
 vi.mock('../../maker-host/index.js', () => ({
   getMakerIfReady: vi.fn(() => null),
 }));
+vi.mock('../../utility-model/auxiliary-model-settings-store.js', () => ({
+  readAuxiliaryModelSelection: vi.fn(() => null),
+}));
 vi.mock('../../i18n.js', () => ({
   getResolvedMainLocale: vi.fn(() => 'en'),
 }));

@@ -446,6 +446,7 @@ import {
   onToolResultFullEvent,
   onToolUseEvent,
   preserveTurnPersistStateForBackground,
+  sealAssistantBlockForLateFinal,
   markAutoResumeOutcome,
   onTurnErrorEvent,
   prepareSyntheticToolEventForBroadcast,
@@ -11744,7 +11745,7 @@ export function registerMakerIpc(maker: Maker, options: RegisterMakerIpcOptions)
   const sealLostTerminalPersistState = (sessionId: string): void => {
     // Same persist boundary as a lost-terminal live-idle reconcile. The next
     // turn on this sessionId must not append to a half-open streaming block.
-    flushAssistantBlock(sessionId, null);
+    sealAssistantBlockForLateFinal(sessionId, null);
     const abortedAssistantPersistId = consumeLastAssistantPersistId(sessionId);
     const abortedBoundaryAssistantPersistId = consumeLastTopLevelAssistantPersistId(sessionId);
     flushOrphanToolResults(sessionId, null);
