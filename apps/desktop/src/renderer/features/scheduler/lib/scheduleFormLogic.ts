@@ -624,7 +624,9 @@ export function buildScheduleInput(
   if (form.workspaceKind === 'project') base.workingDir = form.workingDir.trim();
   else base.useWorktree = false;
   if (form.model.trim()) base.model = form.model.trim();
-  if (form.providerId.trim()) base.providerId = form.providerId.trim();
+  // providerId 是可清除的来源 override：表单选回原生默认来源时值为空，仍须保留 key，
+  // 让 update patch 按「key 在 + undefined」把旧 provider_id 清成 NULL。
+  base.providerId = form.providerId.trim() || undefined;
   const persistedEffort = resolvePersistedScheduleEffort(form, modelEfforts);
   if (persistedEffort) base.effort = persistedEffort;
   // fastMode 对 Codex / Cursor / Pi 都生效;claude-code 忽略此字段。

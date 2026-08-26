@@ -267,6 +267,11 @@ export interface InterruptedTurnResumeProgress {
   windowAttempt: number;
   /** 窗口内硬上限。 */
   maxWindowAttempts: number;
+  /**
+   * 上游 runtime fallback 用的「本 episode 第几次」。feat 改成滑动窗后，
+   * 用 windowAttempt 充当：第一次不降级，窗口内第 2 次起才允许换路。
+   */
+  episodeAttempt: number;
 }
 
 export type InterruptedTurnResumeDecision =
@@ -560,6 +565,7 @@ export class InterruptedTurnAutoResumeGuard {
       maxAttempts: INTERRUPTED_TURN_MAX_CONSECUTIVE_ATTEMPTS,
       windowAttempt: s.windowAttemptTimes.length,
       maxWindowAttempts: INTERRUPTED_TURN_MAX_WINDOW_ATTEMPTS,
+      episodeAttempt: s.windowAttemptTimes.length,
       sessionTotal: s.sessionTotalResumes,
       attemptToken,
       delayMs,

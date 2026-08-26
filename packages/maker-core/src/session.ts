@@ -1498,6 +1498,9 @@ export class Session {
     return this.handle.getFastMode?.() ?? null;
   }
 
+  getEffort(): Effort | null {
+    return this.handle.getEffort?.() ?? null;
+  }
 
   /**
    * 运行时合并 vendorOptions (浅合并到内部 closure)。

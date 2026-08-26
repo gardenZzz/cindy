@@ -1125,6 +1125,7 @@ interface ElectronAPI {
   getDeviceId: () => Promise<string>;
   windowMinimize: () => void;
   windowMaximize: () => void;
+  windowExitFullscreen: () => void;
   windowClose: () => void;
   /**
    * 手动窗口拖拽(no-drag 元素上"按住拖动移动窗口"):start 后 main 用光标
@@ -1228,6 +1229,18 @@ interface ElectronAPI {
   ghosts: {
     /** 首帧同步拉取已装清单(规则 7:意识面板与内置面板同帧注册,无跳变)。 */
     listSync: () => { ghosts: import('../shared/ghost').InstalledGhost[] };
+    onForgeOidcInstallConfirmRequest: (
+      callback: (payload: {
+        requestId: string;
+        ghostId: string;
+        ghostName: string;
+        hosts: string[];
+      }) => void,
+    ) => () => void;
+    resolveForgeOidcInstallConfirm: (
+      requestId: string,
+      confirmed: boolean,
+    ) => Promise<{ handled: boolean }>;
     /** Plugin 快捷行最近使用顺序(最新在前,首帧同步读取避免排序跳变)。 */
     recentUsageSync: () => { ids: string[] };
     /** 成功发送一次 Plugin 指令后记录最近使用。 */
@@ -3417,6 +3430,9 @@ interface ElectronAPI {
     /** 本窗口草稿附件 URL 变化时上报(fire-and-forget;多窗口防误删取证)。 */
     reportDraftUrls: (urls: string[]) => void;
     openLegacyImagesDir: () => Promise<{ opened: boolean }>;
+    clearLegacyImagesDir: () => Promise<{ cleared: boolean }>;
+    openChatAttachmentsDir: () => Promise<{ opened: boolean }>;
+    clearChatAttachmentsDir: () => Promise<{ cleared: boolean }>;
     stats: () => Promise<{
       success: boolean;
       error?: string;
@@ -4236,6 +4252,7 @@ interface ElectronAPI {
       list: (
         limit?: number,
         status?: 'active' | 'archived' | 'all',
+        options?: { includePinned?: boolean; fresh?: boolean },
       ) => Promise<import('@/lib/ccAgent.types').Session[]>;
       create: (body?: {
         id?: string;
@@ -5641,6 +5658,23 @@ interface ElectronAPI {
       defaultEnabled: boolean;
       effective: 'immediate';
     }>;
+    sessionRuntimeFallbackGet: () => Promise<{
+      enabled: boolean;
+      isCustomized?: boolean;
+      defaultEnabled?: boolean;
+    }>;
+    sessionRuntimeFallbackSet: (enabled: boolean) => Promise<{
+      enabled: boolean;
+      isCustomized: boolean;
+      defaultEnabled: boolean;
+      effective: 'immediate';
+    }>;
+    sessionRuntimeFallbackReset: () => Promise<{
+      enabled: boolean;
+      isCustomized: boolean;
+      defaultEnabled: boolean;
+      effective: 'immediate';
+    }>;
 
     /** Claude Code 自动上下文压缩触发百分比。仅对新建会话生效 */
     compactionGetPct: () => Promise<number>;
@@ -5648,25 +5682,46 @@ interface ElectronAPI {
     /** 写入后返回 main 端 clamp 后的最终百分比 */
     compactionSetPct: (
       pct: number,
+      owner: { dataOwnerId: string | null; ownerGeneration: number },
     ) => Promise<{ pct: number; isCustomized: boolean; defaultPct: number }>;
-    compactionResetPct: () => Promise<{ pct: number; isCustomized: boolean; defaultPct: number }>;
+    compactionResetPct: (
+      owner: { dataOwnerId: string | null; ownerGeneration: number },
+    ) => Promise<{ pct: number; isCustomized: boolean; defaultPct: number }>;
+
+    /** Pi 原生自动上下文压缩触发百分比。下次启动或恢复 Pi 任务时生效 */
+    piCompactionGetPct: () => Promise<number>;
+    piCompactionGetState: () => Promise<{ pct: number; isCustomized: boolean; defaultPct: number }>;
+    piCompactionSetPct: (
+      pct: number,
+      owner: { dataOwnerId: string | null; ownerGeneration: number },
+    ) => Promise<{ pct: number; isCustomized: boolean; defaultPct: number }>;
+    piCompactionResetPct: (
+      owner: { dataOwnerId: string | null; ownerGeneration: number },
+    ) => Promise<{ pct: number; isCustomized: boolean; defaultPct: number }>;
 
     /** LSP Beta 开关 — 控制 mcp providers 是否注入 lsp_* 工具 (默认 false) */
     lspModeGet: () => Promise<{ enabled: boolean }>;
     /** 仅对新 session 生效; 已开 session 的 mcp providers 已固化 */
     lspModeSet: (enabled: boolean) => Promise<{ effective: 'next-session' }>;
 
-    /** 聊天嵌入开关 — 控制 chat-history-embedder 是否对新消息入队嵌入到本地向量库 */
+    /** 对话语义索引开关 — owner-scoped；企业组织账号默认开，其余默认关 */
     chatEmbeddingGet: () => Promise<{
       enabled: boolean;
       isCustomized?: boolean;
       defaultEnabled?: boolean;
     }>;
+    onChatEmbeddingChanged: (
+      cb: (stamp: { dataOwnerId: string | null; ownerGeneration: number }) => void,
+    ) => () => void;
     /** 立即生效; 第一次开启时 main 会在 embedding_meta 表写入 cutoff 时间戳 */
     chatEmbeddingSet: (
       enabled: boolean,
+      owner: { dataOwnerId: string | null; ownerGeneration: number },
     ) => Promise<{ enabled: boolean; isCustomized: boolean; defaultEnabled: boolean }>;
-    chatEmbeddingReset: () => Promise<{
+    chatEmbeddingReset: (owner: {
+      dataOwnerId: string | null;
+      ownerGeneration: number;
+    }) => Promise<{
       enabled: boolean;
       isCustomized: boolean;
       defaultEnabled: boolean;
