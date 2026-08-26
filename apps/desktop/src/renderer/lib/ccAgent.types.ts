@@ -314,7 +314,7 @@ export interface Session {
 }
 
 export interface SessionRuntimeProfileProjection {
-  agentKind: 'claude-code' | 'codex' | 'pi';
+  agentKind: 'claude-code' | 'codex' | 'cursor' | 'pi';
   model: string;
   providerId: string | null;
   effort: Effort | null;

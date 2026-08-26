@@ -90,7 +90,7 @@ export interface RemoteSession {
 }
 
 export interface RemoteSessionRuntimeProfile {
-  agentKind: 'claude-code' | 'codex' | 'pi';
+  agentKind: 'claude-code' | 'codex' | 'cursor' | 'pi';
   model: string;
   providerId: string | null;
   effort: string | null;
