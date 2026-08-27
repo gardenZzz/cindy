@@ -10,9 +10,10 @@ import {
 } from '@/lib/issueConfirmPayload';
 
 describe('issue runtime metadata parsers', () => {
-  it('只接受三个公开 Harness 全名', () => {
+  it('只接受四个公开 Harness 全名', () => {
     expect(parseIssueEnvHarness('Claude Code')).toBe('Claude Code');
     expect(parseIssueEnvHarness('Codex')).toBe('Codex');
+    expect(parseIssueEnvHarness('Cursor')).toBe('Cursor');
     expect(parseIssueEnvHarness('Pi')).toBe('Pi');
     expect(parseIssueEnvHarness('cc')).toBeUndefined();
     expect(parseIssueEnvHarness('cx')).toBeUndefined();

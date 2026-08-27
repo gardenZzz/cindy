@@ -39,7 +39,7 @@ export interface SendToWorkerDeps {
   }) => Promise<
     ControlResult<
       {
-        agentKind: 'claude-code' | 'codex' | 'pi';
+        agentKind: AgentKind;
         queuedMessageId: string;
         stopOutcome:
           | 'requested'

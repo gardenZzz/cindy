@@ -29,7 +29,7 @@ export interface IssueEnv {
   platform: string;
   arch: string;
   osVersion?: string;
-  harness?: 'Claude Code' | 'Codex' | 'Pi';
+  harness?: 'Claude Code' | 'Codex' | 'Cursor' | 'Pi';
   modelId?: string;
 }
 
@@ -1076,7 +1076,9 @@ export function normalizeIssueConfirm(request: InteractionRequestLike): IssueCon
 }
 
 function readIssueHarness(value: unknown): IssueEnv['harness'] {
-  return value === 'Claude Code' || value === 'Codex' || value === 'Pi' ? value : undefined;
+  return value === 'Claude Code' || value === 'Codex' || value === 'Cursor' || value === 'Pi'
+    ? value
+    : undefined;
 }
 
 function normalizeIssueModelId(value: unknown): string | undefined {
