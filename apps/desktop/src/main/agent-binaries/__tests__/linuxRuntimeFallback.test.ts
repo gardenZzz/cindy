@@ -39,10 +39,10 @@ function singleFileTar(name: string, content: Buffer): Buffer {
 
 describe('runtimeVersionMatchesPin', () => {
   it('requires Cindy-managed Claude and Codex binaries to match their pins exactly', () => {
-    expect(runtimeVersionMatchesPin('claude-code', '2.1.219 (Claude Code)')).toBe(true);
-    expect(runtimeVersionMatchesPin('claude-code', '2.1.218 (Claude Code)')).toBe(false);
-    expect(runtimeVersionMatchesPin('codex', 'codex-cli 0.145.0')).toBe(true);
-    expect(runtimeVersionMatchesPin('codex', 'codex-cli 0.144.6')).toBe(false);
+    expect(runtimeVersionMatchesPin('claude-code', '2.1.247 (Claude Code)')).toBe(true);
+    expect(runtimeVersionMatchesPin('claude-code', '2.1.246 (Claude Code)')).toBe(false);
+    expect(runtimeVersionMatchesPin('codex', 'codex-cli 0.150.1')).toBe(true);
+    expect(runtimeVersionMatchesPin('codex', 'codex-cli 0.150.0')).toBe(false);
   });
 
   it('rejects empty or unparsable version output', () => {
@@ -53,10 +53,10 @@ describe('runtimeVersionMatchesPin', () => {
 
 describe('systemRuntimeVersionSupportsPin', () => {
   it('accepts the pinned or newer Claude runtime and rejects older or prerelease-equivalent builds', () => {
-    expect(systemRuntimeVersionSupportsPin('claude-code', '2.1.219 (Claude Code)')).toBe(true);
+    expect(systemRuntimeVersionSupportsPin('claude-code', '2.1.247 (Claude Code)')).toBe(true);
     expect(systemRuntimeVersionSupportsPin('claude-code', '2.2.0 (Claude Code)')).toBe(true);
-    expect(systemRuntimeVersionSupportsPin('claude-code', '2.1.218 (Claude Code)')).toBe(false);
-    expect(systemRuntimeVersionSupportsPin('claude-code', '2.1.219-beta.1')).toBe(false);
+    expect(systemRuntimeVersionSupportsPin('claude-code', '2.1.246 (Claude Code)')).toBe(false);
+    expect(systemRuntimeVersionSupportsPin('claude-code', '2.1.247-beta.1')).toBe(false);
     expect(systemRuntimeVersionSupportsPin('claude-code', '2.2.0-beta.1')).toBe(false);
   });
 });
@@ -77,10 +77,10 @@ describeOnLinuxFileSystem('install path helpers', () => {
 
   it('resolves the exact legacy CDN cache path for migration', () => {
     expect(legacyManagedBinaryPath('/userdata', 'claude-code')).toBe(
-      path.join('/userdata', 'claude-code', '2.1.219', 'claude'),
+      path.join('/userdata', 'claude-code', '2.1.247', 'claude'),
     );
     expect(legacyManagedBinaryPath('/userdata', 'codex')).toBe(
-      path.join('/userdata', 'codex', '0.145.0', 'codex'),
+      path.join('/userdata', 'codex', '0.150.1', 'codex'),
     );
   });
 
