@@ -56,7 +56,7 @@ import {
   CONTROLLER_CAPABILITY_SET_MODEL_EXPLICIT_PROVIDER_NULL_V1,
   DL_SESSION_REFERENCE_CAPABILITY_CHANNEL,
 } from '@cindy/device-link';
-import { and, desc, eq, gte, inArray, isNull, sql } from 'drizzle-orm';
+import { and, desc, eq, gte, inArray, isNull, lt, sql } from 'drizzle-orm';
 import { app, BrowserWindow, dialog, ipcMain, shell, type IpcMainInvokeEvent } from 'electron';
 import {
   getActiveAppSession,
@@ -238,6 +238,7 @@ import {
   type ReviewArtifactConfirmationItem,
 } from '../reviewer/reviewArtifactAuthorization.js';
 import { buildReviewArtifactConfirmationDialog } from '../reviewer/reviewArtifactDialog.js';
+import { showReviewArtifactConfirmWindow } from '../reviewer/reviewArtifactConfirmWindow.js';
 import {
   cleanupOrphanedReviewArtifactSnapshots,
   prepareStableReviewArtifactSnapshots,
@@ -257,14 +258,17 @@ import {
   type ReviewRunOwner,
 } from '../../shared/reviewRun.js';
 import {
-  createRetryableReviewStartup,
+  createRetryableReviewInitialization,
   hasReviewOwnerProcessEnded,
   shouldFailInterruptedReview,
 } from '../reviewer/reviewRunRecovery.js';
-import { startReviewOwnerLiveness } from '../reviewer/reviewOwnerLiveness.js';
+import {
+  startReviewOwnerLiveness,
+  type ReviewOwnerLivenessHandle,
+} from '../reviewer/reviewOwnerLiveness.js';
 import {
   discardInvalidReviewSourceLease,
-  listPersistedReviewSourceLeases,
+  readPersistedReviewSourceLease,
   releaseReviewSourceLease,
   tryAcquireReviewSourceLease,
 } from '../reviewer/reviewSourceLease.js';
@@ -683,9 +687,12 @@ import { throwOrcaServiceFailure } from './orcaServiceFailure.js';
 import {
   createOrcaTeamService,
   findFocusTargetWorker,
+  type InterruptWorkerResult,
   type ListWorkerQueuedMessagesResult,
+  type MergeWorkerQueuedMessagesResult,
   type OrcaTeamService,
   type OrcaWorkerEffort,
+  type SendToWorkerResult,
   type WorkerQueuedMessageControlResult,
 } from './orcaTeamService.js';
 import {
@@ -717,6 +724,7 @@ import {
   isKnownOrcaWorkerSession,
   markKnownOrcaWorkerSession,
   markManualInterrupt,
+  restoreManualInterrupt,
 } from './orcaManualInterrupt.js';
 import { tryInjectProjectContext } from './projectContextInject.js';
 import { registerMakerSessionCreateHandler } from './sessionCreateHandler.js';
@@ -1852,6 +1860,10 @@ interface OrcaCollabService {
           session_status: string;
           idle_ms: number | null;
           restored_from_storage: boolean;
+          is_working: boolean;
+          will_queue: boolean;
+          queued_count: number;
+          queue_paused: boolean;
           label: string | null;
           role: string;
           agent_kind: AgentKind;
@@ -1897,17 +1909,12 @@ interface OrcaCollabService {
     callerLeadSessionId: string;
     targetSessionId: string;
     message: string;
-  }) => Promise<
-    | {
-        ok: true;
-        agentKind: AgentKind;
-        wakeKind: 'resumed' | 'already-active' | 'queued';
-        targetTitle: string | null;
-        targetLastUserSendAt: string | null;
-        queuedMessageId?: string;
-      }
-    | { ok: false; errorCode: string; message: string }
-  >;
+  }) => Promise<SendToWorkerResult>;
+  interruptWorker: (params: {
+    callerLeadSessionId: string;
+    targetSessionId: string;
+    message: string;
+  }) => Promise<InterruptWorkerResult>;
   // 排队消息控制:只作用于 lead 自己发出的 orca 排队条目,归属校验与 send/idle/archive 同一套 resolveWorkerRef。
   listWorkerQueuedMessages: (params: {
     callerLeadSessionId: string;
@@ -1924,6 +1931,12 @@ interface OrcaCollabService {
     workerRef: string;
     queuedMessageId: string;
   }) => Promise<WorkerQueuedMessageControlResult>;
+  mergeWorkerQueuedMessages: (params: {
+    callerLeadSessionId: string;
+    workerRef: string;
+    queuedMessageIds: string[];
+    message: string;
+  }) => Promise<MergeWorkerQueuedMessagesResult>;
   idleWorker: (params: {
     callerLeadSessionId: string;
     workerId: string;
@@ -2882,11 +2895,6 @@ let cancelPendingAgentSwitchHolder: ((sessionId: string) => void) | null = null;
 let gitSnapshotCoordinator: GitSnapshotCoordinator | null = null;
 const sessionTurnActivityTracker = new SessionTurnActivityTracker();
 const reviewRunOwner: ReviewRunOwner = { instanceId: randomUUID(), processId: process.pid };
-configureTempAttachmentOwner(reviewRunOwner);
-const ensureReviewOwnerLivenessReady = createRetryableReviewStartup(async () => {
-  const handle = await startReviewOwnerLiveness();
-  reviewRunOwner.liveness = handle.identity;
-});
 const sessionTurnLeaseTracker = new SessionTurnLeaseTracker({
   getDbClient,
   owner: reviewRunOwner,
@@ -2894,6 +2902,14 @@ const sessionTurnLeaseTracker = new SessionTurnLeaseTracker({
   now: Date.now,
   warn: (message, fields) => log.warn(message, fields),
 });
+let reviewOwnerLivenessHandle: ReviewOwnerLivenessHandle | null = null;
+const ensureReviewOwnerLivenessReady = createRetryableReviewInitialization(async () => {
+  const handle = reviewOwnerLivenessHandle ?? (await startReviewOwnerLiveness());
+  reviewOwnerLivenessHandle = handle;
+  reviewRunOwner.liveness = handle.identity;
+  await sessionTurnLeaseTracker.refreshActiveLeaseOwners();
+});
+configureTempAttachmentOwner(reviewRunOwner, ensureReviewOwnerLivenessReady);
 const silentStopTurnLeaseGate = new SilentStopTurnLeaseGate();
 function providerTurnLeaseId(sessionInstanceId: string, turnGeneration: number): string {
   return `${sessionInstanceId}:${turnGeneration}`;
@@ -3841,10 +3857,7 @@ function isFencedStaleProductTerminal(event: AgentEvent): boolean {
   return data?.isRunning === false;
 }
 
-function isFencedStaleSessionTerminal(
-  sessionId: string,
-  event: AgentEvent,
-): boolean {
+function isFencedStaleSessionTerminal(sessionId: string, event: AgentEvent): boolean {
   if (isTurnContinuationBoundaryEvent(event) || event.turnScope === 'background') {
     return false;
   }
@@ -3880,6 +3893,8 @@ export function wireSessionToIpc(session: ReturnType<Maker['getSession']>): void
     beforeProviderStart: async (turnGeneration) => {
       if (session.remoteHostId) return;
       silentStopTurnLeaseGate.supersede(session.id);
+      // Keep Review's exact-instance liveness listener lazy. PID-only turn
+      // leases remain fail-closed until this process actually starts Review.
       await sessionTurnLeaseTracker.markTurnStarted(
         session.id,
         providerTurnLeaseId(session.instanceId, turnGeneration),
@@ -4257,7 +4272,13 @@ export function wireSessionToIpc(session: ReturnType<Maker['getSession']>): void
         // invalid api key / 401 的情形。本地会话（无 remoteHostId）无 auto-retry，不跳过。
         isRemoteAuthRetry = isRemoteAuthRetryErrorEvent(session, event);
         isGatewayProxyTokenRecovery = isGatewayProxyTokenRecoveryErrorEvent(session.id, event);
-        if (!isPlannedUpgradeClose) {
+        if (isPlannedUpgradeClose) {
+          agentInputCoordinatorHolder?.noteSuppressedTerminalError(session.id, {
+            generation: event.sessionTurnGeneration,
+            reason: 'remote_daemon_closed',
+            instanceId: event.sessionInstanceId ?? session.instanceId,
+          });
+        } else {
           agentInputCoordinatorHolder?.onTurnEvent(
             session.id,
             'error',
@@ -4348,7 +4369,7 @@ export function wireSessionToIpc(session: ReturnType<Maker['getSession']>): void
       } else if (event.type === 'tool_result_full') {
         const r = onToolResultFullEvent(
           session.id,
-          event.data as { toolUseId?: unknown; fullText?: unknown },
+          event.data as { toolUseId?: unknown; fullText?: unknown; isError?: unknown },
           eventAgentMeta,
           event.turnScope === 'background' ? 'background' : 'turn',
         );
@@ -4410,6 +4431,14 @@ export function wireSessionToIpc(session: ReturnType<Maker['getSession']>): void
       // 先 broadcast 保 UI 实时性,再 flush(flush 只入队、不阻塞)。
       // Keep the raw event for main-side coordination/persistence, but only
       // cross renderer/device-link boundaries with the redacted copy.
+      // Capture Orca terminal ownership before the tracker wakes queue drain.
+      // The replacement input may be accepted while the async persistence and
+      // turn-start barriers below yield; that later turn must not inherit this
+      // terminal event or lose the lead_interrupt marker before it is observed.
+      const workerTerminalCapture =
+        !isContinuationBoundary && (event.type === 'done' || isTerminalTurnErrorEvent(event))
+          ? orcaTeamServiceForEvents?.captureWorkerTerminalTurn(session.id)
+          : undefined;
       const suppressOverflowBroadcast =
         !session.remoteHostId &&
         event.type === 'error' &&
@@ -4740,6 +4769,7 @@ export function wireSessionToIpc(session: ReturnType<Maker['getSession']>): void
                 status: isTerminalTurnErrorEvent(event) ? 'error' : 'done',
                 finalText,
                 diagnostic,
+                capture: workerTerminalCapture,
               });
             } catch {
               /* non-fatal */
@@ -5867,13 +5897,13 @@ async function confirmReviewExternalArtifacts(
   event: IpcMainInvokeEvent,
   items: ReviewArtifactConfirmationItem[],
 ): Promise<boolean> {
-  const options = buildReviewArtifactConfirmationDialog(items, t);
-  const owner = BrowserWindow.fromWebContents(event.sender);
-  const result =
-    owner && !owner.isDestroyed()
-      ? await dialog.showMessageBox(owner, options)
-      : await dialog.showMessageBox(options);
-  return result.response === 1;
+  const parent = BrowserWindow.fromWebContents(event.sender);
+  if (!parent || parent.isDestroyed()) return false;
+  return showReviewArtifactConfirmWindow(
+    parent,
+    buildReviewArtifactConfirmationDialog(items, t),
+    { log },
+  );
 }
 
 export interface RegisterMakerIpcOptions {
@@ -6008,7 +6038,9 @@ export function registerMakerIpc(maker: Maker, options: RegisterMakerIpcOptions)
   });
 
   // submit_github_issue 工具的 main 侧提交服务(确认桥 → serverApiFetch)。
-  initGithubIssueSubmit(issueConfirmBridge);
+  initGithubIssueSubmit(issueConfirmBridge, (sessionId) =>
+    turnModelPromiseBySession.get(sessionId) ?? readSessionModelForUsage(sessionId),
+  );
   initRenameSessionsConfirm(renameSessionsConfirmBridge);
 
   // ── newMakerDraft 缓存同步 ──────────────────────────────────────────────
@@ -7399,6 +7431,18 @@ export function registerMakerIpc(maker: Maker, options: RegisterMakerIpcOptions)
       readActiveTeam: readActiveOrcaTeamByLeadReadOnly,
       listWorkersByLead,
       getSessionStatus: orcaSessionStatus,
+      getWorkerFlowStatus: async (sessionId: string) => {
+        await inputCoordinator.ensureQueueRestored(sessionId);
+        const inspection = inputCoordinator.getQueueInspection(sessionId);
+        const live = getStableSessionForTurnBoundary(sessionId);
+        return {
+          isWorking: isSessionTurnDispatchBoundaryBusy(sessionTurnActivityTracker, sessionId, live),
+          willQueue:
+            inputCoordinator.shouldQueueNewTurn(sessionId) || sendToSessionLocks.has(sessionId),
+          queuedCount: inspection.length,
+          queuePaused: inputCoordinator.isQueuePaused(sessionId),
+        };
+      },
       readLatestAssistantMessage: readLatestWorkerAssistantMessage,
     };
   }
@@ -8146,25 +8190,28 @@ export function registerMakerIpc(maker: Maker, options: RegisterMakerIpcOptions)
     await maker.cancelPrewarmedSession(sessionId);
   });
 
-  const reconcileInterruptedReviews = async (): Promise<void> => {
-    const dbClient = getDbClient();
-    const db = dbClient.drizzle;
-    const [rows, sourceLeases] = await Promise.all([
-      db
-        .select({
-          sessionId: messages.sessionId,
-          clientId: messages.clientId,
-          agentMeta: messages.agentMeta,
-        })
-        .from(messages)
-        .where(
-          and(
-            eq(messages.role, 'assistant'),
-            isNull(messages.rewindAt),
-            sql`${messages.agentMeta} LIKE '%"reviewRun"%'`,
-          ),
+  const readSourceReviewCards = async (sourceSessionId: string) =>
+    getDbClient()
+      .drizzle.select({
+        clientId: messages.clientId,
+        agentMeta: messages.agentMeta,
+      })
+      .from(messages)
+      .where(
+        and(
+          eq(messages.sessionId, sourceSessionId),
+          gte(messages.clientId, 'review:'),
+          lt(messages.clientId, 'review;'),
+          eq(messages.role, 'assistant'),
+          isNull(messages.rewindAt),
         ),
-      listPersistedReviewSourceLeases(dbClient),
+      );
+
+  const reconcileReviewForSource = async (sourceSessionId: string): Promise<void> => {
+    const dbClient = getDbClient();
+    const [rows, sourceLease] = await Promise.all([
+      readSourceReviewCards(sourceSessionId),
+      readPersistedReviewSourceLease(dbClient, sourceSessionId),
     ]);
     const interruptedAt = Date.now();
     for (const row of rows) {
@@ -8176,39 +8223,28 @@ export function registerMakerIpc(maker: Maker, options: RegisterMakerIpcOptions)
         completedAt: interruptedAt,
         failureCode: 'interrupted',
       };
-      await updateMessageContent(row.sessionId, row.clientId, '');
-      await patchMessageAgentMeta(row.sessionId, row.clientId, { reviewRun: failed });
-      await broadcastMessageAgentMetaUpdate(row.sessionId, row.clientId);
+      await updateMessageContent(sourceSessionId, row.clientId, '');
+      await patchMessageAgentMeta(sourceSessionId, row.clientId, { reviewRun: failed });
+      await broadcastMessageAgentMetaUpdate(sourceSessionId, row.clientId);
     }
-    for (const row of sourceLeases) {
-      if (!row.lease) {
-        await discardInvalidReviewSourceLease(dbClient, row);
-        log.warn('discarded malformed Review source lease', {
-          sourceSessionId: row.sourceSessionId,
-          leaseRowId: row.id,
-        });
-        continue;
-      }
-      if (!(await hasReviewOwnerProcessEnded(row.lease.owner, reviewRunOwner))) continue;
-      await releaseReviewSourceLease(dbClient, {
-        sourceSessionId: row.sourceSessionId,
-        runId: row.lease.runId,
-        owner: row.lease.owner,
+    if (!sourceLease) return;
+    if (!sourceLease.lease) {
+      await discardInvalidReviewSourceLease(dbClient, sourceLease);
+      log.warn('discarded malformed Review source lease', {
+        sourceSessionId,
+        leaseRowId: sourceLease.id,
       });
+      return;
     }
+    if (!(await hasReviewOwnerProcessEnded(sourceLease.lease.owner, reviewRunOwner))) return;
+    await releaseReviewSourceLease(dbClient, {
+      sourceSessionId,
+      runId: sourceLease.lease.runId,
+      owner: sourceLease.lease.owner,
+    });
   };
   const sourceHasPersistedRunningReview = async (sourceSessionId: string): Promise<boolean> => {
-    const rows = await getDbClient()
-      .drizzle.select({ agentMeta: messages.agentMeta })
-      .from(messages)
-      .where(
-        and(
-          eq(messages.sessionId, sourceSessionId),
-          eq(messages.role, 'assistant'),
-          isNull(messages.rewindAt),
-          sql`${messages.agentMeta} LIKE '%"reviewRun"%'`,
-        ),
-      );
+    const rows = await readSourceReviewCards(sourceSessionId);
     return rows.some((row) => readReviewRunFromAgentMeta(row.agentMeta)?.status === 'running');
   };
   const sourceHasActiveTurn = async (sourceSessionId: string): Promise<boolean> => {
@@ -8220,15 +8256,17 @@ export function registerMakerIpc(maker: Maker, options: RegisterMakerIpcOptions)
     }
     return sessionTurnLeaseTracker.isTurnActive(sourceSessionId);
   };
-  const ensureReviewStartupReady = createRetryableReviewStartup(async () => {
+  // This is ordinary attachment hygiene rather than Review recovery. Keep its
+  // existing startup behavior while Review-specific work remains on demand.
+  void cleanupOrphanedTempAttachments({ currentOwner: reviewRunOwner }).catch((error) => {
+    log.warn('failed to clean orphaned temporary attachments', {
+      error: error instanceof Error ? error.message : String(error),
+    });
+  });
+  const ensureReviewRuntimeReady = createRetryableReviewInitialization(async () => {
     try {
       await ensureReviewOwnerLivenessReady();
-      await Promise.all([
-        reconcileInterruptedReviews(),
-        sessionTurnLeaseTracker.reconcileStaleLeases(),
-        cleanupOrphanedReviewArtifactSnapshots({ currentOwner: reviewRunOwner }),
-        cleanupOrphanedTempAttachments({ currentOwner: reviewRunOwner }),
-      ]);
+      await cleanupOrphanedReviewArtifactSnapshots({ currentOwner: reviewRunOwner });
     } catch (error) {
       log.error('failed to prepare Review runtime state', {
         error: error instanceof Error ? error.message : String(error),
@@ -8236,11 +8274,6 @@ export function registerMakerIpc(maker: Maker, options: RegisterMakerIpcOptions)
       throw error;
     }
   });
-  // Registration happens before the renderer can invoke /review. Keep a
-  // rejection observer here so a startup database failure is logged without
-  // becoming an unhandled promise. A rejected attempt is forgotten so a later
-  // START_REVIEW can retry the full reconciliation and still fail closed.
-  void ensureReviewStartupReady().catch(() => {});
 
   const readLatestReviewerResult = async (reviewerSessionId: string): Promise<string> => {
     const rows = await getDbClient()
@@ -8262,15 +8295,14 @@ export function registerMakerIpc(maker: Maker, options: RegisterMakerIpcOptions)
     return '';
   };
 
-  registerReviewStartHandler(makerSessionRegistry, {
+  const reviewRunControl = registerReviewStartHandler(makerSessionRegistry, {
     assertCaller: (event) =>
       assertTrustedAppRendererEvent(event as Parameters<typeof assertTrustedAppRendererEvent>[0]),
-    waitUntilReady: async () => {
-      await ensureReviewStartupReady();
-      // A supported shared-userData peer can exit after this instance starts.
-      // Recheck ownership immediately before each run so its stale card can be
-      // failed, while a still-live peer remains protected by the DB-backed gate.
-      await reconcileInterruptedReviews();
+    waitUntilReady: async (sourceSessionId) => {
+      await ensureReviewRuntimeReady();
+      // Recover only this task when the user explicitly starts Review again.
+      // A live or ambiguous peer remains protected by the DB-backed gate.
+      await reconcileReviewForSource(sourceSessionId);
     },
     createRunId: randomUUID,
     createReviewerSessionId: randomUUID,
@@ -9144,6 +9176,7 @@ export function registerMakerIpc(maker: Maker, options: RegisterMakerIpcOptions)
     execution?: SendToSessionExecutionOverrides;
     onAccepted?: () => void | Promise<void>;
     onAcceptedRollback?: () => void | Promise<void>;
+    onAcceptedCommit?: () => void | Promise<void>;
     origin?: AgentInputQueuedMessage['origin'];
     createDefaults?: SendToSessionCreateDefaults;
     /** 安全调用方可要求新会话不比来源会话拥有更高的权限。 */
@@ -9161,6 +9194,7 @@ export function registerMakerIpc(maker: Maker, options: RegisterMakerIpcOptions)
       execution: executionOverrides,
       onAccepted,
       onAcceptedRollback,
+      onAcceptedCommit,
       origin,
       createDefaults,
       inheritSourcePermissionMode,
@@ -9499,6 +9533,7 @@ export function registerMakerIpc(maker: Maker, options: RegisterMakerIpcOptions)
           dbRow,
           onAccepted,
           onAcceptedRollback,
+          onAcceptedCommit,
           origin: queuedOrigin,
         });
         return {
@@ -9551,6 +9586,7 @@ export function registerMakerIpc(maker: Maker, options: RegisterMakerIpcOptions)
             dbRow,
             onAccepted,
             onAcceptedRollback,
+            onAcceptedCommit,
             origin: queuedOrigin,
           });
           return {
@@ -9670,6 +9706,7 @@ export function registerMakerIpc(maker: Maker, options: RegisterMakerIpcOptions)
               dbRow,
               onAccepted,
               onAcceptedRollback,
+              onAcceptedCommit,
               origin: queuedOrigin,
             });
             return {
@@ -9769,6 +9806,7 @@ export function registerMakerIpc(maker: Maker, options: RegisterMakerIpcOptions)
             dbRow,
             onAccepted,
             onAcceptedRollback,
+            onAcceptedCommit,
             origin: queuedOrigin,
           });
           return {
@@ -10102,6 +10140,7 @@ export function registerMakerIpc(maker: Maker, options: RegisterMakerIpcOptions)
     dbRow: NonNullable<Awaited<ReturnType<typeof getSessionRowSnapshot>>>;
     onAccepted?: () => void | Promise<void>;
     onAcceptedRollback?: () => void | Promise<void>;
+    onAcceptedCommit?: () => void | Promise<void>;
     origin?: AgentInputQueuedMessage['origin'];
   }): Promise<void> {
     const queued = await buildSessionControlInputItem(params);
@@ -10110,6 +10149,7 @@ export function registerMakerIpc(maker: Maker, options: RegisterMakerIpcOptions)
         params.clientId,
         params.onAccepted,
         params.onAcceptedRollback,
+        params.onAcceptedCommit,
       );
     }
     // 崩溃恢复排序:确保先读回持久化队列再追加本条(见 ensureQueueRestored)。
@@ -10169,6 +10209,13 @@ export function registerMakerIpc(maker: Maker, options: RegisterMakerIpcOptions)
         await inputCoordinator.ensureQueueRestored(sessionId).catch(() => undefined);
         inputCoordinator.enqueue(sessionId, item);
       })();
+    },
+    reserveNextQueuedMessage: async (sessionId, item, onReserved) => {
+      await inputCoordinator.ensureQueueRestored(sessionId);
+      if (!inputCoordinator.isQueueRestored(sessionId)) {
+        throw new Error(`queue restore incomplete for ${sessionId}`);
+      }
+      return inputCoordinator.reserveNextInput(sessionId, item, { onReserved }).reserved;
     },
     sendToSessionInternal,
     createDbMessage,
@@ -10623,6 +10670,7 @@ export function registerMakerIpc(maker: Maker, options: RegisterMakerIpcOptions)
     },
     getManualInterrupt,
     clearManualInterrupt,
+    restoreManualInterrupt,
     forgetWorkerSession: forgetKnownOrcaWorkerSession,
     broadcastOrcaWorkerChanged: (leadSessionId) => {
       broadcastToAllWindows(MAKER_PUSH.ORCA_WORKER_CHANGED, { leadSessionId });
@@ -10634,6 +10682,7 @@ export function registerMakerIpc(maker: Maker, options: RegisterMakerIpcOptions)
       dispatchMeta,
       onAccepted,
       onAcceptedRollback,
+      onAcceptedCommit,
     }) => {
       const result = await dispatchOrEnqueueOrcaInterAgentMessage({
         targetSessionId,
@@ -10642,11 +10691,9 @@ export function registerMakerIpc(maker: Maker, options: RegisterMakerIpcOptions)
         senderLabel: 'Lead',
         workerId,
         meta: dispatchMeta,
-        onAccepted: async () => {
-          clearManualInterrupt(targetSessionId);
-          await onAccepted?.();
-        },
+        onAccepted,
         onAcceptedRollback,
+        onAcceptedCommit,
       });
       if (!result.ok) {
         return { ok: false, dispatchOutcome: result.dispatchOutcome };
@@ -10660,6 +10707,56 @@ export function registerMakerIpc(maker: Maker, options: RegisterMakerIpcOptions)
         targetLastUserSendAt: result.targetLastUserSendAt ?? null,
       };
     },
+    reserveWorkerMessage: async ({
+      targetSessionId,
+      message,
+      workerId,
+      dispatchMeta,
+      onReserved,
+      onAccepted,
+      onAcceptedRollback,
+      onAcceptedCommit,
+    }) => {
+      const result = await orcaInterAgentDispatcher.reserveNextOrcaInterAgentMessage({
+        targetSessionId,
+        rawContent: message,
+        source: 'lead',
+        senderLabel: 'Lead',
+        workerId,
+        meta: dispatchMeta,
+        onReserved,
+        onAccepted,
+        onAcceptedRollback,
+        onAcceptedCommit,
+      });
+      if (!result.ok) return { ok: false, dispatchOutcome: result.dispatchOutcome };
+      return {
+        ok: true,
+        mode: result.mode,
+        clientId: result.clientId,
+        dispatchOutcome: result.dispatchOutcome,
+        targetTitle: result.targetTitle ?? null,
+        targetLastUserSendAt: result.targetLastUserSendAt ?? null,
+      };
+    },
+    requestWorkerInterrupt: async (sessionId) => {
+      markManualInterrupt(sessionId, 'lead_interrupt');
+      const sess = getStableSessionForTurnBoundary(sessionId);
+      if (!sess) {
+        return {
+          stopOutcome: sessionTurnActivityTracker.isSessionTurnDispatchBoundaryBusy(sessionId)
+            ? ('unconfirmed' as const)
+            : ('no-active-turn' as const),
+          queuePaused: inputCoordinator.getProjection(sessionId).queuePaused,
+        };
+      }
+      const result = await sess.requestGracefulStop();
+      return {
+        stopOutcome: result.status,
+        queuePaused: inputCoordinator.getProjection(sessionId).queuePaused,
+      };
+    },
+    getWorkerQueuePaused: (sessionId) => inputCoordinator.isQueuePaused(sessionId),
     getSessionQueueSnapshot: async (sessionId) => {
       // 先补崩溃恢复,保证重启后 lead 仍能看到快照恢复出的排队消息。
       await inputCoordinator.ensureQueueRestored(sessionId).catch(() => undefined);
@@ -10671,7 +10768,31 @@ export function registerMakerIpc(maker: Maker, options: RegisterMakerIpcOptions)
         consumingClientIds: inspection
           .filter((entry) => entry.consuming)
           .map((entry) => entry.queuedMessageId),
+        inspectionMessages: inspection.map((entry) => ({
+          queuedMessageId: entry.queuedMessageId,
+          position: entry.position,
+          source:
+            entry.source === 'orca'
+              ? ('lead' as const)
+              : entry.source === 'scheduler'
+                ? ('scheduler' as const)
+                : ('user' as const),
+          content: entry.content,
+          consuming: entry.consuming,
+        })),
+        isWorking: isSessionTurnDispatchBoundaryBusy(
+          sessionTurnActivityTracker,
+          sessionId,
+          getStableSessionForTurnBoundary(sessionId),
+        ),
+        willQueue:
+          inputCoordinator.shouldQueueNewTurn(sessionId) || sendToSessionLocks.has(sessionId),
+        queuePaused: inputCoordinator.getProjection(sessionId).queuePaused,
       };
+    },
+    ensureWorkerQueueRestored: async (sessionId) => {
+      await inputCoordinator.ensureQueueRestored(sessionId).catch(() => undefined);
+      return inputCoordinator.isQueueRestored(sessionId);
     },
     removeQueuedMessage: (sessionId, clientId) => {
       if (!inputCoordinator.hasQueuedItemWhere(sessionId, (item) => item.clientId === clientId)) {
@@ -10683,6 +10804,8 @@ export function registerMakerIpc(maker: Maker, options: RegisterMakerIpcOptions)
     },
     replaceQueuedMessage: (sessionId, clientId, next) =>
       inputCoordinator.replaceQueuedMessage(sessionId, clientId, next),
+    mergeQueuedMessages: (sessionId, clientIds, buildReplacement) =>
+      inputCoordinator.mergeQueuedMessagesAtomically(sessionId, clientIds, buildReplacement).merged,
     sendAutoBridgeToLead: async (leadSessionId, message, workerId) => {
       const result = await dispatchInterAgentMessage({
         targetSessionId: leadSessionId,
@@ -11001,10 +11124,7 @@ export function registerMakerIpc(maker: Maker, options: RegisterMakerIpcOptions)
             applyingPendingGeneration: pending.generation,
             effortExplicit: pending.profile.effort !== null,
             fastExplicit: true,
-            routeExplicit: isPendingSessionRuntimeRouteExplicit(
-              sessionId,
-              pending.generation,
-            ),
+            routeExplicit: isPendingSessionRuntimeRouteExplicit(sessionId, pending.generation),
           },
         );
         log.info('pending session runtime settled', {
@@ -11455,13 +11575,14 @@ export function registerMakerIpc(maker: Maker, options: RegisterMakerIpcOptions)
     disableOrca: disableOrcaInternal,
     // MCP worker 派活必须经 OrcaTeamService，确保 running、resume idle、广播和
     // 公开错误码映射都与 IPC handler WORKER_SEND_TO 保持同一套状态机。
-    sendToWorker: ({ callerLeadSessionId, targetSessionId, message }) =>
-      orcaTeamService.sendToWorker({ callerLeadSessionId, targetSessionId, message }),
+    sendToWorker: (params) => orcaTeamService.sendToWorker(params),
+    interruptWorker: (params) => orcaTeamService.interruptWorker(params),
     // 排队消息控制统一走 OrcaTeamService,复用 resolveWorkerRef 归属校验与
     // coordinator 的 remove/replace 原语(cancel 经 remove 触发 discard settle)。
     listWorkerQueuedMessages: (params) => orcaTeamService.listWorkerQueuedMessages(params),
     updateWorkerQueuedMessage: (params) => orcaTeamService.updateWorkerQueuedMessage(params),
     cancelWorkerQueuedMessage: (params) => orcaTeamService.cancelWorkerQueuedMessage(params),
+    mergeWorkerQueuedMessages: (params) => orcaTeamService.mergeWorkerQueuedMessages(params),
     startTeam: async ({ leadSessionId, workerPermissionMode }) => {
       try {
         await assertLeadCollabProjectEnabled(leadSessionId);
@@ -12270,9 +12391,7 @@ export function registerMakerIpc(maker: Maker, options: RegisterMakerIpcOptions)
    * view and can remain stale across owner-boundary teardown.
    */
   type StableSessionLookup =
-    | { status: 'found'; session: WiredSession }
-    | { status: 'missing' }
-    | { status: 'unavailable' };
+    { status: 'found'; session: WiredSession } | { status: 'missing' } | { status: 'unavailable' };
 
   const lookupStableSessionForTurnBoundary = (sessionId: string): StableSessionLookup => {
     const wired = wiredSessionsById.get(sessionId)?.session;
@@ -12885,6 +13004,15 @@ export function registerMakerIpc(maker: Maker, options: RegisterMakerIpcOptions)
     },
     getTurnGeneration: (sessionId) =>
       getStableSessionForTurnBoundary(sessionId)?.getTurnGeneration() ?? null,
+    getObservedCurrentTurnTerminal: (sessionId) => {
+      const lookup = lookupStableSessionForTurnBoundary(sessionId);
+      if (lookup.status !== 'found') return undefined;
+      try {
+        return lookup.session.getObservedCurrentTurnTerminal();
+      } catch {
+        return undefined;
+      }
+    },
     getTurnSessionIdentity: (sessionId) => getStableSessionForTurnBoundary(sessionId) ?? null,
     reconcileTurnIdle: (sessionId) => {
       // steer 拿到 maker-core 权威 NO_ACTIVE_TURN、或 abort 已让 vendor 停止
@@ -13786,8 +13914,11 @@ export function registerMakerIpc(maker: Maker, options: RegisterMakerIpcOptions)
     sid: string,
     remote: boolean,
     opts: unknown,
+    intent: 'external-input' | 'stop' = 'external-input',
   ): Promise<MainOwnedInputBoundaryStamp> => {
-    await assertReviewExternalInputAllowed(sid);
+    // Stop is lifecycle control rather than external input. Keep the exception
+    // local-only: this Review version does not expand Device Link control.
+    if (intent !== 'stop' || remote) await assertReviewExternalInputAllowed(sid);
     // Capture the coordinator generation before the first database await.  A
     // concurrent /clear replaces the in-memory state; after that await we must
     // reject the old request rather than treating the new generation as its
@@ -14205,7 +14336,9 @@ export function registerMakerIpc(maker: Maker, options: RegisterMakerIpcOptions)
 
   ipcMain.handle(MAKER_INVOKE.INPUT_STOP, async (_e, sessionId: unknown, opts?: unknown) => {
     const sid = requireSessionId(sessionId);
-    await assertRemoteInputControlBoundary(sid, isDeviceLinkInvoke(), opts);
+    const remote = isDeviceLinkInvoke();
+    await assertRemoteInputControlBoundary(sid, remote, opts, 'stop');
+    if (!remote) reviewRunControl.noteReviewerStopRequested(sid);
     // Main 是本机窗口与 Device Link 控制端的 Stop 汇合点；先记账再触发 abort，
     // 任何 renderer 后续请求推荐都会从同一 ledger fail-closed。
     notePromptPredictionSessionStopped(sid);
@@ -14688,9 +14821,7 @@ export function registerMakerIpc(maker: Maker, options: RegisterMakerIpcOptions)
     internalOptions: InternalRuntimeSelectionOptions,
   ) => {
     if (internalOptions.source === 'user' && !isDeviceLinkInvoke()) {
-      assertTrustedAppRendererEvent(
-        event as Parameters<typeof assertTrustedAppRendererEvent>[0],
-      );
+      assertTrustedAppRendererEvent(event as Parameters<typeof assertTrustedAppRendererEvent>[0]);
     }
     if (typeof sessionId !== 'string' || typeof model !== 'string') {
       throwIpcError('INVALID_PARAMS', 'sessionId + model required');
@@ -14710,15 +14841,8 @@ export function registerMakerIpc(maker: Maker, options: RegisterMakerIpcOptions)
     providerId = normalizedWireArgs.providerId;
     expectedAgentSwitchRevision = normalizedWireArgs.expectedAgentSwitchRevision;
     selection = normalizedWireArgs.selection;
-    if (
-      providerId !== undefined &&
-      providerId !== null &&
-      typeof providerId !== 'string'
-    ) {
-      throwIpcError(
-        'INVALID_PARAMS',
-        'providerId must be string, null, or undefined',
-      );
+    if (providerId !== undefined && providerId !== null && typeof providerId !== 'string') {
+      throwIpcError('INVALID_PARAMS', 'providerId must be string, null, or undefined');
     }
     if (
       expectedAgentSwitchRevision !== undefined &&
@@ -14726,10 +14850,7 @@ export function registerMakerIpc(maker: Maker, options: RegisterMakerIpcOptions)
         !Number.isSafeInteger(expectedAgentSwitchRevision) ||
         expectedAgentSwitchRevision < 0)
     ) {
-      throwIpcError(
-        'INVALID_PARAMS',
-        'expectedAgentSwitchRevision must be a non-negative integer',
-      );
+      throwIpcError('INVALID_PARAMS', 'expectedAgentSwitchRevision must be a non-negative integer');
     }
     if (
       selection !== undefined &&
@@ -14738,8 +14859,7 @@ export function registerMakerIpc(maker: Maker, options: RegisterMakerIpcOptions)
         Array.isArray(selection) ||
         (!isSupportedRuntimeEffort((selection as { effort?: unknown }).effort) &&
           !(
-            internalOptions.source !== 'user' &&
-            (selection as { effort?: unknown }).effort === null
+            internalOptions.source !== 'user' && (selection as { effort?: unknown }).effort === null
           )) ||
         typeof (selection as { fastMode?: unknown }).fastMode !== 'boolean')
     ) {
@@ -14793,10 +14913,7 @@ export function registerMakerIpc(maker: Maker, options: RegisterMakerIpcOptions)
       }
       if (
         internalOptions.source !== 'user' &&
-        !sessionRuntimeGenerationMatches(
-          sessionId,
-          internalOptions.expectedGeneration,
-        )
+        !sessionRuntimeGenerationMatches(sessionId, internalOptions.expectedGeneration)
       ) {
         return { deferred: false, superseded: true };
       }
@@ -14818,9 +14935,7 @@ export function registerMakerIpc(maker: Maker, options: RegisterMakerIpcOptions)
       // 落地(与 bootstrapSession 同语义)。agentKind 读不到(会话行缺失等)时不拦。
       // DB 存的是 'cc' | 'codex'(messages.agent_kind 口径),目录侧是 AgentKind。
       const requestedProviderId = normalizeSessionProviderId(
-        typeof providerId === 'string' || providerId === null
-          ? providerId
-          : undefined,
+        typeof providerId === 'string' || providerId === null ? providerId : undefined,
       );
       let persistedProviderId: string | null = null;
       let persistedProviderKnown = true;
@@ -14856,11 +14971,7 @@ export function registerMakerIpc(maker: Maker, options: RegisterMakerIpcOptions)
         const dbAgentKind = getSessionDbAgentKind(sessionId);
         if (dbAgentKind) {
           const reroute = persistedProviderKnown
-            ? await assertModelRouteUsable(
-                dbToMakerAgentKind(dbAgentKind),
-                model,
-                guardProviderId,
-              )
+            ? await assertModelRouteUsable(dbToMakerAgentKind(dbAgentKind), model, guardProviderId)
             : undefined;
           effectiveProviderId = resolveExclusiveSetModelReroute(
             requestedProviderId,
@@ -14879,10 +14990,7 @@ export function registerMakerIpc(maker: Maker, options: RegisterMakerIpcOptions)
             ? dbToMakerAgentKind(getSessionDbAgentKind(sessionId))
             : meta?.agentKind);
         if (!runtimeAgentKind) {
-          throwIpcError(
-            'INVALID_PARAMS',
-            `session ${sessionId} has no runtime agent`,
-          );
+          throwIpcError('INVALID_PARAMS', `session ${sessionId} has no runtime agent`);
         }
         const selectedProviderId =
           effectiveProviderId === null
@@ -14894,15 +15002,8 @@ export function registerMakerIpc(maker: Maker, options: RegisterMakerIpcOptions)
         });
         const actualProviderId =
           selectedProviderId ??
-          effectiveSourceIdForModel(
-            runtimeProviders,
-            null,
-            model,
-            runtimeAgentKind,
-          );
-        const provider = runtimeProviders.find(
-          (candidate) => candidate.id === actualProviderId,
-        );
+          effectiveSourceIdForModel(runtimeProviders, null, model, runtimeAgentKind);
+        const provider = runtimeProviders.find((candidate) => candidate.id === actualProviderId);
         const catalogModel = findCatalogModel(provider, model, runtimeAgentKind, {
           exact: true,
         });
@@ -14918,8 +15019,7 @@ export function registerMakerIpc(maker: Maker, options: RegisterMakerIpcOptions)
           fastMode: atomicSelection.fastMode,
           effortExplicit:
             internalOptions.source === 'user' || internalOptions.effortExplicit === true,
-          fastExplicit:
-            internalOptions.source === 'user' || internalOptions.fastExplicit === true,
+          fastExplicit: internalOptions.source === 'user' || internalOptions.fastExplicit === true,
           allowFixedEffortPlaceholder: internalOptions.source === 'user',
         });
         if (!axes.ok && axes.reason === 'effort-unavailable') {
@@ -14929,10 +15029,7 @@ export function registerMakerIpc(maker: Maker, options: RegisterMakerIpcOptions)
           );
         }
         if (!axes.ok) {
-          throwIpcError(
-            'INVALID_PARAMS',
-            `Fast is unavailable for model "${model}"`,
-          );
+          throwIpcError('INVALID_PARAMS', `Fast is unavailable for model "${model}"`);
         }
         atomicSelection = {
           effort: axes.effort,
@@ -14995,8 +15092,7 @@ export function registerMakerIpc(maker: Maker, options: RegisterMakerIpcOptions)
           deferred: true,
           superseded: false,
           generation,
-          effectiveProviderId:
-            normalizeSessionProviderId(effectiveProviderId) ?? null,
+          effectiveProviderId: normalizeSessionProviderId(effectiveProviderId) ?? null,
         };
       }
       const previousRuntime = {
@@ -15123,21 +15219,13 @@ export function registerMakerIpc(maker: Maker, options: RegisterMakerIpcOptions)
               ...(atomicSelection?.effort
                 ? {
                     effort: atomicSelection.effort as
-                      | 'minimal'
-                      | 'low'
-                      | 'medium'
-                      | 'high'
-                      | 'xhigh'
-                      | 'max'
-                      | 'ultra',
+                      'minimal' | 'low' | 'medium' | 'high' | 'xhigh' | 'max' | 'ultra',
                   }
                 : {}),
               forceSessionRebuild: rebuildLiveOrcaWorker,
               isSessionInTurn,
-              registerPendingCredentialSwitch:
-                registerPendingCredentialSwitchForSession,
-              clearPendingCredentialSwitch:
-                clearPendingCredentialSwitchForSession,
+              registerPendingCredentialSwitch: registerPendingCredentialSwitchForSession,
+              clearPendingCredentialSwitch: clearPendingCredentialSwitchForSession,
               // Worker rebuild must publish the accepted runtime profile before queued input
               // can lazy-create the replacement execution unit.
               ...(!rebuildLiveOrcaWorker
@@ -15192,19 +15280,14 @@ export function registerMakerIpc(maker: Maker, options: RegisterMakerIpcOptions)
             commitControlStores();
           }
         }
-        if (
-          internalOptions.source === 'user' &&
-          (isDeviceLinkInvoke() || atomicSelection)
-        ) {
+        if (internalOptions.source === 'user' && (isDeviceLinkInvoke() || atomicSelection)) {
           // device-link 的通用持久化原本发生在 handler 返回、session 锁释放之后；
           // 本地 renderer 的 sessionService.update 也有同一窗口。凡携带 selection 的
           // 新调用都由 host 在解锁前一次落定全部字段。
           const patch: Record<string, unknown> = { model };
           if (effectiveProviderId !== undefined) {
             patch.providerId = normalizeSessionProviderId(
-              typeof effectiveProviderId === 'string'
-                ? effectiveProviderId
-                : null,
+              typeof effectiveProviderId === 'string' ? effectiveProviderId : null,
             );
           }
           if (atomicSelection) {
@@ -15222,9 +15305,9 @@ export function registerMakerIpc(maker: Maker, options: RegisterMakerIpcOptions)
             restoreControlStores();
             let recoveryError: unknown;
             if (
-              result.status !== 'deferred'
-              && previousRuntime.hadLiveSession
-              && maker.getSession(sessionId)
+              result.status !== 'deferred' &&
+              previousRuntime.hadLiveSession &&
+              maker.getSession(sessionId)
             ) {
               try {
                 await withRehydrateCloseSuppressed(sessionId, () => maker.closeSession(sessionId));
@@ -15279,10 +15362,7 @@ export function registerMakerIpc(maker: Maker, options: RegisterMakerIpcOptions)
             sessionId,
             source: internalOptions.source,
             profile: {
-              agentKind:
-                maker.getSession(sessionId)?.agentKind ??
-                meta?.agentKind ??
-                'claude-code',
+              agentKind: maker.getSession(sessionId)?.agentKind ?? meta?.agentKind ?? 'claude-code',
               model,
               providerId: getSessionProvider(sessionId),
               effort: atomicSelection?.effort ?? previousRuntime.effort ?? null,
@@ -15298,18 +15378,14 @@ export function registerMakerIpc(maker: Maker, options: RegisterMakerIpcOptions)
             previousProfile: internalOptions.previousProfile,
             deferred: response.deferred,
             profile: {
-              agentKind:
-                maker.getSession(sessionId)?.agentKind ??
-                meta?.agentKind ??
-                'claude-code',
+              agentKind: maker.getSession(sessionId)?.agentKind ?? meta?.agentKind ?? 'claude-code',
               model,
               providerId:
                 effectiveProviderId === undefined
                   ? getSessionProvider(sessionId)
                   : (normalizeSessionProviderId(effectiveProviderId) ?? null),
               effort: atomicSelection?.effort ?? null,
-              fastMode:
-                atomicSelection?.fastMode ?? getSessionFastMode(sessionId),
+              fastMode: atomicSelection?.fastMode ?? getSessionFastMode(sessionId),
             },
           });
         }
@@ -15368,9 +15444,7 @@ export function registerMakerIpc(maker: Maker, options: RegisterMakerIpcOptions)
                     : (normalizeSessionProviderId(effectiveProviderId) ?? null),
                 effort:
                   atomicSelection?.effort ??
-                  (getSessionEffort(sessionId) as
-                    | SessionRuntimeProfile['effort']
-                    | undefined) ??
+                  (getSessionEffort(sessionId) as SessionRuntimeProfile['effort'] | undefined) ??
                   projectionMeta?.effort ??
                   null,
                 fastMode: atomicSelection?.fastMode ?? getSessionFastMode(sessionId),
@@ -15385,8 +15459,7 @@ export function registerMakerIpc(maker: Maker, options: RegisterMakerIpcOptions)
         return {
           ...response,
           generation,
-          effectiveProviderId:
-            normalizeSessionProviderId(effectiveProviderId) ?? null,
+          effectiveProviderId: normalizeSessionProviderId(effectiveProviderId) ?? null,
         };
       } catch (err) {
         if (err instanceof CredentialModeSwitchBusyError) {
@@ -15399,34 +15472,14 @@ export function registerMakerIpc(maker: Maker, options: RegisterMakerIpcOptions)
     };
     return withSendToSessionLock(sessionId, applyLocked);
   };
-  applySessionRuntimeSelection = (
-    sessionId,
-    model,
-    providerId,
-    selection,
-    options,
-  ) =>
-    handleSetModel(
-      undefined,
-      sessionId,
-      model,
-      providerId,
-      undefined,
-      selection,
-      options,
-    );
+  applySessionRuntimeSelection = (sessionId, model, providerId, selection, options) =>
+    handleSetModel(undefined, sessionId, model, providerId, undefined, selection, options);
   ipcMain.handle(
     MAKER_INVOKE.SET_MODEL,
     (event, sessionId, model, providerId, expectedAgentSwitchRevision, selection) =>
-      handleSetModel(
-        event,
-        sessionId,
-        model,
-        providerId,
-        expectedAgentSwitchRevision,
-        selection,
-        { source: 'user' },
-      ),
+      handleSetModel(event, sessionId, model, providerId, expectedAgentSwitchRevision, selection, {
+        source: 'user',
+      }),
   );
 
   const recoverRemoteRuntimeAxisPersistence = async (

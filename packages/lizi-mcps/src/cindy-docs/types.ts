@@ -11,6 +11,8 @@
  *    所以这两个函数都由 desktop main 在 mcp-providers.ts 闭包注入。
  */
 
+import type { AgentKind } from '@cindy/maker-core';
+
 import type { LiziMcpLogger, LiziMcpSessionContext } from '../types.js';
 
 /** render_pdf 支持的纸张。与 Electron printToPDF 的 pageSize 取值对齐。 */
@@ -134,6 +136,6 @@ export interface DocsMcpDeps {
  * workingDir 为根,解析不出来就 fail closed(见 _paths.ts)。
  */
 export interface DocsMcpSessionCtx extends LiziMcpSessionContext {
-  agentKind: 'claude-code' | 'codex' | 'pi';
+  agentKind: AgentKind;
   workingDir: string;
 }

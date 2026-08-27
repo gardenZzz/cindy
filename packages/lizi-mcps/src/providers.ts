@@ -426,7 +426,7 @@ export function createLiziMcpProviders(
         type: 'sdk',
         name: 'cindy_docs',
         instance: createCindyDocsMcpServer(opts.docs!, {
-          agentKind: ctx.agentKind === 'codex' ? 'codex' : ctx.agentKind === 'pi' ? 'pi' : 'claude-code',
+          agentKind: toMcpAgentKind(ctx.agentKind),
           workingDir: ctx.workingDir,
           ...(ctx.getSessionContext ? { getSessionContext: ctx.getSessionContext } : {}),
           sessionId: ctx.sessionId,
