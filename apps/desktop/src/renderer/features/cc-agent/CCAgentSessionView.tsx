@@ -2977,6 +2977,10 @@ export function CCAgentSessionView({
               pending.onDeferredAccepted?.();
               const resumedSessionId = sessionId;
               if (resumedSessionId) {
+                requestFollowLatest(
+                  resumedSessionId,
+                  readSendFollowCancelGeneration(resumedSessionId),
+                );
                 void dispatchDeferredUiAssignment(resumedSessionId, undefined, {
                   waitForLeadHistory: false,
                 }).catch((err) => {
@@ -3012,6 +3016,7 @@ export function CCAgentSessionView({
               : undefined;
           const dispatch = pending.deliveryMode === 'steer' ? steerMessage : sendMessage;
           const followStartGeneration = readSendFollowCancelGeneration(sessionId);
+          requestFollowLatest(sessionId, followStartGeneration);
           const accepted = await dispatch(
             slashDispatch.message,
             pending.model,
@@ -3050,7 +3055,6 @@ export function CCAgentSessionView({
           );
           if (accepted) {
             pending.onDeferredAccepted?.();
-            requestFollowLatest(sessionId, followStartGeneration);
             const resumedSessionId = sessionId;
             if (resumedSessionId) {
               void dispatchDeferredUiAssignment(resumedSessionId, undefined).catch((err) => {
@@ -3197,13 +3201,20 @@ export function CCAgentSessionView({
               piRuntimeRetryDelaysMs: PI_RUNTIME_SKILL_RETRY_DELAYS_MS,
             });
       if (slashDispatch.handled) {
-        if (slashDispatch.accepted && sessionId) {
-          void dispatchDeferredUiAssignment(sessionId, undefined, {
-            waitForLeadHistory: false,
-          }).catch((err) => {
-            log.error('recover deferred Worker assignment after slash command failed', err);
-            toast.error(t('newChat.collaboration.assignmentFailed'));
-          });
+        if (slashDispatch.accepted) {
+          // Desktop commands can wait in Main long enough for draft hydration to
+          // restore the click-time command. Re-consume only that snapshot after
+          // acceptance; the callback preserves anything typed in the meantime.
+          opts?.onDeferredAccepted?.();
+          if (sessionId) {
+            requestFollowLatest(sessionId, readSendFollowCancelGeneration(sessionId));
+            void dispatchDeferredUiAssignment(sessionId, undefined, {
+              waitForLeadHistory: false,
+            }).catch((err) => {
+              log.error('recover deferred Worker assignment after slash command failed', err);
+              toast.error(t('newChat.collaboration.assignmentFailed'));
+            });
+          }
         }
         return slashDispatch.accepted;
       }
@@ -3330,6 +3341,7 @@ export function CCAgentSessionView({
       };
       if (deliveryMode === 'steer') {
         const followStartGeneration = readSendFollowCancelGeneration(sessionId);
+        if (sessionId) requestFollowLatest(sessionId, followStartGeneration);
         const accepted = await steerMessage(
           message,
           model,
@@ -3341,7 +3353,6 @@ export function CCAgentSessionView({
           sendOptions,
         );
         if (accepted && sessionId) {
-          requestFollowLatest(sessionId, followStartGeneration);
           void dispatchDeferredUiAssignment(sessionId, undefined).catch((err) => {
             log.error('recover deferred Worker assignment after user message failed', err);
             toast.error(t('newChat.collaboration.assignmentFailed'));
@@ -3350,6 +3361,7 @@ export function CCAgentSessionView({
         return accepted;
       }
       const followStartGeneration = readSendFollowCancelGeneration(sessionId);
+      if (sessionId) requestFollowLatest(sessionId, followStartGeneration);
       const accepted = await sendMessage(
         message,
         model,
@@ -3361,7 +3373,6 @@ export function CCAgentSessionView({
         sendOptions,
       );
       if (accepted && sessionId) {
-        requestFollowLatest(sessionId, followStartGeneration);
         void dispatchDeferredUiAssignment(sessionId, undefined).catch((err) => {
           log.error('recover deferred Worker assignment after user message failed', err);
           toast.error(t('newChat.collaboration.assignmentFailed'));
@@ -3864,6 +3875,7 @@ export function CCAgentSessionView({
         // 必须 await:sendMessage 在设备离线 / 访问被撤销 / 远端 enqueue 拒绝时不抛错,
         // 而是 resolve false —— 不等它就丢副本,正文会从界面和磁盘上一起消失(codex P1)。
         const followStartGeneration = readSendFollowCancelGeneration(sessionId);
+        requestFollowLatest(sessionId, followStartGeneration);
         const delivered = await deliverRecoverableHandoff(sessionId, () =>
           sendMessage(
             pendingText,
@@ -3895,7 +3907,6 @@ export function CCAgentSessionView({
           ),
         );
         if (delivered) {
-          requestFollowLatest(sessionId, followStartGeneration);
           void dispatchDeferredUiAssignment(sessionId, deferredUiAssignment).catch((err) => {
             log.error('deferred Worker assignment after first message failed', err);
             toast.error(t('newChat.collaboration.assignmentFailed'));
@@ -4146,6 +4157,7 @@ export function CCAgentSessionView({
       workingDir={session?.workingDir ?? ''}
       messages={messages}
       historyLoaded={historyLoaded}
+      historyCleared={Boolean(session?.clearedAt)}
       taskUpdates={taskUpdates}
       isSessionStreaming={isStreaming}
       continuationTurnClientId={continuationTurnClientId}

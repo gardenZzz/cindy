@@ -1533,6 +1533,13 @@ const config: ForgeConfig = {
           target: 'preload',
         },
         {
+          entry: 'src/main/localDb/dbSlimmingMaintenanceProcess.ts',
+          config: 'vite.db-slimming-worker.config.ts',
+          // DELETE / VACUUM can run for minutes on a large database. An OS-killable
+          // utility process keeps Main responsive and lets users cancel before swap.
+          target: 'preload',
+        },
+        {
           entry: 'src/main/cindy-brain/libraryDbWorker.ts',
           config: 'vite.library-db-worker.config.ts',
           // 插件 Library SQLite 隔离在 per-plugin worker：恶意慢查询只饿死
@@ -1598,6 +1605,13 @@ const config: ForgeConfig = {
           config: 'vite.preload.config.ts',
           // UNC/SMB stat 不可取消；独立 utility process 超时后可直接终止，
           // 避免把挂死 I/O 留在 Electron main 的 libuv 线程池。
+          target: 'preload',
+        },
+        {
+          entry: 'src/main/cindy-brain/piSubagentRunnerProcess.ts',
+          config: 'vite.preload.config.ts',
+          // 正式包关闭 RunAsNode；Pi Subagent 后台管理程序通过固定的
+          // utility-process 入口执行，开发版和正式包保持同一进程边界。
           target: 'preload',
         },
         {
