@@ -1421,6 +1421,9 @@
         "subtitle": "All models · Claude Code / Codex · billed from your balance per token",
         "modelLabel": "All models",
         "billingLabel": "billed from your balance per token",
+        "accountTier": {
+          "free": "Free tier"
+        },
         "disconnectConfirm": {
           "title": "Disconnect Cindy AI?",
           "description": "Disconnecting clears the Cindy AI key saved locally. You will need to reconnect to keep using models provided by Cindy AI."
@@ -1684,6 +1687,8 @@
         "refreshFailed": "Model list couldn’t be refreshed — try again later",
         "refreshFetchDisabled": "Remote model catalog fetching is disabled — refresh skipped",
         "disableModel": "Disable This Model",
+        "paymentRequired": "Paid",
+        "paymentUnlock": "Pay to unlock",
         "enableModel": "Enable This Model",
         "capabilityGroupHint": "Not shown in the chat model picker; used only by features like image generation.",
         "accessWriteFailed": "Couldn't save the change. Please try again.",
@@ -2099,7 +2104,7 @@
       "restartBusyDescription": "Tasks are currently in progress and restarting will interrupt them. Restart now anyway?",
       "unavailable": "The beta channel is unavailable — could not reach the beta update server.",
       "toast": {
-        "disabled": "Beta channel disabled; takes effect after restart",
+        "disabled": "Beta channel disabled. Cindy will keep the current version and switch when a newer release is available",
         "toggleFailed": "Failed to toggle beta channel"
       }
     },
@@ -5596,7 +5601,7 @@
         "provider": "Provider",
         "tokens": "Total tokens",
         "context": "Context used",
-            "lastActive": "Last active"
+        "lastActive": "Last active"
       },
       "providerTooltip": "The provider currently selected for the session; blank when none is pinned.",
       "tokensTooltip": "The session's lifetime total, not the tokens spent within the last 30 days."
@@ -6795,6 +6800,13 @@
     },
     "modelSelector": {
       "budgetNeedsApiKey": "This model needs an API key — configure it in Settings",
+      "paymentRequired": {
+        "badge": "Paid",
+        "unlock": "Pay to unlock",
+        "title": "Pay to Unlock This Model",
+        "description": "Subscribe to a paid plan or top up your balance to use this model.",
+        "action": "View Billing Options"
+      },
       "hidden": "Hidden",
       "modelListAria": "Model list",
       "subscriptionDirectDisabled": {
@@ -7527,6 +7539,9 @@
       "forkStripEncrypted": "Fork and strip",
       "forkStripEncryptedRunning": "Forking…",
       "forkStripEncryptedTitle": "Fork and strip into a new session",
+      "forkStripOversizedHistory": "Slim history and continue",
+      "forkStripOversizedHistoryRunning": "Forking…",
+      "forkStripOversizedHistoryTitle": "Fork into a new task after removing oversized inline images",
       "codexSessionExpiredLogin": "Reconnect ChatGPT",
       "codexSessionReconnected": "ChatGPT is reconnected. Click “Retry” to continue.",
       "networkUnreachable": "Network error: the service is temporarily unreachable. Click \"Retry\" to try again.",
@@ -7892,6 +7907,7 @@
       "contextRebuild": {
         "labelOverflow": "Context reorganized, continuing",
         "labelTimeout": "Last turn didn't respond; context reorganized to continue",
+        "labelStrip": "Oversized images removed, continuing",
         "toggleHint": "View handoff context",
         "handoffTitle": "Handoff — the context summary sent to the next stretch of this conversation (not part of the chat transcript; shown only here)",
         "handoffTitleEnglishSource": "Handoff — the context summary sent to the next stretch of this conversation (not part of the chat transcript; shown only here)"
@@ -8976,7 +8992,15 @@
         "custom": "Custom"
       },
       "weekday": {
-        "full": { "0": "Sunday", "1": "Monday", "2": "Tuesday", "3": "Wednesday", "4": "Thursday", "5": "Friday", "6": "Saturday" },
+        "full": {
+          "0": "Sunday",
+          "1": "Monday",
+          "2": "Tuesday",
+          "3": "Wednesday",
+          "4": "Thursday",
+          "5": "Friday",
+          "6": "Saturday"
+        },
         "short": { "0": "Su", "1": "Mo", "2": "Tu", "3": "We", "4": "Th", "5": "Fr", "6": "Sa" }
       },
       "time": {
@@ -10440,6 +10464,8 @@
       "codexAutoReviewUnavailable": "Auto-review is temporarily unavailable. The current action was blocked and permissions switched to Default. Retry the request; Cindy will ask when needed.",
       "hostShellCommandBlocked": "Cindy blocked a shell command that would bypass the embedded iOS Simulator. Use the iOS Simulator tool for device control, app launches, interaction, screenshots, and diagnostics.",
       "upstreamResponseIdleTimeout": "The model stopped responding for a long time, so this turn was interrupted to avoid hanging forever. Completed tool calls are preserved — send the next message to continue.",
+      "codexHistoryOversized": "This task’s history includes oversized images, so remote compaction cannot finish. Cindy will omit those images and continue in this task.",
+      "codexHistoryOversizedRemote": "This task’s history includes oversized images, so remote compaction cannot finish. Open the task on the machine running Codex and send again; Cindy will omit those images there.",
       "codexCompactionNotConverging": "Codex kept compacting the context without making progress, so this turn was interrupted to stop the loop. What's taking up the space usually isn't the conversation — the system prompt and tool definitions can't be compacted away. Start a new task to continue.",
       "codexCompactionNotConvergingModelSwitch": "Codex kept compacting the context without making progress, so this turn was interrupted to stop the loop. This task switched model midway, and Codex still evaluates the context limit against the previous model. Switch back to that model to continue, or start a new task.",
       "turnNoEventTimeout": "This turn showed no activity for a long time (model, tools and background processes were all silent), so it was interrupted to avoid hanging forever. Send the next message to continue."

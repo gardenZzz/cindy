@@ -1421,6 +1421,9 @@
         "subtitle": "全部模型 · Claude Code / Codex 通用 · 按 token 从余额扣费",
         "modelLabel": "全部模型",
         "billingLabel": "按 token 从余额扣费",
+        "accountTier": {
+          "free": "免费版"
+        },
         "disconnectConfirm": {
           "title": "断开 Cindy AI？",
           "description": "断开后将清除本地保存的 Cindy AI Key，需要重新连接才能继续使用 Cindy AI 提供的模型。"
@@ -1683,6 +1686,8 @@
         "refreshFailed": "模型列表刷新失败，请稍后再试",
         "refreshFetchDisabled": "模型目录远程拉取未启用，已跳过刷新",
         "disableModel": "停用此模型",
+        "paymentRequired": "付费",
+        "paymentUnlock": "付费解锁",
         "enableModel": "启用此模型",
         "capabilityGroupHint": "不会出现在对话模型选择中，仅供图像生成等功能使用",
         "accessWriteFailed": "停用设置未能保存，请重试",
@@ -2090,7 +2095,7 @@
       "restartBusyDescription": "当前有任务正在进行中，重启会打断它们。确定要立即重启吗？",
       "unavailable": "Beta 测试渠道暂不可用，无法连接到 Beta 更新服务器。",
       "toast": {
-        "disabled": "Beta 测试渠道已关闭，重启后生效",
+        "disabled": "Beta 测试渠道已关闭，将继续使用当前版本，等正式版推出更高版本后自动切换",
         "toggleFailed": "切换 Beta 测试渠道失败"
       }
     },
@@ -5586,7 +5591,7 @@
         "provider": "供应商",
         "tokens": "累计 token",
         "context": "上下文占用",
-            "lastActive": "最后活跃"
+        "lastActive": "最后活跃"
       },
       "providerTooltip": "取该任务当前选定的供应商；未指定时留空。",
       "tokensTooltip": "该任务的生命周期累计，不是近 30 天内的增量。"
@@ -6785,6 +6790,13 @@
     },
     "modelSelector": {
       "budgetNeedsApiKey": "此模型需先在设置里配置 API key 才能使用",
+      "paymentRequired": {
+        "badge": "付费",
+        "unlock": "付费解锁",
+        "title": "付费后解锁此模型",
+        "description": "订阅付费方案或完成余额充值后，即可使用此模型。",
+        "action": "查看付费方式"
+      },
       "hidden": "已隐藏",
       "modelListAria": "模型列表",
       "subscriptionDirectDisabled": {
@@ -7516,6 +7528,9 @@
       "forkStripEncrypted": "Fork 并剥离",
       "forkStripEncryptedRunning": "Fork 中…",
       "forkStripEncryptedTitle": "Fork 并剥离出新任务(去掉加密推理内容)",
+      "forkStripOversizedHistory": "瘦身后继续",
+      "forkStripOversizedHistoryRunning": "Fork 中…",
+      "forkStripOversizedHistoryTitle": "去掉过大的历史图片后 Fork 成新任务",
       "codexSessionExpiredLogin": "重新连接 ChatGPT",
       "codexSessionReconnected": "ChatGPT 账号已重新连接。点击「重试」继续。",
       "networkUnreachable": "网络异常，服务暂时不可达，可点击「重试」。",
@@ -7881,6 +7896,7 @@
       "contextRebuild": {
         "labelOverflow": "已整理上下文并继续",
         "labelTimeout": "上一轮没有响应，已整理后继续",
+        "labelStrip": "已去掉过大图片并继续",
         "toggleHint": "查看交接内容",
         "handoffTitle": "交接内容——整理后发送给后续对话的上下文摘要(不计入对话记录，仅在此展示)",
         "handoffTitleEnglishSource": "交接内容——整理后发送给后续对话的上下文摘要，原文为英文(不计入对话记录，仅在此展示)"
@@ -8956,7 +8972,15 @@
         "custom": "自定义"
       },
       "weekday": {
-        "full": { "0": "星期日", "1": "星期一", "2": "星期二", "3": "星期三", "4": "星期四", "5": "星期五", "6": "星期六" },
+        "full": {
+          "0": "星期日",
+          "1": "星期一",
+          "2": "星期二",
+          "3": "星期三",
+          "4": "星期四",
+          "5": "星期五",
+          "6": "星期六"
+        },
         "short": { "0": "日", "1": "一", "2": "二", "3": "三", "4": "四", "5": "五", "6": "六" }
       },
       "time": {
@@ -10419,6 +10443,8 @@
       "codexAutoReviewUnavailable": "自动审批暂时不可用，当前操作已阻止并切换为默认权限。请重试，需要时会询问你。",
       "hostShellCommandBlocked": "Cindy 已阻止会绕过内嵌模拟器的 Shell 命令。请改用模拟器工具控制设备、启动应用、操作界面、截图和诊断。",
       "upstreamResponseIdleTimeout": "模型长时间没有任何响应，本轮已自动中断以免无限等待。已完成的工具调用都保留，可以直接发下一条消息继续。",
+      "codexHistoryOversized": "这段历史里有过大的图片，远端压缩发不出去。Cindy 会自动略去这些图片，并在当前任务里继续。",
+      "codexHistoryOversizedRemote": "这段历史里有过大的图片，远端压缩发不出去。请在运行 Codex 的那台电脑上打开任务后再发送，Cindy 会自动略去这些图片并继续。",
       "codexCompactionNotConverging": "Codex 反复压缩上下文却压不动，本轮已自动中断以免无限循环。压不动的部分通常不在对话里——system prompt 与工具定义占掉的空间压缩清不掉。新开一个任务可以继续。",
       "codexCompactionNotConvergingModelSwitch": "Codex 反复压缩上下文却压不动，本轮已自动中断以免无限循环。本任务中途切换过模型，而 Codex 仍按切换前那个模型的上下文上限来判断。切回原模型可以继续，或者新开一个任务。",
       "turnNoEventTimeout": "本轮长时间没有任何进展（模型、工具与后台进程都没有动静），已自动中断以免无限等待。可以直接发下一条消息继续。"
