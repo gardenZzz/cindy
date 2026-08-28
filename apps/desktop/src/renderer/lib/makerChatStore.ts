@@ -809,11 +809,12 @@ export interface PendingGhostGrantConfirm {
   ghostName: string;
   /**
    * attachments = 媒体文件交给意识;dir = 上传目录/文件;save_dir = 允许意识
-   * 往目录里存文件;fs_write = 意识申请写工作目录文件(会话 permission 为
+   * 往目录里存文件;reveal_path = 允许当前 Agent 获得单个媒体仓本机路径;
+   * fs_write = 意识申请写工作目录文件(会话 permission 为
    * 逐条确认档时逐次弹,同目录本会话批一次);workspace = 意识申请以该目录
    * 为工作区在侧边栏创建/复用会话入口(不过户字节)。
    */
-  lane: 'attachments' | 'dir' | 'save_dir' | 'fs_write' | 'workspace';
+  lane: 'attachments' | 'dir' | 'save_dir' | 'reveal_path' | 'fs_write' | 'workspace';
   items: Array<{
     name: string;
     absPath: string;
@@ -14153,6 +14154,7 @@ function parseGhostGrantConfirmRequest(request: {
     lane !== 'attachments' &&
     lane !== 'dir' &&
     lane !== 'save_dir' &&
+    lane !== 'reveal_path' &&
     lane !== 'fs_write' &&
     lane !== 'workspace'
   )
@@ -14918,17 +14920,27 @@ function mirrorAgentSwitchIntent(sessionId: string, value: unknown): void {
 
 function setSessionRuntime(
   sessionId: string,
-  opts: { agentKind?: AgentKind; fastMode?: boolean; planModeEnabled?: boolean },
+  opts: {
+    agentKind?: AgentKind;
+    fastMode?: boolean;
+    planModeEnabled?: boolean;
+    /** Seed before SessionView hydrates the DB row; sendMessage reads this for SSH routing. */
+    remoteHostId?: string | null;
+  },
 ): void {
   if (!sessionId) return;
   setState(sessionId, (s) => {
     const nextAgentKind = opts.agentKind ?? s.agentKind;
     const nextFastMode = opts.fastMode ?? s.fastMode;
     const nextPlanMode = opts.planModeEnabled ?? s.planModeEnabled;
+    const nextRemoteHostId = Object.hasOwn(opts, 'remoteHostId')
+      ? (opts.remoteHostId ?? null)
+      : s.remoteHostId;
     if (
       s.agentKind === nextAgentKind &&
       s.fastMode === nextFastMode &&
-      s.planModeEnabled === nextPlanMode
+      s.planModeEnabled === nextPlanMode &&
+      s.remoteHostId === nextRemoteHostId
     )
       return s;
     return {
@@ -14936,6 +14948,7 @@ function setSessionRuntime(
       agentKind: nextAgentKind,
       fastMode: nextFastMode,
       planModeEnabled: nextPlanMode,
+      remoteHostId: nextRemoteHostId,
       ...(s.planModeEnabled !== nextPlanMode ? { planModeRev: s.planModeRev + 1 } : {}),
     };
   });
