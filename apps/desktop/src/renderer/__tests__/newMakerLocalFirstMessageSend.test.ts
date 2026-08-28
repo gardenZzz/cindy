@@ -36,14 +36,15 @@ describe('NewMakerDraftRoute local first-message send', () => {
   });
 
   it('seeds remoteHostId into chat store before the draft-route first send', () => {
-    const seed = source.indexOf(
+    // 从本机首发围栏往前找最近一次 seed：文件前部还有 SSH browse / worktree 的
+    // setSessionRuntime，不能用全文第一处 workspaceKind 当下锚。
+    const seed = source.lastIndexOf(
       'makerChatStore.setSessionRuntime(newSession.id, {',
-      source.indexOf("workspaceKind: workingDir ? 'project' : 'dialogue'"),
+      localFence,
     );
     const seedBlock = source.slice(seed, source.indexOf('});', seed) + 3);
 
     expect(seed).toBeGreaterThan(-1);
-    expect(seed).toBeLessThan(localFence);
     expect(seedBlock).toContain('remoteHostId: workingDir ? (effectiveRemoteHostId ?? null) : null');
   });
 
