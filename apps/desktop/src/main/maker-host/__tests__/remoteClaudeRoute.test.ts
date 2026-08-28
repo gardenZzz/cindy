@@ -185,11 +185,37 @@ describe('resolveRemoteClaudeRoute — 显式供应商', () => {
     expect(route!.env.ANTHROPIC_API_KEY).toBe('cindy-remote-no-auth');
   });
 
-  it('无鉴权(none)+ loopback upstream → REMOTE_PROVIDER_UNSUPPORTED(远端 localhost 必错)', async () => {
+  it('无鉴权(none)+ loopback upstream(可隧道)→ 挂 hostProxyForward + host 归一 127.0.0.1', async () => {
     resolveProviderRouteDecision.mockResolvedValue({
       providerId: 'selfhost',
       routing: { upstream: 'http://localhost:8080/anthropic', authStrategy: 'none' },
       decision: { upstreamOverride: 'http://localhost:8080/anthropic', headerOverride: {} },
+    });
+    const route = await resolveRemoteClaudeRoute({ providerId: 'selfhost', model: 'm' });
+    expect(route!.endpoint).toBe('http://127.0.0.1:8080/anthropic');
+    expect(route!.hostProxyForward).toEqual({
+      localUrl: 'http://localhost:8080/anthropic',
+      remotePort: 8080,
+    });
+    expect(route!.env.ANTHROPIC_API_KEY).toBe('cindy-remote-no-auth');
+  });
+
+  it('loopback upstream 无显式端口 → REMOTE_PROVIDER_UNSUPPORTED(建不了隧道)', async () => {
+    resolveProviderRouteDecision.mockResolvedValue({
+      providerId: 'selfhost',
+      routing: { upstream: 'http://localhost/anthropic', authStrategy: 'none' },
+      decision: { upstreamOverride: 'http://localhost/anthropic', headerOverride: {} },
+    });
+    await expect(resolveRemoteClaudeRoute({ providerId: 'selfhost', model: 'm' })).rejects.toThrow(
+      /REMOTE_PROVIDER_UNSUPPORTED/,
+    );
+  });
+
+  it('loopback upstream 是 127.0.0.0/8 别名地址 → REMOTE_PROVIDER_UNSUPPORTED(建不了隧道)', async () => {
+    resolveProviderRouteDecision.mockResolvedValue({
+      providerId: 'selfhost',
+      routing: { upstream: 'http://127.0.1.1:8080/anthropic', authStrategy: 'none' },
+      decision: { upstreamOverride: 'http://127.0.1.1:8080/anthropic', headerOverride: {} },
     });
     await expect(resolveRemoteClaudeRoute({ providerId: 'selfhost', model: 'm' })).rejects.toThrow(
       /REMOTE_PROVIDER_UNSUPPORTED/,

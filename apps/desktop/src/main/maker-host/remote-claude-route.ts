@@ -44,6 +44,7 @@ import {
   resolveProviderRouteDecision,
   type ResolvedProviderRouteDecision,
 } from './provider-route.js';
+import { isLoopbackUrl, loopbackForwardPort, toRemoteLoopbackUrl } from './pi-remote-provider-forward.js';
 
 /** 'none'(自托管无鉴权)供应商在远端的 cc auth-gate 占位值 —— 目标上游应忽略它。 */
 const REMOTE_NO_AUTH_PLACEHOLDER = 'cindy-remote-no-auth';
@@ -164,13 +165,24 @@ function materializeRoutedProvider(routed: ResolvedProviderRouteDecision): Remot
   }
   // no-auth + loopback upstream:baseUrl 指向本机 localhost,materialize 后远端
   // ANTHROPIC_BASE_URL 会指向**远端机器的** localhost,必错(codex-connector review
-  // #1035)。除非显式隧道(follow-up),一律拒绝;非 loopback 的 no-auth(如内网
-  // 自托管)远端可能可达,仍放行。
+  // #1035)。能建反向隧道的(显式端口 + 127.0.0.1/::1/localhost)挂上
+  // hostProxyForward,host 在 openCcManagerSession 前建好 SSH reverse-forward,
+  // 远端 127.0.0.1:<port> 真实可达 —— 本机 Ollama / vLLM / 聚合代理可用。
+  // 建不了隧道的(无显式端口 / 127.0.0.0/8 别名地址)保持拒绝。
   const endpoint = (decision.upstreamOverride ?? routing.upstream)?.trim();
-  if (routing.authStrategy === 'none' && endpoint && isLoopbackUrl(endpoint)) {
-    throw new Error(
-      `[REMOTE_PROVIDER_UNSUPPORTED] provider "${providerId}" (no-auth loopback) isn't supported on remote Claude Code sessions: the loopback base URL would point at the remote host's localhost`,
-    );
+  if (endpoint && isLoopbackUrl(endpoint)) {
+    const forwardPort = loopbackForwardPort(endpoint);
+    if (forwardPort === null) {
+      throw new Error(
+        `[REMOTE_PROVIDER_UNSUPPORTED] provider "${providerId}" (loopback) isn't supported on remote Claude Code sessions: ` +
+          `the loopback base URL ${endpoint} can't be reverse-forwarded (needs an explicit port on 127.0.0.1/localhost)`,
+      );
+    }
+    return {
+      endpoint: toRemoteLoopbackUrl(endpoint),
+      env: routeDecisionToCcEnv(decision),
+      hostProxyForward: { localUrl: endpoint, remotePort: forwardPort },
+    };
   }
   if (!endpoint) {
     throw new Error(`[REMOTE_PROVIDER_UNSUPPORTED] provider "${providerId}" has no upstream endpoint`);
@@ -210,21 +222,6 @@ function routeDecisionToCcEnv(decision: RoutingDecision): Record<string, string>
 function stripBearer(value: string): string {
   const m = /^\s*Bearer\s+(.*)$/i.exec(value);
   return m ? m[1] : value;
-}
-
-/** URL 是否指向本机 loopback(localhost / 127.x.y.z / ::1)。
- *  轮 36 HIGH:与 pi-host.ts 的 isLoopbackUrl 对齐 —— startsWith('127.') 会误杀
- *  127.example.com 等合法域名, 改为精确 IPv4 loopback 正则。 */
-function isLoopbackUrl(url: string): boolean {
-  try {
-    const host = new URL(url).hostname.toLowerCase();
-    return host === 'localhost'
-      || /^127\.\d{1,3}\.\d{1,3}\.\d{1,3}$/.test(host)
-      || host === '::1'
-      || host === '[::1]';
-  } catch {
-    return false;
-  }
 }
 
 /** cc 的 ANTHROPIC_CUSTOM_HEADERS 格式:每行 `Name: Value`,换行分隔(header-echo 探测确认)。

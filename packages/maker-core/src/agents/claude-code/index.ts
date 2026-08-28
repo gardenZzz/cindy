@@ -2820,7 +2820,13 @@ export class ClaudeCodeAgent extends BaseAgent {
         // env-builder.ts remote branch), so this should never fire — if it does, the
         // remote env was assembled wrong; reject rather than let remote cc dial a
         // loopback URL it can't reach.
-        if (isLoopbackEndpoint(remoteEnv?.ANTHROPIC_BASE_URL)) {
+        //
+        // 唯一例外:loopback BYOM 供应商(本机 Ollama / vLLM / 聚合代理)经 SSH 反向
+        // 隧道桥接进远端 —— route materialization 已把 ANTHROPIC_BASE_URL 归一到
+        // 127.0.0.1:<port> 并挂上 hostProxyForward,host 在 openCcManagerSession 前
+        // 建好 reverse-forward,远端 127.0.0.1:<port> 真实可达。此场景放行;没有
+        // hostProxyForward 的 loopback 才说明 env 装错,拒绝。
+        if (isLoopbackEndpoint(remoteEnv?.ANTHROPIC_BASE_URL) && !remoteRoute?.hostProxyForward) {
           throw new Error('[REMOTE_COMPAT_MODE_UNSUPPORTED] Remote Claude Code sessions cannot route through the local compat proxy.');
         }
         // startParams shape 跟 sdkQuery options 同源 (cwd / model / env / mcpServers /
@@ -2960,6 +2966,12 @@ export class ClaudeCodeAgent extends BaseAgent {
           // per-session Maker Memory 开关 — host 据此决定是否把 cindy_memory
           // 以 http 形态注进远端 startParams.mcpServers (cc-remote-mcp.ts)。
           makerMemoryEnabled,
+          // 本机 loopback BYOM 服务的反向隧道规格:host 在 resolveRemoteClaudeRoute
+          // 里挂上,必须赶在 openCcManagerSession 之前 ensure,否则远端 cc 连
+          // 127.0.0.1:<port> 是远端自己的 localhost。
+          ...(remoteRoute?.hostProxyForward
+            ? { hostProxyForward: remoteRoute.hostProxyForward }
+            : {}),
           onApprovalRequest: async (rawParams: unknown) => {
             // 110s timeout — must respond before daemon's 120s server-request timeout.
             // On timeout, dismiss the pending interaction (clears UI) and reject to

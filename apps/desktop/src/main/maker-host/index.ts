@@ -1052,6 +1052,7 @@ export function getMaker(): Maker {
         onSubagentModelAccessRequest,
         onOAuthRefresh,
         makerMemoryEnabled,
+        hostProxyForward,
       }) => {
         const host = getRemoteSshPool().get(remoteHostId);
         if (host?.getStatus() !== 'ready') {
@@ -1067,6 +1068,23 @@ export function getMaker(): Maker {
         // the path here and pass it down; cc-manager-client merges it into the SDK
         // options via `pathToClaudeCodeExecutable`. First call ~200ms, cache hit instant.
         const claudeBinaryPath = await getRemoteClaudeBinaryPath(host);
+        // 本机 loopback BYOM(用户自配 Ollama/vLLM/聚合代理)的反向隧道:远端 cc 的
+        // ANTHROPIC_BASE_URL 已由 route materialization 烤成 127.0.0.1:<port>,
+        // 必须在 openCcManagerSession(spawn 远端 cc)之前建好 SSH reverse-forward,
+        // 否则远端 cc 连到远端自己的 localhost。lease 与 Pi 共用(RemoteHost 按
+        // localHost:localPort 去重 + 引用计数, 同 host 多会话共享一条隧道)。
+        // 失败(fail-closed)直接上抛, 不静默回落直连。
+        const providerForwardLease = hostProxyForward
+          ? createPiRemoteProviderForwardLease((spec) => host.ensureRemoteForward(spec))
+          : null;
+        if (providerForwardLease && hostProxyForward) {
+          try {
+            await providerForwardLease.ensure(hostProxyForward);
+          } catch (err) {
+            await Promise.allSettled([providerForwardLease.releaseAll()]);
+            throw err;
+          }
+        }
 
         // 远端 cc 的协同 MCP 恢复通道:bridge + remote-forward + per-session
         // token,把 cindy_orca / orca_worker_bridge 以 http 形态追加进
@@ -1232,6 +1250,12 @@ export function getMaker(): Maker {
               sessionId,
               message: err instanceof Error ? err.message : String(err),
             });
+          }
+          // 释放 loopback BYOM 反向隧道(refCount-1;RemoteHost 会保持到最后一个
+          // 使用者释放才真正拆)。detach 不清 —— detach 是断传输保 session, 远端
+          // cc daemon 可能还活着, 重连时 factory 会重新 ensure。
+          if (providerForwardLease) {
+            await Promise.allSettled([providerForwardLease.releaseAll()]);
           }
           await dispose();
         };

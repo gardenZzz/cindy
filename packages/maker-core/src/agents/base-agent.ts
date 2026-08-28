@@ -1301,6 +1301,16 @@ export interface AgentDeps {
      * to avoid cross-package dependency.
      */
     onOAuthRefresh?: (params: unknown) => Promise<unknown>;
+    /**
+     * 本机 loopback BYOM 服务的反向隧道规格(host 在 resolveRemoteClaudeRoute 里挂上,
+     * maker-core 原样透传)。host 必须在 openCcManagerSession 之前 ensure 该 SSH
+     * reverse-forward,否则远端 cc 连 127.0.0.1:<port> 是远端自己的 localhost。
+     * 缺省 = 无隧道。
+     */
+    hostProxyForward?: {
+      localUrl: string;
+      remotePort: number;
+    };
   }) => Promise<Query>;
 
   /**
@@ -1337,7 +1347,8 @@ export interface AgentDeps {
  * 远端 Claude Code 会话解析出的上游 + 鉴权 env(见 AgentDeps.resolveRemoteClaudeRoute)。
  */
 export interface RemoteClaudeRoute {
-  /** 远端 cc 子进程 ANTHROPIC_BASE_URL 的最终取值(供应商真上游,绝不是本机 loopback)。 */
+  /** 远端 cc 子进程 ANTHROPIC_BASE_URL 的最终取值(供应商真上游,绝不是本机 loopback)。
+   *   loopback BYOM 经反向隧道时,host 已把 host 归一到 127.0.0.1,远端可达。 */
   endpoint: string;
   /**
    * 覆盖进远端 env 的鉴权 / 定制头字段。恰好携带一个鉴权门(ANTHROPIC_API_KEY 或
@@ -1346,6 +1357,18 @@ export interface RemoteClaudeRoute {
    * 触发 cc 的 shouldDisableAuth(见 claude-code/index.ts 远端分支实测记录)。
    */
   env: Record<string, string>;
+  /**
+   * 本机 loopback 服务(用户自配的 Ollama / vLLM / 聚合代理)经 SSH 反向隧道桥接进远端
+   * 会话的规格。host 必须在 openCcManagerSession 之前建好该 reverse-forward,否则远端
+   * cc 打 `127.0.0.1:<port>` 连到远端自己的 localhost。缺省 = 无隧道(网关 / 远端可达
+   * 上游 / native OAuth 订阅)。
+   */
+  hostProxyForward?: {
+    /** 本机原始端点(localhost 别名也保留原样)—— lease 据此解析本地目标 host:port。 */
+    localUrl: string;
+    /** 远端 127.0.0.1 上绑定的端口(与本地端口同号,exactRemotePort 语义)。 */
+    remotePort: number;
+  };
 }
 
 export interface OneShotOptions {
