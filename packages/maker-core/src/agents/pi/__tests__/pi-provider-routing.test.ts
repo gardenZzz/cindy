@@ -3290,6 +3290,64 @@ describe('Pi provider-aware model routing', () => {
     expect(captured.args).toEqual([]);
   });
 
+  it('accepts a loopback BYOM provider that host-side attached an SSH reverse-forward to', async () => {
+    // host(pi-host withRemoteLoopbackForwards)给本机 BYOM 端点挂上反向隧道后,
+    // 远端 127.0.0.1:<port> 真实可达 —— guard 必须放行, 且隧道要在 spawn 前建好。
+    // 隧道直通用户自己的服务, 不经 Desktop compat proxy: 不得凭空注入 session token。
+    const remoteStub: import('../transport.js').PiTransport = {
+      writeLine: async () => {},
+      onLine: () => () => {},
+      onStderr: () => () => {},
+      onClose: () => () => {},
+      close: async () => {},
+      pid: 4321,
+      isClosed: () => false,
+      remoteBinaryPath: '/remote/pi',
+      killRemoteSession: async () => {},
+    };
+    let transportOptions:
+      Parameters<NonNullable<AgentDeps['getRemotePiTransport']>>[1] | undefined;
+    const agent = new PiAgent({
+      ...byomDeps(async () => ({
+        providers: [
+          {
+            id: 'ollama',
+            name: 'Ollama',
+            baseUrl: 'http://127.0.0.1:11434',
+            api: 'openai-completions' as const,
+            models: [{ id: 'local-model' }],
+            hostProxyForward: { localUrl: 'http://localhost:11434', remotePort: 11434 },
+          },
+        ],
+        env: {},
+      })),
+      resolveRemotePiBinaryPath: async () => '/remote/pi',
+      getRemotePiTransport: async (_hostId, opts) => {
+        transportOptions = opts;
+        return remoteStub;
+      },
+      getRemotePiFileOps: () => ({
+        mkdirp: async () => {},
+        writeFile: async () => {},
+        stat: async () => ({ isFile: true }),
+        rm: async () => {},
+        listDir: async () => [],
+      }),
+    });
+    const handle = await agent.startSession({
+      sessionId: 'remote-tunneled-byom',
+      workingDir: cwd,
+      model: 'local-model',
+      providerId: 'ollama',
+      remoteHostId: 'remote-host',
+    });
+    expect(transportOptions?.hostProxyForwards).toEqual([
+      { localUrl: 'http://localhost:11434', remotePort: 11434 },
+    ]);
+    expect(transportOptions?.env?.CINDY_PI_SESSION_TOKEN).toBeUndefined();
+    await handle.close();
+  });
+
   it('rejects a local-only OpenAI context profile before resolving or spawning remote Pi', async () => {
     const resolver = vi.fn(async () => ({ providers: [], env: {} }));
     const transport = vi.fn(async () => {

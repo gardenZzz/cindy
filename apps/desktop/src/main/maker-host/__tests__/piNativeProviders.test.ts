@@ -38,6 +38,7 @@ import {
   resolvePiBundledApiByModelId,
   resolvePiBundledModelById,
   resolvePiCindyGatewayModelApi,
+  withRemoteLoopbackForwards,
   type PiBundledModelInfo,
 } from '../pi-host.js';
 import { setXdGatewayModels } from '../active-catalog.js';
@@ -1862,5 +1863,66 @@ describe('buildPiNativeProvidersFromConfigs', () => {
         max: 'max',
       },
     });
+  });
+});
+
+describe('withRemoteLoopbackForwards', () => {
+  const byomProvider = (baseUrl: string, models: Array<{ id: string; baseUrl?: string }> = [{ id: 'm' }]) =>
+    buildPiNativeProvidersFromConfigs(
+      [
+        {
+          id: 'local-llm',
+          name: 'Local LLM',
+          auth: { method: 'none' },
+          runtimes: {
+            pi: {
+              baseUrl,
+              wireProtocol: 'openai-chat' as const,
+              models: models.map((model) => ({
+                id: model.id,
+                ...(model.baseUrl
+                  ? { route: { baseUrl: model.baseUrl, wireProtocol: 'openai-chat' as const } }
+                  : {}),
+              })),
+            },
+          },
+        },
+      ],
+      () => null,
+    ).providers;
+
+  it('tunnels a loopback BYOM endpoint through the same port on the remote host', () => {
+    const [provider] = withRemoteLoopbackForwards(byomProvider('http://127.0.0.1:11434/v1'));
+    expect(provider).toMatchObject({
+      baseUrl: 'http://127.0.0.1:11434/v1',
+      hostProxyForward: { localUrl: 'http://127.0.0.1:11434/v1', remotePort: 11434 },
+    });
+  });
+
+  it('normalizes localhost to 127.0.0.1 because the remote listener only binds v4 loopback', () => {
+    const [provider] = withRemoteLoopbackForwards(byomProvider('http://localhost:8317'));
+    expect(provider).toMatchObject({
+      baseUrl: 'http://127.0.0.1:8317',
+      hostProxyForward: { localUrl: 'http://localhost:8317', remotePort: 8317 },
+    });
+  });
+
+  it('leaves untunnelable providers for the core [REMOTE_LOCAL_ONLY_PROVIDER] guard', () => {
+    // 非 loopback:远端本就能直连,不该改写。
+    const remoteReachable = byomProvider('https://api.example.com/v1');
+    expect(withRemoteLoopbackForwards(remoteReachable)).toEqual(remoteReachable);
+    // 无显式端口:远端绑 80 要 root。
+    const implicitPort = byomProvider('http://127.0.0.1/v1');
+    expect(withRemoteLoopbackForwards(implicitPort)).toEqual(implicitPort);
+    // 127.0.0.0/8 别名地址本机通常没绑。
+    const aliasLoopback = byomProvider('http://127.0.1.1:11434/v1');
+    expect(withRemoteLoopbackForwards(aliasLoopback)).toEqual(aliasLoopback);
+    // 模型级 baseUrl 指向另一个端口:一条隧道盖不住,整块跳过而不是放行一半。
+    const splitPorts = byomProvider('http://127.0.0.1:11434/v1', [
+      { id: 'a' },
+      { id: 'b', baseUrl: 'http://127.0.0.1:9000/v1' },
+    ]);
+    expect(splitPorts[0]?.models[1]?.baseUrl).toBe('http://127.0.0.1:9000/v1');
+    expect(withRemoteLoopbackForwards(splitPorts)).toEqual(splitPorts);
   });
 });

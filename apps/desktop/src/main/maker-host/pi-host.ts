@@ -1531,31 +1531,17 @@ export async function resolvePiNativeProviders(ctx: {
       userDataDir: app.getPath('userData'),
     });
   }
-  // 远端会话:本地 loopback 端点(本机 Ollama/vLLM)远端够不到。
-  // 轮 42 P2(codex-connector):**不再 pre-filter 掉** —— 让 PiAgent 的
-  // [REMOTE_LOCAL_ONLY_PROVIDER] guard 显式拒绝, 用户才能拿到带行动指引的
-  // 可行动错误码(换网关/远端可达 BYOM)。pre-filter 会让显式选择落到通用
-  // 「BYOM provider cannot serve model」路径, renderer 收不到指引文案。
-  if (isRemote) {
-    for (const c of configs) {
-      const baseUrl = c.runtimes.pi?.baseUrl;
-      if (baseUrl && isLoopbackUrl(baseUrl)) {
-        log.debug(
-          'resolvePiNativeProviders: remote session has loopback BYOM provider (core guard will reject)',
-          {
-            id: c.id,
-            baseUrl,
-          },
-        );
-      }
-    }
-  }
   const custom = buildPiNativeProvidersFromConfigs(
     configs,
     readCustomProviderKey,
     (id, reason) => log.warn('resolvePiNativeProviders: skipped custom provider', { id, reason }),
     bundledModels ?? undefined,
   );
+  // 远端会话:本地 loopback 端点(本机 Ollama/vLLM/聚合代理)远端够不到 —— 能建隧道的
+  // 接上 SSH 反向转发,建不了的保持原样让 PiAgent 的 [REMOTE_LOCAL_ONLY_PROVIDER]
+  // guard 显式拒绝(pre-filter 会让显式选择落到通用「cannot serve model」路径,
+  // renderer 收不到「换网关/换远端可达 BYOM」的指引文案)。
+  if (isRemote) custom.providers = withRemoteLoopbackForwards(custom.providers);
   // Remote PI cannot use the local native overlay. Preserve upstream's exact
   // SuperGrok provenance/forwarding path there; locally the version-matched PI
   // native provider above remains the protocol authority.
@@ -1612,6 +1598,80 @@ function isLoopbackUrl(baseUrl: string): boolean {
   } catch {
     return false;
   }
+}
+
+/** 能建反向隧道的 loopback host —— 与 pi-remote-provider-forward 的 lease 同口径。
+ *  127.0.0.0/8 里的别名地址(127.0.1.1 等)本机通常没绑,不在此列:仍是 loopback,
+ *  但建不出隧道,留给 core guard 拒绝。 */
+const FORWARDABLE_LOOPBACK_HOSTS = new Set(['127.0.0.1', '::1', 'localhost']);
+
+/** loopback baseUrl → 可用于反向隧道的端口;不可隧道(非 loopback / 别名地址 /
+ *  无显式端口)返回 null。端口必须显式:隐式 80/443 在远端绑定要 root。 */
+function loopbackForwardPort(baseUrl: string): number | null {
+  if (!isLoopbackUrl(baseUrl)) return null;
+  try {
+    const parsed = new URL(baseUrl);
+    const host = parsed.hostname.toLowerCase().replace(/^\[|\]$/g, '');
+    const port = Number(parsed.port);
+    if (!FORWARDABLE_LOOPBACK_HOSTS.has(host)) return null;
+    return Number.isInteger(port) && port > 0 ? port : null;
+  } catch {
+    return null;
+  }
+}
+
+/** URL 串的 host 归一到 127.0.0.1(已是则原样返回,不做任何规范化)。 */
+function toRemoteLoopbackUrl(url: string): string {
+  const parsed = new URL(url);
+  if (parsed.hostname === '127.0.0.1') return url;
+  parsed.hostname = '127.0.0.1';
+  const next = parsed.toString();
+  // URL.toString() 会给裸 origin 补尾斜杠;原串没有就去掉,baseUrl 保持逐字忠实。
+  return url.endsWith('/') || !next.endsWith('/') ? next : next.slice(0, -1);
+}
+
+/**
+ * 远端会话:把 loopback BYOM provider 挂到 SSH 反向隧道上。远端 pi 连
+ * `127.0.0.1:<port>` → sshd 转回本机同号端口的服务(Ollama / vLLM / 本地聚合代理)。
+ * 隧道本身由 PiAgent 按实际路由按需建立(启动只为 initialProvider 建,setModel 切过去
+ * 时再建),这里只登记「怎么建」。
+ *
+ * - **两端同号端口**:baseUrl 必须在隧道建起来之前就写进 models.json,没有「先绑、
+ *   再回填实际端口」的窗口 —— 所以用 `exactRemotePort` 语义,远端该端口被占即失败,
+ *   不顺延漂移。
+ * - **host 归一到 127.0.0.1**:`RemoteHost.armForward` 恒 `forwardIn('127.0.0.1', …)`,
+ *   而远端把 `localhost` 先解析成 `::1` 时会连不上自己绑的 v4 口。
+ * - 建不了隧道的保持原样,由 core 的 [REMOTE_LOCAL_ONLY_PROVIDER] guard 拒绝。
+ */
+export function withRemoteLoopbackForwards(
+  providers: PiNativeProviderSpec[],
+): PiNativeProviderSpec[] {
+  return providers.map((provider) => {
+    const port = loopbackForwardPort(provider.baseUrl);
+    if (port === null) return provider;
+    // 一个 provider 只能带一条 hostProxyForward。模型级 baseUrl 指向别的 host:port 时
+    // 整块跳过 —— 放行会让那些模型静默连到**远端自己**的同号端口(URL 解析失败同样
+    // 跳过,fail closed)。
+    const providerHost = new URL(provider.baseUrl).host;
+    const modelHostDiffers = (baseUrl: string): boolean => {
+      try {
+        return new URL(baseUrl).host !== providerHost;
+      } catch {
+        return true;
+      }
+    };
+    if (provider.models.some((model) => model.baseUrl !== undefined && modelHostDiffers(model.baseUrl))) {
+      return provider;
+    }
+    return {
+      ...provider,
+      baseUrl: toRemoteLoopbackUrl(provider.baseUrl),
+      models: provider.models.map((model) =>
+        model.baseUrl === undefined ? model : { ...model, baseUrl: toRemoteLoopbackUrl(model.baseUrl) },
+      ),
+      hostProxyForward: { localUrl: provider.baseUrl, remotePort: port },
+    };
+  });
 }
 
 /** pi 二进制缺失时返回 null(调用方跳过注册);其余情况构造 PiAgent。 */

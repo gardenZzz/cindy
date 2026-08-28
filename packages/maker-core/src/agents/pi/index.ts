@@ -1798,11 +1798,18 @@ export class PiAgent extends BaseAgent {
     const startupContextWindow =
       selectedRuntimeModel?.contextWindow ?? publicRuntimeModel?.contextWindow ?? 128_000;
 
-    // 普通远端会话直连网关(remoteEndpoint),不生成本地 proxy token。只有显式声明
-    // hostProxyForward 的 provider（当前为 xAI）仍通过 Desktop compat proxy：
-    // SSH 只解决可达性，session token 继续提供逐会话鉴权，不能把 loopback 端口
-    // 当作信任边界。
-    const remoteUsesHostProxy = remote && nativeProviders.some((provider) => provider.hostProxyForward);
+    // 普通远端会话直连网关(remoteEndpoint),不生成本地 proxy token。只有隧道通往
+    // Desktop compat proxy 的 provider（当前为 xAI）才需要：SSH 只解决可达性，
+    // session token 继续提供逐会话鉴权，不能把 loopback 端口当作信任边界。
+    // 判据是「headers 引用了 session token」而非「有 hostProxyForward」——BYOM 的
+    // 隧道直通用户自己的本机服务(Ollama/vLLM)，不经 compat proxy，不该仅仅因为
+    // 用户配过一个本机 provider 就给远端会话凭空多注一个 token(env 变动 + 安全存储
+    // 不可用时连启动都会失败)。
+    const remoteUsesHostProxy = remote && nativeProviders.some(
+      (provider) =>
+        provider.hostProxyForward
+        && provider.headers?.['x-cindy-pi-session-token'] === `$${PI_SESSION_TOKEN_ENV}`,
+    );
     const proxySessionToken = remoteUsesHostProxy
       ? stableRemoteProxySessionToken(opts.sessionId, this.deps.derivePiProxySessionToken)
       : !remote
