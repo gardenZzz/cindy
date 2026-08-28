@@ -40,6 +40,7 @@ const { MockCodexTransport, createdTransports, createdStdioOptions } = vi.hoiste
     static dropModelList = false;
     static dropInitialize = false;
     static beforeThreadStartResponse: ((transport: MockCodexTransport) => Promise<void> | void) | null = null;
+    static beforeSkillsListResponse: ((transport: MockCodexTransport) => Promise<void> | void) | null = null;
     static onCreate: ((transport: MockCodexTransport) => void) | null = null;
 
     readonly lines: string[] = [];
@@ -139,6 +140,7 @@ const { MockCodexTransport, createdTransports, createdStdioOptions } = vi.hoiste
         return;
       }
       if (req.method === 'skills/list') {
+        await MockCodexTransport.beforeSkillsListResponse?.(this);
         const params = req.params as { cwds?: string[] } | undefined;
         const cwds = params?.cwds ?? ['/repo'];
         this.emitLine({
@@ -272,6 +274,7 @@ beforeEach(() => {
   MockCodexTransport.dropModelList = false;
   MockCodexTransport.dropInitialize = false;
   MockCodexTransport.beforeThreadStartResponse = null;
+  MockCodexTransport.beforeSkillsListResponse = null;
   MockCodexTransport.onCreate = null;
 });
 
@@ -1481,6 +1484,56 @@ describe('CodexAgent capability routing', () => {
     );
 
     await handle.close();
+  });
+
+  it('keeps remote provider-oauth Skill discovery on the remote session host', async () => {
+    const agent = new CodexAgent(createDeps({}, { capabilityRouting }));
+    const host = installFakeHost(agent, undefined, {
+      userAgent: 'mock-codex/0.145.0',
+    });
+
+    const handle = await agent.startSession({
+      sessionId: 'session-capability-routing-remote-provider-oauth',
+      providerId: 'xai',
+      model: 'xai/grok-4.3',
+      workingDir: '/remote/repo',
+      remoteHostId: 'remote-xai-host',
+    });
+
+    expect(host.getHost).toHaveBeenCalledTimes(1);
+    expect(host.getHost).toHaveBeenCalledWith('remote-xai-host', undefined);
+    expect(host.request).toHaveBeenCalledWith(Method.SkillsList, {
+      cwds: ['/remote/repo'],
+      forceReload: false,
+      perCwdExtraUserRoots: null,
+    }, { timeoutMs: 60_000 });
+
+    await handle.close();
+  });
+
+  it('fails closed when the local Skill discovery host is replaced in flight', async () => {
+    const agent = new CodexAgent(createDeps({}, { capabilityRouting }));
+    const hosts = (agent as unknown as { hosts: Map<string, unknown> }).hosts;
+    let displacedHost: unknown;
+    MockCodexTransport.beforeSkillsListResponse = () => {
+      displacedHost = hosts.get('local-control:provider-oauth');
+      const sessionHost = hosts.get('local');
+      expect(displacedHost).toBeDefined();
+      expect(sessionHost).toBeDefined();
+      hosts.set('local-control:provider-oauth', sessionHost);
+    };
+
+    await expect(agent.startSession({
+      sessionId: 'session-capability-routing-replaced-skill-host',
+      providerId: 'xai',
+      model: 'xai/grok-4.3',
+      workingDir: '/repo',
+    })).rejects.toThrow(
+      'Codex Skill discovery expired because its control-plane app-server was replaced',
+    );
+
+    if (displacedHost) hosts.set('local-control:provider-oauth', displacedHost);
+    await agent.dispose();
   });
 
   it('fails closed when restricted Skill discovery is unavailable', async () => {
