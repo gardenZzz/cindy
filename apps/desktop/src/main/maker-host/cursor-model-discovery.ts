@@ -19,11 +19,21 @@ import {
 import { ownerScopedUserDataPath } from '../appSessionState.js';
 import { desktopMakerLogger } from './logger-adapter.js';
 
-/** ACP 上报 → 产品目录描述符。空 listing 返回 []（调用方保留 Auto 兜底）。 */
+/**
+ * ACP 上报 → 产品目录描述符。空 listing 返回 []（调用方保留 Auto 兜底）。
+ *
+ * 结果按显示名字母升序；capabilities 与磁盘缓存共用这一份数组，选择器顺序因此
+ * 不再跟着上游数组序漂。比较器锁定 `en` 而不跟随应用语言：缓存是跨语言共享的
+ * 单份快照，跟随语言会让切换语言产生一次无意义的整表重写。
+ */
 export function mapCursorAcpModelsToDescriptors(
   listing: CursorModelsListing,
 ): ModelDescriptor[] {
-  return cursorListingToDescriptors(listing.models);
+  return cursorListingToDescriptors(listing.models).sort(
+    (a, b) =>
+      a.displayName.localeCompare(b.displayName, 'en', { numeric: true, sensitivity: 'base' }) ||
+      a.id.localeCompare(b.id, 'en'),
+  );
 }
 
 /**

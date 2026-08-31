@@ -64,6 +64,53 @@ describe('mapCursorAcpModelsToDescriptors', () => {
       },
     ]);
   });
+
+  it('按显示名字母升序重排，不沿用上游数组序', () => {
+    const model = (id: string, displayName: string) => ({
+      id,
+      displayName,
+      contextWindow: 200_000,
+      efforts: [],
+      defaultEffort: null,
+    });
+    const out = mapCursorAcpModelsToDescriptors({
+      currentModelId: 'auto',
+      models: [
+        model('auto', 'Auto'),
+        model('cursor-grok-4.6', 'Cursor Grok 4.6'),
+        model('claude-opus-5', 'Claude Opus 5'),
+        model('gpt-5.6-sol', 'GPT-5.6 Sol'),
+        model('gemini-3.7-flash', 'Gemini 3.7 Flash'),
+      ],
+    });
+    expect(out.map((m) => m.displayName)).toEqual([
+      'Auto',
+      'Claude Opus 5',
+      'Cursor Grok 4.6',
+      'Gemini 3.7 Flash',
+      'GPT-5.6 Sol',
+    ]);
+  });
+
+  it('版本号按数值比较，且同名条目按 id 兜底定序', () => {
+    const model = (id: string, displayName: string) => ({
+      id,
+      displayName,
+      contextWindow: 200_000,
+      efforts: [],
+      defaultEffort: null,
+    });
+    const out = mapCursorAcpModelsToDescriptors({
+      currentModelId: 'auto',
+      models: [
+        model('opus-10', 'Claude Opus 10'),
+        model('twin-b', 'Claude Opus 5'),
+        model('opus-9', 'Claude Opus 9'),
+        model('twin-a', 'Claude Opus 5'),
+      ],
+    });
+    expect(out.map((m) => m.id)).toEqual(['twin-a', 'twin-b', 'opus-9', 'opus-10']);
+  });
 });
 
 describe('模型目录磁盘缓存', () => {
