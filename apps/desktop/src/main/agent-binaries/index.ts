@@ -31,6 +31,7 @@ import fs from 'node:fs';
 import { app, BrowserWindow } from 'electron';
 
 import { createBinaryProvisioner } from './factory.js';
+import { probeBinaryVersion } from './binary-version-probe.js';
 import { findDevBinary } from './dev-fallback.js';
 import {
   findCachedLinuxRuntimeFallbackBinary,
@@ -174,6 +175,7 @@ interface AgentBinaryConfig {
   vendorTag: VendorKey;            // 'binary-download-progress' IPC payload 的 vendor 字段
   artifactKind: 'gz' | 'tar-gz-dir'; // CDN 资产形态(单文件 gz / 整目录 tar.gz)
   optionalAsset?: boolean;         // true = manifest 缺字段不算"需要下载"(可选 vendor)
+  preserveLocalVersion?: boolean;  // true = 本地真实版本 >= manifest 时保留，禁止降级
 }
 
 const CONFIG: Record<AgentBinaryKind, AgentBinaryConfig> = {
@@ -204,6 +206,7 @@ const CONFIG: Record<AgentBinaryKind, AgentBinaryConfig> = {
     vendorTag: 'pi',
     artifactKind: 'tar-gz-dir',
     optionalAsset: true,
+    preserveLocalVersion: true,
   },
 };
 
@@ -221,6 +224,7 @@ function getBase(kind: AgentBinaryKind): BinaryProvisioner {
       installSubdir: cfg.installSubdir,
       artifact: { kind: cfg.artifactKind, binaryName: cfg.binaryName },
       optionalAsset: cfg.optionalAsset,
+      localVersionResolver: cfg.preserveLocalVersion ? probeBinaryVersion : undefined,
     });
     baseProvisioners.set(kind, base);
   }
