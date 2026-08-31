@@ -6644,7 +6644,7 @@ export function registerMakerIpc(maker: Maker, options: RegisterMakerIpcOptions)
           { id: 'medium', displayName: 'Medium' },
           { id: 'high', displayName: 'High' },
           { id: 'xhigh', displayName: 'Extra High' },
-          { id: 'max', displayName: 'Max' },
+          { id: 'max', displayName: 'Maximum' },
         ],
         reasoningDisplay: ['off'],
         permissionModes: [],

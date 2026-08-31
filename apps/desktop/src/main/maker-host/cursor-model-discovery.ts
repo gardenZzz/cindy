@@ -19,11 +19,29 @@ import {
 import { ownerScopedUserDataPath } from '../appSessionState.js';
 import { desktopMakerLogger } from './logger-adapter.js';
 
-/** ACP 上报 → 产品目录描述符。空 listing 返回 []（调用方保留 Auto 兜底）。 */
+/**
+ * 目录展示序：显示名字母升序，同显示名按 id 兜底定序。
+ *
+ * 比较器锁定 `en` 而不跟随应用语言：缓存是跨语言共享的单份快照，跟随语言会让
+ * 切换语言产生一次无意义的整表重写。numeric 让版本号按数值排，否则 Opus 10 会
+ * 排在 Opus 5 前面。
+ */
+function byDisplayName(a: ModelDescriptor, b: ModelDescriptor): number {
+  return (
+    a.displayName.localeCompare(b.displayName, 'en', { numeric: true, sensitivity: 'base' }) ||
+    a.id.localeCompare(b.id, 'en')
+  );
+}
+
+/**
+ * ACP 上报 → 产品目录描述符。空 listing 返回 []（调用方保留 Auto 兜底）。
+ *
+ * capabilities 与磁盘缓存共用这一份数组，选择器顺序因此不再跟着上游数组序漂。
+ */
 export function mapCursorAcpModelsToDescriptors(
   listing: CursorModelsListing,
 ): ModelDescriptor[] {
-  return cursorListingToDescriptors(listing.models);
+  return cursorListingToDescriptors(listing.models).sort(byDisplayName);
 }
 
 /**
@@ -79,10 +97,17 @@ function sanitizeDescriptors(raw: unknown): ModelDescriptor[] {
   return out;
 }
 
-/** 上次上报的目录快照；文件缺失 / 损坏一律回 []（调用方保留 Auto 兜底）。 */
+/**
+ * 上次上报的目录快照；文件缺失 / 损坏一律回 []（调用方保留 Auto 兜底）。
+ *
+ * 读回时同样排序：升级前写下的缓存是上游数组序，不在这里兜住的话老用户要等到
+ * 下一次显式探测刷新才能看到有序列表。这样也省掉一次性迁移代码。
+ */
 export function readCachedCursorModels(): ModelDescriptor[] {
   try {
-    return sanitizeDescriptors(JSON.parse(fs.readFileSync(cacheFilePath(), 'utf-8')));
+    return sanitizeDescriptors(JSON.parse(fs.readFileSync(cacheFilePath(), 'utf-8'))).sort(
+      byDisplayName,
+    );
   } catch {
     return [];
   }
