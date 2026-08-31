@@ -3,6 +3,7 @@ import type { AgentKind, Effort } from '@cindy/maker-core';
 import {
   budgetModelRequiresApiKey,
   budgetModelRequiresApiKeyMessage,
+  isProviderRoutedAgent,
   type OrcaWorkerProviderRoutingContext,
   type OrcaWorkerProviderSnapshot,
 } from './orcaWorkerCreationService.js';
@@ -145,6 +146,9 @@ function routeProviderFor(params: {
  * effort/Fast 能力来自和 Orca worker 共用的已连接 provider 快照；不猜默认模型、
  * 不静默换模型。跨 Agent/model 时不携带来源会话的 provider，按现有默认路由落点
  * 重新解析；唯一且必须显式写入来源的 provider 会保留其 id 供凭证注入。
+ *
+ * cursor 是例外:它没有供应商维度，整条来源解析与路由 preflight 跳过，模型只按
+ * 能力目录清单校验，effort/Fast 也只按该清单条目判定（见 isProviderRoutedAgent）。
  */
 export function resolveSendToSessionExecutionConfig(params: {
   source: SendToSessionExecutionConfig;
@@ -167,10 +171,17 @@ export function resolveSendToSessionExecutionConfig(params: {
     };
   }
 
+  // cursor 不走供应商路由(见 isProviderRoutedAgent):它的凭证在 cursor-agent 自己的
+  // login 态里,model-providers 里没有供应商条目,availability 恒空。整条「来源解析 →
+  // 精确路由」链路必须跳过,否则显式 agent_kind='cursor' 会被恒空的 availability
+  // 拒成 PROVIDER_ROUTE_UNAVAILABLE。与 Orca worker 创建同口径。
+  const providerRouted = isProviderRoutedAgent(agentKind);
   const routeChanged = agentKind !== source.agentKind || model !== source.model;
-  const budgetRouteProviderId = !routeChanged && source.providerId
-    ? source.providerId
-    : params.providerRouting.resolveDefaultProviderIdForModel(agentKind, model);
+  const budgetRouteProviderId = !providerRouted
+    ? null
+    : !routeChanged && source.providerId
+      ? source.providerId
+      : params.providerRouting.resolveDefaultProviderIdForModel(agentKind, model);
   if (
     budgetModelRequiresApiKey(agentKind, model, params.hasCindyAiApiKey)
     && (budgetRouteProviderId === null || budgetRouteProviderId === 'xd')
@@ -182,22 +193,28 @@ export function resolveSendToSessionExecutionConfig(params: {
     };
   }
 
-  const route = routeProviderFor({
-    agentKind,
-    model,
-    sourceProviderId: source.providerId,
-    routeChanged,
-    providerRouting: params.providerRouting,
-  });
-  if (!route.ok) {
-    return {
-      ok: false,
-      errorCode: 'PROVIDER_ROUTE_UNAVAILABLE',
-      message: route.message,
-    };
+  let routeProvider: OrcaWorkerProviderSnapshot | undefined;
+  let routedProviderId: string | null | undefined = null;
+  if (providerRouted) {
+    const route = routeProviderFor({
+      agentKind,
+      model,
+      sourceProviderId: source.providerId,
+      routeChanged,
+      providerRouting: params.providerRouting,
+    });
+    if (!route.ok) {
+      return {
+        ok: false,
+        errorCode: 'PROVIDER_ROUTE_UNAVAILABLE',
+        message: route.message,
+      };
+    }
+    routeProvider = route.provider;
+    routedProviderId = route.providerId;
   }
 
-  const routeEffortMeta = route.provider.effortMetaByModel?.[model];
+  const routeEffortMeta = routeProvider?.effortMetaByModel?.[model];
   const effortCapabilities = routeEffortMeta
     ? {
         id: model,
@@ -218,9 +235,14 @@ export function resolveSendToSessionExecutionConfig(params: {
     };
   }
 
-  const supportsFast = route.provider.fastModels
-    ? route.provider.fastModels.includes(model)
-    : modelCapabilities.supportsFastMode === true;
+  // cursor 的 capabilities 条目只带 id / efforts / defaultEffort,没有 supportsFastMode
+  // (Fast 是 agent 级能力,hasFastMode=true),按 `=== true` 判会把它误杀成不支持。
+  // 无供应商维度时改为「只有目录明确写 false 才算不支持」,与 Orca 的 resolveWorkerConfig 同口径。
+  const supportsFast = routeProvider
+    ? (routeProvider.fastModels
+        ? routeProvider.fastModels.includes(model)
+        : modelCapabilities.supportsFastMode === true)
+    : modelCapabilities.supportsFastMode !== false;
   if (overrides.fastMode === true && !supportsFast) {
     return {
       ok: false,
@@ -241,7 +263,7 @@ export function resolveSendToSessionExecutionConfig(params: {
       model,
       effort,
       fastMode,
-      providerId: route.providerId,
+      providerId: routedProviderId,
     },
   };
 }
