@@ -2,6 +2,7 @@ import type { MobileSessionAgentSwitchIntent } from '@cindy/maker-shared/device-
 import type { AgentInputReference } from '@cindy/maker-shared/agent-input-projection';
 import type { RemoteMoney } from '@/session/remoteMoney';
 import type { AgentKind } from '@cindy/maker-shared';
+import type { MobileToolLoopErrorDetails } from '@/session/toolLoopErrorI18n';
 
 export type RemoteSessionStatus = 'active' | 'archived' | 'deleted';
 export type RemoteMessageRole =
@@ -240,6 +241,10 @@ export interface InputProjection {
   queueEditLocks: string[];
   queueAbortPending: boolean;
   error: string | null;
+  /** Stable error reason for live projections; older controlled hosts may omit it. */
+  errorReason?: string | null;
+  /** Bounded details for tool-loop errors; older projections may omit them. */
+  toolLoop?: MobileToolLoopErrorDetails | null;
   recovery?: unknown;
   errorRetryText: string | null;
   autoResumePending?: Record<string, unknown> | null;

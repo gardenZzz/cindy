@@ -75,6 +75,7 @@ import { withSessionRouteLock, withSessionRouteLocks } from '../sessionRouteLock
 import { cleanupSessionRuntimeForTerminalStatus } from '../sessionRuntimeCleanup.js';
 import { broadcastSubagentRunsInvalidated } from './subagentRuns.js';
 import { compactSessionToolResultsBestEffort } from '../toolResultCompaction.js';
+import { consumeWritableDirectoryPickerGrants } from '../../maker-ipc/writableDirectoryPickerGrant.js';
 
 export { setSessionRuntimeCleanup } from '../sessionRuntimeCleanup.js';
 
@@ -413,6 +414,7 @@ const REMOTE_PERSIST_FIELDS = new Set([
   'fastMode',
   'planModeEnabled',
   'extraDirs',
+  'writableDirs',
 ]);
 
 /**
@@ -1126,7 +1128,8 @@ export function registerSessionIpc(
     },
   );
 
-  ipcMain.handle('local-db:sessions:create', async (_e, body) => {
+  ipcMain.handle('local-db:sessions:create', async (event, body) => {
+    assertTrustedAppRendererEvent(event);
     const db = getDbClient().drizzle;
     const now = Date.now();
     const bodyObj = body && typeof body === 'object' ? (body as Record<string, unknown>) : {};
@@ -1164,6 +1167,33 @@ export function registerSessionIpc(
         : explicitWorkingDir;
     if (workspaceKind === 'dialogue' && !explicitWorkingDir) {
       log.info('[localDb] allocated dialogue workspace', { sessionId: id, workingDir });
+    }
+    const requestedWritableDirs = createBody?.writableDirs ?? [];
+    if (!Array.isArray(requestedWritableDirs)
+      || !requestedWritableDirs.every((dir) => typeof dir === 'string')) {
+      throwIpcError('INVALID_PARAMS', 'writableDirs must be string[]');
+    }
+    const requestedRemoteHostId = normalizeRemoteHostId(createBody?.remoteHostId);
+    if (requestedRemoteHostId && requestedWritableDirs.length > 0) {
+      throwIpcError(
+        'PRECONDITION_FAILED',
+        'remote writable directories can only be revoked from an existing task',
+      );
+    }
+    if (!requestedRemoteHostId && requestedWritableDirs.length > 0) {
+      try {
+        await consumeWritableDirectoryPickerGrants({
+          scopeId: id,
+          senderId: event.sender.id,
+          requestedDirs: requestedWritableDirs,
+          previousDirs: [],
+        });
+      } catch (error) {
+        throwIpcError(
+          'PRECONDITION_FAILED',
+          error instanceof Error ? error.message : 'Writable directory authorization failed',
+        );
+      }
     }
     // body 透传 agentKind / orcaRole 给 mapper；非法值已由上方校验拦截，默认值由 mapper 兜底。
     const insertRow = sessionCreateToRow(id, { ...createBody, workspaceKind, workingDir }, now);
@@ -1432,6 +1462,12 @@ export function registerSessionIpc(
     const sid = requireString(id, 'id');
     const ownerScope = captureOwnerScope();
     const p = requireObject(patch, 'patch');
+    if (p.extraDirs !== undefined || p.writableDirs !== undefined) {
+      throwIpcError(
+        'UNSUPPORTED_CAPABILITY',
+        'directory grants must be changed through maker:set-*-dirs',
+      );
+    }
     const dbClient = getDbClient();
     const db = dbClient.drizzle;
     // 工作目录切换必须和发送/懒启动共用同一把路由锁。否则发送可能在
@@ -1465,6 +1501,7 @@ export function registerSessionIpc(
       'planModeEnabled',
       'orcaRole',
       'extraDirs',
+      'writableDirs',
     ]);
     if (Object.keys(p).some((key) => REVIEW_IMMUTABLE_FIELDS.has(key))) {
       const [target] = await db
@@ -1527,6 +1564,7 @@ export function registerSessionIpc(
       'providerId',
       'orcaRole',
       'extraDirs',
+      'writableDirs',
       'pinnedAt',
       'workingDir',
       'workspaceKind',
