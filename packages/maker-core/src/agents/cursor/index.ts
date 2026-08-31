@@ -221,7 +221,7 @@ const CURSOR_EFFORT_LEVELS: EffortDescriptor[] = [
   { id: 'medium', displayName: 'Medium', description: 'Balanced reasoning depth' },
   { id: 'high', displayName: 'High', description: 'Deeper reasoning for harder tasks' },
   { id: 'xhigh', displayName: 'Extra High', description: 'Extended reasoning budget' },
-  { id: 'max', displayName: 'Max', description: 'Very high reasoning budget (model-dependent)' },
+  { id: 'max', displayName: 'Maximum', description: 'Very high reasoning budget (model-dependent)' },
 ];
 
 /** 目录上报失败 / 尚未建立会话时的兜底：选择器至少能选 Auto，不卡住新建。 */
