@@ -16,7 +16,7 @@ import {
  * 来源解析 → 精确路由 preflight」链路对 cursor 不适用，必须整段跳过，否则 worker
  * 创建会被恒空的 availability 拒成 NO_PROVIDER_FOR_AGENT。
  */
-function isProviderRoutedAgent(agent: AgentKind): boolean {
+export function isProviderRoutedAgent(agent: AgentKind): boolean {
   return agent !== 'cursor';
 }
 
