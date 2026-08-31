@@ -373,8 +373,20 @@ const EFFORT_ORDER: readonly Effort[] = [
   'ultra',
 ];
 
+/**
+ * 档位裁决只需要模型的能力三元。Cursor 的模型清单不在 provider 目录里（没有
+ * `Provider.models.cursor`，见 renderer/lib/providerModels.ts），只有 agent
+ * capabilities 的 `ModelDescriptor`（`efforts` 是只读数组）——所以这里按结构收，
+ * 不绑 `CatalogModel`。
+ */
+export interface SessionRuntimeAxisModel {
+  efforts: readonly Effort[];
+  defaultEffort: Effort | null;
+  supportsFastMode?: boolean;
+}
+
 export function resolveCompatibleSessionRuntimeEffort(
-  model: CatalogModel,
+  model: SessionRuntimeAxisModel,
   requested: Effort | null,
 ): Effort | null {
   if (model.efforts.length === 0) return null;
@@ -393,7 +405,7 @@ export function resolveCompatibleSessionRuntimeEffort(
 }
 
 export function resolveSessionRuntimeAxes(params: {
-  model: CatalogModel;
+  model: SessionRuntimeAxisModel;
   effort: Effort | null;
   fastMode: boolean;
   effortExplicit: boolean;

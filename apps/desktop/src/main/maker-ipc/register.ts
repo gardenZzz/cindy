@@ -961,6 +961,7 @@ import {
   sessionRuntimeControlOwnerEpochMatches,
   settlePendingSessionRuntimeMutation,
   type SessionRuntimeMutationSource,
+  type SessionRuntimeAxisModel,
   type SessionRuntimeAxisPatch,
   type SessionRuntimeProfile,
 } from './sessionRuntimeControl.js';
@@ -15461,49 +15462,66 @@ export function registerMakerIpc(maker: Maker, options: RegisterMakerIpcOptions)
         if (!runtimeAgentKind) {
           throwIpcError('INVALID_PARAMS', `session ${sessionId} has no runtime agent`);
         }
-        const selectedProviderId =
-          effectiveProviderId === null
-            ? null
-            : (normalizeSessionProviderId(effectiveProviderId) ?? currentProviderId);
-        const runtimeProviders = await getDesktopProviderService().listProviders({
-          allowSideEffects: false,
-          catalog: getActiveCatalog(),
-        });
-        const actualProviderId =
-          selectedProviderId ??
-          effectiveSourceIdForModel(runtimeProviders, null, model, runtimeAgentKind);
-        const provider = runtimeProviders.find((candidate) => candidate.id === actualProviderId);
-        const catalogModel = findCatalogModel(provider, model, runtimeAgentKind, {
-          exact: true,
-        });
-        if ((!provider?.connected && routeExplicit) || !catalogModel) {
-          throwIpcError(
-            'INVALID_PARAMS',
-            `model "${model}" is unavailable from provider "${actualProviderId ?? 'default'}"`,
-          );
+        // Cursor 的模型清单只活在 agent capabilities 里(provider 目录没有
+        // models.cursor,见 renderer/lib/providerModels.ts),照目录查会把**每一次**
+        // 会话内切模型判成「模型不可用」。用选择器同源的 capabilities 条目裁决档位;
+        // 那里也查不到(目录尚未探测 / id 已下架)时不裁决,留给 cursor handle 的
+        // setEffort / setFastMode 按真实 ACP config option 报不支持。
+        let axisModel: SessionRuntimeAxisModel | undefined;
+        if (runtimeAgentKind === 'cursor') {
+          // cursor-agent 二进制缺失时该 agent 根本没注册,getCapabilities 会抛。
+          axisModel = maker.listAvailableAgents().includes('cursor')
+            ? maker
+                .getCapabilities('cursor')
+                .availableModels.find((candidate) => candidate.id === model)
+            : undefined;
+        } else {
+          const selectedProviderId =
+            effectiveProviderId === null
+              ? null
+              : (normalizeSessionProviderId(effectiveProviderId) ?? currentProviderId);
+          const runtimeProviders = await getDesktopProviderService().listProviders({
+            allowSideEffects: false,
+            catalog: getActiveCatalog(),
+          });
+          const actualProviderId =
+            selectedProviderId ??
+            effectiveSourceIdForModel(runtimeProviders, null, model, runtimeAgentKind);
+          const provider = runtimeProviders.find((candidate) => candidate.id === actualProviderId);
+          axisModel = findCatalogModel(provider, model, runtimeAgentKind, {
+            exact: true,
+          });
+          if ((!provider?.connected && routeExplicit) || !axisModel) {
+            throwIpcError(
+              'INVALID_PARAMS',
+              `model "${model}" is unavailable from provider "${actualProviderId ?? 'default'}"`,
+            );
+          }
         }
-        const axes = resolveSessionRuntimeAxes({
-          model: catalogModel,
-          effort: atomicSelection.effort,
-          fastMode: atomicSelection.fastMode,
-          effortExplicit:
-            internalOptions.source === 'user' || internalOptions.effortExplicit === true,
-          fastExplicit: internalOptions.source === 'user' || internalOptions.fastExplicit === true,
-          allowFixedEffortPlaceholder: internalOptions.source === 'user',
-        });
-        if (!axes.ok && axes.reason === 'effort-unavailable') {
-          throwIpcError(
-            'INVALID_PARAMS',
-            `effort "${atomicSelection.effort}" is unavailable for model "${model}"`,
-          );
+        if (axisModel) {
+          const axes = resolveSessionRuntimeAxes({
+            model: axisModel,
+            effort: atomicSelection.effort,
+            fastMode: atomicSelection.fastMode,
+            effortExplicit:
+              internalOptions.source === 'user' || internalOptions.effortExplicit === true,
+            fastExplicit: internalOptions.source === 'user' || internalOptions.fastExplicit === true,
+            allowFixedEffortPlaceholder: internalOptions.source === 'user',
+          });
+          if (!axes.ok && axes.reason === 'effort-unavailable') {
+            throwIpcError(
+              'INVALID_PARAMS',
+              `effort "${atomicSelection.effort}" is unavailable for model "${model}"`,
+            );
+          }
+          if (!axes.ok) {
+            throwIpcError('INVALID_PARAMS', `Fast is unavailable for model "${model}"`);
+          }
+          atomicSelection = {
+            effort: axes.effort,
+            fastMode: axes.fastMode,
+          };
         }
-        if (!axes.ok) {
-          throwIpcError('INVALID_PARAMS', `Fast is unavailable for model "${model}"`);
-        }
-        atomicSelection = {
-          effort: axes.effort,
-          fastMode: axes.fastMode,
-        };
       }
       const axisPatch: SessionRuntimeAxisPatch = {
         ...(internalOptions.effortExplicit === true && atomicSelection
