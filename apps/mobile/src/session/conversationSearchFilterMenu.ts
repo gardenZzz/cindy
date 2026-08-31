@@ -27,6 +27,7 @@ const AGENT_OPTIONS: ConversationSearchAgentFilter[] = [
   "all",
   "cc",
   "codex",
+  "cursor",
   "pi",
 ];
 const LAST_ACTIVITY_OPTIONS: ConversationSearchLastActivityFilter[] = [

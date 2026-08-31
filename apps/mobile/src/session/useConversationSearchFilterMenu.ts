@@ -42,6 +42,7 @@ export function useConversationSearchFilterMenu({
           all: t("devices.list.search.filter.agent.all"),
           cc: t("devices.list.search.filter.agent.cc"),
           codex: t("devices.list.search.filter.agent.codex"),
+          cursor: t("devices.list.search.filter.agent.cursor"),
           pi: t("devices.list.search.filter.agent.pi"),
         },
         allProjectsLabel: t("devices.list.search.filter.allProjects"),

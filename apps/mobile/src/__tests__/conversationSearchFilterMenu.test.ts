@@ -25,6 +25,7 @@ const labels = {
     all: "全部",
     cc: "Claude Code",
     codex: "Codex",
+    cursor: "Cursor",
     pi: "Pi",
   },
   allProjectsLabel: "所有项目",

@@ -2188,7 +2188,7 @@ export function NewMakerDraftRoute() {
     prewarmed: boolean;
   }> => {
     const prewarm = cursorPrewarmRef.current;
-    if (!prewarm) return { sessionId: makeDraftSessionId(), prewarmed: false };
+    if (!prewarm) return { sessionId: localDraftSessionIdRef.current, prewarmed: false };
     try {
       const res = await window.electronAPI.maker.claimPrewarmSession(prewarm.sessionId);
       if (res.claimed) {
@@ -2205,7 +2205,7 @@ export function NewMakerDraftRoute() {
       .cancelPrewarmSession(prewarm.sessionId)
       .catch((err) => log.warn('[draft prewarm] cancel after claim-miss failed', err));
     cursorPrewarmRef.current = null;
-    return { sessionId: makeDraftSessionId(), prewarmed: false };
+    return { sessionId: localDraftSessionIdRef.current, prewarmed: false };
   }, []);
   // 预热 effect：草稿打开 + 400ms debounce（Q2）。配置/目录变化 → 回收旧预热、用最新档位
   // 重新预热（与 Q8-B「配置预写联动草稿最新档位」一致，claim 不逐项 reconcile）。
@@ -2236,7 +2236,7 @@ export function NewMakerDraftRoute() {
           .cancelPrewarmSession(previous.sessionId)
           .catch(() => undefined);
       }
-      const sessionId = makeDraftSessionId();
+      const sessionId = localDraftSessionIdRef.current;
       const workingDir = effectiveWorkingDir?.trim() || undefined;
       cursorPrewarmRef.current = { sessionId, claimed: false };
       try {
@@ -4058,10 +4058,10 @@ export function NewMakerDraftRoute() {
           // Send 流程会先 createSession (本段下方) 创建 Lead,然后立刻调 enableOrca
           // 拉起 Worker (见下方 "F-COLLAB: draft 阶段开了协同模式" 段)。
 
-          // 非阻塞预热接管（claim-if-ready）：本地普通 Cursor 草稿已预热且就绪 → 复用其
-          // sessionId，createSession 内部 reusedPrewarm 分支 0 等待接管（maker-core）；
-          // 未就绪 / 无预热 / 非本地普通草稿（worktree / device-link / remote）→ 回退
-          // main 的草稿生命周期 id（writable picker 证据绑定同一 id）。
+          // 非阻塞预热接管（claim-if-ready）：本地普通 Cursor 草稿已预热且就绪 →
+          // claim 接管**同一** reserved draft id（与 writable picker 证据同源，
+          // createSession 内部 reusedPrewarm 分支 0 等待）；未就绪 / 无预热 /
+          // 非本地普通草稿（worktree / device-link / remote）→ 仍用该 id 普通创建。
           // claim 只查就绪标志、**不 await 会话就绪**（ADR 0005 核心）。
           const prewarmAble =
             persistedAgentKind === 'cursor' &&
@@ -4069,9 +4069,10 @@ export function NewMakerDraftRoute() {
             !isDeviceLinkDraft &&
             !effectiveRemoteHostId &&
             !wtEnabled;
-          const { sessionId } = prewarmAble
-            ? await claimCursorPrewarmSession()
-            : { sessionId: localDraftSessionIdRef.current };
+          if (prewarmAble) {
+            await claimCursorPrewarmSession();
+          }
+          const sessionId = localDraftSessionIdRef.current;
           const optimisticTitle = optimisticFirstMessageTitle(
             message,
             files,
