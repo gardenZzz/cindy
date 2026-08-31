@@ -1,4 +1,5 @@
 import { afterEach, describe, expect, it } from 'vitest';
+import type { ModelDescriptor } from '@cindy/maker-core';
 import type { ProviderView } from '@cindy/model-providers';
 
 import {
@@ -615,6 +616,45 @@ describe('session runtime fallback selection', () => {
         allowFixedEffortPlaceholder: true,
       }),
     ).toEqual({ ok: true, effort: null, fastMode: false });
+  });
+
+  it('resolves axes from a Cursor capability descriptor', () => {
+    // Cursor 的模型清单只活在 agent capabilities 里(provider 目录没有 models.cursor),
+    // 档位裁决必须吃得下 ModelDescriptor:efforts 只读、supportsFastMode 可缺省。
+    const auto: ModelDescriptor = {
+      id: 'auto',
+      displayName: 'Auto',
+      contextWindow: 200_000,
+      efforts: [],
+      defaultEffort: null,
+    };
+    const composer: ModelDescriptor = {
+      id: 'composer-2',
+      displayName: 'Composer 2',
+      contextWindow: 200_000,
+      efforts: ['low', 'high'],
+      defaultEffort: 'high',
+      supportsFastMode: true,
+    };
+    expect(
+      resolveSessionRuntimeAxes({
+        model: auto,
+        effort: 'low',
+        fastMode: false,
+        effortExplicit: true,
+        fastExplicit: true,
+        allowFixedEffortPlaceholder: true,
+      }),
+    ).toEqual({ ok: true, effort: null, fastMode: false });
+    expect(
+      resolveSessionRuntimeAxes({
+        model: composer,
+        effort: 'high',
+        fastMode: true,
+        effortExplicit: true,
+        fastExplicit: true,
+      }),
+    ).toEqual({ ok: true, effort: 'high', fastMode: true });
   });
 
   it('prefers the same model on another connected source', () => {
