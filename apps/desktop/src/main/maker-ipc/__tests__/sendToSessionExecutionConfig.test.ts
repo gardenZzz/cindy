@@ -39,6 +39,13 @@ const available = (agent: AgentKind) => (
       ]
 );
 
+/**
+ * cursor 的静态能力目录只有产品级 Auto（见 maker-core cursorAutoModelFallback）：
+ * 没有档位表、defaultEffort 为 null，也不带 supportsFastMode —— Fast 是 agent 级
+ * 能力（hasFastMode: true），不落在模型条目上。
+ */
+const cursorAvailable = [{ id: 'auto', efforts: [], defaultEffort: null }];
+
 const fableSource = () => ({
   agentKind: 'claude-code' as const,
   model: 'claude-fable-5',
@@ -360,6 +367,40 @@ describe('resolveSendToSessionExecutionConfig', () => {
     })).toMatchObject({
       ok: false,
       errorCode: 'PROVIDER_ROUTE_UNAVAILABLE',
+    });
+  });
+
+  // cursor 的 availability 恒空（orcaProviderRoutingContext 硬编码 `cursor: []`），
+  // 走供应商路由必然拒成 PROVIDER_ROUTE_UNAVAILABLE。这两条守住整段跳过。
+  it('resolves Claude/Fable → Cursor without going through provider routing', () => {
+    expect(resolveSendToSessionExecutionConfig({
+      source: fableSource(),
+      overrides: { agentKind: 'cursor', model: 'auto' },
+      availableModels: cursorAvailable,
+      providerRouting: providerRouting(),
+      hasCindyAiApiKey: true,
+    })).toEqual({
+      ok: true,
+      config: {
+        agentKind: 'cursor',
+        model: 'auto',
+        effort: undefined,
+        fastMode: false,
+        providerId: null,
+      },
+    });
+  });
+
+  it('keeps Fast available for Cursor even though its catalog entry omits supportsFastMode', () => {
+    expect(resolveSendToSessionExecutionConfig({
+      source: fableSource(),
+      overrides: { agentKind: 'cursor', model: 'auto', fastMode: true },
+      availableModels: cursorAvailable,
+      providerRouting: providerRouting(),
+      hasCindyAiApiKey: true,
+    })).toMatchObject({
+      ok: true,
+      config: { agentKind: 'cursor', fastMode: true, providerId: null },
     });
   });
 });

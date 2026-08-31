@@ -201,6 +201,25 @@ describe('send_to_session tool', () => {
     }));
   });
 
+  // Cursor 是登录制 agent,没有 Cindy 供应商条目。schema 与工具描述都必须留着它,
+  // 否则显式新建 Cursor 任务会在到达 host 前被 INVALID_ARGS 拦掉。
+  it('create: Cursor Agent 配置通过 schema 并完整透传', async () => {
+    const { registry, sendToSession } = setup();
+    const res = await registry.call('send_to_session', {
+      message: '交给 Cursor 实现',
+      agent_kind: 'cursor',
+      model: 'auto',
+      fast: true,
+    });
+
+    expect(res.isError).toBeUndefined();
+    expect(sendToSession).toHaveBeenCalledWith(expect.objectContaining({
+      agentKind: 'cursor',
+      model: 'auto',
+      fast: true,
+    }));
+  });
+
   it.each([
     { agent_kind: 'not-an-agent' },
     { effort: 'extreme' },
