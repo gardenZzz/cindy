@@ -750,7 +750,7 @@ describe('pi auto-review dispatch & spawn config (mocked pi process)', () => {
       ))).toBe(true));
       const published = JSON.stringify({ response, events });
       expect(published).toContain('restart-cindy-to-refresh-packages');
-      expect(captured.closed).toBe(true);
+      await vi.waitFor(() => expect(captured.closed).toBe(true));
     } finally {
       await handle.close();
     }

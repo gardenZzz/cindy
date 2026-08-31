@@ -28,6 +28,23 @@ let myAuth: string;
 const SYSTEM_CONTENT = JSON.stringify({ tokens: { access_token: 'system-token' } });
 const MY_CONTENT = JSON.stringify({ tokens: { access_token: 'stale-local-token' } });
 
+/** 探测宿主真实能力，不假设每台 Windows 机器都能创建文件 symlink。 */
+function canCreateFileSymlink(): boolean {
+  const probeRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'cindy-codex-auth-link-probe-'));
+  try {
+    const target = path.join(probeRoot, 'target');
+    fs.writeFileSync(target, 'probe');
+    fs.symlinkSync(target, path.join(probeRoot, 'link'), 'file');
+    return true;
+  } catch {
+    return false;
+  } finally {
+    fs.rmSync(probeRoot, { recursive: true, force: true });
+  }
+}
+
+const canLinkFile = canCreateFileSymlink();
+
 beforeEach(() => {
   tmpRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'codex-auth-link-test-'));
   // 模拟 ~/.codex/auth.json 与 codex-home/auth.json 两个独立路径。
@@ -55,7 +72,7 @@ function leftoverSidecars(): string[] {
 }
 
 describe('relinkSharedCodexAuth', () => {
-  it('POSIX:myAuth 已存在→原子替换为 symlink', async () => {
+  it.skipIf(!canLinkFile)('POSIX:myAuth 已存在→原子替换为 symlink', async () => {
     fs.writeFileSync(systemAuth, SYSTEM_CONTENT);
     fs.writeFileSync(myAuth, MY_CONTENT);
 
@@ -70,7 +87,7 @@ describe('relinkSharedCodexAuth', () => {
     expect(leftoverSidecars()).toEqual([]);
   });
 
-  it('POSIX:myAuth 不存在 → linked,直接建出 symlink', async () => {
+  it.skipIf(!canLinkFile)('POSIX:myAuth 不存在 → linked,直接建出 symlink', async () => {
     fs.writeFileSync(systemAuth, SYSTEM_CONTENT);
 
     const out = await relinkSharedCodexAuth(systemAuth, myAuth, 'darwin');
@@ -82,7 +99,7 @@ describe('relinkSharedCodexAuth', () => {
     expect(leftoverSidecars()).toEqual([]);
   });
 
-  it('POSIX:系统 auth 原子替换后 symlink 自动跟随新 inode', async () => {
+  it.skipIf(!canLinkFile)('POSIX:系统 auth 原子替换后 symlink 自动跟随新 inode', async () => {
     fs.writeFileSync(systemAuth, SYSTEM_CONTENT);
     await relinkSharedCodexAuth(systemAuth, myAuth, 'darwin');
     const oldInode = fs.statSync(myAuth).ino;
@@ -120,7 +137,7 @@ describe('relinkSharedCodexAuth', () => {
     expect(leftoverSidecars()).toEqual([]);
   });
 
-  it('POSIX 会原子替换 dangling symlink', async () => {
+  it.skipIf(!canLinkFile)('POSIX 会原子替换 dangling symlink', async () => {
     fs.writeFileSync(systemAuth, SYSTEM_CONTENT);
     fs.symlinkSync(path.join(tmpRoot, 'missing-auth.json'), myAuth);
 
@@ -219,7 +236,7 @@ describe('inspectCodexAuthLink', () => {
     });
   });
 
-  it('返回 symlink 健康度与权威文件元数据', async () => {
+  it.skipIf(!canLinkFile)('返回 symlink 健康度与权威文件元数据', async () => {
     fs.writeFileSync(systemAuth, SYSTEM_CONTENT);
     await relinkSharedCodexAuth(systemAuth, myAuth, 'darwin');
 
@@ -230,7 +247,7 @@ describe('inspectCodexAuthLink', () => {
     expect(diagnostics.systemAuthLinkCount).toBe(1);
   });
 
-  it('识别 dangling symlink', async () => {
+  it.skipIf(!canLinkFile)('识别 dangling symlink', async () => {
     fs.symlinkSync(systemAuth, myAuth);
 
     await expect(inspectCodexAuthLink(systemAuth, myAuth)).resolves.toEqual({
