@@ -168,6 +168,25 @@ describe('模型目录磁盘缓存', () => {
     fs.writeFileSync(cacheFile, '{ broken', 'utf8');
     expect(readCachedCursorModels()).toEqual([]);
   });
+
+  it('升级前写下的乱序缓存读回时就地排好，无需等下一次探测', () => {
+    fs.writeFileSync(
+      cacheFile,
+      JSON.stringify([
+        { id: 'cursor-grok-4.6', displayName: 'Cursor Grok 4.6' },
+        { id: 'auto', displayName: 'Auto' },
+        { id: 'gpt-5.6-sol', displayName: 'GPT-5.6 Sol' },
+        { id: 'claude-opus-5', displayName: 'Claude Opus 5' },
+      ]),
+      'utf8',
+    );
+    expect(readCachedCursorModels().map((m) => m.displayName)).toEqual([
+      'Auto',
+      'Claude Opus 5',
+      'Cursor Grok 4.6',
+      'GPT-5.6 Sol',
+    ]);
+  });
 });
 
 describe('探测编排 startCursorModelRefresh (spec #21 / #28)', () => {
