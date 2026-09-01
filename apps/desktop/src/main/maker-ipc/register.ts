@@ -302,6 +302,7 @@ import {
   recycleSessionWorktreeForStatusChange,
   setSessionRuntimeCleanup,
 } from '../localDb/ipc/sessions.js';
+import { persistableSessionEffort } from '../localDb/mapper.js';
 // sidebar-card-mode: turn-done 后刷新列表预览,并按需生成置顶卡片摘要
 import {
   maybeGenerateSessionTaskSummary,
@@ -15679,6 +15680,7 @@ export function registerMakerIpc(maker: Maker, options: RegisterMakerIpcOptions)
                     return false;
                   }
                   const now = Date.now();
+                  const persistableEffort = persistableSessionEffort(target.effort);
                   const sourceRouteConditions = [
                     eq(sessions.id, targetSessionId),
                     eq(sessions.sdkSessionId, source.sdkSessionId),
@@ -15700,7 +15702,7 @@ export function registerMakerIpc(maker: Maker, options: RegisterMakerIpcOptions)
                       sdkSessionId: newSdkSessionId,
                       model: target.model,
                       providerId: target.providerId,
-                      effort: target.effort as (typeof sessions.$inferInsert)['effort'],
+                      ...(persistableEffort !== undefined ? { effort: persistableEffort } : {}),
                       fastMode: target.fastMode,
                       updatedAt: now,
                     })
@@ -15713,7 +15715,7 @@ export function registerMakerIpc(maker: Maker, options: RegisterMakerIpcOptions)
                       sdkSessionId: newSdkSessionId,
                       model: target.model,
                       providerId: target.providerId,
-                      effort: target.effort,
+                      ...(persistableEffort !== undefined ? { effort: persistableEffort } : {}),
                       fastMode: target.fastMode,
                       updatedAt: new Date(now).toISOString(),
                     },
