@@ -15,7 +15,10 @@
     "REMOTE_WORKDIR_INVALID": "远程项目目录无效，请重新选择项目目录。",
     "REMOTE_WORKDIR_NOT_FOUND": "远程项目目录不存在，请重新选择项目目录。",
     "REMOTE_WORKDIR_NOT_DIRECTORY": "远程项目路径不是文件夹，请重新选择项目目录。",
-    "REMOTE_WORKDIR_UNAVAILABLE": "远程项目目录不可访问，请恢复网络盘连接后重试。"
+    "REMOTE_WORKDIR_UNAVAILABLE": "远程项目目录不可访问，请恢复网络盘连接后重试。",
+    "RIGHT_SIDEBAR_TOO_MANY_TABS": "当前任务已达标签数量上限，请先关闭一些标签",
+    "RIGHT_SIDEBAR_STATE_TOO_LARGE": "标签内容过大，无法添加",
+    "RIGHT_SIDEBAR_UNKNOWN_KIND": "该标签类型暂不可用"
   },
   "providerError": {
     "AUTH_INVALID": "API 密钥无效或已过期（401），请检查密钥后重试",
@@ -6699,6 +6702,13 @@
       "description": "请先将 {{appName}} 移动到「应用程序」文件夹，才能使用自动更新功能。",
       "move": "立即移动（推荐）",
       "download": "手动下载新版本"
+    },
+    "windowsRuntimeMissing": {
+      "title": "需要安装 Microsoft Visual C++ 运行库",
+      "description": "这台电脑缺少更新程序所需的 Microsoft Visual C++ 运行库。已下载的更新包会保留；请安装微软官方 x64 运行库后重新检查。",
+      "download": "下载运行库",
+      "retry": "重新检查",
+      "later": "稍后安装"
     },
     "moveToApplications": {
       "title": "移动到应用程序文件夹",
