@@ -16,6 +16,12 @@
     "REMOTE_NATIVE_OAUTH_UNAVAILABLE": "Claude.ai サブスクリプションが未接続です。先に接続するか、ゲートウェイモデルを選択してください",
     "DEVICE_LINK_DEVICE_UNRESPONSIVE": "対象デバイスが応答していません。リモートデバイスを確認して再試行してください。",
     "INTERNAL": "操作に失敗しました。しばらくしてから再試行してください。",
+    "SSH_CONFIG_CONCURRENT_MODIFICATION": "SSH 設定がディスク上で変更されました。再読み込みしてからもう一度お試しください。",
+    "SSH_CONFIG_RELOAD_REQUIRED": "SSH 設定は保存されましたが、Cindy で再読み込みできませんでした。SSH 設定を再読み込みしてください。",
+    "SSH_CONFIG_OWNERSHIP_REQUIRED": "Cindy はこの SSH 設定を安全に管理できません。再読み込みして、Cindy の所有マーカーとホストエイリアスの一意性を確認してください。",
+    "SSH_CONFIG_AUTH_UNSUPPORTED": "Cindy はこのホストの一部の SSH 設定規則を安全に再現できません。ターミナルの SSH は動作する場合があります。Match、条件付き Include、IdentityAgent、IdentitiesOnly、公開鍵設定を確認してください。",
+    "SSH_AGENT_UNAVAILABLE": "SSH Agent を使用できません。SSH Agent を起動し、ssh-add で対応する秘密鍵を読み込んでから再試行してください。",
+    "SSH_HOST_PREFS_WRITE_FAILED": "ホストは保存されていますが、表示名または Agent Proxy の設定を保存できませんでした。ローカルストレージの権限を確認して再試行してください。",
     "RIGHT_SIDEBAR_TOO_MANY_TABS": "このタスクのタブ数の上限に達しました。いくつかのタブを閉じてください",
     "RIGHT_SIDEBAR_STATE_TOO_LARGE": "タブの内容が大きすぎるため、追加できません",
     "RIGHT_SIDEBAR_UNKNOWN_KIND": "このタブの種類は現在使用できません"
@@ -168,6 +174,13 @@
       "title": "リモートマシン",
       "footnote": "Phase A は SSH 接続管理のみ。リモートでのエージェント実行は今後のアップデートで対応します。",
       "viaAuth": "{{label}} で認証",
+      "readOnlyFromSshConfig": "接続情報は SSH 設定から読み込まれています",
+      "configWarning": "一部の SSH 設定ルールを Cindy では評価できません。ホスト一覧や接続情報がターミナルの SSH と異なる場合があります。",
+      "configDiagnostic": {
+        "io": "Cindy は SSH 設定を読み込めませんでした。最後に正常に読み込んだホストを引き続き表示しています。ファイルのアクセス権を確認して、再読み込みしてください。",
+        "syntax": "Cindy は SSH 設定を解析できませんでした。最後に正常に読み込んだホストを引き続き表示しています。設定を修正して、再読み込みしてください。",
+        "limit": "SSH 設定のネストが深すぎるか、サイズが大きすぎるため、Cindy で安全に読み込めません。最後に正常に読み込んだホストを引き続き表示しています。"
+      },
       "empty": {
         "title": "リモートマシンはまだありません。",
         "hint": "「追加」で登録するか、更新アイコンで ~/.ssh/config から取り込めます。"
@@ -199,7 +212,9 @@
       },
       "edit": {
         "title": "{{id}} を編集",
-        "submit": "変更を保存"
+        "submit": "変更を保存",
+        "connectionFieldsReadOnly": "SSH 設定から読み込まれた接続情報はここでは読み取り専用です。表示名、自動接続、Agent Proxy は変更できます。",
+        "authenticationFromSshConfig": "認証情報は SSH 設定から読み込まれます。"
       },
       "keys": {
         "title": "SSH 鍵を設定",
@@ -276,6 +291,8 @@
       "add": {
         "title": "リモートマシンを追加",
         "alias": "エイリアス",
+        "displayName": "表示名",
+        "displayNamePlaceholder": "任意。Cindy 内でのみ表示",
         "hostname": "ホスト名",
         "user": "ユーザー",
         "port": "ポート",
@@ -376,6 +393,7 @@
         "reloaded": "~/.ssh/config を再読み込みしました",
         "loadFailed": "リモートマシンの読み込みに失敗",
         "addFailed": "マシンの追加に失敗",
+        "addConflict": "マシンの追加中に SSH 設定が変更されました。設定を再読み込みし、ホスト項目を確認してから再試行してください。",
         "connectFailed": "接続に失敗",
         "disconnectFailed": "切断に失敗",
         "removeFailed": "削除に失敗",
@@ -3043,7 +3061,14 @@
           "toggleFailed": "ブラウザ自動操作の切り替えに失敗しました",
           "openedForLogin": "自動操作ブラウザを開きました。必要なサイトにログインしてください",
           "openForLoginFailed": "ブラウザを開けませんでした",
-          "foreignInstance": "別の Cindy が Agent 専用ブラウザを使用中です。先にそのウィンドウを終了してください。"
+          "foreignInstance": "別の Cindy が Agent 専用ブラウザを使用中です。先にそのウィンドウを終了してください。",
+          "profileLocked": "Chrome、Edge、または Brave をトレイのプロセスも含めて完全に終了し、もう一度お試しください。",
+          "noChromium": "このコンピューターに Chrome、Edge、Brave、または Chromium が見つかりません。",
+          "noAuthDb": "コピーできるブラウザのログインデータが見つかりません。通常のブラウザで先にログインするか、「ブラウザのログイン状態を使う」をオフにして Agent 専用ブラウザでログインしてください。",
+          "copyFailed": "ブラウザのログイン状態をコピーできませんでした。通常のブラウザを完全に終了して再試行するか、「ブラウザのログイン状態を使う」をオフにしてください。",
+          "headlessForbidden": "Agent 専用ブラウザがヘッドレスモードで動作している間は、ブラウザのログイン状態を使用できません。",
+          "stopFailed": "Agent 専用ブラウザを完全に終了してから、もう一度お試しください。",
+          "appBoundEncryptionUnsupported": "Windows のアプリバウンド暗号化で保護されているため、Cindy はこのブラウザのログイン状態をコピーできません。「ブラウザのログイン状態を使う」をオフにし、Agent 専用ブラウザを開いて一度ログインしてください。"
         },
         "openForLogin": "Agent 専用ブラウザを開く",
         "openForLoginHint": "これはエージェント専用の独立したブラウザです。お使いの Chrome を利用しますが、プロファイルは完全に独立しており（右上に「Cindy」と表示）、普段の Chrome のタブ・ブックマーク・ログイン状態には一切影響しません。エージェントはこのブラウザであなたの代わりにページを開き、読み、クリックし、スクリーンショットを撮ります。ログインが必要なサイトは、上の「Agent 専用ブラウザを開く」から一度ログインすれば、ログイン状態が保持され、以降はエージェントがあなたとして操作を続けられます。"
@@ -3752,6 +3777,28 @@
       "recording": "新しいショートカットを入力…",
       "editAria": "{{name}} のショートカットを変更",
       "workLouderCodex": {
+        "codexGuard": {
+          "title": "Codex との互換性",
+          "label": "Codex によるデバイスの占有を防ぐ",
+          "aria": "Codex による Codex Micro の占有を防ぐ",
+          "recover": "環境を復元",
+          "status": {
+            "unsupported": "macOS のみ",
+            "disabled": "オフ",
+            "protecting": "Codex を再起動",
+            "intercepted": "保護中",
+            "recovery-required": "復元が必要",
+            "error": "利用不可"
+          },
+          "descriptions": {
+            "unsupported": "この保護機能は macOS でのみ利用できます。",
+            "disabled": "Cindy の実行中、Codex が Codex Micro に接続するのを防ぎます。Cindy 自体は制限されません。",
+            "protecting": "保護の準備ができました。Codex を完全に終了してから開き直してください。実行中の Codex には影響しません。",
+            "intercepted": "Codex の Work Louder サービスをブロックしました。Cindy は引き続きデバイスを使用できます。",
+            "recovery-required": "保護は停止しましたが、NODE_OPTIONS は安全に復元されていません。再度有効にする前に復元を再試行してください。",
+            "error": "Codex の保護を更新できませんでした。以前の NODE_OPTIONS は保持されているか、復元待ちです。"
+          }
+        },
         "commands": {
           "session.selectPrevious": {
             "name": "前のタスク",
@@ -5469,7 +5516,8 @@
     "browserWaiting": "ブラウザで認証を完了してください",
     "browserCallback": {
       "successTitle": "ログイン完了",
-      "successBody": "このページを閉じて {{appName}} に戻れます。",
+      "successBody": "ログインが完了しました。このページは閉じて構いません。",
+      "closeCountdown": "{{count}}秒後に自動で閉じます",
       "errorTitle": "ログインを完了できませんでした",
       "errorBody": "{{appName}} に戻ってもう一度ログインしてください。",
       "returnButton": "{{appName}} に戻る"
@@ -6020,6 +6068,10 @@
       "detachDevice": "デバイスを切断",
       "startDevice": "デバイスを起動",
       "stopDevice": "デバイスを停止",
+      "deleteDevice": "デバイスを削除",
+      "deleteDeviceConfirmTitle": "「{{device}}」を削除しますか？",
+      "deleteDeviceConfirmDescription": "このシミュレータと、その中に保存されているすべてのアプリ、アカウント、データを完全に削除します。この操作は取り消せません。",
+      "deleteRunningDeviceConfirmDescription": "このシミュレータは実行中です。確認すると、Cindy が関連リソースをクリーンアップしてデバイスを停止した後、保存されているすべてのアプリ、アカウント、データを完全に削除します。この操作は取り消せません。",
       "attachedDescription": "このデバイスは現在の Cindy セッションに割り当てられています。",
       "agentControlTitle": "Agent の操作権限",
       "agentControlDescription": "許可した場合のみ、Agent がこのデバイスを起動、停止、操作できます。",
@@ -7363,7 +7415,7 @@
         "title": "このモデルには今の会話が収まりません",
         "warnToast": "この会話はすでに {{used}} 使っています。切替後は新しいモデルの容量（{{total}}）の約 {{pct}}% になります",
         "overflowDescription": "この会話はすでに {{used}} 使っており、新しいモデルが扱える {{total}}（約 {{pct}}%）を超えています。切り替えると、Cindy が要約してから続けます。チャット履歴は残りますが、全文をそのままは渡しません。",
-        "overflowDescriptionRemote": "この会話はすでに {{used}} 使っており、新しいモデルが扱える {{total}}（約 {{pct}}%）を超えています。リモートのタスクでは自動的に新しいエージェント文脈へ引き継げないため、次の送信が失敗する可能性があります。このまま切り替えるか、今のモデルのままにしてください。",
+        "overflowDescriptionRemote": "このリモートタスクのコンテキストは、小さいモデルの {{total}} に対して {{used}}（約 {{pct}}%）を使用しているため、安全に切り替えられません。現在のモデルを維持するか、新しいタスクを作成してからこのモデルを選択してください。",
         "confirmSwitch": "切り替えて続ける",
         "cancelSwitch": "今は切り替えない"
       },
@@ -7544,7 +7596,7 @@
     "openApp": "ChatGPT App を開く",
     "relogin": "ChatGPT に再ログイン",
     "reloginRiskTitle": "それでも Cindy から再ログインしますか？",
-    "reloginRiskDescription": "新しい OpenAI OAuth 認証が作成され、このコンピューターの ChatGPT App と Codex CLI が直ちにログアウトする可能性があります。完了後、それらのアプリでもう一度ログインする必要があります。",
+    "reloginRiskDescription": "Cindy は新しい OpenAI OAuth 認証情報を作成します。通常は ChatGPT App に影響しませんが、システムの Codex と認証情報を共有している場合は、関連アプリで再ログインが必要になることがあります。",
     "reloginRiskConfirm": "リスクを承知して続行",
     "devWriteBlocked": "開発環境は既定で、このコンピューターの ChatGPT ログインを読み取り専用で共有するため、OAuth の開始や認証情報の変更はできません。OAuth をテストする場合は、隔離サンドボックスで XDT_ALLOW_DEV_OAUTH_WRITE=1 を明示的に設定してください。",
     "devReadOnly": "開発環境では読み取り専用",
@@ -7729,7 +7781,7 @@
       "switchClaudeSubscriptionTitle": "このセッションを Claude.ai サブスクリプションに切り替えて再試行",
       "switchingClaudeSubscription": "Claude.ai に切り替え中…",
       "claudeSubscriptionSwitchFailed": "Claude.ai への切り替えまたはこのセッションの再試行に失敗しました：{{msg}}",
-      "budgetModelHint": "繰り返し失敗する場合は、通常版 GPT モデルに切り替えてお試しください。",
+      "codexAppServerRetired": "Codex サービスが再起動または交換されました。現在のリクエストは中断されたため、もう一度実行してください。",
       "codexAuthMissing": "リモートの Codex がまだサインインしていません（401 Unauthorized）。「認証情報を同期」をクリックしてローカルの Codex 認証情報をリモートの Cindy Codex home にプッシュし、再試行してください。",
       "codexAuthMissingLocal": "Codex 認証情報がないか期限切れです（401 Unauthorized）。{{appName}} Settings → Codex から再ログインする（ログイン時に app-server が自動再起動）か、ターミナルで `codex login` 実行後 Settings で認証モードを一度切り替えて app-server を再起動してから、新しいセッションを開始してください。",
       "codexSessionExpired": "OpenAI 接続の更新が必要です。ChatGPT に再接続すると続行できます。{{appName}} がシステムの Codex CLI からサインアウトしたり、他のモデルソースへの再接続を求めたりすることはありません。",
