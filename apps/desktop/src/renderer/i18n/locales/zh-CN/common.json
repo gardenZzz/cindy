@@ -12,6 +12,12 @@
     "REMOTE_NATIVE_OAUTH_UNAVAILABLE": "未连接 Claude.ai 订阅，请先连接或选择网关模型",
     "DEVICE_LINK_DEVICE_UNRESPONSIVE": "目标设备长时间无响应，请检查远程设备后重试",
     "INTERNAL": "操作失败，请稍后重试。",
+    "SSH_CONFIG_CONCURRENT_MODIFICATION": "SSH 配置已在磁盘上发生变化，请重新加载后再试。",
+    "SSH_CONFIG_RELOAD_REQUIRED": "SSH 配置已保存，但 Cindy 刷新失败。请重新加载 SSH 配置。",
+    "SSH_CONFIG_OWNERSHIP_REQUIRED": "Cindy 无法安全管理此 SSH 配置。请重新加载，并确认 Cindy 所有权标记存在且主机别名唯一。",
+    "SSH_CONFIG_AUTH_UNSUPPORTED": "Cindy 无法安全复现此主机的部分 SSH 配置规则。终端 SSH 仍可能成功；请检查 Match、条件 Include、IdentityAgent、IdentitiesOnly 和公钥设置。",
+    "SSH_AGENT_UNAVAILABLE": "SSH Agent 当前不可用。请启动 SSH Agent，并用 ssh-add 加载对应私钥后重试。",
+    "SSH_HOST_PREFS_WRITE_FAILED": "主机仍已保存，但显示名称或 Agent Proxy 设置未能保存。请检查本地存储权限后重试。",
     "REMOTE_WORKDIR_INVALID": "远程项目目录无效，请重新选择项目目录。",
     "REMOTE_WORKDIR_NOT_FOUND": "远程项目目录不存在，请重新选择项目目录。",
     "REMOTE_WORKDIR_NOT_DIRECTORY": "远程项目路径不是文件夹，请重新选择项目目录。",
@@ -168,6 +174,13 @@
       "title": "远端机器",
       "footnote": "第一版仅支持 SSH 连接管理。在远端运行 Agent 的能力将在后续版本中加入。",
       "viaAuth": "通过 {{label}} 认证",
+      "readOnlyFromSshConfig": "连接信息来自 SSH 配置",
+      "configWarning": "部分 SSH 配置规则 Cindy 无法解析，主机列表或连接信息可能与终端 SSH 不一致。",
+      "configDiagnostic": {
+        "io": "Cindy 无法读取 SSH 配置。这里仍显示上次成功读取的主机；请检查文件权限，然后重新加载。",
+        "syntax": "Cindy 无法解析 SSH 配置。这里仍显示上次成功读取的主机；请修复配置，然后重新加载。",
+        "limit": "SSH 配置的嵌套过深或内容过大，Cindy 无法安全读取。这里仍显示上次成功读取的主机。"
+      },
       "empty": {
         "title": "还没有远端机器。",
         "hint": "点击\"添加\"注册一台，或点刷新图标从 ~/.ssh/config 导入。"
@@ -199,7 +212,9 @@
       },
       "edit": {
         "title": "编辑 {{id}}",
-        "submit": "保存修改"
+        "submit": "保存修改",
+        "connectionFieldsReadOnly": "来自 SSH 配置的连接信息在这里为只读；显示名、自动连接和 Agent Proxy 仍可修改。",
+        "authenticationFromSshConfig": "认证信息来自 SSH 配置。"
       },
       "keys": {
         "title": "配置 SSH 密钥",
@@ -276,6 +291,8 @@
       "add": {
         "title": "添加一台远端机器",
         "alias": "别名",
+        "displayName": "显示名",
+        "displayNamePlaceholder": "可选，仅在 Cindy 中显示",
         "hostname": "主机名",
         "user": "用户",
         "port": "端口",
@@ -376,6 +393,7 @@
         "reloaded": "已重新读取 ~/.ssh/config",
         "loadFailed": "加载远端机器失败",
         "addFailed": "添加机器失败",
+        "addConflict": "添加期间 SSH 配置发生了变化。请重新加载配置，检查该主机条目后再试。",
         "connectFailed": "连接失败",
         "disconnectFailed": "断开失败",
         "removeFailed": "移除失败",
@@ -3035,7 +3053,14 @@
           "toggleFailed": "切换浏览器自动化失败",
           "openedForLogin": "已打开自动化浏览器，请在其中登录需要的网站",
           "openForLoginFailed": "打开浏览器失败",
-          "foreignInstance": "本机已有另一个 Cindy 占用了 Agent 专用浏览器。请先退出其它 Cindy 窗口再试。"
+          "foreignInstance": "本机已有另一个 Cindy 占用了 Agent 专用浏览器。请先退出其它 Cindy 窗口再试。",
+          "profileLocked": "请彻底退出 Chrome、Edge 或 Brave（包括托盘中的进程），然后重试。",
+          "noChromium": "未在这台电脑上找到 Chrome、Edge、Brave 或 Chromium。",
+          "noAuthDb": "没有找到可复制的浏览器登录数据。请先在日常浏览器中登录，或关闭「使用我的浏览器登录态」后在 Agent 专用浏览器中登录。",
+          "copyFailed": "无法复制浏览器登录态。请彻底退出日常浏览器后重试，或关闭「使用我的浏览器登录态」。",
+          "headlessForbidden": "Agent 专用浏览器处于无界面模式时无法使用你的浏览器登录态。",
+          "stopFailed": "请彻底关闭 Agent 专用浏览器，然后重试。",
+          "appBoundEncryptionUnsupported": "Windows 已使用应用绑定加密保护这些浏览器登录态，Cindy 无法复制。请关闭「使用我的浏览器登录态」，打开 Agent 专用浏览器并在其中登录一次。"
         },
         "openForLogin": "打开 Agent 专用浏览器",
         "openForLoginHint": "这是 Agent 专用的独立浏览器：基于你本机的 Chrome，但用一份独立配置（右上角显示为 Cindy），不会动你日常 Chrome 的标签页、书签和登录态。Agent 会在这里替你打开网页、阅读内容、点击和截图。需要登录的网站，点上面「打开 Agent 专用浏览器」手动登录一次即可——登录态会长期保留，之后 Agent 就能以你的身份继续操作。"
@@ -3738,6 +3763,28 @@
       "recording": "按下新快捷键…",
       "editAria": "修改 {{name}} 的快捷键",
       "workLouderCodex": {
+        "codexGuard": {
+          "title": "Codex 兼容性",
+          "label": "防止 Codex 占用设备",
+          "aria": "防止 Codex 占用 Codex Micro",
+          "recover": "恢复环境",
+          "status": {
+            "unsupported": "仅 macOS",
+            "disabled": "已关闭",
+            "protecting": "请重启 Codex",
+            "intercepted": "保护中",
+            "recovery-required": "需要恢复",
+            "error": "不可用"
+          },
+          "descriptions": {
+            "unsupported": "此保护仅在 macOS 上可用。",
+            "disabled": "Cindy 运行期间阻止 Codex 连接 Codex Micro；不会限制 Cindy 本身。",
+            "protecting": "保护已就绪。请完全退出后重新打开 Codex；已经运行的 Codex 不受影响。",
+            "intercepted": "已阻止 Codex 的 Work Louder 服务，Cindy 可以继续使用设备。",
+            "recovery-required": "保护已停止，但 NODE_OPTIONS 尚未安全恢复。请先重试恢复，再重新开启。",
+            "error": "Cindy 无法更新 Codex 保护；原有 NODE_OPTIONS 已保留或等待恢复。"
+          }
+        },
         "commands": {
           "session.selectPrevious": {
             "name": "上一个任务",
@@ -5461,7 +5508,8 @@
     "browserWaiting": "请在浏览器中完成验证",
     "browserCallback": {
       "successTitle": "登录成功",
-      "successBody": "你可以关闭此页面，回到 {{appName}} 继续。",
+      "successBody": "登录已成功，现在可以关闭此页面了。",
+      "closeCountdown": "{{count}}秒后自动关闭",
       "errorTitle": "登录未完成",
       "errorBody": "请回到 {{appName}} 重新登录。",
       "returnButton": "回到 {{appName}}"
@@ -6012,6 +6060,10 @@
       "detachDevice": "断开设备",
       "startDevice": "启动设备",
       "stopDevice": "停止设备",
+      "deleteDevice": "删除设备",
+      "deleteDeviceConfirmTitle": "删除“{{device}}”？",
+      "deleteDeviceConfirmDescription": "此操作会永久删除这台模拟器，以及其中存储的所有 App、账号和数据。此操作无法撤销。",
+      "deleteRunningDeviceConfirmDescription": "这台模拟器正在运行。确认后，Cindy 会先清理相关资源并停止设备，然后永久删除其中的所有 App、账号和数据。此操作无法撤销。",
       "attachedDescription": "此设备已绑定到当前 Cindy 任务。",
       "agentControlTitle": "Agent 控制",
       "agentControlDescription": "允许后，Agent 才能启动、停止或操作这台设备。",
@@ -7355,7 +7407,7 @@
         "title": "这个模型装不下当前对话",
         "warnToast": "这段对话已经用了 {{used}}，换过去大约会占新模型容量（{{total}}）的 {{pct}}%",
         "overflowDescription": "这段对话已经用了 {{used}}，超过新模型能放下的 {{total}}（约 {{pct}}%）。换过去后，Cindy 会先整理一份摘要再继续；对话记录还在，只是不会整段原样带给新模型。",
-        "overflowDescriptionRemote": "这段对话已经用了 {{used}}，超过新模型能放下的 {{total}}（约 {{pct}}%）。远程任务不会自动换窗，下一次发送仍可能失败。可以仍然切换，或留在当前模型。",
+        "overflowDescriptionRemote": "当前远程任务的上下文已用 {{used}} / {{total}}（约 {{pct}}%），无法安全切换到这个小窗口模型。请保留当前模型，或新建任务后再选择。",
         "confirmSwitch": "切换并继续",
         "cancelSwitch": "先不换"
       },
@@ -7536,7 +7588,7 @@
     "openApp": "打开 ChatGPT App",
     "relogin": "重新登录 ChatGPT",
     "reloginRiskTitle": "仍要由 Cindy 重新登录？",
-    "reloginRiskDescription": "这会创建新的 OpenAI OAuth 授权，并可能让本机 ChatGPT App 和 Codex CLI 立即退出登录。完成后，你需要在本机应用中再次登录。",
+    "reloginRiskDescription": "Cindy 会创建新的 OpenAI OAuth 登录凭证。通常不会影响 ChatGPT App；如果仍与系统 Codex 共用同一份凭证，相关应用可能会要求你重新登录。",
     "reloginRiskConfirm": "接受风险并继续",
     "devWriteBlocked": "开发环境默认只读共享本机 ChatGPT 登录，不能发起登录或改写凭证。确需测试 OAuth 时，请用隔离沙箱并显式设置 XDT_ALLOW_DEV_OAUTH_WRITE=1。",
     "devReadOnly": "开发环境只读",
@@ -7721,7 +7773,7 @@
       "switchClaudeSubscriptionTitle": "把当前任务切换到 Claude.ai 订阅并重试",
       "switchingClaudeSubscription": "正在切换到 Claude.ai…",
       "claudeSubscriptionSwitchFailed": "无法切换到 Claude.ai 或重试当前任务：{{msg}}",
-      "budgetModelHint": "如果反复失败，可以切换到普通版 GPT 再试试。",
+      "codexAppServerRetired": "Codex 服务已重启或更换；当前请求已中断，请重新运行。",
       "codexAuthMissing": "远端 Codex 还没同步登录态（401 Unauthorized）。点击右侧「同步登录态」把本机 Codex 凭证推到远端 Cindy Codex home，然后重试发送。",
       "codexAuthMissingLocal": "Codex 凭证缺失或失效（401 Unauthorized）。请在 {{appName}} Settings → Codex 重新登录（登录后会自动重启 Codex app-server），或在终端跑 `codex login` + 在 Settings 切换一次鉴权模式来重启 app-server，然后新建任务再发。",
       "codexSessionExpired": "OpenAI 连接需要更新。重新连接 ChatGPT 后即可继续；{{appName}} 不会退出系统 Codex CLI，也不会要求你重新连接其他模型来源。",

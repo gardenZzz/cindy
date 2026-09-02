@@ -42,6 +42,13 @@ import {
   type WindowsCloseBehavior,
 } from '../shared/windowBehavior';
 import {
+  CODEX_MICRO_GUARD_GET_STATE_CHANNEL,
+  CODEX_MICRO_GUARD_RECOVER_CHANNEL,
+  CODEX_MICRO_GUARD_SET_ENABLED_CHANNEL,
+  CODEX_MICRO_GUARD_STATE_CHANGED_CHANNEL,
+  type CodexMicroGuardState,
+} from '../shared/codexMicroGuard';
+import {
   WORKLOUDER_CODEX_ACTION_CHANNEL,
   WORKLOUDER_CODEX_GET_STATE_CHANNEL,
   WORKLOUDER_CODEX_PREVIEW_INPUT_CHANNEL,
@@ -1622,6 +1629,22 @@ contextBridge.exposeInMainWorld('electronAPI', {
     },
     notifyWindowsCloseBehaviorPromptShown: (): void =>
       ipcRenderer.send(WINDOW_BEHAVIOR_WINDOWS_CLOSE_BEHAVIOR_SHOWN_CHANNEL),
+  },
+
+  codexMicroGuard: {
+    getState: (): Promise<CodexMicroGuardState> =>
+      ipcRenderer.invoke(CODEX_MICRO_GUARD_GET_STATE_CHANNEL),
+    setEnabled: (enabled: boolean): Promise<CodexMicroGuardState> =>
+      ipcRenderer.invoke(CODEX_MICRO_GUARD_SET_ENABLED_CHANNEL, enabled),
+    recover: (): Promise<CodexMicroGuardState> =>
+      ipcRenderer.invoke(CODEX_MICRO_GUARD_RECOVER_CHANNEL),
+    onStateChanged: (callback: (state: CodexMicroGuardState) => void): (() => void) => {
+      const listener = (_event: Electron.IpcRendererEvent, state: CodexMicroGuardState): void => {
+        callback(state);
+      };
+      ipcRenderer.on(CODEX_MICRO_GUARD_STATE_CHANGED_CHANNEL, listener);
+      return () => ipcRenderer.removeListener(CODEX_MICRO_GUARD_STATE_CHANGED_CHANNEL, listener);
+    },
   },
 
   workLouderCodex: {
@@ -4197,8 +4220,8 @@ contextBridge.exposeInMainWorld('electronAPI', {
   },
 
   // ── Remote SSH (Phase A) ───────────────────────────────────────────────
-  // 连接管理 + ~/.ssh/config IO. 暂未涉及 agent-on-remote / session 同步.
-  // `host.config.id` 即 ssh alias, 与 ~/.ssh/config Host 行同名.
+  // 连接管理 + OpenSSH config 发现；Cindy 新主机写独立 managed Include 文件。
+  // `host.config.id` 即 ssh alias, 与 OpenSSH `Host` 声明同名.
   remoteSsh: {
     list: (): Promise<{
       hosts: Array<{
@@ -4208,8 +4231,11 @@ contextBridge.exposeInMainWorld('electronAPI', {
           port: number;
           user: string;
           authMethod: 'agent' | 'key';
-          identityFile?: string;
+          identityFileConfigured: boolean;
+          identityFileName?: string;
           source: 'ssh-config' | 'manual';
+          managedByCindy: boolean;
+          displayName?: string;
         };
         status:
           'disconnected' | 'connecting' | 'authenticating' | 'ready' | 'reconnecting' | 'failed';
@@ -4222,11 +4248,18 @@ contextBridge.exposeInMainWorld('electronAPI', {
         /** 隧道实时状态 (内存态); 无记录 → null. */
         agentProxyTunnel: AgentProxyTunnelState | null;
       }>;
+      warningCount?: number;
+      diagnostic?: { kind: 'io' | 'syntax' | 'limit' } | null;
     }> => ipcRenderer.invoke('maker:remote-ssh:list'),
-    reloadConfig: (): Promise<{ hosts: unknown[] }> =>
+    reloadConfig: (): Promise<{
+      hosts: unknown[];
+      warningCount?: number;
+      diagnostic?: { kind: 'io' | 'syntax' | 'limit' } | null;
+    }> =>
       ipcRenderer.invoke('maker:remote-ssh:reload-config'),
     add: (host: {
       id: string;
+      displayName?: string;
       hostname: string;
       port?: number;
       user: string;
@@ -4236,11 +4269,14 @@ contextBridge.exposeInMainWorld('electronAPI', {
     }): Promise<{ host: unknown }> => ipcRenderer.invoke('maker:remote-ssh:add', host),
     update: (host: {
       id: string;
+      displayName?: string;
       hostname: string;
       port?: number;
       user: string;
       authMethod?: 'agent' | 'key';
       identityFile?: string;
+      /** Preserve the existing main-only path without returning it to Renderer. */
+      identityFileUnchanged?: boolean;
       agentProxy?: SshHostAgentProxyPref | null;
     }): Promise<{ host: unknown }> => ipcRenderer.invoke('maker:remote-ssh:update', host),
     remove: (id: string): Promise<{ ok: true }> =>

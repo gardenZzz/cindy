@@ -8357,6 +8357,9 @@ export type GhostPipeLibraryResult =
       softLimitBytes?: number;
       softLimitExceeded?: boolean;
       location?: 'default' | 'custom';
+      authorizedReadonly?: boolean;
+      libraryGeneration?: number;
+      libraryIdentity?: string;
     }
   | {
       ok: true;
