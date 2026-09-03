@@ -382,6 +382,7 @@ import {
   getMakerIfReady,
   getPluginRegistry,
   prepareCodexForAuthModeChange,
+  prepareCodexForCustomProviderHostChange,
   restartCodexAfterAuthModeChange,
   setBeforeLocalCodexSessionStartHook,
 } from '../maker-host/index.js';
@@ -941,6 +942,10 @@ import {
   closeRejectedRuntimeAndRestoreControlStores,
   isRemoteModelSwitchRouteChangeError,
 } from './runtimeSetModel.js';
+import {
+  codexCustomProviderConfigSignature,
+  hasCodexAppliedCustomProviderCapability,
+} from '../maker-host/codex-custom-provider-route.js';
 import {
   decideCodexProviderThreadRelink,
   relinkCodexProviderThread,
@@ -4941,7 +4946,12 @@ export function wireSessionToIpc(session: ReturnType<Maker['getSession']>): void
           if (!isSuccessfulDone) {
             void markAssistantTurnFailed(session.id, turnBoundaryAssistantPersistId);
           } else if (!isPairedFailedTurnDone) {
-            void markAssistantTurnCompleted(session.id, turnBoundaryAssistantPersistId);
+            const nativeForkAnchor = eventAgentMeta?.nativeForkAnchor;
+            void markAssistantTurnCompleted(
+              session.id,
+              turnBoundaryAssistantPersistId,
+              nativeForkAnchor ? { nativeForkAnchor } : undefined,
+            );
           }
         }
         // error 行在 flushOrphanToolResults 之后入队,保证 orphan tool_result 排在
@@ -7133,6 +7143,22 @@ export function registerMakerIpc(maker: Maker, options: RegisterMakerIpcOptions)
     listProviders: (opts) => getDesktopProviderService().listProviders(opts),
     getModelVisibilityOverrides: () => getModelVisibilityMirrorSnapshot(),
     refreshCatalog: () => refreshCustomProvidersIntoCatalog(),
+    codexCustomProviderConfigSignature,
+    hasAppliedCodexCustomProviderImageGeneration: (providerId) =>
+      hasCodexAppliedCustomProviderCapability(providerId, 'imageGeneration'),
+    listBusyLocalCodexSessionIds: () =>
+      maker
+        .listActiveSessions()
+        .filter(
+          (session) =>
+            session.agentKind === 'codex' &&
+            !session.remoteHostId &&
+            isLocalSessionBusy(session, isSessionInTurn),
+        )
+        .map((session) => session.id),
+    prepareCodexCustomProviderHostChange: prepareCodexForCustomProviderHostChange,
+    finalizeCodexCustomProviderHostChange: finalizeCodexAfterAuthModeChange,
+    cancelCodexCustomProviderHostChange: cancelCodexAuthModeChange,
     beginRouteMutation: (providerId) => beginProviderRouteMutation(providerId),
     broadcastChanged: () => broadcastToAllWindows(MAKER_PUSH.PROVIDER_CHANGED, {}),
     listProviderIds: () => getDesktopSelectableCatalog().providers.map((provider) => provider.id),
@@ -9415,6 +9441,7 @@ export function registerMakerIpc(maker: Maker, options: RegisterMakerIpcOptions)
           id: sessions.id,
           agentKind: sessions.agentKind,
           model: sessions.model,
+          providerId: sessions.providerId,
           status: sessions.status,
           remoteHostId: sessions.remoteHostId,
           orcaRole: sessions.orcaRole,
