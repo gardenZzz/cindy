@@ -129,6 +129,7 @@ export interface MobileLearnStartRequest {
   input: string;
   sourceKind: 'freetext' | 'session' | 'hub';
   hubSlug?: string;
+  hubCatalogScope?: 'market' | 'team';
   originSessionId?: string;
 }
 

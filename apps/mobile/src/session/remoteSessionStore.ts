@@ -64,6 +64,7 @@ import type { InputProjection, PendingInteraction, RemoteMessage, RemoteSession 
 import { clampLiveRowCreatedAt, compareMessageOrder, MESSAGE_PAGE_SIZE } from '@/session/messagePaging';
 import { normalizeRemoteMoney } from '@/session/remoteMoney';
 import type { AgentKind } from '@cindy/maker-shared';
+import { projectLargeSettledToolInputs } from '@/session/messageToolPayloadProjection';
 
 interface DeviceShard {
   deviceId: string;
@@ -1573,7 +1574,7 @@ function preserveSessionRuntimeFields(
 }
 
 function normalizeMessages(list: readonly RemoteMessage[]): RemoteMessage[] {
-  return [...list].sort(compareMessageOrder);
+  return projectLargeSettledToolInputs([...list].sort(compareMessageOrder));
 }
 
 function messageKey(message: RemoteMessage): string {
