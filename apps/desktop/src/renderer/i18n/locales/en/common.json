@@ -231,7 +231,7 @@
         "unlockButton": "Unlock",
         "unlockTip": "Load this key into ssh-agent so SSH connections work without re-typing the passphrase.",
         "unlockTitle": "Unlock {{name}}",
-        "unlockHint": "Type the passphrase to load this key into ssh-agent. We pipe it to `ssh-add` and forget it immediately afterwards.",
+        "unlockHint": "Type the passphrase to load this key into ssh-agent — leave it blank if the key has no passphrase. We pipe it to `ssh-add` and forget it immediately afterwards.",
         "unlockSubmit": "Unlock",
         "generateTitle": "Generate a new SSH key",
         "nameLabel": "Name (optional)",

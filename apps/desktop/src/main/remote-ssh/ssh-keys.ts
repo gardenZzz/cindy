@@ -194,6 +194,10 @@ export interface AddKeyToAgentResult {
  * IMMEDIATELY after `generateNewKey` (passing the freshly typed passphrase
  * in memory) so the user types it once at creation and never again.
  *
+ * An absent or empty `passphrase` is a first-class input, not a degenerate
+ * one: unencrypted private keys are exactly the keys that need no passphrase,
+ * and they still have to reach the agent.
+ *
  * Passphrase handling — see this file's header for the full security model.
  * Briefly: passphrase is written to a temp script under `os.tmpdir()` with
  * mode 0700; ssh-add reads it via SSH_ASKPASS; the script is overwritten
@@ -218,7 +222,8 @@ export async function addKeyToAgent(opts: {
   privateKeyPath: string;
   passphrase?: string;
 }): Promise<AddKeyToAgentResult> {
-  const { privateKeyPath, passphrase } = opts;
+  const { privateKeyPath } = opts;
+  const passphrase = opts.passphrase ?? '';
 
   // Deterministic pre-flight: confirm the private key actually exists BEFORE
   // handing the path to ssh-add. ssh-add's failure mode for a missing file is
@@ -246,22 +251,18 @@ export async function addKeyToAgent(opts: {
     // attempts the key and buildFailure classifies its stderr downstream.
   }
 
-  // No passphrase = key is unencrypted; ssh-add doesn't need to prompt
-  // and we can skip the askpass dance entirely.
-  if (!passphrase) {
-    try {
-      const args = sshAddArgs(privateKeyPath);
-      // execFile defaults to pipes (not inherit) so ssh-add won't grab a tty.
-      const result = await execFileP('ssh-add', args);
-      return { success: true, failureReason: null, errorHint: null, stderr: result.stderr };
-    } catch (err) {
-      return buildFailure(err);
-    }
-  }
-
-  // Encrypted key: feed passphrase via SSH_ASKPASS. We write a tiny helper
-  // script under os.tmpdir() that just emits the passphrase to stdout.
-  // ssh-add invokes it when it needs the passphrase.
+  // Always go through SSH_ASKPASS, including the empty-passphrase case.
+  // Skipping it for `!passphrase` used to look like a harmless shortcut — an
+  // unencrypted key never prompts — but the branch is also what an *encrypted*
+  // key reaches when the caller submits a blank passphrase. Then ssh-add finds
+  // no askpass and no tty, falls back to reading the prompt off stdin, and
+  // execFile's stdin pipe is never closed: it blocks forever and the IPC call
+  // never settles. Feeding it a blank passphrase through askpass instead makes
+  // ssh-add reject and exit within seconds.
+  //
+  // Feed the passphrase via SSH_ASKPASS: we write a tiny helper script under
+  // os.tmpdir() that just emits it to stdout. ssh-add invokes the script only
+  // when it actually needs a passphrase, so an unencrypted key never reads it.
   //
   // Windows note: file extension MUST be `.cmd` (or `.bat`/`.exe`) — Windows'
   // `CreateProcessW` rejects `.sh` with error 193 (ERROR_BAD_EXE_FORMAT)

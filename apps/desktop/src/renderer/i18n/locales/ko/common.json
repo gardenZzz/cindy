@@ -231,7 +231,7 @@
         "unlockButton": "잠금 해제",
         "unlockTip": "이 키를 ssh-agent 에 로드하여 이후 SSH 연결마다 passphrase 를 다시 묻지 않게 합니다.",
         "unlockTitle": "{{name}} 잠금 해제",
-        "unlockHint": "passphrase 를 입력하면 `ssh-add` 에 전달하여 agent 에 로드합니다. {{appName}} 는 즉시 폐기합니다.",
+        "unlockHint": "passphrase 를 입력하면 `ssh-add` 에 전달하여 agent 에 로드합니다. passphrase 가 없는 키는 비워 두면 됩니다. {{appName}} 는 즉시 폐기합니다.",
         "unlockSubmit": "잠금 해제",
         "generateTitle": "새 SSH 키 생성",
         "nameLabel": "이름(선택)",

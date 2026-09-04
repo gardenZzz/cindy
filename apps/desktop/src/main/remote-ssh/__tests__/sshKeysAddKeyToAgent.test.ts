@@ -1,7 +1,12 @@
 /**
- * addKeyToAgent — 私钥路径不存在时稳定归类为 no_such_file (#1837)。
- * 只测缺失路径分支(不会真跑 ssh-add),覆盖 Windows 路径形态。
+ * addKeyToAgent — 私钥路径不存在时稳定归类为 no_such_file (#1837);
+ * 以及空 passphrase 必须仍然经由 SSH_ASKPASS 调用 ssh-add。
+ * 缺失路径分支不会真跑 ssh-add,覆盖 Windows 路径形态。
  */
+
+import fsp from 'node:fs/promises';
+import os from 'node:os';
+import nodePath from 'node:path';
 
 import { describe, expect, it, vi, afterEach } from 'vitest';
 
@@ -51,5 +56,33 @@ describe('addKeyToAgent — missing private key path', () => {
     expect(result.failureReason).toBe('no_such_file');
     // 关键断言:缺失路径在 fs.access 就返回,execFile(ssh-add) 不被调用。
     expect(execFileMock).not.toHaveBeenCalled();
+  });
+});
+
+describe('addKeyToAgent — 空 passphrase', () => {
+  it('仍走 SSH_ASKPASS,不落回裸 ssh-add(那条路会挂死在 stdin 上)', async () => {
+    // 未加密的私钥正确的输入就是「不填」。曾经这里会跳过 askpass 直接 execFile,
+    // 对未加密密钥没问题,但同一分支也是「加密密钥 + 留空」的落点:ssh-add 找不到
+    // askpass 又没有 tty,退回从 stdin 读 prompt,而 execFile 的 stdin 管道永不关闭
+    // → 整个 IPC 调用无限期挂起。走 askpass 则会在几秒内被拒绝并退出。
+    const dir = await fsp.mkdtemp(nodePath.join(os.tmpdir(), 'sshkeys-askpass-'));
+    const keyPath = nodePath.join(dir, 'id_ed25519');
+    await fsp.writeFile(keyPath, 'placeholder — ssh-add 已被 mock,不会真的解析它');
+    execFileMock.mockImplementation(
+      (_file: string, _args: string[], _options: unknown, cb: (e: unknown, o: string, s: string) => void) => {
+        cb(null, '', '');
+      },
+    );
+    try {
+      const result = await addKeyToAgent({ privateKeyPath: keyPath });
+      expect(result.success).toBe(true);
+      expect(execFileMock).toHaveBeenCalledTimes(1);
+      const options = execFileMock.mock.calls[0]?.[2] as { env?: NodeJS.ProcessEnv } | undefined;
+      expect(options?.env?.SSH_ASKPASS).toBeTruthy();
+      expect(options?.env?.SSH_ASKPASS_REQUIRE).toBe('force');
+    } finally {
+      execFileMock.mockReset();
+      await fsp.rm(dir, { recursive: true, force: true });
+    }
   });
 });

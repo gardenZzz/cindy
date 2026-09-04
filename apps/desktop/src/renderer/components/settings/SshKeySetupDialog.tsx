@@ -706,7 +706,12 @@ function UnlockDialog({ privateKeyPath, onClose, onSubmit }: UnlockDialogProps) 
               onToggleVisible={() => setVisible((v) => !v)}
               autoFocus
               onSubmit={async () => {
-                if (!pass || submitting) return;
+                // Empty passphrase is a legitimate submission — an unencrypted
+                // private key needs none, and "type nothing" is its only correct
+                // input. Gating on `pass` left those keys with no path at all
+                // from the UI into the agent. main's addKeyToAgent accepts an
+                // empty passphrase and hands it to ssh-add via SSH_ASKPASS.
+                if (submitting) return;
                 setSubmitting(true);
                 await onSubmit(privateKeyPath, pass);
                 setSubmitting(false);
@@ -731,7 +736,7 @@ function UnlockDialog({ privateKeyPath, onClose, onSubmit }: UnlockDialogProps) 
             </Dialog.Close>
             <button
               type="button"
-              disabled={!pass || submitting}
+              disabled={submitting}
               onClick={async () => {
                 setSubmitting(true);
                 await onSubmit(privateKeyPath, pass);
@@ -739,7 +744,7 @@ function UnlockDialog({ privateKeyPath, onClose, onSubmit }: UnlockDialogProps) 
               }}
               className={cn(
                 'flex h-7 items-center gap-1 rounded-full px-3 text-12 leading-none font-medium border',
-                (!pass || submitting) && 'cursor-not-allowed opacity-60',
+                submitting && 'cursor-not-allowed opacity-60',
               )}
               style={{
                 backgroundColor: 'var(--settings-btn-secondary-bg)',
