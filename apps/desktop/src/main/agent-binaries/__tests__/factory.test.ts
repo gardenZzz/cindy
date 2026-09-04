@@ -325,7 +325,7 @@ describe('离线启动 fallback', () => {
 
     try {
       const { getCachedManifest } = await import('../../manifestService.js');
-      vi.mocked(getCachedManifest).mockReturnValue({ app: {} } as any);
+      vi.mocked(getCachedManifest).mockReturnValue({ app: { version: '0.0.0-test' } });
       // 清单本身可达,只是没有这个 vendor 段(发布侧漏发)。
       mocks.getVendorAsset.mockReturnValue(undefined);
 
@@ -351,7 +351,7 @@ describe('离线启动 fallback', () => {
     const installSubdir = `asset-missing-nolocal-${Date.now()}-${Math.random().toString(36).slice(2)}`;
 
     const { getCachedManifest } = await import('../../manifestService.js');
-    vi.mocked(getCachedManifest).mockReturnValue({ app: {} } as any);
+    vi.mocked(getCachedManifest).mockReturnValue({ app: { version: '0.0.0-test' } });
     mocks.getVendorAsset.mockReturnValue(undefined);
 
     const provisioner = createBinaryProvisioner({
@@ -374,7 +374,7 @@ describe('离线启动 fallback', () => {
 
     try {
       const { getCachedManifest } = await import('../../manifestService.js');
-      vi.mocked(getCachedManifest).mockReturnValue({ app: {} } as any);
+      vi.mocked(getCachedManifest).mockReturnValue({ app: { version: '0.0.0-test' } });
       mocks.getVendorAsset.mockReturnValue(undefined);
 
       const provisioner = createBinaryProvisioner({
