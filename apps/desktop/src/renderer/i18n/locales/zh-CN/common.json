@@ -231,7 +231,7 @@
         "unlockButton": "解锁",
         "unlockTip": "把这把密钥加载到 ssh-agent，后续 SSH 连接就不用每次再输 passphrase。",
         "unlockTitle": "解锁 {{name}}",
-        "unlockHint": "输入 passphrase 把这把密钥加载到 ssh-agent。我们把它直接喂给 `ssh-add` 后立刻丢弃，不保存。",
+        "unlockHint": "输入 passphrase 把这把密钥加载到 ssh-agent；没有 passphrase 的密钥留空即可。我们把它直接喂给 `ssh-add` 后立刻丢弃，不保存。",
         "unlockSubmit": "解锁",
         "generateTitle": "生成新的 SSH 密钥",
         "nameLabel": "名字(可选)",

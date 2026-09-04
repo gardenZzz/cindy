@@ -235,9 +235,17 @@ export function isAuthFailure(msg: string): boolean {
 export function authFailureHint(cfg: HostConfig): string {
   const portArg = cfg.port && cfg.port !== 22 ? `-p ${cfg.port} ` : '';
   if (cfg.authMethod === 'agent') {
-    const pinned = !!cfg.identityFile
-      || (cfg.sshAuthentication?.allowedAgentFingerprints?.length ?? 0) > 0;
-    if (pinned) {
+    // 配置里点名了具体身份 —— Cindy marker 的显式 pin、IdentitiesOnly 解析出的指纹集,
+    // 或普通 OpenSSH host 的 IdentityFile 指令 —— 时,正确的补救是把那把私钥 ssh-add
+    // 进 agent。第三种此前漏掉了:无 marker 的 host 一律 Agent-first(见 sshConfig 的
+    // authMethod 判定),identityFile / allowedAgentFingerprints 都是空,于是落到下面
+    // 那条"跑 ssh-copy-id,或改用 Identity file 认证"——对这类 host 两条都是死路:
+    // pubkey 通常早就装在远端了,而 ssh-config 来源的 host 在设置里连接字段只读,
+    // 认证方式根本改不了。
+    const hasConfiguredIdentity = !!cfg.identityFile
+      || (cfg.sshAuthentication?.allowedAgentFingerprints?.length ?? 0) > 0
+      || (cfg.sshAuthentication?.configuredIdentityFiles?.length ?? 0) > 0;
+    if (hasConfiguredIdentity) {
       return 'SSH agent has no key the remote accepts from the configured identity set. '
         + 'Load the matching private key with `ssh-add`, then try again.';
     }

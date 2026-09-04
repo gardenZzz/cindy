@@ -54,6 +54,26 @@ describe('isAuthFailure recognizes every authFailureHint variant', () => {
     expect(isAuthFailure(hint)).toBe(true);
   });
 
+  it('ssh config 写了 IdentityFile 但没 IdentitiesOnly 时也引导 ssh-add', () => {
+    // 无 Cindy marker 的普通 OpenSSH host 一律 Agent-first,identityFile 与
+    // allowedAgentFingerprints 都是空,只剩 configuredIdentityFiles。此时劝
+    // ssh-copy-id 是错的(pubkey 通常已在远端),劝"改用 Identity file 认证"
+    // 更是死路(ssh-config 来源的 host 在设置里连接字段只读)。
+    const hint = authFailureHint(cfg({
+      authMethod: 'agent',
+      sshAuthentication: {
+        identitiesOnly: false,
+        configuredIdentityFiles: ['/home/u/.ssh/id_rsa'],
+        identityFileDirectiveSeen: true,
+        identityFileNoneSeen: false,
+      },
+    }));
+    expect(hint).toContain('ssh-add');
+    expect(hint).not.toContain('ssh-copy-id');
+    expect(hint).not.toContain('Identity file');
+    expect(isAuthFailure(hint)).toBe(true);
+  });
+
   it('key mode hint (with and without identityFile)', () => {
     const hint = authFailureHint(cfg({
       authMethod: 'key',
