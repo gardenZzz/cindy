@@ -308,6 +308,17 @@ export function createBinaryProvisioner(config: BinaryProvisionerConfig): Binary
         // 3. 取 vendor asset
         const asset: VendorAsset | undefined = getVendorAsset(manifest, config.manifestField);
         if (!asset) {
+          // 必需 runtime 的字段缺失属发布侧漏发（客户端代码先于 CDN 资产落地），
+          // 与 manifest 拉取失败、下载/解压失败同属"清单侧拿不到资产"，回落本地
+          // 已验证安装，不让发布时序把启动打死。可选资产维持禁用语义：缺字段 =
+          // 该平台/渠道撤下了这个资产，不得复活陈旧安装。
+          const local = config.optionalAsset
+            ? null
+            : findLatestVerifiedBinary(config.installSubdir, binaryName);
+          if (local) {
+            emit({ status: 'ready', installedVersion: local.version, binaryPath: local.binaryPath }, onProgress);
+            return { ready: true, binaryPath: local.binaryPath };
+          }
           emit({
             status: 'failed',
             error: {
@@ -489,7 +500,12 @@ export function createBinaryProvisioner(config: BinaryProvisionerConfig): Binary
         if (!manifest) manifest = await fetchManifest();
         if (!manifest) return true;
         const asset = getVendorAsset(manifest, config.manifestField);
-        if (!asset) return config.optionalAsset !== true;
+        if (!asset) {
+          // 必需 runtime 缺字段时 prepare 会回落本地已验证安装(见上),这里与之
+          // 对齐:本地已有就不算"需要下载",splash 才不会挂一个永不发生的下载步。
+          if (config.optionalAsset === true) return false;
+          return findLatestVerifiedBinary(config.installSubdir, deriveBinaryName()) === null;
+        }
         return !isInstalled(config.installSubdir, asset.version, deriveBinaryName());
       } catch {
         return true;

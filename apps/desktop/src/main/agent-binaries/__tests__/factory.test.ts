@@ -15,6 +15,7 @@ import type { VendorRuntimeState } from '../types.js';
 
 const mocks = vi.hoisted(() => ({
   download: vi.fn(),
+  getVendorAsset: vi.fn(),
 }));
 
 vi.mock('../../downloader/index.js', () => ({
@@ -36,13 +37,15 @@ vi.mock('../../manifestService.js', () => ({
   getBaseUrl: () => 'https://cdn.test',
 }));
 
+const DEFAULT_ASSET = {
+  version: '9.9.9-test',
+  file: 'claude/claude-9.9.9.gz',
+  sha256: FAKE_SHA,
+  size: 3,
+};
+
 vi.mock('../manifest.js', () => ({
-  getVendorAsset: () => ({
-    version: '9.9.9-test',
-    file: 'claude/claude-9.9.9.gz',
-    sha256: FAKE_SHA,
-    size: 3,
-  }),
+  getVendorAsset: mocks.getVendorAsset,
   resolveVendorAssetUrl: (base: string, asset: { file: string }) => `${base}/${asset.file}`,
 }));
 
@@ -81,6 +84,8 @@ function makeProvisioner() {
 
 beforeEach(() => {
   mocks.download.mockReset();
+  mocks.getVendorAsset.mockReset();
+  mocks.getVendorAsset.mockReturnValue(DEFAULT_ASSET);
 });
 
 describe('createBinaryProvisioner emit 时序', () => {
@@ -305,6 +310,86 @@ describe('离线启动 fallback', () => {
 
       expect(result.ready).toBe(false);
       expect(result.error).toBe('unknown');
+    } finally {
+      local.cleanup();
+    }
+  });
+
+  // 回归(2026-09-04):客户端切到 codexPackage 字段、CDN 尚未发布该段时,
+  // asset_missing 是唯一一条不回落本地已验证安装的失败路径,导致 splash
+  // 卡在「环境初始化失败」——即便 userData 里已有装好并 .verified 的 runtime。
+  it('必需 runtime 在 manifest 缺字段时回落本地已验证安装', async () => {
+    const installSubdir = `asset-missing-fallback-${Date.now()}-${Math.random().toString(36).slice(2)}`;
+    const binaryName = 'test-binary';
+    const local = await mountVerifiedBinary(installSubdir, '6.0.0-verified', binaryName);
+
+    try {
+      const { getCachedManifest } = await import('../../manifestService.js');
+      vi.mocked(getCachedManifest).mockReturnValue({ app: {} } as any);
+      // 清单本身可达,只是没有这个 vendor 段(发布侧漏发)。
+      mocks.getVendorAsset.mockReturnValue(undefined);
+
+      const provisioner = createBinaryProvisioner({
+        vendorKey: 'codex',
+        manifestField: 'codexPackage',
+        installSubdir,
+        artifact: { kind: 'raw', binaryName },
+      });
+
+      const result = await provisioner.prepare();
+
+      expect(result.ready).toBe(true);
+      expect(result.binaryPath).toBe(local.binPath);
+      // 缺字段但本地已就位时不该再计入 splash 下载步数。
+      expect(await provisioner.peekNeedsDownload()).toBe(false);
+    } finally {
+      local.cleanup();
+    }
+  });
+
+  it('必需 runtime 在 manifest 缺字段且本地无安装时仍报 asset_missing', async () => {
+    const installSubdir = `asset-missing-nolocal-${Date.now()}-${Math.random().toString(36).slice(2)}`;
+
+    const { getCachedManifest } = await import('../../manifestService.js');
+    vi.mocked(getCachedManifest).mockReturnValue({ app: {} } as any);
+    mocks.getVendorAsset.mockReturnValue(undefined);
+
+    const provisioner = createBinaryProvisioner({
+      vendorKey: 'codex',
+      manifestField: 'codexPackage',
+      installSubdir,
+      artifact: { kind: 'raw', binaryName: 'test-binary' },
+    });
+
+    const result = await provisioner.prepare();
+
+    expect(result.ready).toBe(false);
+    expect(result.error).toBe('asset_missing');
+    expect(await provisioner.peekNeedsDownload()).toBe(true);
+  });
+
+  it('可选 runtime 在 manifest 缺字段时不复用旧版本', async () => {
+    const installSubdir = `optional-asset-missing-${Date.now()}-${Math.random().toString(36).slice(2)}`;
+    const local = await mountVerifiedBinary(installSubdir, '7.0.0-verified', 'pi');
+
+    try {
+      const { getCachedManifest } = await import('../../manifestService.js');
+      vi.mocked(getCachedManifest).mockReturnValue({ app: {} } as any);
+      mocks.getVendorAsset.mockReturnValue(undefined);
+
+      const provisioner = createBinaryProvisioner({
+        vendorKey: 'pi',
+        manifestField: 'pi',
+        installSubdir,
+        optionalAsset: true,
+        artifact: { kind: 'raw', binaryName: 'pi' },
+      });
+
+      const result = await provisioner.prepare();
+
+      expect(result.ready).toBe(false);
+      expect(result.error).toBe('asset_missing');
+      expect(await provisioner.peekNeedsDownload()).toBe(false);
     } finally {
       local.cleanup();
     }
