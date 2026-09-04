@@ -1,12 +1,12 @@
 {
   "source": "apps/desktop/src/renderer/themes/colors.ts",
   "generatedBy": "packages/design-tokens/src/classify.ts",
-  "snapshotCount": 515,
+  "snapshotCount": 521,
   "categories": {
     "literal": 249,
-    "alias": 235,
+    "alias": 236,
     "hsl-triplet": 6,
-    "runtime-derived-or-protected": 25
+    "runtime-derived-or-protected": 30
   },
   "entries": [
     {
@@ -5158,6 +5158,58 @@
         "light": "accent-cta-bg",
         "dark": "accent-cta-bg"
       },
+      "modeledAsSemantic": false
+    },
+    {
+      "id": "button-primary-hover",
+      "category": "runtime-derived-or-protected",
+      "destination": "register-only",
+      "lightKind": "color-mix",
+      "darkKind": "color-mix",
+      "modeledAsSemantic": false
+    },
+    {
+      "id": "button-primary-pressed",
+      "category": "runtime-derived-or-protected",
+      "destination": "register-only",
+      "lightKind": "color-mix",
+      "darkKind": "color-mix",
+      "modeledAsSemantic": false
+    },
+    {
+      "id": "button-secondary-hover",
+      "category": "runtime-derived-or-protected",
+      "destination": "register-only",
+      "lightKind": "color-mix",
+      "darkKind": "color-mix",
+      "modeledAsSemantic": false
+    },
+    {
+      "id": "button-secondary-pressed",
+      "category": "runtime-derived-or-protected",
+      "destination": "register-only",
+      "lightKind": "color-mix",
+      "darkKind": "color-mix",
+      "modeledAsSemantic": false
+    },
+    {
+      "id": "button-cta-hover",
+      "category": "alias",
+      "destination": "semantic-or-component-candidate",
+      "lightKind": "alias",
+      "darkKind": "alias",
+      "aliasOf": {
+        "light": "accent-hover",
+        "dark": "accent-hover"
+      },
+      "modeledAsSemantic": false
+    },
+    {
+      "id": "button-cta-pressed",
+      "category": "runtime-derived-or-protected",
+      "destination": "register-only",
+      "lightKind": "color-mix",
+      "darkKind": "color-mix",
       "modeledAsSemantic": false
     }
   ]
