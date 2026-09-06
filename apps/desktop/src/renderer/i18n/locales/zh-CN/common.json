@@ -1726,6 +1726,7 @@
       },
       "models": {
         "search": "搜索模型",
+        "available": "在模型选择中显示",
         "modelCount_other": "{{count}} 个模型",
         "subscription": "订阅",
         "subscriptionProduct": "{{product}} 订阅",

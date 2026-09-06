@@ -1726,6 +1726,7 @@
       },
       "models": {
         "search": "Search models",
+        "available": "Shown in Model Picker",
         "modelCount_one": "{{count}} model",
         "modelCount_other": "{{count}} models",
         "subscription": "Subscription",

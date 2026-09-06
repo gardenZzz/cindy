@@ -1726,6 +1726,7 @@
       },
       "models": {
         "search": "모델 검색",
+        "available": "모델 선택에 표시",
         "modelCount_other": "모델 {{count}}개",
         "subscription": "구독",
         "subscriptionProduct": "{{product}} 구독",

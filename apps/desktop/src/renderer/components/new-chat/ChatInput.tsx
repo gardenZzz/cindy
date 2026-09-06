@@ -7062,12 +7062,12 @@ export function ChatInput({
         providerEffort,
         rememberedEffort: getRememberedEffort(newModelId),
       });
-      const restoredFast = resolveFast(newModelId, effectiveSourceId);
+      const restoredFast = resolveFast(newModelId, effectiveSourceId) ?? false;
       const { effort: atomicEffort, fastMode: atomicFast } = composeAtomicModelSelection({
         efforts,
         effort: newEffort,
         fastSupported: modelFastSupported(newModelId, effectiveSourceId),
-        requestedFast: restoredFast ?? false,
+        requestedFast: restoredFast,
       });
       try {
         if (sessionId) {
@@ -7112,7 +7112,7 @@ export function ChatInput({
               remoteDeferred = remoteSetModelResult?.deferred === true;
               if (!useAtomicSelection) {
                 await remoteMaker.setEffort(sessionId, newEffort);
-                fastPersisted = await persistFastModeChange(restoredFast ?? false, {
+                fastPersisted = await persistFastModeChange(restoredFast, {
                   silent: true,
                   remoteDeviceId: sourceRemoteDeviceId,
                 });
@@ -7197,7 +7197,7 @@ export function ChatInput({
                 currentModelAgentKind,
                 effectiveSourceId,
                 newModelId,
-                restoredFast ?? false,
+                restoredFast,
               );
             }
             // fast live 同步:host 已原子落 DB/runtime,这里只更新驱动 chip ⚡ 的 renderer 快照。

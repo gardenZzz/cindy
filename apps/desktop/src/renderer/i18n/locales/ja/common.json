@@ -1726,6 +1726,7 @@
       },
       "models": {
         "search": "モデルを検索",
+        "available": "モデル選択に表示",
         "modelCount_other": "{{count}} モデル",
         "subscription": "サブスク",
         "subscriptionProduct": "{{product}} サブスク",
