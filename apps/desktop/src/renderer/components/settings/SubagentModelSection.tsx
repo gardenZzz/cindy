@@ -117,10 +117,10 @@ export function SubagentModelSection() {
   const setClaudeModel = useCallback(
     async (model: string | null, providerId: string | null) => {
       const current = settingsRef.current;
-      if (!current) return;
+      if (!current) return false;
       const nextProviderId = model === null ? null : providerId;
       if (model === current.claudeCode && nextProviderId === current.claudeCodeProviderId) return;
-      await persistPatch({ claudeCode: model, claudeCodeProviderId: nextProviderId });
+      return persistPatch({ claudeCode: model, claudeCodeProviderId: nextProviderId });
     },
     [persistPatch],
   );
@@ -181,7 +181,7 @@ export function SubagentModelSection() {
                 modelId={settings.claudeCode ?? ''}
                 effort=""
                 onModelChange={(modelId) => {
-                  void setClaudeModel(modelId, settings.claudeCodeProviderId);
+                  return setClaudeModel(modelId, settings.claudeCodeProviderId);
                 }}
                 onEffortChange={() => undefined}
                 vendorKey="cc"
@@ -195,8 +195,8 @@ export function SubagentModelSection() {
                 reselectEmitsChange
                 onProviderChange={(providerId, modelId) => {
                   const nextModel = modelId ?? settings.claudeCode;
-                  if (!nextModel) return;
-                  void setClaudeModel(nextModel, resolveClaudeProviderId(nextModel, providerId));
+                  if (!nextModel) return false;
+                  return setClaudeModel(nextModel, resolveClaudeProviderId(nextModel, providerId));
                 }}
                 switching={pending}
                 disabled={providersLoading}
@@ -208,7 +208,7 @@ export function SubagentModelSection() {
                   active: settings.claudeCode === null,
                   label: t('settings.subagentModels.unspecified'),
                   onSelect: () => {
-                    void setClaudeModel(null, null);
+                    return setClaudeModel(null, null);
                   },
                 }}
               />

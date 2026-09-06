@@ -1517,6 +1517,20 @@ describe('FORGE_GUIDE', () => {
     expect(FORGE_GUIDE).toContain('`RATE_LIMITED`');
   });
 
+  it('documents library capabilities as a sessionless support list with stable failure reasons', () => {
+    expect(FORGE_GUIDE).toContain("op: 'capabilities'");
+    expect(FORGE_GUIDE).toContain("operations:['clipboardWrite','saveAs']");
+    expect(FORGE_GUIDE).toContain('不等于此刻有窗口 / 已授权 / 库可用');
+    expect(FORGE_GUIDE).toContain('全部字符串');
+    expect(FORGE_GUIDE).toContain('数组内混入');
+    expect(FORGE_GUIDE).toContain('`IMPLEMENTATION_UNSUPPORTED`');
+    expect(FORGE_GUIDE).toContain('`NO_VISIBLE_WINDOW`');
+    expect(FORGE_GUIDE).toContain('`PERMISSION_DENIED`');
+    expect(FORGE_GUIDE).toContain('{ ok:false, errorCode, message, reason? }');
+    expect(FORGE_GUIDE).toContain('非法/越界 dbPath');
+    expect(FORGE_GUIDE).toContain("state:'unavailable'");
+  });
+
   it('documents explicit Forge install without changing pack into an install action', () => {
     expect(FORGE_GUIDE).toContain("ghost_forge_install({ dir: '<绝对路径>' })");
     expect(FORGE_GUIDE).toContain('不要因为 scaffold 或 pack 成功就自动调用本工具');
@@ -1687,6 +1701,51 @@ describe('FORGE_GUIDE', () => {
       expect(settingsSection).toContain(marker);
     }
     expect(settingsSection).not.toContain('声明之外的任何外链点了没反应');
+  });
+
+  it('所有插件页面只开放 HTTPS 图片直连，不扩大其它网络能力', () => {
+    const mainJsIntro = FORGE_GUIDE.slice(
+      FORGE_GUIDE.indexOf('## 4. main.js 电子脑(沙箱后台逻辑)'),
+      FORGE_GUIDE.indexOf('### 4.0.1'),
+    );
+    const settingsSection = FORGE_GUIDE.slice(
+      FORGE_GUIDE.indexOf('## 4.8 设置自绘(settingsHtml)+ 自定义参数存取(/kv)'),
+      FORGE_GUIDE.indexOf('## 4.9'),
+    );
+    const sandboxRedlines = FORGE_GUIDE.slice(
+      FORGE_GUIDE.indexOf('## 6. 沙箱红线(平台结构保证,写了也没用)'),
+      FORGE_GUIDE.indexOf('## 7. 打包与测试'),
+    );
+
+    for (const section of [mainJsIntro, settingsSection, sandboxRedlines]) {
+      expect(section).toContain('HTTPS 图片');
+      expect(section).toContain('无通用网络直连');
+    }
+    for (const marker of [
+      '所有插件 HTML 页面',
+      'settingsHtml、panel、mainView 与逻辑页',
+      '**HTTPS 图片资源**',
+      '<img src="https://…">',
+      'background-image: url("https://…")',
+      'Electron 判定为 `image`',
+      '不会放行',
+      '`fetch()` / XHR',
+      '外部脚本',
+      '外部样式表',
+      '`http:` 图片',
+      '共用浏览器存储和',
+      '`BroadcastChannel`,脚本/样式',
+      "new BroadcastChannel('my-ghost').postMessage",
+      '完整图片 URL',
+      '`onload` / `onerror`',
+    ]) {
+      expect(settingsSection).toContain(marker);
+    }
+    for (const marker of ['fetch/XHR/', 'WebSocket', '除 HTTPS 图片外']) {
+      expect(sandboxRedlines).toContain(marker);
+    }
+    expect(FORGE_GUIDE).not.toContain('跑在无网络、无文件、无 Node');
+    expect(FORGE_GUIDE).not.toContain('默认无网络');
   });
 
   it('分章体量守卫:每个 ## 章节须留在单次工具结果安全体量内(#890 分章投递的不变量)', () => {

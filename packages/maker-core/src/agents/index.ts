@@ -47,6 +47,7 @@ export {
   resolveCursorToolIdleMs,
   type ToolIdleWatchdog,
 } from './cursor/toolIdleWatchdog.js';
+export { isCodexHistoryRecoveryRequired } from './codex/history-recovery.js';
 export {
   CODEX_HISTORY_OVERSIZED_REASON,
   CODEX_LIVE_TAIL_OVERSIZED_BYTES,
@@ -133,6 +134,7 @@ export {
   AUTO_REVIEW_RETRY_SCHEDULING_SLACK_MS,
   autoReviewRetryBudgetMs,
   DEFAULT_AUTO_REVIEW_TIMEOUT_POLICY,
+  extractAutoReviewUserIntent,
   getAutoReviewActionTextLength,
   getAutoReviewDelegateHardCeilingMs,
   isAutoReviewConfirmUndeliveredNotice,
@@ -145,6 +147,7 @@ export {
   type AutoReviewRequest,
   type AutoReviewTimeoutPolicy,
 } from './shared/auto-review-decision.js';
+export { toolAutoReviewAction } from './shared/auto-review-decision.js';
 export type { ReviewableAction } from './shared/auto-review.js';
 export {
   ORCA_NESTED_REPORT_DENIAL_REASON,

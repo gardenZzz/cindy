@@ -226,6 +226,22 @@ describe('resolveSubmitGuardCatalog —— 提交终检目录取信(代际安全
     buildRows: (pl: DeviceProvidersPayload) => rowsOf((pl as TestPayload).id),
   };
 
+  it('ordinary creation hands off without awaiting a hung catalog refresh', async () => {
+    const fetch = vi.fn(() => new Promise<TestPayload>(() => {}));
+    const result = await resolveSubmitGuardCatalog({ ...baseArgs, fetch, cached: () => payload('cached'), deferRefreshToCreation: true });
+    expect(result).toEqual({ rows: [], catalogKnown: false, genAt: 1 });
+    const selected = { model: 'newly-connected-model', providerId: 'newly-connected-provider' };
+    expect(resolveRecentModelAndProvider(result.rows, selected, 'codex', result.catalogKnown)).toEqual(selected);
+    expect(fetch).not.toHaveBeenCalled();
+  });
+
+  it('defers an evicted catalog to the post-link check without trusting stale rows', async () => {
+    const fetch = vi.fn(baseArgs.fetch);
+    const result = await resolveSubmitGuardCatalog({ ...baseArgs, fetch, deferRefreshToCreation: true });
+    expect(result).toEqual({ rows: [], catalogKnown: false, genAt: 1 });
+    expect(fetch).not.toHaveBeenCalled();
+  });
+
   it('缓存命中 → join fetch revalidate,成功用新目录(工作站已换 provider,codex review P1)', async () => {
     const fetchSpy = vi.fn(baseArgs.fetch);
     const res = await resolveSubmitGuardCatalog({
@@ -1609,7 +1625,8 @@ describe('new session composer surface', () => {
     expect(newComposerSource).toContain('inputTestID="newSession.firstMessageInput"');
     expect(newComposerSource).toContain('autoFocus={visualFocusComposer}');
     expect(newComposerSource).toContain('maxHeight={composerResize.inputMaxHeight}');
-    expect(newComposerSource).toContain('inputFrameHeight={composerResize.frameHeight}');
+    expect(newComposerSource).toContain('inputFrameAnimatedStyle={composerResize.frameStyle}');
+    expect(newSource).toContain('gesture={composerResize.gesture}');
     expect(newComposerSource).toContain('resizeHandle={composerCardActive ? renderComposerResizeHandle() : null}');
     expect(newComposerSource).toContain('cardActive={composerCardActive}');
     expect(newComposerSource).toContain('toolbar={renderComposerToolbar()}');
@@ -1782,8 +1799,12 @@ describe('new session composer surface', () => {
     expect(newSource).toContain('voiceDraftListeningText: {\n    color: colors.textTertiary,');
     expect(newSource).not.toContain('voiceDraftListeningText: {\n    color: colors.statusReady,');
     expect(newSource).toContain('const voiceDraftShowsListeningPrompt = voiceIsListening && draft.firstMessage.length === 0;');
-    expect(newSource).toContain('firstMessageInputRef.current?.setNativeProps({ selection: { start: end, end } });');
-    expect(newSource).toContain('voiceDraftScrollRef.current?.scrollToEnd({ animated: false });');
+    expect(newSource).toContain('firstMessageInputRef.current?.setNativeProps({ selection: firstMessageSelectionRef.current });');
+    expect(newSource).toContain('voiceDraftScrollRef.current?.scrollTo({ y: voiceDraftCaretFrame.top, animated: false });');
+    expect(newSource).toContain('draft.firstMessage.slice(0, firstMessageSelectionRef.current.end)');
+    expect(newSource).toContain('draft.firstMessage.slice(firstMessageSelectionRef.current.end)');
+    expect(newSource).toContain('caret.measureLayout(block, (x, y) => {');
+    expect(newSource).toContain('viewRef={voiceDraftCaretRef}');
     expect(sharedSource).toContain('export function VoiceMicWaveCaret');
     expect(newSource).toContain('const creatingRef = useRef(false);');
     expect(createSource).toContain('|| voiceStartupInFlightRef.current');
@@ -1813,7 +1834,8 @@ describe('new session composer surface', () => {
     expect(newSource).toContain('refreshAccessToken: () => auth.refreshAccessToken(),');
     expect(newSource).toContain('apiFetch: auth.apiFetch,');
     expect(newSource).toContain('const [prewarmedVoice, localVoiceInputHistory] = await Promise.all([');
-    expect(newSource).toContain('takePrewarmedMobileVoiceAsr(selectedDeviceId) ?? Promise.resolve(null),');
+    expect(newSource).toContain('const prewarmedVoicePromise = takePrewarmedMobileVoiceAsr(selectedDeviceId) ?? Promise.resolve(null);');
+    expect(newSource).toContain('prewarmedVoicePromise.then((voice) => getMobileVoiceInputHistoryForHost(selectedDeviceId, voice?.credential.settings?.voiceInputHistory))');
     expect(newSource).not.toContain('MobileVoiceServiceMode');
     expect(newSource).not.toContain('LiteLlm');
     expect(newSource).toContain('?? createMobileCindyVoiceCredential(selectedDeviceId);');
@@ -2275,7 +2297,7 @@ describe('submit guard catalog wiring (source locks)', () => {
       sessionSource.indexOf('initial={goalRestoreForSession}') + 300,
     );
     expect(viewCall).toContain('initial={goalRestoreForSession}');
-    expect(viewCall).toContain('initialObjective={goalRestoreForSession ? undefined : (draft.trim() || undefined)}');
+    expect(viewCall).toContain('initialObjective={goalRestoreForSession ? undefined : (draftRef.current.trim() || undefined)}');
   });
 
   it('goal 接回载荷按 sessionId 换代清理:切任务不残留旧 objective/limits(codex P2)', () => {

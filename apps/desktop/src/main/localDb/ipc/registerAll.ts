@@ -13,6 +13,7 @@ import { closeDb, ensureReady, getCurrentUserId } from '../index';
 import { getCurrentDbClientUserId, tryGetDbClient } from '../client/current';
 import {
   registerSessionIpc,
+  type RegisterSessionIpcOpts,
   setSessionRemovalCancelOperations,
   setSessionRemovalCleanup,
 } from './sessions';
@@ -28,6 +29,8 @@ import { enqueueDurableWrite } from '../../messagePersistBroadcaster';
 import { registerDevSqliteVecIpc } from './dev/sqliteVec';
 import { registerSearchIpc } from './search';
 import { registerRemoteHistoryIpc } from './history';
+import { recoverActiveBotTemplateSkills, registerBotIpc } from './bots';
+import { registerBotRemoteResourceProvider } from './botRemoteResourceProvider';
 
 import { createLogger } from '../../logger';
 import { recordDesktopDevLocalDbStartupResult } from '../../devStartupStatus';
@@ -71,6 +74,7 @@ function startMediaRefCompensationReconcile(
 }
 
 export interface RegisterLocalDbIpcOpts {
+  resolveContextWindow?: RegisterSessionIpcOpts['resolveContextWindow'];
   /** Current stable app-session owner. False makes queued/in-flight work stale. */
   isOwnerCurrent?: (userId: string) => boolean;
   /** Dispose any secondary DB client committed by a stale onReady callback. */
@@ -128,6 +132,10 @@ export function registerLocalDbIpc(opts: RegisterLocalDbIpcOpts = {}): void {
         tryGetDbClient() === client &&
         getCurrentDbClientUserId() === userId &&
         (opts.isOwnerCurrent?.(userId) ?? true);
+      // 数据库与账号边界都已就绪后再补装旧版内置伙伴能力；不依赖用户先打开
+      // 伙伴页面。列表/get 仍保留幂等恢复，覆盖同进程账号切换后的读取路径。
+      await recoverActiveBotTemplateSkills();
+      if (!isReadyOwnerCurrent()) return;
       startMediaRefCompensationReconcile(userId, client, isReadyOwnerCurrent);
 
       const cancelSessionOperations = opts.cancelSessionOperations;
@@ -237,10 +245,13 @@ export function registerLocalDbIpc(opts: RegisterLocalDbIpcOpts = {}): void {
   });
 
   registerSessionIpc(getCurrentDbClientUserId, {
+    resolveContextWindow: opts.resolveContextWindow,
     closeIdleSessionForMove: opts.closeIdleSessionForMove,
   });
   registerMessageIpc();
   registerRemoteHistoryIpc();
+  registerBotIpc();
+  registerBotRemoteResourceProvider();
   registerSessionImportIpc();
   registerSessionShareIpc();
   registerOrcaWorkflowIpc();

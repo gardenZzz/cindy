@@ -17,6 +17,8 @@ import claudeLatest from '../../../../../tools/claude/latest.json';
 import codexLatest from '../../../../../tools/codex/latest.json';
 import { download, type ProgressEvent } from '../downloader/index.js';
 // pi / cursor 都不进 Linux runtime fallback 安装面(pi 走独立 binary 分发,cursor 本机 ACP)。
+import { parseBinaryVersionOutput } from './binary-version-probe.js';
+
 export type LinuxRuntimeFallbackKind = 'claude-code' | 'codex';
 
 interface RuntimeConfig {
@@ -355,10 +357,12 @@ async function migrateLegacyManagedBinary(
  */
 export function findCachedLinuxRuntimeFallbackBinary(
   kind: LinuxRuntimeFallbackKind,
+  checkForUpdates = true,
 ): string | null {
   if (!app.isPackaged || process.platform !== 'linux') return null;
   const userDataPath = app.getPath('userData');
-  if (readText(runtimeVersionMarkerPath(userDataPath, kind)) === CONFIG[kind].version) {
+  const installedVersion = readText(runtimeVersionMarkerPath(userDataPath, kind));
+  if (installedVersion && (!checkForUpdates || installedVersion === CONFIG[kind].version)) {
     for (const candidate of privateBinaryCandidates(userDataPath, kind)) {
       try {
         fs.accessSync(candidate, fs.constants.X_OK);
@@ -528,6 +532,19 @@ async function installCodexFromOfficialAsset(
   }
   writeRuntimeVersionMarker(app.getPath('userData'), 'codex');
   return binaryPath;
+}
+
+export async function findUsableLinuxRuntimeFallbackBinary(
+  kind: LinuxRuntimeFallbackKind,
+  signal?: AbortSignal,
+): Promise<string | null> {
+  if (!app.isPackaged || process.platform !== 'linux') return null;
+  const cachedPath = findCachedLinuxRuntimeFallbackBinary(kind, false);
+  if (cachedPath) {
+    const versionOutput = await readExecutableVersion(cachedPath, signal);
+    if (versionOutput && parseBinaryVersionOutput(versionOutput, '')) return cachedPath;
+  }
+  return findSystemBinaryAsync(kind, signal);
 }
 
 export async function prepareLinuxRuntimeFallback(

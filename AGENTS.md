@@ -26,6 +26,9 @@
   `docs/dev-rules/repo-map.md`。
 - 首次安装、修复依赖或准备新 worktree 时，必须先读
   `docs/dev-rules/environment-setup.md`。
+- 新增模型、更新模型窗口／价格／推理档位／默认值，或排查模型信息显示错误前，必须先读
+  `docs/dev-rules/model-catalog-maintenance.md`：先确认实际下发目录与数据归属；Server
+  目录和客户端内置兜底需协调更新，不能只改本仓快照就认定线上已生效。
 - 启动、调试或验证 Desktop 时，必须先读 `docs/dev-rules/desktop-development.md`。
 - 修改 Desktop Renderer、preload、BrowserWindow、WebView、IPC、CSP、导航或 Electron
   特权能力前，必须先读 `docs/dev-rules/electron-security-and-process-boundaries.md`。
@@ -48,6 +51,8 @@
   提的，提交者身份不构成例外。
 - 新增或调整产品功能、判断能力应进入 Core / Skill / 插件、设计人机交互或多端体验
   前，必须先读 `docs/product-rules/core-product-principles.md`。
+- 修改伙伴（Bot）的身份、Session 生命周期、模型 fallback、工作目录、Skill / MCP 装配、
+  委派协作或伙伴设置前，必须先读 `docs/product-rules/cindy-bots-runtime.md`。
 - 新增或修改 `/review`、Reviewer 任务、成果快照、Finding 协议、复核入口、结果呈现或
   复核生命周期前，必须先读 `docs/product-rules/review-product-direction.md`。
 - 新增或修改按区域（`cn` / `global`）分支的逻辑、构建身份与命名、端点选择、区域相关

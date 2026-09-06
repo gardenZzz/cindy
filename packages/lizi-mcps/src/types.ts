@@ -433,6 +433,17 @@ export interface SessionSearchOptions {
   role?: 'user' | 'assistant' | 'system';
   /** 默认 10 */
   limit?: number;
+  /**
+   * Host-owned caller identity used to enforce Bot history isolation. This is
+   * populated by the MCP adapter from the current runtime context and is never
+   * accepted from model tool arguments.
+   */
+  callerSessionId?: string;
+  /**
+   * Host-owned memory namespace. A `bot:` scope without a recoverable caller
+   * Session must fail closed instead of falling back to cross-session search.
+   */
+  callerMemoryScopeKey?: string;
 }
 
 export interface SessionSearchHit {
@@ -552,6 +563,7 @@ export type ComputerMcpToolName =
   | 'list_apps'
   | 'list_windows'
   | 'get_window_state'
+  | 'verify_state'
   | 'click'
   | 'double_click'
   | 'right_click'
@@ -604,6 +616,8 @@ export interface ComputerDriverPermissionState {
 
 export interface ComputerMcpCallContext {
   sessionId?: string;
+  /** Request cancellation stays on the host side; never serialized to the driver. */
+  signal?: AbortSignal;
   /** Identifies the agent runtime whose MCP server dispatched this call. */
   agentKind?: string;
 }
@@ -871,6 +885,8 @@ export type LiziMcpCallerKind = 'root' | 'descendant' | 'unknown';
 export interface LiziMcpSessionContext {
   agentKind: string;
   workingDir: string;
+  /** Host-owned memory namespace override shared with the agent prompt path. */
+  memoryScopeKey?: string;
   /**
    * 当前 tool-call 的权威 session ctx accessor。
    *

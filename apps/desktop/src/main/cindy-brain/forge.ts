@@ -2017,7 +2017,9 @@ Cindy 先发布，确认首个支持它的**正式版本号**后，再把 \`minC
 
 ## 4. main.js 电子脑(沙箱后台逻辑)
 
-跑在无网络、无文件、无 Node 的独立沙箱页里,只有一个全局 \`cindy\`:
+跑在无文件、无 Node、无通用网络直连的独立沙箱页里,只有一个全局 \`cindy\`。
+唯一外部直连例外是所有插件页面共有的 HTTPS 图片请求;\`fetch\` / XHR、脚本、样式、
+字体、音视频与 WebSocket 仍不能直连:
 
 \`\`\`js
 // 收活:AI 调你的工具时收到 tool-call
@@ -3230,8 +3232,16 @@ tool-call 内轮询时记得定期发 tool-progress 心跳续命(见 §4"长任�
 "settingsHeight": 360              // 可选:固定高度 px(160–800);缺省 = 随内容自适应(矮内容真收矮),超 800 内部滚动
 \`\`\`
 
-**渲染环境**:与面板同款沙箱页(零桥、零网络直连、CSP 只认同源)。主题变量与
-面板同一套(§5「主题」条的 \`var(--xxx, 回退值)\` 写法照用),主机注入并随换肤
+**渲染环境**:与面板同款沙箱页(零桥、无通用网络直连,与同插件面板/逻辑页共用浏览器存储和
+\`BroadcastChannel\`,脚本/样式/字体/媒体/数据请求仍只认同源)。所有插件 HTML 页面
+(settingsHtml、panel、mainView 与逻辑页)唯一的网络直连例外都是**HTTPS 图片资源**:
+\`<img src="https://…">\` 与 CSS \`background-image: url("https://…")\` 可以直接加载
+任意 HTTPS 地址。主机统一生成 CSP 并只放行 Electron 判定为 \`image\` 的 HTTPS 请求;
+它**不会放行** \`fetch()\` / XHR、外部脚本、外部样式表、字体、音视频、WebSocket、
+\`http:\` 图片或其它协议。加载远程图片会向第三方暴露网络地址及完整图片 URL,不要把密钥、
+token 或用户私密数据拼进 URL。CSP 仍阻止内联脚本和 \`onload\` / \`onerror\` 等内联事件;
+同包外挂 JS 的行为不变。主题变量与面板同一套(§5「主题」条的
+\`var(--xxx, 回退值)\` 写法照用),主机注入并随换肤
 自动重灌;设置区基线背景 = 宿主设置卡片色(与相邻卡片无缝),别再自己铺整页
 底色。高度缺省自适应:主机在页面就绪后量内容高度,内容动态增减(展开区、
 追加列表)时会自动跟随重量(内部 ResizeObserver 通知宿主再量,你无需做
@@ -3454,6 +3464,12 @@ const st = await cindy.library({ op: 'status' });
 // st = { ok:true, state:'ready', usedBytes, fileCount, diskFreeBytes,
 //        softLimitBytes, softLimitExceeded, location:'default'|'custom' }
 
+// 只读能力查询:资格审与 op 合法性之后、会话创建之前返回;不打开库、不弹窗
+const caps = await cindy.library({ op: 'capabilities' });
+// caps = { ok:true, op:'capabilities',
+//          capabilities:{ version:1, operations:['clipboardWrite','saveAs'] } }
+// operations 只表示宿主实现了这些 op,不等于此刻有窗口 / 已授权 / 库可用
+
 // 文件操作(全 Family;写入原子化,大文件走分块流)
 await cindy.library({ op: 'write', path: 'canvases/c1/state.json', content: s });
 await cindy.library({ op: 'read', path: 'canvases/c1/state.json', encoding: 'base64' });
@@ -3476,6 +3492,14 @@ const saved = await cindy.library({ op: 'saveAs', path: 'exports/a.psd', name: '
 //      或 { ok:true, cancelled:false, path:'exports/a.psd', bytes }
 // path 永远是库内相对键,不是用户另存到的绝对路径
 
+// 写系统剪贴板 PNG 位图(不是 Finder 文件列表,也不是 saveAs)
+const copied = await cindy.library({
+  op: 'clipboardWrite', content: pngBase64, encoding: 'base64',
+});
+// copied = { ok:true, bytes }  —— bytes 是写入的 PNG 字节数
+// 空字节 / 非 base64 / 非 PNG / 超限 → { ok:false, errorCode, message }
+// 外部应用能否粘上由操作系统剪贴板决定,插件侧不要自己承诺粘贴完成
+
 // SQLite:参数化语句 + 首词白名单(SELECT/WITH/INSERT/REPLACE/UPDATE/DELETE/
 // CREATE/DROP/ALTER/REINDEX/ANALYZE);ATTACH/PRAGMA/VACUUM/事务语句一律拒,
 // 事务由宿主管理(db.batch 整批原子),迁移按 user_version 幂等续跑
@@ -3494,12 +3518,23 @@ await cindy.library({ op: 'db.check',  dbPath: 'library.sqlite' });  // quick_ch
 
 关键语义(全部由宿主强制):
 
-- **失败是结构化的**:\`{ ok:false, errorCode, message }\`,常用码
-  \`LIBRARY_UNAVAILABLE\`(含 reason:binding-moved/disk-missing/corrupt)、
+- **失败是结构化的**:\`{ ok:false, errorCode, message, reason? }\`。旧
+  \`errorCode\` 保留;另加稳定 \`reason\` 供分类,不要解析人类 \`message\`。
+  常用码 \`LIBRARY_UNAVAILABLE\`(含 open/status 的 binding-moved/disk-missing/corrupt)、
   \`LIBRARY_READONLY\`、\`DISK_FULL\`、\`PATH_INVALID\`、\`NOT_FOUND\`、
   \`ALREADY_EXISTS\`、\`TOO_LARGE\`、\`STREAM_INVALID\`、\`DB_STATEMENT_REJECTED\`、
   \`DB_ROW_LIMIT\`(结果集超 2000 行,自己加 LIMIT)、\`DB_MIGRATION_CONFLICT\`、
-  \`BUSY\`、\`RATE_LIMITED\`;
+  \`BUSY\`、\`RATE_LIMITED\`、\`UNSUPPORTED\`、\`NOT_DECLARED\`;
+  稳定 \`reason\`:无 handler=\`IMPLEMENTATION_UNSUPPORTED\`,无窗口=\`NO_VISIBLE_WINDOW\`,
+  权限=\`PERMISSION_DENIED\`,库不可用=\`LIBRARY_UNAVAILABLE\`(含 vault 透传的
+  open/status 失败),非法请求=\`INVALID_REQUEST\`(含非法/越界 dbPath 与未知 op),
+  取消=\`CANCELLED\`;成功 open/status 的 \`state:'unavailable'\` 仍用结果体 reason
+  (如 disk-missing),不是失败 reason 枚举;查询/传输层本地分类 \`TIMEOUT\` / \`TRANSPORT_ERROR\`;
+- **capabilities**:先查 \`{ op:'capabilities' }\`。仅 \`version===1\` 且
+  \`operations\` 为**全部字符串**的数组才有效;额外字段忽略,未知 operation 忽略,
+  已知项保留;有效 v1 清单缺少某项才是 unsupported。缺字段、错类型(含数组内混入
+  非字符串)、\`version\` 非 1、或旧宿主 unknown-op 一律 unknown,不得把其中碰巧
+  合法的项当成有效清单。查询本身不证明窗口/授权/库可用,也不要求旧插件重装;
 - **reveal / saveAs**:只收库内相对路径。成功不回用户另存目标的绝对路径;
   取消是 \`{ cancelled:true }\`。reveal 打开系统文件夹、saveAs 弹系统对话框
   (跨平台标题带已核验插件名;macOS 另有正文),同插件 3 秒内连发 \`RATE_LIMITED\`;
@@ -3507,6 +3542,12 @@ await cindy.library({ op: 'db.check',  dbPath: 'library.sqlite' });  // quick_ch
   对话框期间账号切换则拒绝拷贝(\`LIBRARY_UNAVAILABLE\`);
   拷贝完成替换前、reveal 打开文件夹前再核一次会话;
   确认后先拷到目标旁临时文件再替换,失败不破坏已有文件;
+- **clipboardWrite**:只收 \`encoding:'base64'\` 的 PNG 字节,写系统剪贴板位图,
+  成功回 \`{ ok:true, bytes }\`。不是 saveAs,也不在文件夹中显示作品。
+  空字节 / 非法 encoding / 非 PNG / 超限一律结构化失败,永不 \`ok:true\`。
+  同插件 3 秒内连发 \`RATE_LIMITED\`;无主壳窗 / 宿主不能写剪贴板 \`UNSUPPORTED\`;
+  账号切换后旧会话不得继续写(\`LIBRARY_UNAVAILABLE\`)。
+  外部粘贴是否成功由操作系统与目标应用决定,插件侧不要单独承诺已粘上;
 - **不可用 ≠ 空**:\`state:'unavailable'\` 时**不要**当空库重建、不要触发
   清理、不要把素材判成已删——如实向用户展示状态,等位置恢复;
 - **无跨库事务**:多个 .sqlite 之间没有 ATTACH;跨库一致性用幂等 + 墓碑
@@ -4263,6 +4304,36 @@ const opened = await cindy.iosSimulator.request({
 - 页面需要电子脑逻辑时仍先 \`fetch('/wake')\`，通信和媒体协议与 §5 完全相同。插件停用、
   卸载或失去批准后，Host 会卸载页面并退出该路由。
 
+## 4.21 为插件添加推荐任务（可选内容）
+
+在 v3 ghost.json 顶层添加 \`recommendations\` 数组，每条包含稳定 \`id\`、短标题
+\`label\` 和完整 \`prompt\`。最多 24 条，id 为 1–64 位小写字母、数字或连字符，
+label 为 1–120 字符，prompt 为 1–8000 字符；整份列表 UTF-8 不超过 64 KiB。
+可选 \`locales\` 按 en / zh-CN / zh-TW / ja / ko 提供 \`{label,prompt}\`，
+缺当前语言时使用 en，再回退条目自身。不要放秘密或其它账号的内容。
+宿主在生成首页候选时校验此列表，不合格的列表不展示，但不影响插件安装、批准和运行。
+v2 清单继续忽略此扩展字段；运行时更新始终严格校验，不合格的更新不会替换原列表。
+
+\`\`\`json
+{"recommendations":[{"id":"daily-mail","label":"整理今天需要处理的邮件","prompt":"整理今天需要我处理的邮件，列出待办和原文中的截止时间。先给清单，不发送或删除邮件。"}]}
+\`\`\`
+
+运行中的电子脑可调用 \`await cindy.recommendations(items)\`，等价于
+\`cindy.send({type:'recommendations-update',items})\`。Host 从真实沙箱绑定取得身份，
+只替换调用插件自己的完整推荐任务列表；返回 \`{ok:true}\` 或 \`{ok:false,errorCode}\`。
+这不是能力 slot，不执行任务、不授予新权限。面板仍为零桥，需要更新时经同源通信
+交给电子脑。Node 子程序同样由自己的 main.js 代转管子。
+
+运行时列表按当前用户保存，重启保留；卸载清除，停用保留。空数组明确撤下全部推荐，
+不会退回初始推荐任务列表；不提供此字段的旧插件继续正常使用。首页打开或换批时读取最新列表，
+不为获取推荐任务启动所有插件；已显示的一批保持稳定，点击前重新核对是否撤回或改变。
+
+Cindy 统一归类、随机选择与排序，同批每个场景和每个插件最多一条。增加推荐任务数量不会增加
+插件的抽取机会。若只想提供某个场景的任务，替换为仅含该任务的列表即可，但不能指定
+首页位置或优先级。用户主动首装优先，更新包或替换推荐任务列表不算新安装，首次使用后回到普通排序。
+点击推荐后才将 prompt 作为普通用户消息发送，绝不进入系统提示词。未安装/未启用时
+进入已有插件详情，由用户安装或启用后继续；账号配置仍复用 Host Setup 的原调用接续。
+
 ## 5. 面板(panel.html/css/js)
 
 - 显示形态由 \`panel.position\` 决定:\`left\`(缺省)= 停靠主聊天窗左侧的常驻
@@ -4324,12 +4395,13 @@ const opened = await cindy.iosSimulator.request({
 
 ## 6. 沙箱红线(平台结构保证,写了也没用)
 
-- **本节说的是 main.js 浏览器电子脑**:它无文件系统、无 Node API、默认无网络——
+- **本节说的是 main.js 浏览器电子脑**:它无文件系统、无 Node API、无通用网络直连
+  (所有插件页面共有的 HTTPS 图片请求是唯一例外)——
   即使另声明 node，Node 也在独立进程里，只能经 §4.12 的 stdio 与 main.js 交换数据，
   不会把 require/process 等能力注入 main.js。想用 AI/出图走 cindy-request 求主机代办,
   随包代码与 CLI 走 §4.12 的 Node 工作进程，网络走 \`cindy.fetch\`，落盘走 \`cindy.fs\`；
   是否需要 manifest 声明取决于是 Agent 在途调用还是插件自主调用，见 §4.2、
-  §4.7 和 §4.10。沙箱内直连(fetch/XHR/
+  §4.7 和 §4.10。除 HTTPS 图片外,沙箱内直连(fetch/XHR/
   WebSocket)与直接读写磁盘永远不存在,声明字段给的是"请主机代办"的资格,
   不是能力本身;
 - 保险库里的凭证明文永不进沙箱:network 的 key 由主机保管注入,你的代码

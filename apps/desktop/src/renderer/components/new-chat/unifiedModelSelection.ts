@@ -186,8 +186,7 @@ function pickEffort(
 export function resolveUnifiedRowConfig(args: ResolveRowConfigArgs): UnifiedRowConfig {
   const { entry, engineOverride, memoryEffort, memoryFast, agentFastModeCapable } = args;
   const candidateEngines = entry.candidates.map(engineOfAgentKind);
-  const overrideUsable =
-    engineOverride !== undefined && candidateEngines.includes(engineOverride);
+  const overrideUsable = engineOverride !== undefined && candidateEngines.includes(engineOverride);
   const pinned =
     args.pinnedEngine !== undefined &&
     candidateEngines.includes(args.pinnedEngine) &&
@@ -266,9 +265,31 @@ export function resolveFavoriteRowConfig(args: {
 }
 
 /**
- * 收藏选中身份就是 uid(Chris 2026-08-20):面板只认「这条 uid 还在收藏列表里」,
- * 不拿正在跑的引擎/思维/加速去对副本 —— 对上才打勾会让下面同名模型行抢走焦点。
+ * uid 记录选择来源，完整配置决定它是否仍在使用。收藏在其它任务被编辑后，
+ * 旧任务保留自己的配置；不能用历史 uid 把不同的 Fast / 推理强度冒充为已应用。
+ * 这里只派生选中态，不回写任务、收藏或锚点存储。
  */
+export function favoriteMatchesSelection(args: {
+  entry: UnifiedModelEntry;
+  item: ModelFavoriteItem;
+  selected: { providerId: string | null; modelId: string };
+  agent: AgentKind | null | undefined;
+  effort: Effort | undefined;
+  fast: boolean;
+  agentFastModeCapable?: (agent: AgentKind) => boolean;
+}): boolean {
+  const { entry, item, selected, agent } = args;
+  if (
+    !agent ||
+    item.providerId !== selected.providerId ||
+    !entryMatchesModelId(entry, selected.modelId) ||
+    agentKindOfEngine(item.agent) !== agent ||
+    !entry.candidates.includes(agent)
+  )
+    return false;
+  const config = resolveFavoriteRowConfig(args);
+  return config.effort === (args.effort || null) && config.fast === args.fast;
+}
 
 /**
  * 该收藏是否**就是**该模型的推荐配置 —— 决定收藏行右侧要不要挂 `引擎 · 深度 [⚡]` 后缀
@@ -468,6 +489,7 @@ export function buildUnifiedListSections(args: {
   entries: readonly UnifiedModelEntry[];
   favorites: readonly ModelFavoriteItem[];
   query: string;
+  matchesQuery?: (entry: UnifiedModelEntry, query: string) => boolean;
   rail: UnifiedRailFilter;
   /**
    * 该行(或该条收藏)**生效引擎**的解析器 —— 同引擎视图用它做**排序优先级**
@@ -480,6 +502,7 @@ export function buildUnifiedListSections(args: {
 }): UnifiedListSection[] {
   const { entries, favorites, rail, effectiveEngineOf } = args;
   const q = args.query.trim().toLowerCase();
+  const matches = args.matchesQuery ?? matchesQuery;
   const byKey = new Map<string, UnifiedModelEntry>();
   for (const entry of entries) byKey.set(entryKeyOf(entry.providerId, entry.modelId), entry);
 
@@ -513,7 +536,7 @@ export function buildUnifiedListSections(args: {
       const favoriteEngine = effectiveEngineOf ? effectiveEngineOf(entry, item) : item.agent;
       if (favoriteEngine !== engineOfAgentKind(rail.agent)) continue;
     }
-    if (!matchesQuery(entry, q)) continue;
+    if (!matches(entry, q)) continue;
     favRows.push({
       anchor: {
         kind: 'fav',
@@ -537,7 +560,7 @@ export function buildUnifiedListSections(args: {
   // 行在后。不把兼容行转换成当前引擎 —— 点下去仍按其落点走,落点在别处就走跨引擎确认。
   const visible = entries.filter(
     (entry) =>
-      matchesQuery(entry, q) &&
+      matches(entry, q) &&
       (rail.kind !== 'provider' || entry.providerId === rail.providerId) &&
       (rail.kind !== 'engine' || entry.candidates.includes(rail.agent)),
   );
@@ -593,8 +616,7 @@ export function computeSelectedRowScrollTop(args: {
   rowBottom: number;
 }): SelectedRowAlignment {
   const maxScrollTop = Math.max(0, args.scrollHeight - args.clientHeight);
-  const clamp = (value: number): number =>
-    Math.round(Math.min(Math.max(0, value), maxScrollTop));
+  const clamp = (value: number): number => Math.round(Math.min(Math.max(0, value), maxScrollTop));
   // 题头带盖住的那一条不算可视高度:按它算居中,行会偏上一半题头高。
   const visibleHeight = Math.max(0, args.clientHeight - args.headerInset);
   if (args.rowBottom - args.rowTop >= visibleHeight) {
