@@ -15073,14 +15073,16 @@ export function registerMakerIpc(maker: Maker, options: RegisterMakerIpcOptions)
           }
         }
         const catalogModel = axisModel;
+        if (!catalogModel) {
+          // Cursor 的模型可能只活在 capabilities 里;探测前不按目录裁决。
+        } else if (
+          internalOptions.source === 'user' &&
+          atomicSelection.effort === null &&
+          catalogModel.efforts.length > 0
+        ) {
+          throwIpcError('INVALID_PARAMS', `effort "null" is unavailable for model "${model}"`);
+        }
         if (catalogModel) {
-          if (
-            internalOptions.source === 'user' &&
-            atomicSelection.effort === null &&
-            catalogModel.efforts.length > 0
-          ) {
-            throwIpcError('INVALID_PARAMS', `effort "null" is unavailable for model "${model}"`);
-          }
           const axes = resolveSessionRuntimeAxes({
             model: catalogModel,
             effort: atomicSelection.effort,
