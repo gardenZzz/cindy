@@ -432,6 +432,7 @@ export function useUnifiedRowActions(options: UnifiedRowActionsOptions): Unified
       fast: false,
       favoriteUid: null,
       rowModelId: args.anchor.modelId,
+      rowProviderId: args.anchor.providerId,
       resetToRecommended: true,
     });
   };
@@ -506,6 +507,7 @@ export function useUnifiedRowActions(options: UnifiedRowActionsOptions): Unified
         fast: args.target.fast,
         favoriteUid: args.uid,
         rowModelId: args.anchor.modelId,
+        rowProviderId: args.anchor.providerId,
       }),
     ).then((applied) => {
       if (applied) args.commit();
@@ -539,6 +541,7 @@ export function useUnifiedRowActions(options: UnifiedRowActionsOptions): Unified
         fast: target.fast,
         favoriteUid: null,
         rowModelId: anchor.modelId,
+        rowProviderId: anchor.providerId,
       },
     );
   };
@@ -610,6 +613,7 @@ export function useUnifiedRowActions(options: UnifiedRowActionsOptions): Unified
             fast: next.fast,
             favoriteUid: null,
             rowModelId: anchor.modelId,
+            rowProviderId: anchor.providerId,
           }),
         ).then((applied) => {
           if (applied) setModelEngineOverride(anchor.providerId, anchor.modelId, engine);
@@ -965,6 +969,7 @@ export function useUnifiedRowActions(options: UnifiedRowActionsOptions): Unified
       fast: config.fast,
       favoriteUid: favorite ? favorite.uid : null,
       rowModelId: anchor.modelId,
+      rowProviderId: anchor.providerId,
     });
   };
 

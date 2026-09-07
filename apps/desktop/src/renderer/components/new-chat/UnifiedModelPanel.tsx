@@ -35,6 +35,7 @@ import {
   engineOfAgentKind,
   entryMatchesModelId,
   overlayCursorUnifiedEntries,
+  routeProviderIdOf,
   unifiedRowMatchesSelection,
   wireModelIdOf,
   buildUnifiedListSections,
@@ -76,6 +77,13 @@ export interface UnifiedSelectedRow {
    * 不同的 wire id,用 wire id 当身份会让「换个引擎再打开」认不出是同一行。
    */
   rowModelId: string;
+  /**
+   * ★该行的**来源身份 id**(与 `rowModelId` 同一套分离)。回调第一参给的是「要路由的
+   * 来源」—— Cursor 合成槽在那里已被 `routeProviderIdOf` 归一成 null;而收藏锚点 / 记忆槽
+   * 这类**记住这一行**的事情必须用它,否则 Cursor 行的锚点会退化成「没有来源」,与目录里
+   * 真正 providerId 为空的行撞在一起。非合成行两者恒等,行为与改动前逐字一致。
+   */
+  rowProviderId: string;
   /** 该次选中由配置浮层的「恢复推荐」触发；草稿层据此删除 override 而不是重新记忆。 */
   resetToRecommended?: true;
 }
@@ -206,7 +214,7 @@ export interface UnifiedModelPanelProps {
    * 调用方重推必然漂移成「行上写着 Codex、写进草稿的却是 Claude」。
    */
   onSelect: (
-    providerId: string,
+    providerId: string | null,
     modelId: string,
     effort: Effort | '',
     config: UnifiedSelectedRow,
@@ -228,7 +236,7 @@ export interface UnifiedModelPanelProps {
    * 既有的 favoriteUid 直通链路上,会话等价于 `onSessionFavoriteAnchorChange(null)`。
    */
   onSelectedFavoriteAnchorClear?: (
-    providerId: string,
+    providerId: string | null,
     modelId: string,
     effort: Effort | '',
     config: UnifiedSelectedRow,
@@ -769,6 +777,19 @@ export function UnifiedModelPanel({
   // ── 写入(引擎 / 深度 / Fast / 收藏 / 选中)────────────────────────────────
   // 这些是**唯一**会改用户数据的地方,集中在一个 hook 里(useUnifiedRowActions),
   // 便于逐条对照规格审:哪一步写 store、哪一步交给调用方、哪一步什么都不写。
+  //
+  // ★ 合成槽的唯一出口:行动作层内部一律用**行身份 id**(anchor.providerId,Cursor 行
+  // 恒 'cursor'),交出面板时经 routeProviderIdOf 归一成路由来源 id。下游因此收不到
+  // 'cursor',不必逐个消费点加守卫;需要行身份的消费点读 config.rowProviderId。
+  const routeSelect = <T,>(
+    handler:
+      | ((providerId: string | null, modelId: string, effort: Effort | '', config: UnifiedSelectedRow) => T)
+      | undefined,
+  ) =>
+    handler === undefined
+      ? undefined
+      : (providerId: string, modelId: string, effort: Effort | '', config: UnifiedSelectedRow): T =>
+          handler(routeProviderIdOf(providerId), modelId, effort, config);
   const {
     applyEngine,
     applyEffort,
@@ -789,9 +810,9 @@ export function UnifiedModelPanel({
     modelMemory,
     onEffortChangeLive,
     onFastModeChangeLive,
-    onSelect,
-    onConfigure,
-    onSelectedFavoriteAnchorClear,
+    onSelect: routeSelect(onSelect)!,
+    onConfigure: routeSelect(onConfigure),
+    onSelectedFavoriteAnchorClear: routeSelect(onSelectedFavoriteAnchorClear),
     sessionEngineFilter,
     sessionAgent,
     // 「假设引擎 override = engine」的行配置:目标引擎的 wire id / 深度记忆 / Fast 记忆

@@ -2130,15 +2130,12 @@ export function NewMakerDraftRoute() {
    */
   const chatInitialProviderId = useMemo<string | null>(() => {
     if (!isDeviceLinkDraft) return localProviderIdForDraft;
-    const preferred =
-      deviceLinkInitial?.providerId === 'cursor' ? null : (deviceLinkInitial?.providerId ?? null);
-    const resolved = effectiveSourceIdForModel(
+    return effectiveSourceIdForModel(
       deviceProviders,
-      preferred,
+      deviceLinkInitial?.providerId ?? null,
       draftInitialModel,
       capabilityAgentKind,
     );
-    return resolved === 'cursor' ? null : resolved;
   }, [
     isDeviceLinkDraft,
     localProviderIdForDraft,
@@ -2921,7 +2918,10 @@ export function NewMakerDraftRoute() {
   const handleUnifiedDraftSelect = useCallback(
     (selection: {
       vendor: MakerVendor;
-      providerId: string;
+      /** 路由来源;面板已归一(Cursor 合成槽 → null)。 */
+      providerId: string | null;
+      /** 行的来源身份 id(锚点用;语义见 UnifiedSelectedRow.rowProviderId)。 */
+      rowProviderId: string;
       /** 选中引擎的 **wire model id**(不是行的归一化 id)。 */
       modelId: string;
       effort?: Effort;
@@ -2941,7 +2941,9 @@ export function NewMakerDraftRoute() {
               uid: selection.favoriteUid,
               wireModelId: selection.modelId,
               // 来源也是锚点身份(2026-08-19 review P1):同 wire model 换来源后旧锚点不得再亮。
-              providerId: selection.providerId,
+              // 用**行身份**而非路由来源:Cursor 行的路由来源已归一成 null,拿它当锚点会与
+              // 目录里真正无来源的行撞身份(见 UnifiedSelectedRow.rowProviderId)。
+              providerId: selection.rowProviderId,
             }
           : null,
       );
@@ -3591,7 +3593,7 @@ export function NewMakerDraftRoute() {
       // 草稿里选定的来源(供应商):ChatInput 在发送时把"仍连接的显式选择"经 opts 传上来
       // (未选 / 已断开 → null = 跟随默认路由)。透传给 createSession 落盘 sessions.provider_id,
       // 让新会话首个请求就走对来源,与"会话内切来源"行为一致。device-link 远程会话不支持(下方分支跳过)。
-      const providerId = opts?.providerId === 'cursor' ? null : (opts?.providerId ?? null);
+      const providerId = opts?.providerId ?? null;
 
       // 本地导航命令(/jump-session)在进入 createSession 前同步短路:命中即直接
       // 跳转,新建界面不会先创建 session。这正是它和 /issue 的关键区别。

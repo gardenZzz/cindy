@@ -904,13 +904,16 @@ interface ModelSelectorContentProps {
    * 两者不要同时传:同时传时本 prop 生效,跨引擎行就不会再走切换事务了。
    */
   onUnifiedSelect?: (selection: {
-    providerId: string;
+    /** 路由来源:面板已归一(Cursor 合成槽 → null)。行身份见 `rowProviderId`。 */
+    providerId: string | null;
     modelId: string;
     /** 该行生效档位;该 (模型, 引擎) 不可调档时为 undefined。 */
     effort?: Effort;
     engine: SelectableVendor;
     fast: boolean;
     favoriteUid: string | null;
+    /** 行的**来源身份 id**(收藏锚点 / 记忆槽用;语义见 UnifiedSelectedRow.rowProviderId)。 */
+    rowProviderId: string;
     /** 配置浮层「恢复推荐」的应用动作；调用方应删除 override，不得重新记忆推荐值。 */
     resetToRecommended?: true;
   }) => void | boolean | Promise<void | boolean>;
@@ -2005,7 +2008,8 @@ function ModelSelectorContentView({
    *     状态,先记锚点会被它顺手清掉)。
    */
   const applyUnifiedSessionSelect = async (args: {
-    providerId: string;
+    /** 路由来源:面板已按 routeProviderIdOf 归一(Cursor 合成槽 → null)。 */
+    providerId: string | null;
     /** 该行生效引擎的 **wire model id**(选择链路唯一可发送的 id)。 */
     wireModelId: string;
     effort: Effort | undefined;
@@ -2017,7 +2021,9 @@ function ModelSelectorContentView({
           uid: args.config.favoriteUid,
           wireModelId: args.wireModelId,
           engine: args.config.engine,
-          providerId: args.providerId,
+          // 锚点存的是**行身份**,不是路由来源:Cursor 行的路由来源已归一成 null,
+          // 用它当锚点会与目录里真正无来源的行撞身份(见 UnifiedSelectedRow.rowProviderId)。
+          providerId: args.config.rowProviderId,
         }
       : null;
     // 「正在跑的是哪个引擎」以会话形态给的那一个为准(已确认的会话引擎);没有会话形态的
@@ -2964,6 +2970,7 @@ function ModelSelectorContentView({
                   onUnifiedSelect({
                     providerId,
                     modelId: id,
+                    rowProviderId: rowConfig.rowProviderId,
                     ...(rowEffortValue ? { effort: rowEffortValue } : {}),
                     engine: rowConfig.engine,
                     fast: rowConfig.fast,
@@ -2997,6 +3004,7 @@ function ModelSelectorContentView({
                 return onUnifiedSelect({
                   providerId,
                   modelId: id,
+                  rowProviderId: rowConfig.rowProviderId,
                   ...(nextEffort ? { effort: nextEffort } : {}),
                   engine: rowConfig.engine,
                   fast: rowConfig.fast,
@@ -3022,6 +3030,7 @@ function ModelSelectorContentView({
                 return onUnifiedSelect({
                   providerId,
                   modelId: id,
+                  rowProviderId: rowConfig.rowProviderId,
                   ...(rowEffortValue ? { effort: rowEffortValue } : {}),
                   engine: rowConfig.engine,
                   fast: rowConfig.fast,

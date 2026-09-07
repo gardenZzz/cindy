@@ -725,6 +725,19 @@ export function priceTierOf(outputPerMtok: number, currency: string): 1 | 2 | 3 
 /** Cursor ACP 在联合列表里的合成来源 id。只用于 UI / 记忆槽,不是 Cindy 路由 provider。 */
 export const CURSOR_UNIFIED_SOURCE_ID = 'cursor';
 
+/**
+ * **行身份 id → 路由来源 id**。合成槽不是可路由来源,对外恒 null —— 与 flat 选择器
+ * 「Cursor 行 providerId 恒 null」逐字同义(见 ModelSelector.isSelectedRow / memorySourceOf)。
+ *
+ * 这是合成槽**唯一**的出口:面板把三个选择回调的第一参经它归一,下游(发送路由 /
+ * sessions.provider_id / 草稿 prefs)因此永远收不到 'cursor',不必各自加守卫。
+ * 需要「记住这一行」的消费点(收藏锚点 / 记忆槽)改读 `UnifiedSelectedRow.rowProviderId`,
+ * 与 `rowModelId` 是同一套「发送 id ≠ 行身份 id」的分离。
+ */
+export function routeProviderIdOf(rowProviderId: string): string | null {
+  return rowProviderId === CURSOR_UNIFIED_SOURCE_ID ? null : rowProviderId;
+}
+
 /** ACP listing 的最小投影。不绑 capabilities hook,单测可塞 plain object。 */
 export interface CursorOverlayModel {
   id: string;

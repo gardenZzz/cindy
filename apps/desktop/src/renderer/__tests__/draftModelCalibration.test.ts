@@ -786,36 +786,4 @@ describe('resolveDraftSessionProviderId', () => {
       }),
     ).toBe('xd');
   });
-
-  it('Cursor 合成槽永不写入 sessions.provider_id', () => {
-    const gateway = provider('xd', true, {
-      'claude-code': [model('gpt-5')],
-    });
-    const input = {
-      providers: [gateway],
-      agent: 'cursor' as const,
-      model: 'gpt-5',
-    };
-    expect(
-      resolveDraftSessionProviderId({
-        ...input,
-        explicitProviderId: 'cursor',
-        effectiveProviderId: 'cursor',
-      }),
-    ).toBeNull();
-    expect(
-      resolveDraftSessionProviderId({
-        ...input,
-        explicitProviderId: 'cursor',
-        effectiveProviderId: 'xd',
-      }),
-    ).toBe('xd');
-    expect(
-      resolveDraftSessionProviderId({
-        ...input,
-        explicitProviderId: null,
-        effectiveProviderId: 'cursor',
-      }),
-    ).toBeNull();
-  });
 });

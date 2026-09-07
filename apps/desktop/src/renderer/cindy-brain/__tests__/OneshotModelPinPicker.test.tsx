@@ -87,7 +87,7 @@ describe('OneshotModelPinPicker shared A adapter', () => {
     const onChange = vi.fn();
     mount({ options: [...options, xdOption], onChange, groupByProvider: true });
     expect(picker.providersOverride?.find(p => p.id === 'xd')?.name).toBe('Cindy AI');
-    expect(await picker.onUnifiedSelect!({ providerId: 'anthropic', modelId: 'claude-haiku-4-5',
+    expect(await picker.onUnifiedSelect!({ providerId: 'anthropic', rowProviderId: 'anthropic', modelId: 'claude-haiku-4-5',
       engine: 'cc', fast: false, favoriteUid: null })).toBe(true);
     expect(onChange).toHaveBeenCalledWith(ANTHROPIC_PIN);
   });
@@ -101,7 +101,7 @@ describe('OneshotModelPinPicker shared A adapter', () => {
       { providerId: 'xd', modelId: xdOption.modelId, engine: 'codex' as const },
       { providerId: 'anthropic', modelId: 'claude-haiku-4-5', engine: 'codex' as const },
       { providerId: 'unlisted', modelId: 'gpt', engine: 'codex' as const },
-    ]) expect(await picker.onUnifiedSelect!({ ...route, fast: false, favoriteUid: null })).toBe(false);
+    ]) expect(await picker.onUnifiedSelect!({ ...route, rowProviderId: route.providerId, fast: false, favoriteUid: null })).toBe(false);
     expect(onChange).not.toHaveBeenCalled();
   });
 
@@ -110,7 +110,7 @@ describe('OneshotModelPinPicker shared A adapter', () => {
     const onChange = vi.fn();
     mount({ value: unavailable.id, options: [unavailable, xdOption], onChange });
     expect(picker.providersOverride![0]!.agents).toEqual(['codex']);
-    await picker.onUnifiedSelect!({ providerId: 'xd', modelId: xdOption.modelId,
+    await picker.onUnifiedSelect!({ providerId: 'xd', rowProviderId: 'xd', modelId: xdOption.modelId,
       engine: 'codex', fast: false, favoriteUid: null });
     expect(onChange).toHaveBeenCalledWith(xdOption.id);
   });
@@ -118,10 +118,10 @@ describe('OneshotModelPinPicker shared A adapter', () => {
   it('preserves failure results, same-pin no-op, automatic clearing, and legacy labels', async () => {
     const onChange = vi.fn(async () => false);
     const view = mount({ value: OPENROUTER_PIN, onChange });
-    expect(await picker.onUnifiedSelect!({ providerId: 'openrouter', modelId: 'openai/gpt-5-mini',
+    expect(await picker.onUnifiedSelect!({ providerId: 'openrouter', rowProviderId: 'openrouter', modelId: 'openai/gpt-5-mini',
       engine: 'codex', fast: false, favoriteUid: null })).toBe(true);
     expect(onChange).not.toHaveBeenCalled();
-    expect(await picker.onUnifiedSelect!({ providerId: 'anthropic', modelId: 'claude-haiku-4-5',
+    expect(await picker.onUnifiedSelect!({ providerId: 'anthropic', rowProviderId: 'anthropic', modelId: 'claude-haiku-4-5',
       engine: 'cc', fast: false, favoriteUid: null })).toBe(false);
     expect(await picker.fallbackOption!.onSelect()).toBe(false);
     expect(onChange).toHaveBeenLastCalledWith(null);

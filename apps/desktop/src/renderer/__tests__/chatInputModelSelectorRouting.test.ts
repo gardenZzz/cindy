@@ -477,10 +477,16 @@ describe('ChatInput model source switching wiring', () => {
     expect(draftBlock).not.toContain('selection.rowModelId');
     for (const write of [
       'modelMemory?.setEffort(',
-      'modelMemory?.setFast(targetKind, selection.providerId, selection.modelId, selection.fast)',
+      'modelMemory?.setFast(targetKind, memorySourceId, selection.modelId, selection.fast)',
     ]) {
       expect(draftBlock).toContain(write);
     }
+    // 记忆槽 ≠ 路由来源:Cursor 的路由来源被面板归一成 null(routeProviderIdOf),记忆写入
+    // 必须经 modelMemorySourceId 还原合成槽 —— 直接用 selection.providerId 会让
+    // 「providerId 为空就不写记忆」把 Cursor 的档位一次都存不下来。
+    expect(draftBlock).toContain('modelMemorySourceId(targetKind, selection.providerId)');
+    // 行的来源身份 id 只透传给草稿层做收藏锚点,不参与记忆键、更不作为路由来源。
+    expect(draftBlock).toContain('rowProviderId: selection.rowProviderId,');
     // 「恢复推荐」已先删除记忆键；直通草稿时不得把推荐档位重新写成 override。
     expect(draftBlock).toContain('!selection.resetToRecommended');
     expect(draftBlock).toContain(

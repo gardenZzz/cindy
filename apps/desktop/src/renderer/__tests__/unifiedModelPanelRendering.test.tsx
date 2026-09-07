@@ -1186,6 +1186,7 @@ describe('统一面板 · 恢复推荐应用到 live 配置', () => {
     expect(onFastModeChange).not.toHaveBeenCalled();
     expect(onUnifiedSelect).toHaveBeenCalledWith({
       providerId: 'xd',
+      rowProviderId: 'xd',
       modelId: 'gpt-5.5',
       effort: 'high',
       engine: 'codex',
@@ -1211,6 +1212,7 @@ describe('统一面板 · 恢复推荐应用到 live 配置', () => {
     });
     expect(onUnifiedSelect).toHaveBeenCalledWith({
       providerId: 'xd',
+      rowProviderId: 'xd',
       modelId: 'gpt-5.5',
       effort: 'high',
       engine: 'codex',
@@ -1390,6 +1392,7 @@ describe('统一面板 · 删除选中的收藏回落到模型默认', () => {
     // 否则草稿还指着一个已经不存在的 uid。
     expect(onUnifiedSelect).toHaveBeenCalledWith({
       providerId: 'xd',
+      rowProviderId: 'xd',
       modelId: 'gpt-5.5',
       engine: 'codex',
       effort: 'high',
@@ -1935,6 +1938,7 @@ describe('统一面板 · 改模型行的实时配置后收藏不再选中', () 
     await waitFor(() => {
       expect(onUnifiedSelect).toHaveBeenCalledWith({
         providerId: 'xd',
+        rowProviderId: 'xd',
         modelId: 'gpt-5.5',
         effort: 'high',
         engine: 'codex',
@@ -2432,6 +2436,7 @@ describe('统一面板 · 编辑选中的收藏同步到 live', () => {
     // 写回草稿;favoriteUid **保持** —— 编辑不改变「选中的是这一条收藏」。
     expect(onUnifiedSelect).toHaveBeenCalledWith({
       providerId: 'xd',
+      rowProviderId: 'xd',
       modelId: 'gpt-5.5',
       engine: 'cc',
       effort: 'low',
@@ -2948,6 +2953,7 @@ describe('统一面板 · 新会话选中直通', () => {
     expect(onProviderChange).not.toHaveBeenCalled();
     expect(onUnifiedSelect).toHaveBeenCalledWith({
       providerId: 'xd',
+      rowProviderId: 'xd',
       modelId: 'gpt-5.5',
       // 推荐引擎 = gpt 家族主场 codex;草稿换引擎无损,直接落(档位取 codex 条目默认)。
       engine: 'codex',
@@ -3005,6 +3011,7 @@ describe('统一面板 · 新会话选中直通', () => {
     });
     expect(onUnifiedSelect).toHaveBeenCalledWith({
       providerId: 'xd',
+      rowProviderId: 'xd',
       modelId: 'gpt-5.5',
       effort: 'low',
       engine: 'codex',

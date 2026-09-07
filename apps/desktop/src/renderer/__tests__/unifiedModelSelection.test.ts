@@ -23,6 +23,7 @@ import {
   entryMatchesModelId,
   favoriteMatchesSelection,
   overlayCursorUnifiedEntries,
+  routeProviderIdOf,
   unifiedRowMatchesSelection,
   wireModelIdOf,
   buildUnifiedRail,
@@ -1185,6 +1186,22 @@ describe('overlayCursorUnifiedEntries', () => {
         keepModel: { providerId: 'openai', modelId: 'composer-1', agent: 'codex' },
       }).map((entry) => entry.modelId),
     ).toEqual(['gpt-5.5']);
+  });
+});
+
+describe('routeProviderIdOf —— 合成槽的唯一出口', () => {
+  it('Cursor 合成槽归一成 null,真实来源原样透传', () => {
+    expect(routeProviderIdOf(CURSOR_UNIFIED_SOURCE_ID)).toBeNull();
+    expect(routeProviderIdOf('openai')).toBe('openai');
+    expect(routeProviderIdOf('xd')).toBe('xd');
+    // 判别性:不能退化成「什么都归 null」或「原样返回」。
+    expect(routeProviderIdOf('cursor-proxy')).toBe('cursor-proxy');
+  });
+
+  it('overlay 行的 providerId 经它出口后不再是可路由来源', () => {
+    const overlay = overlayCursorUnifiedEntries({ models: [cursorOverlayModel('gpt-5.5')] })[0]!;
+    expect(overlay.providerId).toBe(CURSOR_UNIFIED_SOURCE_ID);
+    expect(routeProviderIdOf(overlay.providerId)).toBeNull();
   });
 });
 

@@ -805,7 +805,10 @@ interface ChatInputProps {
    */
   onUnifiedDraftSelect?: (selection: {
     vendor: SelectableVendor;
-    providerId: string;
+    /** 路由来源;面板已归一(Cursor 合成槽 → null)。 */
+    providerId: string | null;
+    /** 行的来源身份 id(收藏锚点用;语义见 UnifiedSelectedRow.rowProviderId)。 */
+    rowProviderId: string;
     /** 选中引擎的 **wire model id**。 */
     modelId: string;
     effort?: Effort;
@@ -2034,7 +2037,7 @@ export function ChatInput({
   //   会改走 catalog gateway-key 路由(见 provider-route.ts),破坏默认 cohort 的路由/缓存基线。
   const sendProviderId = useMemo<string | null>(() => {
     const kind = currentModelAgentKind;
-    if (!kind || !activeProviderId || activeProviderId === 'cursor') return null;
+    if (!kind || !activeProviderId) return null;
     return effectiveSourceIdForModel(sendProviders, activeProviderId, activeModel, kind) ===
       activeProviderId
       ? activeProviderId
@@ -6935,7 +6938,8 @@ export function ChatInput({
   // 所以这里只接收、不消费,也不往下游传。
   const handleUnifiedDraftSelect = useCallback(
     (selection: {
-      providerId: string;
+      /** 路由来源;面板已归一(Cursor 合成槽 → null)。记忆槽另经 modelMemorySourceId 还原。 */
+      providerId: string | null;
       /** 选中引擎的 **wire model id** —— 唯一可发送、可当记忆键的那个 id。 */
       modelId: string;
       effort?: Effort;
@@ -6944,26 +6948,33 @@ export function ChatInput({
       favoriteUid: string | null;
       /** 行的归一化 id(面板行身份)。草稿层不消费,更不作为发送 id。 */
       rowModelId?: string;
+      /** 行的来源身份 id(面板行身份);草稿层只透传给锚点,不作为路由来源。 */
+      rowProviderId: string;
       resetToRecommended?: true;
     }) => {
       if (sessionId || settingsLocked) return;
       const targetKind = vendorKeyToAgentKind(selection.engine);
-      if (targetKind && selection.providerId && !selection.resetToRecommended) {
+      // 记忆槽 ≠ 路由来源:Cursor 无 Cindy provider,路由来源为 null 但仍要按
+      // (agent, model) 记住 effort / Fast —— 交给 modelMemorySourceId 还原合成槽,
+      // 否则「providerId 为空就不写记忆」会让 Cursor 的档位一次都存不下来。
+      const memorySourceId = modelMemorySourceId(targetKind, selection.providerId);
+      if (targetKind && memorySourceId && !selection.resetToRecommended) {
         if (selection.effort) {
           modelMemory?.setEffort(
             targetKind,
-            selection.providerId,
+            memorySourceId,
             selection.modelId,
             selection.effort,
           );
         }
-        modelMemory?.setFast(targetKind, selection.providerId, selection.modelId, selection.fast);
+        modelMemory?.setFast(targetKind, memorySourceId, selection.modelId, selection.fast);
       }
       // 乐观来源:草稿没有 SSoT 回流,pill 的来源图标靠这份本地态即时跟上。
       setSelectedProviderId(selection.providerId);
       onUnifiedDraftSelect?.({
         vendor: selection.engine,
         providerId: selection.providerId,
+        rowProviderId: selection.rowProviderId,
         modelId: selection.modelId,
         ...(selection.effort ? { effort: selection.effort } : {}),
         fast: selection.fast,
