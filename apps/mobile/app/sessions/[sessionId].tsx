@@ -1,3 +1,4 @@
+import { useRemoteResourceSession } from '@/session/useRemoteResourceSession';
 import { isInFlightDeviceLinkError } from '@cindy/device-link';
 import { takeRefinementContextTail, truncateRefinementReply } from '@cindy/voice-input-core';
 import {
@@ -166,6 +167,7 @@ import {
   type SessionExtraDirBrowserState,
 } from '@/session/SessionMenuSheet';
 import type { SessionMenuView } from '@/session/sessionMenu';
+import { isHostManagedSession } from '@/session/hostManagedSession';
 import {
   interactionKind,
   isPendingInteractionCollapsed,
@@ -1937,6 +1939,7 @@ export default function SessionScreen() {
     () => sessions.find((item) => item.id === sessionId) ?? null,
     [sessionId, sessions],
   );
+  const sessionManagedByHost = isHostManagedSession(currentSession);
   const localCodexRateLimitControl = canUseLocalCodexRateLimitControl(currentSession);
   const isDeviceAccessRevoked = !!deviceId && revokedDevices.has(deviceId);
   // 熔断 open:被控电脑「进程活着但不回包」的半死态;relay status 恒 online,必须单独入参。
@@ -2099,6 +2102,12 @@ export default function SessionScreen() {
     () => remoteSessionStore.getSessionLiveActivity(sessionId)?.attention === true,
   );
   const hasRenderedMessages = messages.length > 0;
+  useRemoteResourceSession(deviceId, deviceName, sessionId,
+    currentSession?.id === sessionId && hasRenderedMessages
+      && readAckSyncedKey === `${sessionId}:${connectionEpoch}`
+      // A pre-ACK snapshot may omit replies sent before the subscription took effect.
+      && contentRecoveryKey !== null && contentSyncedKey === contentRecoveryKey
+      && !outboxRecoverySyncHeld && !loading);
   const lastAckKeyRef = useRef<string | null>(null);
   // AppState 门槛:锁屏 / 切后台时导航焦点不变,useFocusEffect 的 cleanup 不会跑,
   // 驻留计时器可能在没有真实前台展示的情况下(甚至后台恢复补跑时)发出 explicit
@@ -2320,6 +2329,8 @@ export default function SessionScreen() {
     ? resolveSessionAgentKind(currentSession)
     : 'claude-code';
   const agentSwitchIntent = currentSession?.agentSwitchIntent ?? null;
+  const composerDisplayAgentKind = agentSwitchIntent?.targetAgentKind ?? sessionAgentKind;
+  const composerSwitchesAgent = composerDisplayAgentKind !== sessionAgentKind;
   const sessionAgentSwitchSupported = !!currentSession
     && supportsMobileSessionAgentSwitch(currentSession, capabilities);
   const runtimeOptions = useMemo(
@@ -2360,23 +2371,18 @@ export default function SessionScreen() {
   // 被控端供应商目录 → provider-aware 模型分段(与新建会话页同逻辑;0 供应商回退扁平 modelOptions)。
   const composerDeviceProviders = useDeviceProviders(deviceId || undefined);
   const composerModelSections = useMemo(
-    () => currentSession
+    () => composerDisplaySession
       ? buildMobileModelSections({
           providers: composerDeviceProviders.providers,
-          agentKind: sessionAgentKind,
-          selectedModelId: currentSession.model,
-          selectedProviderId: currentSession.providerId ?? null,
+          agentKind: composerDisplayAgentKind,
+          selectedModelId: composerDisplaySession.model,
+          selectedProviderId: composerDisplaySession.providerId ?? null,
           visibilityOverrides: composerDeviceProviders.modelVisibilityOverrides,
           // 已建会话:实际路由口径(运行中会话跟真实扣费路由,含停用拷贝)。
           existingSessionRoute: true,
         })
       : null,
-    [
-      composerDeviceProviders.providers,
-      composerDeviceProviders.modelVisibilityOverrides,
-      currentSession,
-      sessionAgentKind,
-    ],
+    [composerDeviceProviders.providers, composerDeviceProviders.modelVisibilityOverrides, composerDisplayAgentKind, composerDisplaySession],
   );
   // 模型列表元信息(单价 / 折扣版 key presence)—— 与新建会话页同一套隧道缓存 hook。
   const deviceModelPricing = useDeviceModelPricing(deviceId || undefined);
@@ -2455,12 +2461,12 @@ export default function SessionScreen() {
   // 画成真实来源，否则手机会显示「默认来源 Logo」，发送却仍按已断开的 providerId 路由。
   // provider 列表加载期间不判，避免首帧短暂闪出断开态。
   const composerSelectedSourceDisconnected = useMemo(() => {
-    if (!currentSession) return false;
+    if (!composerDisplaySession) return false;
     return isSelectedSourceDisconnected({
       providers: composerDeviceProviders.providers,
-      providerId: currentSession.providerId,
-      modelId: currentSession.model,
-      agentKind: sessionAgentKind,
+      providerId: composerDisplaySession.providerId,
+      modelId: composerDisplaySession.model,
+      agentKind: composerDisplayAgentKind,
       loading: composerDeviceProviders.loading,
       error: composerDeviceProviders.error,
     });
@@ -2468,22 +2474,22 @@ export default function SessionScreen() {
     composerDeviceProviders.error,
     composerDeviceProviders.loading,
     composerDeviceProviders.providers,
-    currentSession,
-    sessionAgentKind,
+    composerDisplaySession,
+    composerDisplayAgentKind,
   ]);
   const composerPillSourceProvider = useMemo(() => {
     if (!composerSelectedSourceDisconnected) return composerActiveSourceProvider;
     return composerDeviceProviders.providers.find(
-      (provider) => provider.id === currentSession?.providerId,
+      (provider) => provider.id === composerDisplaySession?.providerId,
     ) ?? null;
   }, [
     composerActiveSourceProvider,
     composerDeviceProviders.providers,
     composerSelectedSourceDisconnected,
-    currentSession?.providerId,
+    composerDisplaySession?.providerId,
   ]);
   const composerPillSourceId = composerSelectedSourceDisconnected
-    ? currentSession?.providerId ?? null
+    ? composerDisplaySession?.providerId ?? null
     : composerPillSourceProvider?.id ?? null;
   const composerPillFastOn = agentSwitchIntent
     ? agentSwitchIntent.fastMode === true
@@ -2496,7 +2502,10 @@ export default function SessionScreen() {
       });
   const composerRuntimeLabel = composerRuntimeSummary
     ? agentSwitchIntent
-      ? t('session.screen.nextAgentSwitch', { agent: mobileAgentLabel(agentSwitchIntent.targetAgentKind), model: composerRuntimeSummary.modelSummary })
+      ? t(composerSwitchesAgent ? 'session.screen.nextAgentSwitch' : 'session.screen.nextModelSelection', {
+          agent: mobileAgentLabel(agentSwitchIntent.targetAgentKind),
+          model: composerRuntimeSummary.modelSummary,
+        })
       : composerRuntimeSummary.modelSummary
     : '';
   const nativeShellLayout = useMemo(() => buildSessionNativeShellLayout({
@@ -2857,6 +2866,18 @@ export default function SessionScreen() {
     setModelSheetOpen(false);
     setPermissionSheetOpen(false);
   }, [canUseRemoteSessionControls]);
+
+  useEffect(() => {
+    if (!sessionManagedByHost) return;
+    setSettingsOpen(false);
+    setModelSheetOpen(false);
+    setSessionTreeOpen(false);
+    setSessionTreePendingOpen(false);
+    if (contextSheetView !== 'main') {
+      setContextSheetView('main');
+      setContextSheetOpen(false);
+    }
+  }, [contextSheetView, sessionManagedByHost]);
 
   useEffect(() => {
     const subscription = AppState.addEventListener('change', (nextState) => {
@@ -6569,7 +6590,7 @@ export default function SessionScreen() {
       <ComposerToolbarLeftGroup testID="session.composerToolbarLeft">
         {renderComposerAttachmentButton()}
         {renderSessionPermissionButton()}
-        {planModeOn ? (
+        {!sessionManagedByHost && planModeOn ? (
           <PlanModeChip
             disabled={controlBusy || !canUseRemoteSessionControls}
             onExit={() => togglePlanMode(false)}
@@ -6578,10 +6599,10 @@ export default function SessionScreen() {
         ) : null}
         {composerRuntimeSummary ? (
           <ComposerRuntimePill
-            disabled={controlBusy || !canUseRemoteSessionControls}
+            disabled={sessionManagedByHost || controlBusy || !canUseRemoteSessionControls}
             fastOn={composerPillFastOn}
             label={composerRuntimeLabel}
-            leading={agentSwitchIntent ? (
+            leading={agentSwitchIntent && composerSwitchesAgent ? (
               <MobileAgentMark
                 agentKind={agentSwitchIntent.targetAgentKind}
                 color={colors.textSecondary}
@@ -6592,8 +6613,8 @@ export default function SessionScreen() {
               // 不静默换成 activeSourceId 的默认回退 Logo。
               <MobileModelIconMark
                 color={composerSelectedSourceDisconnected ? colors.statusError : undefined}
-                icon={currentSession && composerPillSourceProvider
-                  ? getModel(composerPillSourceProvider, currentSession.model, sessionAgentKind)?.icon
+                icon={composerDisplaySession && composerPillSourceProvider
+                  ? getModel(composerPillSourceProvider, composerDisplaySession.model, composerDisplayAgentKind)?.icon
                   : undefined}
                 name={composerPillSourceProvider?.name ?? composerPillSourceId}
                 providerId={composerPillSourceId}
@@ -7931,7 +7952,7 @@ export default function SessionScreen() {
     }
   }, [agentSwitchIntent, maker, modelSheetAgentKind, runControlAction, sessionAgentKind, sessionId, writeSessionAgentSwitchIntent]);
   const toggleComposerModelPicker = useCallback(() => {
-    if (!canUseRemoteSessionControls) {
+    if (sessionManagedByHost || !canUseRemoteSessionControls) {
       setModelSheetOpen(false);
       return;
     }
@@ -7941,7 +7962,7 @@ export default function SessionScreen() {
     }
     setModelSheetAgentKind(agentSwitchIntent?.targetAgentKind ?? sessionAgentKind);
     setModelSheetOpen(true);
-  }, [agentSwitchIntent, canUseRemoteSessionControls, modelSheetOpen, sessionAgentKind]);
+  }, [agentSwitchIntent, canUseRemoteSessionControls, modelSheetOpen, sessionAgentKind, sessionManagedByHost]);
 
   // 账号限额按需拉取(会话信息面板打开时):优先走 Codex app-server 权威控制面,
   // 同时拿窗口和 reset credits。老被控端没有新通道时回退既有只读 usage channel;
@@ -8704,6 +8725,7 @@ export default function SessionScreen() {
               ) : undefined}
               syncing={showSyncingIndicator}
               messageCount={Math.max(messages.length, currentSession?._count?.messages ?? 0)}
+              messageOnly={sessionManagedByHost}
               onBack={goBackToHome}
               onOpenSessionList={wideSessionNav.enabled ? openSessionListDrawer : undefined}
               sessionListButtonRef={sessionListButtonRef}
@@ -8754,7 +8776,7 @@ export default function SessionScreen() {
             ) : null}
           </View>
         </View>
-        {currentSession ? (
+        {currentSession && !sessionManagedByHost ? (
           <SessionMenuSheet
             usageReader={maker}
             accountUsage={localCodexRateLimitControl ? accountUsage : null}
@@ -8865,7 +8887,7 @@ export default function SessionScreen() {
                   testID="session.contextSheetPhotos"
                 />
               ) : null}
-              <ContextSheetGroup label={t('session.common.groupMode')}>
+              {!sessionManagedByHost ? <ContextSheetGroup label={t('session.common.groupMode')}>
                 {planModeSupported ? (
                   // 点击即切换计划模式并关面板(产品决策,不做开关);已开启时显示 ✓,再点退出。
                   <ContextSheetRow
@@ -8895,7 +8917,7 @@ export default function SessionScreen() {
                     </>
                   ) : 'chevron'}
                 />
-              </ContextSheetGroup>
+              </ContextSheetGroup> : null}
               <ContextSheetGroup label={t('session.common.groupAdd')}>
                 <ContextSheetRow
                   accessibilityHint={composerSendUnavailableReason ?? undefined}
@@ -8970,7 +8992,7 @@ export default function SessionScreen() {
             />
           )}
         </ContextSheet>
-        {currentSession && runtimeOptions && modelSheetSelection && modelSheetRuntimeOptions ? (
+        {currentSession && !sessionManagedByHost && runtimeOptions && modelSheetSelection && modelSheetRuntimeOptions ? (
           <ModelPickerSheet
             activeModelId={modelSheetSelection.model}
             existingSessionRoute
@@ -9485,6 +9507,7 @@ function SessionHeaderBar({
   shareSelectAllNode,
   syncing,
   messageCount,
+  messageOnly,
   onBack,
   onOpenFiles,
   onOpenSessionList,
@@ -9509,6 +9532,8 @@ function SessionHeaderBar({
   shareSelectAllNode?: ReactNode;
   syncing: boolean;
   messageCount: number;
+  /** Host-managed canonical Sessions expose conversation controls only. */
+  messageOnly: boolean;
   onBack(): void;
   /** 宽屏导航形态下提供:左上角改为三条杠,点击拉出任务列表抽屉(替代返回)。 */
   onOpenSessionList?: () => void;
@@ -9545,7 +9570,9 @@ function SessionHeaderBar({
   const actionProjection = overview ? projectMobileSessionActions(overview.actions) : null;
   // queue 入口已退役:排队消息 inline 到消息流(InlineQueueSection),不再有独立面板。
   const headerActions = (actionProjection?.primaryActions ?? [])
-    .filter((action) => action.id !== 'settings' && action.id !== 'queue');
+    .filter((action) => action.id !== 'settings'
+      && action.id !== 'queue'
+      && (!messageOnly || action.id === 'search' || action.id === 'files'));
   const actionHandlers = {
     files: onOpenFiles,
     queue: () => undefined,
@@ -9601,7 +9628,7 @@ function SessionHeaderBar({
 
       <View style={styles.sessionHeaderTextBlock}>
         <View style={styles.sessionHeaderTitleRow}>
-          {currentSession?.pinnedAt ? (
+          {!messageOnly && currentSession?.pinnedAt ? (
             <Pin
               color={colors.textTertiary}
               size={iconSize.sm}
@@ -9633,14 +9660,14 @@ function SessionHeaderBar({
             testID={SESSION_ACTION_TEST_IDS[action.id]}
           />
         ))}
-        <SessionHeaderIconButton
+        {!messageOnly ? <SessionHeaderIconButton
           accessibilityLabel={t('session.screen.openSessionMenu')}
           active={false}
           disabled={!currentSession}
           icon={Ellipsis}
           onPress={currentSession ? onOpenSettings : undefined}
           testID="session.controlsToggle"
-        />
+        /> : null}
       </View>
     </View>
   );

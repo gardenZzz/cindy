@@ -13,6 +13,7 @@
  * F-FP-5:   workingDir read-only display
  */
 
+import { useCodexContextWindow } from '@/hooks/useCodexContextWindow';
 import {
   Profiler,
   useCallback,
@@ -5404,6 +5405,9 @@ export function CCAgentSessionView({
                     agentStatus.contextTokens > 0 ||
                     agentStatus.contextWindow > 0) && (
                     <ContextCapacityRing
+                    isRunning={agentStatus.isRunning}
+                    sessionId={sessionId}
+                    providerId={session?.providerId}
                     contextTokens={agentStatus.contextTokens}
                     model={agentSwitchIntent?.model ?? session?.model ?? ''}
                     vendorKey={normalizeDbAgentKind(displayAgentKind)}
@@ -5945,6 +5949,9 @@ function getModelContextWindow(
 }
 
 function ContextCapacityRing({
+  isRunning,
+  sessionId,
+  providerId,
   contextTokens,
   model,
   vendorKey,
@@ -5953,6 +5960,9 @@ function ContextCapacityRing({
   deviceId,
   onCompact,
 }: {
+  isRunning?: boolean;
+  sessionId?: string;
+  providerId?: string | null;
   contextTokens: number;
   model: string;
   vendorKey: 'cc' | 'codex' | 'cursor' | 'pi',
@@ -5965,9 +5975,18 @@ function ContextCapacityRing({
   onCompact?: () => void;
 }) {
   const { t } = useTranslation();
+  const [contextInspection, setContextInspection] = useState(0);
+  const codexContext = useCodexContextWindow({
+    enabled: vendorKey === 'codex' && !deviceId && Boolean(sessionId),
+    providerId, modelId: model, sessionId, reportedWindow: sdkContextWindow,
+    refreshKey: `${isRunning}:${contextInspection}`,
+  });
   const contextWindow = resolveDisplayContextWindow({
     sdkContextWindow,
     verifiedContextWindow,
+    runtimeWindowAuthoritative: vendorKey === 'codex',
+    nativeContextWindow: codexContext?.contextWindow,
+    nativeContextPending: codexContext?.pendingApply,
     modelContextWindow: getModelContextWindow(model, vendorKey, deviceId),
   });
   const pct =
@@ -6030,7 +6049,7 @@ function ContextCapacityRing({
         />
       </svg>
       <span className="text-12 font-medium leading-none" style={{ color: fillColor }}>
-        {pct}%
+        {contextWindow > 0 ? `${pct}%` : '—'}
       </span>
     </>
   );
@@ -6044,10 +6063,18 @@ function ContextCapacityRing({
             <div>{t('ccAgent.layout.contextRing.compactHint')}</div>
           </>
         ) : vendorKey === 'codex' ? (
-          // codex 协议没有手动 compact 入口(server 侧自动压缩),圆环不可点击;
-          // tooltip 里说明原因,避免用户疑惑为什么 Claude 能点 codex 不能。
+          // Native Codex manages compaction; this control only reads its capacity.
           <>
-            <div>{tooltipText}</div>
+            <div>{codexContext?.pendingApply
+              ? t('ccAgent.layout.contextRing.codexPendingHint')
+              : tooltipText}</div>
+            <div>{codexContext
+              ? t('settings.providers.models.advanced.codexContextValues', {
+                  total: codexContext.contextWindow.toLocaleString(),
+                  usable: codexContext.usableContextWindow.toLocaleString(),
+                  compact: codexContext.autoCompactTokenLimit.toLocaleString(),
+                })
+              : t('settings.providers.models.advanced.codexContextUnknown')}</div>
             <div>{t('ccAgent.layout.contextRing.codexAutoHint')}</div>
           </>
         ) : (
@@ -6065,7 +6092,10 @@ function ContextCapacityRing({
           {ringContent}
         </button>
       ) : (
-        <div className="flex shrink-0 items-center gap-1">{ringContent}</div>
+        <div className="flex shrink-0 items-center gap-1"
+          onMouseEnter={() => { if (vendorKey === 'codex') setContextInspection(n => n + 1); }}>
+          {ringContent}
+        </div>
       )}
     </Tip>
   );

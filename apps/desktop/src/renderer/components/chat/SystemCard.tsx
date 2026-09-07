@@ -1347,7 +1347,7 @@ export function SystemCard({
     case 'bot-session-task':
       return <BotSessionTaskCard data={data} sessionId={sessionId} />;
     case 'bot-direct-message':
-      return <BotDirectMessageCard data={data} />;
+      return <BotDirectMessageCard data={data} sessionId={sessionId} />;
     default:
       return null;
   }
