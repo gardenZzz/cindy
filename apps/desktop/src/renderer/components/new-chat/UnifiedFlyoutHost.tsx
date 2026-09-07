@@ -94,6 +94,7 @@ export function UnifiedFlyoutHost({
   anchorEl: HTMLElement | null;
   panelElement: HTMLElement | null;
   flyoutRef: RefObject<HTMLDivElement | null>;
+  /** 加在 portal **外层包装**上的类(宿主抬层级用,如对话框内的 `z-[10020]`)。 */
   className?: string;
   /**
    * 「列表结构变了」的身份值(调用方传 sections 之类的引用即可)。值变化 = 锚点行可能
@@ -148,7 +149,11 @@ export function UnifiedFlyoutHost({
         // 见上:MorphPopover 的 outside / focusin 判定靠这个属性认「自己人」。
         data-radix-popper-content-wrapper=""
         data-unified-flyout-wrapper=""
-        className="fixed z-50"
+        // 调用方的层级覆盖必须落在**这一层**:内层卡片是 position: static,z-index 对它
+        // 无效;而这层 `fixed z-50` 自己就是层叠上下文,钳住内层任何 z。宿主把面板抬到
+        // 对话框之上时(ScheduleFormDialog 整层 z-[10000],chip 弹层 z-[10010]),浮层不跟着
+        // 抬就恒定压在对话框蒙层底下 —— 看不见、点不动,表现为「档位选不了」。
+        className={cn('fixed z-50', className)}
         style={{
           width: FLYOUT_WIDTH + UNIFIED_FLYOUT_GAP,
           // 行与浮层之间那条缝隙由**外层包装自己吃掉**:包装比卡片宽 gap 并把这段留白
@@ -192,7 +197,6 @@ export function UnifiedFlyoutHost({
               'w-full rounded-[16px] border p-3.5 pb-3 shadow-[var(--shadow-menu)]',
               'border-[var(--model-dropdown-border)] bg-[var(--model-dropdown-bg)]',
               'transition-[top] duration-150 ease-out motion-reduce:transition-none',
-              className,
             )}
           >
             {children}
