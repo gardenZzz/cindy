@@ -22,6 +22,7 @@
  * 文件结构对标 codex/index.ts，方便对照阅读。
  */
 
+import { randomUUID } from 'node:crypto';
 import { promises as fs } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -2618,6 +2619,12 @@ export class ClaudeCodeAgent extends BaseAgent {
     // ── 跨 turn 共享状态 ───────────────────────────────────────────────────
     let configuredResumeSessionId: string | undefined = opts.resumeSessionId;
     let sdkSessionId: string | undefined = configuredResumeSessionId;
+    /**
+     * 本次 spawn 用 `--session-id` 钉给 CLI 的新会话 id(见 buildQuery 里的钉死段)。
+     * 只作 handle.id 的读取兜底 —— 让 host 在 `system:init` 到达前就能把 loopback
+     * proxy 看到的请求归属回本会话;`sdkSessionId` 仍只由 SDK 回执写入。
+     */
+    let spawnPinnedSdkSessionId: string | undefined;
     // 只在首次 resume 尚未被真实内容证明成功前允许自愈；成功一轮后即关闭分类窗口，
     // 避免后续普通 turn 中碰巧出现同文案时误清上下文。
     let resumeValidationPending = !!configuredResumeSessionId;
@@ -3671,6 +3678,25 @@ export class ClaudeCodeAgent extends BaseAgent {
           });
         }
       }
+      // ── 新建会话的 SDK session id 前置钉死 ────────────────────────────────
+      // CLI 自生成 id 时 host 只能等 `system:init` 才知道它,而实测(cc 2.1.259)init
+      // 与首个 `/v1/messages` 只隔 0.1–0.6s。这个窗口里 loopback proxy 拿着请求头的
+      // `x-claude-code-session-id` 反解不出会话(handle.id 还是 '<pending>'),
+      // per-session 路由整段落空 → 请求被当成「未选供应商」走默认路由:oauth-spawn
+      // 会被换成网关 key 发去 XD 网关,网关账号没有 claude 权限时就是首轮 403
+      // user_model_access_denied;网关账号有权限时更糟 —— 静默记到错误账号头上。
+      // spawn 前自己生成 id 交给 CLI(`--session-id`),handle.id 立即可用,窗口归零。
+      //
+      // 只钉**新建**:resume / rewind fork 用既有 id,SDK 也禁止 sessionId 与 resume
+      // 并用(见 Options.sessionId 文档)。远端 cc-mgr 分支在上面已 return,流量不经
+      // 本地 proxy,不参与。
+      //
+      // 刻意**不**回填 `sdkSessionId`:那个变量是「SDK 已确认的 id」,重建时的 resume
+      // 判据(resumeSdkSid)与 invalid-resume 自愈都读它。只补 handle.id 的读取兜底,
+      // 其余路径保持原样 —— 随后到达的 `system:init` 仍按原流程触发 onSessionId
+      // (落库、事件),本改动对它们零影响。
+      const pinnedSdkSessionId = resumeSdkSid ? undefined : randomUUID();
+      if (pinnedSdkSessionId) spawnPinnedSdkSessionId = pinnedSdkSessionId;
       // 计划模式开启时 SDK 跑 plan; 读 mutable 值让 rewind/fork 重建拿到当前档而非创建时快照。
       const additionalDirectories = [...new Set([...mutableExtraDirs, ...mutableWritableDirs])];
       activeQueryHasDirectoryGrants = additionalDirectories.length > 0;
@@ -3740,6 +3766,7 @@ export class ClaudeCodeAgent extends BaseAgent {
             };
           })(),
           ...(resumeSdkSid ? { resume: resumeSdkSid } : {}),
+          ...(pinnedSdkSessionId ? { sessionId: pinnedSdkSessionId } : {}),
           enableFileCheckpointing,
           ...(finalResumeAt ? { resumeSessionAt: finalResumeAt } : {}),
           ...(finalFork ? { forkSession: true } : {}),
@@ -5598,7 +5625,7 @@ export class ClaudeCodeAgent extends BaseAgent {
         if (decision.unavailable) autoReviewUnavailableNotice.notify();
         return decision;
       },
-      get id() { return sdkSessionId ?? '<pending>'; },
+      get id() { return sdkSessionId ?? spawnPinnedSdkSessionId ?? '<pending>'; },
       agentKind: 'claude-code',
       get model() { return mutableModel; },
 
