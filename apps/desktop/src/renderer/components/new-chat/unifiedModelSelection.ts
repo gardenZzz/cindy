@@ -286,7 +286,11 @@ export function favoriteMatchesSelection(args: {
   const { entry, item, selected, agent } = args;
   if (
     !agent ||
-    item.providerId !== selected.providerId ||
+    // 收藏存的是**行身份 id**(anchor.providerId,Cursor 合成行恒 'cursor'),而 selected
+    // 是**路由来源**(Cursor 恒 null)—— 两者不同空间,直接比会让 Cursor 行的收藏永远不高亮。
+    // 先把身份归一到路由空间再比;非合成行 routeProviderIdOf 恒等,行为不变。
+    // 引擎那一半由下面的 agent 判据兜:同为 null 的其它引擎不会误命中 Cursor 收藏。
+    routeProviderIdOf(item.providerId) !== selected.providerId ||
     !entryMatchesModelId(entry, selected.modelId) ||
     agentKindOfEngine(item.agent) !== agent ||
     !entry.candidates.includes(agent)

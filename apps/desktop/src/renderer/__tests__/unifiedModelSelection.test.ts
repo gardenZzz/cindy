@@ -1238,3 +1238,41 @@ describe('unifiedRowMatchesSelection', () => {
     expect(unifiedRowMatchesSelection(catalog, selected, null)).toBe(true);
   });
 });
+
+describe('Cursor 收藏的选中态(行身份 vs 路由来源)', () => {
+  const overlay = overlayCursorUnifiedEntries({ models: [cursorOverlayModel('gpt-5.5')] })[0]!;
+  // 收藏落的是 anchor.providerId = **行身份 id**;Cursor 行恒 'cursor'。
+  const item = favoriteOf({
+    uid: 'fav-cursor',
+    providerId: CURSOR_UNIFIED_SOURCE_ID,
+    modelId: 'gpt-5.5',
+    agent: 'cursor',
+    effort: 'high',
+  });
+  // 而 selected 是**路由来源**:Cursor 无 Cindy provider,恒 null。
+  const base = {
+    entry: overlay,
+    item,
+    selected: { providerId: null, modelId: 'gpt-5.5' },
+    agent: 'cursor' as const,
+    effort: 'high' as const,
+    fast: false,
+  };
+
+  it('身份 cursor 与路由 null 归一后视为同一来源(修复前恒不高亮)', () => {
+    expect(favoriteMatchesSelection(base)).toBe(true);
+  });
+
+  it('归一不会让别的引擎误命中 Cursor 收藏', () => {
+    // selected.providerId 同为 null,但引擎判据把它挡住。
+    expect(favoriteMatchesSelection({ ...base, agent: 'codex' })).toBe(false);
+    expect(favoriteMatchesSelection({ ...base, agent: 'claude-code' })).toBe(false);
+  });
+
+  it('目录行的显式来源不因归一而匹配默认路由', () => {
+    const catalogItem = favoriteOf({ providerId: 'openai', modelId: 'gpt-5.5', agent: 'codex' });
+    expect(
+      favoriteMatchesSelection({ ...base, item: catalogItem, agent: 'codex' }),
+    ).toBe(false);
+  });
+});
