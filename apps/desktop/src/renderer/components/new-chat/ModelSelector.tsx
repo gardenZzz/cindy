@@ -341,6 +341,9 @@ export function ProviderMark({
 }) {
   const common = cn(withMargin && 'mr-1.5', 'shrink-0', colorClass);
   const markSize = dense ? 12.3 : 13;
+  if (providerId === 'cursor') {
+    return <CursorMark size={markSize} className={common} />;
+  }
   if (isProviderLogoKind(logoKind) || hasProviderLogo(providerId, routing)) {
     return (
       <ProviderLogoMark
@@ -2752,6 +2755,7 @@ function ModelSelectorContentView({
   // 渲染直接 "Rendered more hooks" 崩溃)。
   const unifiedProviderLabel = useCallback(
     (providerId: string): string => {
+      if (providerId === 'cursor') return t(AGENT_IDENTITY_LABEL_KEY.cursor);
       const provider = providers.find((entry) => entry.id === providerId);
       return provider ? providerDisplayName(provider, t) : providerId;
     },
@@ -2766,10 +2770,12 @@ function ModelSelectorContentView({
           ? (cc.capabilities?.effortLevels ?? [])
           : agent === 'codex'
             ? (codex.capabilities?.effortLevels ?? [])
-            : (pi.capabilities?.effortLevels ?? []);
+            : agent === 'cursor'
+              ? (cursor.capabilities?.effortLevels ?? [])
+              : (pi.capabilities?.effortLevels ?? []);
       return modelEffortLabel(t, null, value, levels.find((e) => e.id === value)?.displayName);
     },
-    [cc.capabilities, codex.capabilities, pi.capabilities, t],
+    [cc.capabilities, codex.capabilities, cursor.capabilities, pi.capabilities, t],
   );
   const unifiedAgentFastCapable = useCallback(
     (agent: AgentKind): boolean =>
@@ -2777,8 +2783,10 @@ function ModelSelectorContentView({
         ? !!cc.capabilities?.hasFastMode
         : agent === 'codex'
           ? !!codex.capabilities?.hasFastMode
-          : !!pi.capabilities?.hasFastMode),
-    [cc.capabilities, codex.capabilities, pi.capabilities, onFastModeChange, onUnifiedSelect],
+          : agent === 'cursor'
+            ? !!cursor.capabilities?.hasFastMode
+            : !!pi.capabilities?.hasFastMode),
+    [cc.capabilities, codex.capabilities, cursor.capabilities, pi.capabilities, onFastModeChange, onUnifiedSelect],
   );
 
   if (emptyState) return emptyState;
@@ -2897,6 +2905,7 @@ function ModelSelectorContentView({
             providers={providers}
             providerOrder={deviceId ? undefined : localProviders.providerOrder}
             {...(unifiedAgents ? { agents: unifiedAgents } : {})}
+            cursorModels={cursor.capabilities?.availableModels}
             scope={unifiedScope}
             isVisible={unifiedIsVisible}
             {...(unifiedExcludeProvider ? { excludeProvider: unifiedExcludeProvider } : {})}
@@ -2931,7 +2940,11 @@ function ModelSelectorContentView({
             onPaymentRequired={showPaymentRequired}
             configurationEnabled={configurationEnabled}
             selectionPolicy={unifiedSelectionPolicy}
-            isRouteDisabled={(providerId, id) => providersOverride ? false : modelDisabledOf(providers.find((provider) => provider.id === providerId) ?? null, id)}
+            isRouteDisabled={(providerId, id) =>
+              providersOverride || providerId === 'cursor'
+                ? false
+                : modelDisabledOf(providers.find((provider) => provider.id === providerId) ?? null, id)
+            }
             {...(sessionEngineFilter ? { sessionEngineFilter } : {})}
             {...(followSession ? { followSession: {
               ...followSession,

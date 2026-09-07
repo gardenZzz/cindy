@@ -2130,12 +2130,15 @@ export function NewMakerDraftRoute() {
    */
   const chatInitialProviderId = useMemo<string | null>(() => {
     if (!isDeviceLinkDraft) return localProviderIdForDraft;
-    return effectiveSourceIdForModel(
+    const preferred =
+      deviceLinkInitial?.providerId === 'cursor' ? null : (deviceLinkInitial?.providerId ?? null);
+    const resolved = effectiveSourceIdForModel(
       deviceProviders,
-      deviceLinkInitial?.providerId ?? null,
+      preferred,
       draftInitialModel,
       capabilityAgentKind,
     );
+    return resolved === 'cursor' ? null : resolved;
   }, [
     isDeviceLinkDraft,
     localProviderIdForDraft,
@@ -3588,7 +3591,7 @@ export function NewMakerDraftRoute() {
       // 草稿里选定的来源(供应商):ChatInput 在发送时把"仍连接的显式选择"经 opts 传上来
       // (未选 / 已断开 → null = 跟随默认路由)。透传给 createSession 落盘 sessions.provider_id,
       // 让新会话首个请求就走对来源,与"会话内切来源"行为一致。device-link 远程会话不支持(下方分支跳过)。
-      const providerId = opts?.providerId ?? null;
+      const providerId = opts?.providerId === 'cursor' ? null : (opts?.providerId ?? null);
 
       // 本地导航命令(/jump-session)在进入 createSession 前同步短路:命中即直接
       // 跳转,新建界面不会先创建 session。这正是它和 /issue 的关键区别。

@@ -277,17 +277,20 @@ export function resolveDraftSessionProviderId({
   explicitProviderId,
   effectiveProviderId,
 }: DraftSessionProviderResolutionInput): string | null {
-  if (explicitProviderId && explicitProviderId === effectiveProviderId) {
-    return explicitProviderId;
+  // Cursor ACP 合成槽不是 Cindy 路由来源,禁止写进 sessions.provider_id。
+  const explicit = explicitProviderId === 'cursor' ? null : explicitProviderId;
+  const effective = effectiveProviderId === 'cursor' ? null : effectiveProviderId;
+  if (explicit && explicit === effective) {
+    return explicit;
   }
-  if (!effectiveProviderId) return null;
+  if (!effective) return null;
   // 预设通过「添加供应商」落地后同样属于 user provider。即使它是当前模型唯一的
   // 已连接来源，也不能省略 providerId：main / maker-core 的 null 语义是沿用各 harness
   // 的原生认证 fallback（Claude → Cindy gateway / Claude OAuth），不会反查目录里唯一的
   // BYOM 来源。省略后 UI 虽显示该来源，首轮 auth gate 却会去读 gateway key，最终报
   // `not authenticated: no_key`。用户来源必须始终显式钉住，保证其代理路由与密钥生效。
-  const effectiveProvider = providers.find((provider) => provider.id === effectiveProviderId);
-  if (effectiveProvider?.source === 'user') return effectiveProviderId;
+  const effectiveProvider = providers.find((provider) => provider.id === effective);
+  if (effectiveProvider?.source === 'user') return effective;
   const modelDefaultProviderId = effectiveSourceIdForModel([...providers], null, model, agent);
   // main 收到 providerId=null 后按 agent 的原生来源选择启动链路，而不是只在“提供当前
   // 模型”的来源里重算。典型分叉：XD 与 Anthropic 都已连接，只有 Anthropic 目录含
@@ -299,8 +302,7 @@ export function resolveDraftSessionProviderId({
     connectedProvidersForAgent([...providers], agent, { includeSuspended: true }),
     agent,
   );
-  return modelDefaultProviderId === effectiveProviderId &&
-    agentDefaultProviderId === effectiveProviderId
+  return modelDefaultProviderId === effective && agentDefaultProviderId === effective
     ? null
-    : effectiveProviderId;
+    : effective;
 }

@@ -2034,7 +2034,7 @@ export function ChatInput({
   //   会改走 catalog gateway-key 路由(见 provider-route.ts),破坏默认 cohort 的路由/缓存基线。
   const sendProviderId = useMemo<string | null>(() => {
     const kind = currentModelAgentKind;
-    if (!kind || !activeProviderId) return null;
+    if (!kind || !activeProviderId || activeProviderId === 'cursor') return null;
     return effectiveSourceIdForModel(sendProviders, activeProviderId, activeModel, kind) ===
       activeProviderId
       ? activeProviderId

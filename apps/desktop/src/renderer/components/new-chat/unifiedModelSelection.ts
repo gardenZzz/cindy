@@ -17,7 +17,12 @@
  *      (i18n `effortLevels.*`),绝不把翻译过的文案回灌进配置。
  */
 
-import type { UnifiedAgentCapability, UnifiedModelEntry } from '@cindy/model-providers';
+import {
+  effortRank,
+  type CatalogModel,
+  type UnifiedAgentCapability,
+  type UnifiedModelEntry,
+} from '@cindy/model-providers';
 
 import type { AgentKind } from '@/hooks/useAgentCapabilities';
 import type { SelectableVendor } from '@/lib/agentVendors';
@@ -715,4 +720,112 @@ export function priceTierOf(outputPerMtok: number, currency: string): 1 | 2 | 3 
   if (usd <= 3) return 1;
   if (usd <= 15) return 2;
   return 3;
+}
+
+/** Cursor ACP 在联合列表里的合成来源 id。只用于 UI / 记忆槽,不是 Cindy 路由 provider。 */
+export const CURSOR_UNIFIED_SOURCE_ID = 'cursor';
+
+/** ACP listing 的最小投影。不绑 capabilities hook,单测可塞 plain object。 */
+export interface CursorOverlayModel {
+  id: string;
+  displayName: string;
+  description?: string;
+  group?: string;
+  sortOrder?: number;
+  contextWindow: number;
+  efforts: readonly Effort[];
+  defaultEffort: Effort | null;
+  supportsFastMode?: boolean;
+  defaultEnabled?: boolean;
+}
+
+function cursorCatalogStub(model: CursorOverlayModel): CatalogModel {
+  return {
+    id: model.id,
+    name: model.displayName,
+    contextWindow: model.contextWindow,
+    efforts: [...model.efforts] as CatalogModel['efforts'],
+    defaultEffort: (model.defaultEffort as CatalogModel['defaultEffort']) ?? null,
+    ...(model.defaultEnabled !== undefined ? { defaultEnabled: model.defaultEnabled } : {}),
+  };
+}
+
+function cursorCapabilityOf(model: CursorOverlayModel): UnifiedAgentCapability {
+  const efforts = [...model.efforts].sort((a, b) => effortRank(a) - effortRank(b));
+  const declared = model.defaultEffort;
+  const fromCatalog = declared !== null && efforts.includes(declared);
+  const defaultEffort = fromCatalog ? declared : efforts.includes('medium') ? 'medium' : null;
+  return {
+    agent: 'cursor',
+    wireModelId: model.id,
+    efforts: efforts as UnifiedAgentCapability['efforts'],
+    defaultEffort: defaultEffort as UnifiedAgentCapability['defaultEffort'],
+    defaultEffortSource: fromCatalog ? 'catalog' : defaultEffort === 'medium' ? 'fallback-medium' : 'none',
+    supportsFastMode: model.supportsFastMode === true,
+    contextWindow: model.contextWindow,
+    contextWindowVerified: false,
+  };
+}
+
+function cursorUnifiedEntry(model: CursorOverlayModel): UnifiedModelEntry {
+  return {
+    providerId: CURSOR_UNIFIED_SOURCE_ID,
+    modelId: model.id,
+    displayName: model.displayName,
+    ...(model.description !== undefined ? { description: model.description } : {}),
+    ...(model.group !== undefined ? { group: model.group } : {}),
+    ...(model.sortOrder !== undefined ? { sortOrder: model.sortOrder } : {}),
+    candidates: ['cursor'],
+    recommended: 'cursor',
+    nativeAgent: 'cursor',
+    capabilities: { cursor: cursorCapabilityOf(model) },
+  };
+}
+
+/**
+ * 把 Cursor ACP 模型拼进联合列表。不进 catalog / UNIFIED_AGENT_PRIORITY。
+ * `agents` 不含 cursor 时返回空;keepModel.agent === 'cursor' 时保住当前 ACP 行。
+ */
+export function overlayCursorUnifiedEntries(args: {
+  models?: readonly CursorOverlayModel[];
+  agents?: readonly AgentKind[];
+  isVisible?: (providerId: string, model: CatalogModel, agent: AgentKind) => boolean;
+  keepModel?: { providerId: string | null; modelId: string; agent: AgentKind } | null;
+}): UnifiedModelEntry[] {
+  if (args.agents && !args.agents.includes('cursor')) return [];
+  const models = args.models;
+  if (!models || models.length === 0) return [];
+  const keep = args.keepModel;
+  const out: UnifiedModelEntry[] = [];
+  for (const model of models) {
+    const keepSelected =
+      keep?.agent === 'cursor' &&
+      keep.modelId === model.id &&
+      (keep.providerId === null || keep.providerId === CURSOR_UNIFIED_SOURCE_ID);
+    if (
+      !keepSelected &&
+      args.isVisible &&
+      !args.isVisible(CURSOR_UNIFIED_SOURCE_ID, cursorCatalogStub(model), 'cursor')
+    ) {
+      continue;
+    }
+    out.push(cursorUnifiedEntry(model));
+  }
+  return out;
+}
+
+/**
+ * 选中行匹配。`providerId === null` 时 Cursor overlay 只在 liveAgent 为 cursor 时命中,
+ * 避免和目录里同名 GPT/Claude 行双勾;official 入口 liveAgent 为 null 也不勾 overlay。
+ */
+export function unifiedRowMatchesSelection(
+  entry: UnifiedModelEntry,
+  selected: { providerId: string | null; modelId: string },
+  liveAgent?: AgentKind | null,
+): boolean {
+  if (!entryMatchesModelId(entry, selected.modelId)) return false;
+  if (selected.providerId !== null) return selected.providerId === entry.providerId;
+  const isCursorOverlay = entry.providerId === CURSOR_UNIFIED_SOURCE_ID;
+  if (liveAgent === 'cursor') return isCursorOverlay;
+  return !isCursorOverlay;
 }

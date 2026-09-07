@@ -34,6 +34,8 @@ import {
   favoriteMatchesSelection,
   engineOfAgentKind,
   entryMatchesModelId,
+  overlayCursorUnifiedEntries,
+  unifiedRowMatchesSelection,
   wireModelIdOf,
   buildUnifiedListSections,
   buildUnifiedRail,
@@ -43,6 +45,7 @@ import {
   resolveFavoriteRowConfig,
   resolveUnifiedRowConfig,
   sameAnchor,
+  type CursorOverlayModel,
   type UnifiedAnchor,
   type UnifiedEngine,
   type UnifiedRailFilter,
@@ -86,6 +89,11 @@ export interface UnifiedModelPanelProps {
   providerOrder?: readonly string[];
   /** 参与联合的引擎;调用方给了 vendorKey 时收窄,缺省 = 三个引擎全参与。 */
   agents?: readonly AgentKind[];
+  /**
+   * Cursor ACP 模型投影。不是 Cindy provider;缺省或 agents 不含 cursor 时不拼。
+   * 传 capabilities.availableModels 的引用,不要 `?? []`(会每帧换身份打穿 entries memo)。
+   */
+  cursorModels?: readonly CursorOverlayModel[];
   /** 来源解析口径:已建会话 'session'(含停用拷贝),其余 'draft'。 */
   scope: 'draft' | 'session';
   /** 可见性谓词(本机 modelVisibilityPrefs / device-link 被控端快照,由调用方注入)。 */
@@ -258,6 +266,7 @@ export function UnifiedModelPanel({
   providers,
   providerOrder,
   agents,
+  cursorModels,
   scope,
   isVisible,
   excludeProvider,
@@ -361,8 +370,8 @@ export function UnifiedModelPanel({
     ? `${keepModel.providerId ?? ''}::${keepModel.modelId}::${keepModel.agent}`
     : '';
   const entries = useMemo(
-    () =>
-      unifiedModelEntries({
+    () => {
+      const catalogEntries = unifiedModelEntries({
         providers,
         ...(agents ? { agents } : {}),
         isVisible: (providerId, model, agent) =>
@@ -377,9 +386,18 @@ export function UnifiedModelPanel({
         // 否则选择器一打开就是空选态,用户看不出自己在跑什么、也换不回来。豁免按 agent
         // 收窄(见上面 keepModel 的推导注释与该选项头注)。
         ...(keepModel ? { keepModel } : {}),
-      }),
+      });
+      const overlay = overlayCursorUnifiedEntries({
+        ...(cursorModels ? { models: cursorModels } : {}),
+        ...(agents ? { agents } : {}),
+        isVisible: (providerId, model, agent) =>
+          predicatesRef.current.isVisible(providerId, model, agent),
+        ...(keepModel ? { keepModel } : {}),
+      });
+      return overlay.length === 0 ? catalogEntries : [...catalogEntries, ...overlay];
+    },
     // biome-ignore lint/correctness/useExhaustiveDependencies: 谓词经 ref 读取,刷新信号是 sourceVersion(见其注释);agents 以 agentsKey 表达身份;keepModel 以 keepModelKey 表达身份。
-    [providers, agentsKey, scope, sourceVersion, keepModelKey, includePaymentRequired],
+    [providers, agentsKey, scope, sourceVersion, keepModelKey, includePaymentRequired, cursorModels],
   );
 
   const railItems = useMemo(
@@ -403,8 +421,7 @@ export function UnifiedModelPanel({
     (entry: UnifiedModelEntry, config: UnifiedRowConfig): boolean =>
       // 外部给的是会话 / 草稿里存的 **wire id**,行身份是归一化 id —— 两头都认
       // (entryMatchesModelId),否则合并行之后选中的模型在列表里不高亮。
-      entryMatchesModelId(entry, selected.modelId) &&
-      (selected.providerId === null || selected.providerId === entry.providerId) &&
+      unifiedRowMatchesSelection(entry, selected, liveEngineAgent) &&
       (liveEngineAgent == null || liveEngineAgent === config.agent),
     [liveEngineAgent, selected.modelId, selected.providerId],
   );
@@ -464,9 +481,7 @@ export function UnifiedModelPanel({
       // 什么),不受推荐 / override / pinned 摆布 —— 2026-08-14 实测抓到草稿在 pi 上跑
       // DeepSeek,行上却按推荐回落显示「Claude」。收藏被选中时不强制(live 的是那条收藏)。
       const isSelectedModelRow =
-        !activeFavoriteUid &&
-        entryMatchesModelId(entry, selected.modelId) &&
-        (selected.providerId === null || selected.providerId === entry.providerId);
+        !activeFavoriteUid && unifiedRowMatchesSelection(entry, selected, liveEngineAgent);
       const personalized = selectionPolicy === 'personalized';
       const base = resolveUnifiedRowConfig({
         entry,
@@ -562,9 +577,7 @@ export function UnifiedModelPanel({
       }
       void enginePrefsVersion;
       const isSelectedModelRow =
-        !activeFavoriteUid &&
-        entryMatchesModelId(entry, selected.modelId) &&
-        (selected.providerId === null || selected.providerId === entry.providerId);
+        !activeFavoriteUid && unifiedRowMatchesSelection(entry, selected, liveEngineAgent);
       return resolveUnifiedRowConfig({
         entry,
         ...(selectionPolicy === 'personalized'
@@ -738,12 +751,9 @@ export function UnifiedModelPanel({
       // 收藏锚点被选中时,模型行不同时打勾(锚点语义:选中的是那一条收藏)。
       if (activeFavoriteUid) return false;
       // 会话 / 草稿存的是 wire id;按「行 id 或任一引擎 wire id 命中」解析(合并行契约)。
-      return (
-        entryMatchesModelId(entry, selected.modelId) &&
-        (selected.providerId === null || selected.providerId === anchor.providerId)
-      );
+      return unifiedRowMatchesSelection(entry, selected, liveEngineAgent);
     },
-    [activeFavoriteUid, selected.modelId, selected.providerId],
+    [activeFavoriteUid, liveEngineAgent, selected.modelId, selected.providerId],
   );
 
   /** ☆ 点亮 0.7s 后恢复(规格 §1.5:源头行不持有收藏态,只给一次动作反馈)。 */

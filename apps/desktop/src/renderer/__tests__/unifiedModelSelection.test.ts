@@ -16,11 +16,14 @@ import type {
 } from '@cindy/model-providers';
 
 import {
+  CURSOR_UNIFIED_SOURCE_ID,
   UNIFIED_FLYOUT_GAP,
   buildUnifiedListSections,
   engineOfAgentKind,
   entryMatchesModelId,
   favoriteMatchesSelection,
+  overlayCursorUnifiedEntries,
+  unifiedRowMatchesSelection,
   wireModelIdOf,
   buildUnifiedRail,
   computeFlyoutPlacement,
@@ -28,6 +31,7 @@ import {
   isRecommendedFavoriteConfig,
   resolveFavoriteRowConfig,
   resolveUnifiedRowConfig,
+  type CursorOverlayModel,
 } from '@/components/new-chat/unifiedModelSelection';
 import type { ModelFavoriteItem } from '@/state/modelFavorites';
 import {
@@ -1119,5 +1123,101 @@ describe('收藏锚点只代表当前完整配置', () => {
     const aliased = { ...entry, modelId: 'normalized-gpt-6' };
     expect(favoriteMatchesSelection({ ...base, entry: aliased })).toBe(true);
     expect(favoriteMatchesSelection({ ...base, agentFastModeCapable: () => false })).toBe(false);
+  });
+});
+
+function cursorOverlayModel(
+  id: string,
+  over: Partial<CursorOverlayModel> = {},
+): CursorOverlayModel {
+  return {
+    id,
+    displayName: id,
+    contextWindow: 200_000,
+    efforts: ['low', 'medium', 'high'],
+    defaultEffort: 'medium',
+    ...over,
+  };
+}
+
+describe('overlayCursorUnifiedEntries', () => {
+  const gpt = cursorOverlayModel('gpt-5.5');
+  const composer = cursorOverlayModel('composer-1', { defaultEnabled: false });
+
+  it('agents 不含 cursor 时不拼', () => {
+    expect(
+      overlayCursorUnifiedEntries({
+        models: [gpt],
+        agents: ['claude-code', 'codex', 'pi'],
+      }),
+    ).toEqual([]);
+  });
+
+  it('agents 未传时拼进 cursor 合成来源', () => {
+    const entries = overlayCursorUnifiedEntries({ models: [gpt, composer] });
+    expect(entries.map((entry) => [entry.providerId, entry.modelId, entry.nativeAgent])).toEqual([
+      [CURSOR_UNIFIED_SOURCE_ID, 'gpt-5.5', 'cursor'],
+      [CURSOR_UNIFIED_SOURCE_ID, 'composer-1', 'cursor'],
+    ]);
+    expect(entries[0]?.candidates).toEqual(['cursor']);
+    expect(entries[0]?.capabilities.cursor?.wireModelId).toBe('gpt-5.5');
+  });
+
+  it('isVisible 挡住的行不进, keepModel.agent=cursor 保住当前行', () => {
+    const isVisible = (_providerId: string, model: { id: string }) => model.id !== 'composer-1';
+    expect(
+      overlayCursorUnifiedEntries({
+        models: [gpt, composer],
+        isVisible,
+      }).map((entry) => entry.modelId),
+    ).toEqual(['gpt-5.5']);
+    expect(
+      overlayCursorUnifiedEntries({
+        models: [gpt, composer],
+        isVisible,
+        keepModel: { providerId: null, modelId: 'composer-1', agent: 'cursor' },
+      }).map((entry) => entry.modelId),
+    ).toEqual(['gpt-5.5', 'composer-1']);
+    expect(
+      overlayCursorUnifiedEntries({
+        models: [gpt, composer],
+        isVisible,
+        keepModel: { providerId: 'openai', modelId: 'composer-1', agent: 'codex' },
+      }).map((entry) => entry.modelId),
+    ).toEqual(['gpt-5.5']);
+  });
+});
+
+describe('unifiedRowMatchesSelection', () => {
+  const overlay = overlayCursorUnifiedEntries({ models: [cursorOverlayModel('gpt-5.5')] })[0]!;
+  const catalog = entryOf({
+    providerId: 'openai',
+    modelId: 'gpt-5.5',
+    candidates: ['codex'],
+    recommended: 'codex',
+    nativeAgent: 'codex',
+    capabilities: { codex: capability('codex', { wireModelId: 'gpt-5.5' }) },
+  });
+
+  it('显式 providerId 只勾对应来源', () => {
+    expect(
+      unifiedRowMatchesSelection(overlay, { providerId: CURSOR_UNIFIED_SOURCE_ID, modelId: 'gpt-5.5' }),
+    ).toBe(true);
+    expect(unifiedRowMatchesSelection(overlay, { providerId: 'openai', modelId: 'gpt-5.5' })).toBe(
+      false,
+    );
+    expect(unifiedRowMatchesSelection(catalog, { providerId: 'openai', modelId: 'gpt-5.5' })).toBe(
+      true,
+    );
+  });
+
+  it('providerId=null 时 cursor live 只勾 overlay, 其它引擎与 official 不勾 overlay', () => {
+    const selected = { providerId: null, modelId: 'gpt-5.5' };
+    expect(unifiedRowMatchesSelection(overlay, selected, 'cursor')).toBe(true);
+    expect(unifiedRowMatchesSelection(catalog, selected, 'cursor')).toBe(false);
+    expect(unifiedRowMatchesSelection(overlay, selected, 'codex')).toBe(false);
+    expect(unifiedRowMatchesSelection(catalog, selected, 'codex')).toBe(true);
+    expect(unifiedRowMatchesSelection(overlay, selected, null)).toBe(false);
+    expect(unifiedRowMatchesSelection(catalog, selected, null)).toBe(true);
   });
 });
