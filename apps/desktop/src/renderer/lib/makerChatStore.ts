@@ -210,9 +210,12 @@ const DEVICE_LINK_CHAT_ERROR_CODES: ReadonlySet<string> = new Set([
  * 未登记的 code 仍然回退到英文兜底文案(绝不把 `[CODE]` 裸露给用户)。
  */
 const AGENT_RUNTIME_CHAT_ERROR_CODES: ReadonlySet<string> = new Set([
-  // Auto 档下审阅器没跑起来(与「模型判定动作危险」不同,后者刻意保持静默)。
+  // Distinguish review availability, blocked calls, and missing confirmations.
   'AUTO_REVIEW_UNAVAILABLE',
   'AUTO_REVIEW_CONFIRM_UNDELIVERED',
+  'MCP_APPROVAL_AUTO_BLOCKED',
+  'MCP_APPROVAL_CONFIRMATION_TIMEOUT',
+  'MCP_APPROVAL_CONFIRMATION_UNAVAILABLE',
 ] as const);
 const REMOTE_HEAVY_INBOUND_CHANNELS: ReadonlySet<string> = new Set([
   'maker:event',
@@ -478,6 +481,8 @@ export interface ChatMessage {
    * agentMeta.goalCompletion 派生(仿 fork divider 从 session 元数据派生),重开会话仍在。
    */
   systemCardType?:
+    | 'cindy-make-doctor'
+    | 'cindy-make'
     | 'help'
     | 'cost'
     | 'context'
@@ -686,6 +691,9 @@ export interface PendingPermission {
   description?: string;
   suggestions?: unknown[];
   autoReviewUnavailable?: boolean;
+  /** Renderer-only delivery state; never part of the permission decision. */
+  submitting?: boolean;
+  submissionFailed?: boolean;
 }
 
 /** F7.2: Pending ask-user-question data — holds ALL questions for the wizard. */
@@ -5909,6 +5917,12 @@ export function handleStreamEvent(
           description: data.description,
           suggestions: data.suggestions,
           autoReviewUnavailable: data.autoReviewUnavailable === true,
+          ...(state.pendingPermission?.requestId === data.requestId
+            ? {
+                submitting: state.pendingPermission.submitting,
+                submissionFailed: state.pendingPermission.submissionFailed,
+              }
+            : {}),
         },
       };
     }
@@ -6058,6 +6072,25 @@ export function handleStreamEvent(
         requestId: string;
         questions: AskUserQuestionItem[];
       };
+      // Codex done reconciles pending interactions with fresh IPC objects. Keep
+      // the same question's identity: AskUserQuestionPrompt restores selections
+      // when questions changes, which would erase locally typed, unsubmitted text.
+      // Compare fields rather than JSON object key order; changed questions must
+      // still take the normal initialization path.
+      const previousAsk = state.pendingAskUser;
+      const keepAskProgress = previousAsk?.requestId === data.requestId &&
+        previousAsk.questions.length === data.questions.length &&
+        previousAsk.questions.every((question, index) => {
+          const next = data.questions[index];
+          return question.question === next.question &&
+            question.header === next.header &&
+            question.multiSelect === next.multiSelect &&
+            (question.options?.length ?? 0) === (next.options?.length ?? 0) &&
+            (question.options ?? []).every((option, optionIndex) =>
+              option.label === next.options?.[optionIndex]?.label &&
+              option.description === next.options?.[optionIndex]?.description,
+            );
+        });
       // F1-a: ask_user 消息的落库(+ 在飞 assistant flush)已收口 main
       // (messagePersistBroadcaster.onInteractionMessage,在 setInteractionListener 里),
       // renderer 只做 UI:finalize 在飞气泡 + 用 main 下发的 persistId 建 ask_user 气泡
@@ -6105,19 +6138,17 @@ export function handleStreamEvent(
 
       return {
         ...finalized,
-        pendingAskUser: {
+        pendingAskUser: keepAskProgress ? previousAsk : {
           requestId: data.requestId,
           questions: data.questions,
         },
         // F-AUQ-MIN-1: Every new pendingAskUser starts expanded — even if the
         // previous question in this same session was minimized. Folding never
         // carries across questions.
-        askUserViewerState: 'expanded',
-        // F-AUQ-DRAFT: Same logic — a new question batch must never inherit a
-        // stale draft, even if for some reason the previous draft happened to
-        // share the same requestId. The component additionally guards via
-        // `draft.requestId === pending.requestId` before hydrating.
-        askUserDraft: null,
+        askUserViewerState: keepAskProgress ? state.askUserViewerState : 'expanded',
+        // Only an unchanged pending request may retain its draft. A new batch
+        // or changed question content starts clean, even with the same requestId.
+        askUserDraft: keepAskProgress ? state.askUserDraft : null,
         messages: askMessages,
       };
     }
@@ -9339,11 +9370,15 @@ function reconcilePendingInteractions(
       // A successful list response is the Host-authoritative snapshot for Setup
       // interactions. Reconcile it subtractively before replaying the snapshot so
       // a Device Link reconnect cannot leave cards that the Host already closed.
-      // Other interaction kinds keep their existing replay semantics.
+      // Permissions also need subtraction after a lost decision receipt.
       const authoritativePluginSetupIds = new Set<string>();
+      const authoritativePermissionIds = new Set<string>();
       const authoritativeRemoteDesktopConfirmationIds = new Set<string>();
       for (const item of list) {
         const request = item?.request;
+        if (request?.kind === 'permission' && typeof request.requestId === 'string') {
+          authoritativePermissionIds.add(request.requestId);
+        }
         if (
           request?.kind === 'plugin_setup' &&
           typeof request.requestId === 'string' &&
@@ -9363,6 +9398,9 @@ function reconcilePendingInteractions(
       }
       if (!isCurrentInteractionReconcile()) return 0;
       setState(sessionId, (state) => {
+        const nextPermission = state.pendingPermission &&
+          authoritativePermissionIds.has(state.pendingPermission.requestId)
+          ? state.pendingPermission : null;
         const currentSurvives =
           state.pendingPluginSetup !== null &&
           authoritativePluginSetupIds.has(state.pendingPluginSetup.requestId);
@@ -9413,6 +9451,7 @@ function reconcilePendingInteractions(
         if (
           !currentChanged &&
           !queueChanged &&
+          nextPermission === state.pendingPermission &&
           nextCommand === state.pluginSetupCommandInFlight &&
           promotedRemoteDesktopConfirmation === state.pendingRemoteDesktopConfirmation &&
           !remoteQueueChanged
@@ -9421,6 +9460,7 @@ function reconcilePendingInteractions(
         }
         return {
           ...state,
+          pendingPermission: nextPermission,
           pendingPluginSetup: nextCurrent,
           pendingPluginSetupQueue: survivingQueue,
           pluginSetupViewerState: currentChanged ? 'expanded' : state.pluginSetupViewerState,
@@ -14128,7 +14168,7 @@ async function clearSessionAfterGuardImpl(sessionId: string, clearedAt: string):
  */
 function insertSystemCard(
   sessionId: string,
-  cardType: 'help' | 'cost' | 'context' | 'pwd' | 'status' | 'compact' | 'cmd' | 'learn',
+  cardType: 'help' | 'cost' | 'context' | 'pwd' | 'status' | 'compact' | 'cmd' | 'learn' | 'cindy-make-doctor' | 'cindy-make',
   data?: Record<string, unknown>,
 ): string | null {
   if (!sessionId) return null;
@@ -14349,31 +14389,89 @@ function respondToPluginSetup(
 }
 
 /**
- * F-PERM-2: Send a permission decision to the main process and clear pendingPermission.
+ * Keep the card until the host acknowledges the decision (or dismisses it).
  */
 function respondToPermission(sessionId: string, result: CCAgentPermissionResult): void {
   if (!sessionId) return;
   const state = getOrCreateState(sessionId);
-  if (!state.pendingPermission) return;
+  if (!state.pendingPermission || state.pendingPermission.submitting) return;
 
   const { requestId } = state.pendingPermission;
+  const owner = getDataOwnerGeneration();
+  const messagesEpoch = _messagesEpoch.get(sessionId) ?? 0;
+  const authorityEpoch = _inputProjectionAuthorityEpoch.get(sessionId) ?? 0;
+  const origin = remoteProjectsStore.getSessionDeviceId(sessionId);
+  const stickyDevice = getStickySessionDeviceId(sessionId);
+  const isCurrent = () =>
+    isDataOwnerGenerationCurrent(owner) &&
+    (_messagesEpoch.get(sessionId) ?? 0) === messagesEpoch &&
+    (_inputProjectionAuthorityEpoch.get(sessionId) ?? 0) === authorityEpoch &&
+    remoteProjectsStore.getSessionDeviceId(sessionId) === origin &&
+    (!stickyDevice || !isRemoteTerminalSessionTombstoned(sessionId, stickyDevice));
+  const hasCurrentCard = () => isCurrent() &&
+    sessions.get(sessionId)?.pendingPermission?.requestId === requestId;
   bumpInteractionReconcileEpoch(sessionId);
 
-  // Clear the pending permission immediately so the UI updates
-  setState(sessionId, (s) => ({ ...s, pendingPermission: null }));
+  setState(sessionId, (s) => ({
+    ...s,
+    pendingPermission: { ...s.pendingPermission!, submitting: true, submissionFailed: false },
+  }));
 
-  // Send to maker (InteractionDecision kind: 'permission')
-  makerApiFor(sessionId)
-    .resolveInteraction(requestId, {
-      kind: 'permission',
-      behavior: result.behavior,
-      updatedInput: (result as { updatedInput?: Record<string, unknown> }).updatedInput,
-      reason: (result as { message?: string }).message,
-      permissionUpdates: Array.isArray(result.updatedPermissions)
-        ? result.updatedPermissions
-        : undefined,
-    })
-    .catch((err) => log.error('Failed to respond to permission:', err));
+  // Bound both local IPC and remote delivery; a lost reply must not disable the
+  // card forever. Never resend an allow automatically after an uncertain reply.
+  const withReceiptTimeout = async <T>(operation: () => Promise<T>): Promise<T> => {
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    try {
+      return await Promise.race([
+        operation(),
+        new Promise<never>((_, reject) => {
+          timer = setTimeout(() => reject(new Error('Permission receipt timeout')), 15_000);
+        }),
+      ]);
+    } finally {
+      if (timer) clearTimeout(timer);
+    }
+  };
+  void (async () => {
+    try {
+      const receipt = await withReceiptTimeout(() => makerApiFor(sessionId).resolveInteraction(requestId, {
+        kind: 'permission',
+        behavior: result.behavior,
+        updatedInput: (result as { updatedInput?: Record<string, unknown> }).updatedInput,
+        reason: (result as { message?: string }).message,
+        permissionUpdates: Array.isArray(result.updatedPermissions)
+          ? result.updatedPermissions
+          : undefined,
+      }));
+      if (!hasCurrentCard()) return;
+      if (receipt?.accepted === true) {
+        bumpInteractionReconcileEpoch(sessionId);
+        setState(sessionId, (s) => ({ ...s, pendingPermission: null }));
+        return;
+      }
+      if (receipt?.accepted === false) {
+        bumpInteractionReconcileEpoch(sessionId);
+        setState(sessionId, (s) => ({ ...s, pendingPermission: null }));
+        toast.warning(i18n.t('newChat.permissionPrompt.requestEnded'));
+        return;
+      }
+      throw new Error('Missing permission receipt');
+    } catch (err) {
+      if (!hasCurrentCard()) return;
+      log.warn('Permission decision receipt unavailable', err);
+      toast.warning(i18n.t('newChat.permissionPrompt.submissionFailed'));
+      try {
+        await withReceiptTimeout(() => reconcilePendingInteractions(sessionId, isCurrent));
+      } catch {
+        // Leave the card retryable when the host cannot be reached at all.
+      }
+      if (!hasCurrentCard()) return;
+      setState(sessionId, (s) => ({
+        ...s,
+        pendingPermission: { ...s.pendingPermission!, submitting: false, submissionFailed: true },
+      }));
+    }
+  })();
 }
 
 /**

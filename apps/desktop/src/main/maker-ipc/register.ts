@@ -1,3 +1,4 @@
+import { registerSessionSetModelHandler } from './sessionSetModelHandler.js';
 import { projectRemoteBotDelegations } from './remoteBotDelegations.js';
 /**
  * registerMakerIpc — 把 Maker Core 的能力暴露为 maker:* IPC channel。
@@ -147,7 +148,7 @@ import {
   shutdownCodexEnvironment,
 } from '../mcp-integrations/codexEnvironment.js';
 import { invalidatePiEnvironment } from '../mcp-integrations/piEnvironment.js';
-import { REMOTE_MEMORY_SERVER_NAME } from '../mcp-integrations/codexHttpBridge.js';
+import { REMOTE_MEMORY_SERVER_NAME, REMOTE_BOT_HELPER_SERVER_NAME } from '../mcp-integrations/codexHttpBridge.js';
 import { getRemoteMcpBridgeToken } from '../mcp-integrations/remoteMcpBridgeToken.js';
 import {
   checkComputerDriverUpdate,
@@ -474,8 +475,9 @@ import {
   readSessionExtraDirsFromDb,
   readSessionWritableDirsFromDb,
   readSessionWorkingDirFromDb,
-  listVisibleActiveSessionIds,
+  listVisibleActiveSessionDirectoryGrants,
 } from '../maker-host/session-storage.js';
+import { libraryExtraDirSyncTargets } from './libraryExtraDirSyncTargets.js';
 import {
   clearSessionPersistState,
   consumeLastAssistantPersistId,
@@ -2986,7 +2988,7 @@ export function applyDirectoryGrants(
       persist: (patch) => persistSessionFields(sessionId, patch),
       terminate: () => maker.closeSession(sessionId),
     });
-    log.info(label, {
+    if (result.changed || result.rejectedCount > 0) log.info(label, {
       sessionId,
       requested: requestedDirs.length,
       kept: result.dirs.length,
@@ -3044,10 +3046,11 @@ async function syncLibraryReadonlyExtraDir(
     const grantRoot = libraryExtraDirSyncRoot;
     const focused = getFocusedGhostSessionId();
     if (generation !== libraryExtraDirSyncGeneration) return 'superseded';
-    const visible = await listVisibleActiveSessionIds();
+    const visible = await listVisibleActiveSessionDirectoryGrants();
     if (generation !== libraryExtraDirSyncGeneration) return 'superseded';
-    const targets = new Set(visible);
-    if (focused) targets.add(focused);
+    const targets = libraryExtraDirSyncTargets(
+      visible, new Set(getMaker().listActiveSessions().map((session) => session.id)), focused,
+    );
     let granted = false;
     for (const sessionId of targets) {
       if (generation !== libraryExtraDirSyncGeneration) return 'superseded';
@@ -3055,8 +3058,8 @@ async function syncLibraryReadonlyExtraDir(
       if (generation !== libraryExtraDirSyncGeneration) return 'superseded';
       const nextRoot = !remote && grantRoot && sessionId === focused ? grantRoot : null;
       try {
-        await applyLibraryReadonlyExtraDir(sessionId, nextRoot);
-        if (nextRoot) granted = true;
+        const applied = await applyLibraryReadonlyExtraDir(sessionId, nextRoot);
+        if (nextRoot && applied?.some(isLibraryExtraDirSlot)) granted = true;
       } catch (error) {
         log.warn('library extraDirs session sync failed', {
           sessionId,
@@ -3957,6 +3960,8 @@ export function installDesktopInteractionListener(session: {
         agentIslandInteractionEpoch,
       );
     });
+  }, (requestId, decision) => {
+    resolvePendingInteraction(requestId, decision);
   });
 }
 
@@ -5636,13 +5641,18 @@ export function registerMakerIpc(maker: Maker, options: RegisterMakerIpcOptions)
   });
 
   ipcMain.handle(MAKER_INVOKE.EXECUTE_DESKTOP_COMMAND, async (e, name: unknown, ctx: unknown) => {
+    if (name === 'cindy-make-doctor' || name === 'cindy-make') {
+      assertTrustedAppRendererEvent(e);
+      if (ctx != null && (typeof ctx !== 'object' || Array.isArray(ctx)))
+        throwIpcError('INVALID_PARAMS', 'Invalid Make context');
+    }
     if (typeof name !== 'string' || name.length === 0) {
       throwIpcError('INVALID_PARAMS', 'name required');
     }
     // senderWebContentsId 由 main 从 event.sender 填入(覆盖 renderer 传入的任何值),
     // 供需要"只回发起窗口"的命令(/issue)做定向 send。
     const c = { ...((ctx ?? {}) as DesktopCommandContext), senderWebContentsId: e.sender.id };
-    await getDesktopCommandRegistry().execute(name, c);
+    return getDesktopCommandRegistry().execute(name, c);
   });
 
   ipcMain.handle(
@@ -6848,6 +6858,7 @@ export function registerMakerIpc(maker: Maker, options: RegisterMakerIpcOptions)
       // 不能只看 manager 现值 — 否则旧 bridge 缺 cindy_memory 时 drift 永不
       // 收敛, 每次 live send 白跑完整 ensure。
       makerMemoryEnabled: remoteMakerMemoryEnabledForBridge(),
+      botHelperAvailable: getActiveCodexBridgeServerNames()?.includes(REMOTE_BOT_HELPER_SERVER_NAME) ?? false,
       token: getRemoteMcpBridgeToken(),
       bridgeInstanceId: getActiveCodexBridgeInstanceId(),
     };
@@ -14891,7 +14902,6 @@ export function registerMakerIpc(maker: Maker, options: RegisterMakerIpcOptions)
   // 可以乐观调用 (UI 更新先行, IPC 失败也不会回滚 UI, 老 agentManager 同语义)。
 
   const handleSetModel = async (
-    event: Electron.IpcMainInvokeEvent | undefined,
     sessionId: unknown,
     model: unknown,
     providerId: unknown,
@@ -14899,9 +14909,6 @@ export function registerMakerIpc(maker: Maker, options: RegisterMakerIpcOptions)
     selection: unknown,
     internalOptions: InternalRuntimeSelectionOptions,
   ) => {
-    if (internalOptions.source === 'user' && !internalOptions.sessionLockHeld && !isDeviceLinkInvoke()) {
-      assertTrustedAppRendererEvent(event as Parameters<typeof assertTrustedAppRendererEvent>[0]);
-    }
     if (typeof sessionId !== 'string' || typeof model !== 'string') {
       throwIpcError('INVALID_PARAMS', 'sessionId + model required');
     }
@@ -16118,14 +16125,15 @@ export function registerMakerIpc(maker: Maker, options: RegisterMakerIpcOptions)
     return internalOptions.sessionLockHeld ? applyLocked() : withSendToSessionLock(sessionId, applyLocked);
   };
   applySessionRuntimeSelection = (sessionId, model, providerId, selection, options) =>
-    handleSetModel(undefined, sessionId, model, providerId, undefined, selection, options);
-  ipcMain.handle(
-    MAKER_INVOKE.SET_MODEL,
-    (event, sessionId, model, providerId, expectedAgentSwitchRevision, selection) =>
-      handleSetModel(event, sessionId, model, providerId, expectedAgentSwitchRevision, selection, {
-        source: 'user',
-      }),
-  );
+    handleSetModel(sessionId, model, providerId, undefined, selection, options);
+  registerSessionSetModelHandler(makerSessionRegistry, {
+    isDeviceLinkInvoke,
+    assertTrustedSender: (event) => assertTrustedAppRendererEvent(
+      event as Parameters<typeof assertTrustedAppRendererEvent>[0],
+    ),
+    apply: (sessionId, model, providerId, revision, selection) =>
+      handleSetModel(sessionId, model, providerId, revision, selection, { source: 'user' }),
+  });
 
   const recoverRemoteRuntimeAxisPersistence = async (
     sessionId: string,
