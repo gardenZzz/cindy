@@ -43,6 +43,42 @@ vi.mock('@/hooks/useAgentCapabilities', () => ({
 
 vi.mock('@/hooks/useAvailableAgents', () => ({ useModelPickerAgents: () => ['claude-code', 'codex', 'pi'] }));
 
+vi.mock('@/components/new-chat/AgentSelect', () => ({
+  AgentSelect: (props: {
+    value: string;
+    disabled?: boolean;
+    ariaContext?: string;
+    reselectEmitsChange?: boolean;
+    side?: string;
+    triggerVariant?: string;
+    dense?: boolean;
+    onChange: (next: string) => void;
+  }) => (
+    <div
+      data-testid="agent-select"
+      data-value={props.value}
+      data-disabled={props.disabled ? 'true' : 'false'}
+      data-aria-context={props.ariaContext}
+      data-reselect-emits={props.reselectEmitsChange ? 'true' : 'false'}
+      data-side={props.side}
+      data-trigger-variant={props.triggerVariant}
+      data-dense={props.dense ? 'true' : 'false'}
+    >
+      {['cc', 'codex', 'cursor', 'pi'].map((vendor) => (
+        <button
+          key={vendor}
+          type="button"
+          data-testid={`agent-option-${vendor}`}
+          disabled={props.disabled === true}
+          onClick={() => props.onChange(vendor)}
+        >
+          {vendor}
+        </button>
+      ))}
+    </div>
+  ),
+}));
+
 vi.mock('@/components/new-chat/ModelSelector', () => ({
   ModelSelector: (props: {
     modelId: string;
@@ -145,7 +181,9 @@ describe('WorkspacePrefsEditor 复用标准选择器', () => {
   it('模型与权限使用标准 field,模型内切 Harness', () => {
     render(<WorkspacePrefsEditor alias="cindy" state={stateWith()} maxVisibleModelRows={6} />);
 
-    expect(screen.queryByTestId('agent-select')).toBeNull();
+    const agent = screen.getByTestId('agent-select');
+    expect(agent.getAttribute('data-value')).toBe('cc');
+    expect(agent.getAttribute('data-trigger-variant')).toBe('field');
     const model = screen.getByTestId('model-selector');
     expect(model.getAttribute('data-fast-configurable')).toBe('false');
     expect(model.getAttribute('data-model')).toBe('claude-opus-4-8');
@@ -237,9 +275,9 @@ describe('WorkspacePrefsEditor 复用标准选择器', () => {
     render(<WorkspacePrefsEditor alias="cindy" state={stateWith()} />);
 
     expect(screen.getByTestId('model-selector').getAttribute('data-effort')).toBe('high');
-    // 字段 label 只剩模型与权限
+    // effort 并进模型选择器;Cursor 引擎仍占用独立 agent 字段
     expect(screen.queryByText('settings.tina.prefs.effortLabel')).toBeNull();
-    expect(screen.queryByText('settings.tina.prefs.agentLabel')).toBeNull();
+    expect(screen.getByText('settings.tina.prefs.agentLabel')).toBeTruthy();
     expect(screen.getByText('settings.tina.prefs.modelLabel')).toBeTruthy();
     expect(screen.getByText('settings.tina.prefs.permissionLabel')).toBeTruthy();
   });
@@ -386,9 +424,12 @@ describe('WorkspacePrefsEditor 复用标准选择器', () => {
 
   // 读屏可及名:三个字段都带「字段名 · 行别名」上下文,多卡片同屏行与行可区分
   // (三个字段统一经 ariaContext 前置到各自 trigger 的 aria-label)。
-  it('两个字段都带 alias 化 ariaContext', () => {
+  it('三个字段都带 alias 化 ariaContext', () => {
     render(<WorkspacePrefsEditor alias="cindy" state={stateWith()} />);
 
+    expect(screen.getByTestId('agent-select').getAttribute('data-aria-context')).toBe(
+      'settings.tina.prefs.agentLabel · cindy',
+    );
     expect(screen.getByTestId('model-selector').getAttribute('data-aria-context')).toBe(
       'settings.tina.prefs.modelLabel · cindy',
     );
