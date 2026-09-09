@@ -218,10 +218,16 @@ describe('ProvidersSection - Cursor 模型清单与显示开关 (spec #21 / S1)'
 
     // 等模型清单渲染完成(probe/auth 状态经 useEffect 异步解析)。
     await screen.findByText('M1');
-    // 「全部隐藏」为除 Auto 外每个模型写显式关闭。
+    // 「取消全选」为除 Auto 外每个模型写显式关闭;入口在共用工具行的「管理」菜单里
+    // (与可路由供应商同一处,见 ModelListToolbar)。
     setManySpy.mockClear();
-    const disableAll = screen.getByRole('button', { name: 'settings.providers.models.disableAll' });
-    fireEvent.click(disableAll);
+    fireEvent.keyDown(
+      screen.getByRole('button', { name: 'settings.providers.models.manage.menu' }),
+      { key: 'Enter' },
+    );
+    fireEvent.click(
+      screen.getByRole('menuitem', { name: 'settings.providers.models.manage.hideAll' }),
+    );
     expect(setManySpy).toHaveBeenCalledWith(
       'cursor',
       'cursor',
@@ -293,8 +299,8 @@ describe('ProvidersSection - Cursor 模型清单与显示开关 (spec #21 / S1)'
     expect(scroller).not.toBeNull();
     expect(scroller!.className).toContain('min-h-0');
     expect(scroller!.className).toContain('flex-1');
-    // 工具行固定在滚动区外,长清单滚走时「在模型选择中显示 / 全部隐藏」仍在。
-    const toolbar = screen.getByText('settings.providers.models.available');
+    // 工具行固定在滚动区外,长清单滚走时「模型 / 已选 N 个 / 管理」仍在。
+    const toolbar = screen.getByText('settings.providers.models.manage.title');
     expect(toolbar.closest('.overflow-y-auto')).toBeNull();
   });
 
