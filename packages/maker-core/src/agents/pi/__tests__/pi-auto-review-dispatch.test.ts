@@ -101,7 +101,7 @@ vi.mock('../rpc-client.js', () => ({
     }
     async request(
       cmd: Record<string, unknown> & { type: string },
-    ): Promise<{ success: boolean; command?: string; data?: unknown }> {
+    ): Promise<{ success: boolean; command?: string; data?: unknown; error?: string }> {
       captured.requests.push(cmd);
       if (cmd.type === 'set_model' && captured.holdSetModel) {
         await captured.holdSetModel;
@@ -581,6 +581,26 @@ describe('pi auto-review dispatch & spawn config (mocked pi process)', () => {
     expect(captured.env.no_proxy).toBeUndefined();
   });
 
+  it.each(['local', 'remote'] as const)('passes route context to behavior flags on %s spawn', async (mode) => {
+    const deps = buildDeps();
+    const remoteTransport = deps.getRemotePiTransport!;
+    deps.getRemotePiTransport = async (host, options) => {
+      captured.env = options.env;
+      return remoteTransport(host, options);
+    };
+    const behaviorFlags = vi.fn(({ spawnMode }: { spawnMode?: string }): Record<string, string> =>
+      spawnMode === 'remote' ? { CINDY_TEST_ROUTE: 'remote' } : { VITEST_MAX_THREADS: '2' });
+    deps.runtimeConfig.behaviorFlags = behaviorFlags;
+    const agent = new PiAgent(deps);
+    const handle = await agent.startSession({ sessionId: 'flags', workingDir: cwd, model: 'm',
+      ...(mode === 'remote' ? { remoteHostId: 'remote-1' } : {}),
+    });
+    expect(behaviorFlags).toHaveBeenCalledWith(expect.objectContaining({ spawnMode: mode }));
+    expect(captured.env[mode === 'remote' ? 'CINDY_TEST_ROUTE' : 'VITEST_MAX_THREADS'])
+      .toBe(mode === 'remote' ? 'remote' : '2');
+    await handle.close();
+  });
+
   it('lets Pi discover user-installed packages natively instead of gating them on Cindy metadata', async () => {
     const packageRoot = path.join(agentHome, 'future-pi-package-shape');
     mkdirSync(packageRoot, { recursive: true });
@@ -733,8 +753,9 @@ describe('pi auto-review dispatch & spawn config (mocked pi process)', () => {
       for (let attempt = 0; attempt < 10; attempt += 1) {
         const event = await events.next();
         if (event.done) break;
-        if (event.value.type === 'text' && event.value.data.text.includes('Pi extension installed')) {
-          visibleReceipt = event.value.data.text;
+        const data = event.value.data as { text?: unknown };
+        if (event.value.type === 'text' && typeof data?.text === 'string' && data.text.includes('Pi extension installed')) {
+          visibleReceipt = data.text;
           break;
         }
       }
@@ -879,8 +900,9 @@ describe('pi auto-review dispatch & spawn config (mocked pi process)', () => {
       for (let attempt = 0; attempt < 10; attempt += 1) {
         const event = await events.next();
         if (event.done) break;
-        if (event.value.type === 'text' && event.value.data.text.includes('Installed')) {
-          visibleReceipt = event.value.data.text;
+        const data = event.value.data as { text?: unknown };
+        if (event.value.type === 'text' && typeof data?.text === 'string' && data.text.includes('Installed')) {
+          visibleReceipt = data.text;
           break;
         }
       }
@@ -961,8 +983,8 @@ describe('pi auto-review dispatch & spawn config (mocked pi process)', () => {
       const deny = vi.fn(async () => ({ kind: 'permission', behavior: 'deny' }) as const);
       handle.setInteractionResolver?.(deny as never);
       fireManagedPackageRequest('pkg-denied', 'install', 'npm:denied');
-      expect(await waitForResponse('pkg-denied')).toMatchObject({
-        cancelled: true,
+      expect(JSON.parse(String((await waitForResponse('pkg-denied')).value))).toEqual({
+        ok: false, error: 'User denied this tool call via Cindy.',
       });
 
       const fail = vi.fn(async () => {
@@ -970,8 +992,8 @@ describe('pi auto-review dispatch & spawn config (mocked pi process)', () => {
       });
       handle.setInteractionResolver?.(fail as never);
       fireManagedPackageRequest('pkg-failed', 'update', 'npm:failed');
-      expect(await waitForResponse('pkg-failed')).toMatchObject({
-        cancelled: true,
+      expect(JSON.parse(String((await waitForResponse('pkg-failed')).value))).toEqual({
+        ok: false, error: 'Cindy could not approve this tool call: Approval was cancelled or could not be completed.',
       });
 
       expect(deny).toHaveBeenCalledOnce();
@@ -993,20 +1015,22 @@ describe('pi auto-review dispatch & spawn config (mocked pi process)', () => {
     });
     try {
       let resolverStarted!: () => void;
+      let releaseDenial!: (value: { kind: 'permission'; behavior: 'deny'; reason: string }) => void;
       const started = new Promise<void>((resolve) => {
         resolverStarted = resolve;
       });
       handle.setInteractionResolver?.(
         vi.fn(async () => {
           resolverStarted();
-          return new Promise<never>(() => undefined);
+          return new Promise<{ kind: 'permission'; behavior: 'deny'; reason: string }>((resolve) => { releaseDenial = resolve; });
         }) as never,
       );
       fireManagedPackageRequest('pkg-switch', 'install', 'npm:switch');
       await started;
       await handle.setPermissionMode?.('bypassPermissions');
-      expect(await waitForResponse('pkg-switch')).toMatchObject({
-        cancelled: true,
+      releaseDenial({ kind: 'permission', behavior: 'deny', reason: 'User denied' });
+      expect(JSON.parse(String((await waitForResponse('pkg-switch')).value))).toEqual({
+        ok: false, error: 'Cindy could not approve this tool call: permission_mode_changed_to_bypassPermissions',
       });
       expect(mutatePiManagedPackage).not.toHaveBeenCalled();
     } finally {
@@ -1585,7 +1609,8 @@ describe('pi auto-review dispatch & spawn config (mocked pi process)', () => {
         { type: 'user', content: 'pi install npm:context-mode' },
         desktopCommandOptions('pi install npm:context-mode'),
       );
-      const prompt = captured.requests.find((request) => request.type === 'prompt')?.message ?? '';
+      const prompt = captured.requests.find((request) => request.type === 'prompt')?.message;
+      if (typeof prompt !== 'string') throw new Error('expected prompt message');
       expect(prompt).toContain('"ok":true');
       expect(prompt).toContain('do not claim every task has already stopped');
       expect(prompt).toContain('this task remains active');
@@ -1699,8 +1724,9 @@ describe('pi auto-review dispatch & spawn config (mocked pi process)', () => {
       for (let attempt = 0; attempt < 10; attempt += 1) {
         const event = await events.next();
         if (event.done) break;
-        if (event.value.type === 'text' && event.value.data.text.includes('context-mode')) {
-          visibleReceipt = event.value.data.text;
+        const data = event.value.data as { text?: unknown };
+        if (event.value.type === 'text' && typeof data?.text === 'string' && data.text.includes('context-mode')) {
+          visibleReceipt = data.text;
           break;
         }
       }
@@ -1767,8 +1793,9 @@ describe('pi auto-review dispatch & spawn config (mocked pi process)', () => {
       for (let attempt = 0; attempt < 10; attempt += 1) {
         const event = await events.next();
         if (event.done) break;
-        if (event.value.type === 'text' && event.value.data.text.includes('"name":"extension"')) {
-          visibleReceipt = event.value.data.text;
+        const data = event.value.data as { text?: unknown };
+        if (event.value.type === 'text' && typeof data?.text === 'string' && data.text.includes('"name":"extension"')) {
+          visibleReceipt = data.text;
           break;
         }
       }
@@ -1832,8 +1859,9 @@ describe('pi auto-review dispatch & spawn config (mocked pi process)', () => {
       for (let attempt = 0; attempt < 10; attempt += 1) {
         const event = await events.next();
         if (event.done) break;
-        if (event.value.type === 'text' && event.value.data.text.includes('Pi 扩展操作失败。')) {
-          visibleReceipt = event.value.data.text;
+        const data = event.value.data as { text?: unknown };
+        if (event.value.type === 'text' && typeof data?.text === 'string' && data.text.includes('Pi 扩展操作失败。')) {
+          visibleReceipt = data.text;
           break;
         }
       }
@@ -2084,8 +2112,9 @@ describe('pi auto-review dispatch & spawn config (mocked pi process)', () => {
       for (let attempt = 0; attempt < 10; attempt += 1) {
         const event = await events.next();
         if (event.done) break;
-        if (event.value.type === 'text' && event.value.data.text.includes('Pi 扩展操作失败。')) {
-          visibleReceipt = event.value.data.text;
+        const data = event.value.data as { text?: unknown };
+        if (event.value.type === 'text' && typeof data?.text === 'string' && data.text.includes('Pi 扩展操作失败。')) {
+          visibleReceipt = data.text;
           break;
         }
       }
@@ -2262,8 +2291,9 @@ describe('pi auto-review dispatch & spawn config (mocked pi process)', () => {
       for (let attempt = 0; attempt < 10; attempt += 1) {
         const event = await events.next();
         if (event.done) break;
-        if (event.value.type === 'text' && event.value.data.text.includes('Pi 扩展已安装')) {
-          visibleReceipt = event.value.data.text;
+        const data = event.value.data as { text?: unknown };
+        if (event.value.type === 'text' && typeof data?.text === 'string' && data.text.includes('Pi 扩展已安装')) {
+          visibleReceipt = data.text;
           break;
         }
       }
@@ -2432,7 +2462,8 @@ describe('pi auto-review dispatch & spawn config (mocked pi process)', () => {
         { type: 'user', content: 'pi install npm:oversized-extension' },
         desktopCommandOptions('pi install npm:oversized-extension'),
       );
-      const prompt = captured.requests.find((request) => request.type === 'prompt')?.message ?? '';
+      const prompt = captured.requests.find((request) => request.type === 'prompt')?.message;
+      if (typeof prompt !== 'string') throw new Error('expected prompt message');
       expect(prompt.length).toBeLessThanOrEqual(16_384);
       expect(prompt).toContain('"name":"oversized-extension"');
       expect(prompt).toContain('"version":"9.8.7"');
@@ -2571,7 +2602,7 @@ describe('pi auto-review dispatch & spawn config (mocked pi process)', () => {
       expect(await waitForResponse('review-pkg')).toEqual({
         type: 'extension_ui_response',
         id: 'review-pkg',
-        cancelled: true,
+        value: JSON.stringify({ ok: false, error: 'Cindy could not approve this tool call: Approval was cancelled or could not be completed.' }),
       });
       expect(deps.mutatePiManagedPackage).not.toHaveBeenCalled();
     } finally {
@@ -2581,6 +2612,7 @@ describe('pi auto-review dispatch & spawn config (mocked pi process)', () => {
 
   it('keeps Bot tools and memory independent of global memory while honoring task permissions', async () => {
     const deps = buildDeps(undefined, false, { serverNames: ['cindy_memory', 'cindy_helper'] });
+    deps.resolvePiGlobalContextHome = vi.fn(() => { throw new Error('Bot must not read user context'); });
     deps.getGhostRosterPrompt = vi.fn(() => 'BOT ROSTER');
     deps.runtimeConfig.memoryEnabled = false;
     const handle = await new PiAgent(deps).startSession({
@@ -2617,6 +2649,7 @@ describe('pi auto-review dispatch & spawn config (mocked pi process)', () => {
         path.posix.join(captured.env.PI_CODING_AGENT_DIR!, 'internal-extensions', 'cindy-subagent.ts'),
       ]));
       expect(captured.args).toContain('--no-context-files');
+      expect(deps.resolvePiGlobalContextHome).not.toHaveBeenCalled();
       const promptIndex = captured.args.indexOf('--append-system-prompt');
       expect(captured.args[promptIndex + 1]).toContain('BOT SOUL');
       expect(captured.args[promptIndex + 1]).not.toContain('BOT ROSTER');
@@ -3464,13 +3497,20 @@ describe('pi auto-review dispatch & spawn config (mocked pi process)', () => {
       reason: 'User denied',
     }) as never);
     firePermissionInputRequest('deny-user', 'write', { path: '/tmp/user-denied.txt' });
-    expect(await waitForResponse('deny-user')).toMatchObject({ value: 'user-deny' });
+    expect(await waitForResponse('deny-user')).toMatchObject({ value: 'user-deny:User denied' });
     await userHandle.close();
 
     const systemHandle = await start('ask');
     firePermissionInputRequest('deny-system', 'write', { path: '/tmp/no-resolver.txt' });
     expect(await waitForResponse('deny-system')).toMatchObject({ value: 'system-deny' });
     await systemHandle.close();
+  });
+
+  it('passes the actual Auto-review reason back to the Pi tool hook', async () => {
+    const handle = await start('auto', async () => ({ verdict: 'block' as const, reason: 'User requested read-only analysis.' }));
+    firePermissionInputRequest('deny-auto-reason', 'write', { path: '/tmp/blocked.txt' });
+    expect(await waitForResponse('deny-auto-reason')).toMatchObject({ value: 'auto-review-deny:User requested read-only analysis.' });
+    await handle.close();
   });
 
   it.each(['read', 'bash', 'powershell'].flatMap((toolName) =>
@@ -3548,7 +3588,9 @@ describe('pi auto-review dispatch & spawn config (mocked pi process)', () => {
     });
     expect(resolver).toHaveBeenCalledTimes(verdict === 'ask' ? 1 : 0);
     expect(mutate).toHaveBeenCalledTimes(verdict === 'allow' ? 1 : 0);
-    if (verdict !== 'allow') expect(response.cancelled).toBe(true);
+    if (verdict !== 'allow') expect(JSON.parse(String(response.value))).toEqual({
+      ok: false, error: verdict === 'block' ? 'Cindy Auto-review denied this tool call.' : 'User denied this tool call via Cindy.',
+    });
     await handle.close();
   });
 

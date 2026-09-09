@@ -53,6 +53,7 @@ import type {
   AgentSessionTeardownOptions,
   BackgroundTaskSnapshot,
   SendOptions,
+  StartSessionOptions,
   TurnContinuationState,
 } from './agents/base-agent.js';
 import {
@@ -150,7 +151,12 @@ function parseTurnStallMs(raw: string | undefined): number {
   return Math.floor(n);
 }
 
+/** Launch-only caller preferences. Live controls and grants have separate authorities. */
+export type SessionStartupPreferences = Readonly<Pick<StartSessionOptions,
+  'userPrompt' | 'makerMemoryEnabled' | 'displayReasoning'>>;
+
 export interface SessionOptions {
+  hostStartupPreferences?: SessionStartupPreferences;
   id: string;
   /** 与 Agent MCP context 同源的本次内存实例代号；省略时由 Session 自铸。 */
   sessionInstanceId?: string;
@@ -396,6 +402,8 @@ function createSendReservation(generation: number): SendReservation {
 }
 
 export class Session {
+  /** Caller preferences before generated context; memory-only recovery input. */
+  readonly hostStartupPreferences?: SessionStartupPreferences;
   readonly id: string;
   /** business id 可复用；instanceId 精确标识本次内存 Session incarnation。 */
   readonly instanceId: string;
@@ -525,6 +533,8 @@ export class Session {
   private turnControlState: TurnControlState | null = null;
 
   constructor(opts: SessionOptions) {
+    this.hostStartupPreferences = opts.hostStartupPreferences
+      ? Object.freeze({ ...opts.hostStartupPreferences }) : undefined;
     this.id = opts.id;
     this.instanceId = opts.sessionInstanceId ?? generateSessionId();
     this.agentKind = opts.agentKind;
@@ -822,7 +832,7 @@ export class Session {
       // 层 B：用户贴图主动调视觉（视觉桥钩子）。此时 turn guard 已通过、reservation 已
       // 建立——并发 send 已被 isTurnRunning 挡住，不会在 guard 前浪费视觉调用；取消时
       // reservation.abortController.signal 可中止视觉请求。钩子失败/未生效 → 原样透传。
-      const autoReviewSourceContent = msg.content;
+      const autoReviewSourceContent = handleOpts[AUTO_REVIEW_SOURCE_CONTENT] ?? msg.content;
       if (this.visionBridge) {
         // 传入 reservation abort signal：用户 Stop / 外部取消时中止视觉请求，避免浪费
         // 外部视觉调用（多图最坏 图片数×timeout 才返回）。
@@ -1065,7 +1075,7 @@ export class Session {
     // 的 turn（跨 turn 串线）。记录发起时代号，转换后必须「同一 generation 且仍
     // 在跑」才投递。
     const steerTurnGeneration = this.getTurnGeneration();
-    const autoReviewSourceContent = msg.content;
+    const autoReviewSourceContent = opts?.[AUTO_REVIEW_SOURCE_CONTENT] ?? msg.content;
     // 层 B：steer 追加图片同样走视觉桥（与 send 一致），否则纯文本模型收到的
     // 原始 image block 会被后端忽略或拒绝（Greptile P1）。
     msg = await this.bridgedVisionMessage(msg, opts?.signal);

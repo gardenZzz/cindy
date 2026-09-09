@@ -1,4 +1,67 @@
 {
+  "remoteDesktop": {
+    "windowsTitle": "잠금 화면 제어",
+    "windowsready": "현재 Cindy 실행에 허용되었습니다. Cindy를 다시 시작하면 관리자 승인이 다시 필요합니다.",
+    "windowsmissing": "잠금 화면과 관리자 확인 창을 제어하려면 관리자 승인이 필요합니다.",
+    "windowsinstallRequired": "Cindy를 Program Files에 모든 사용자용으로 설치하세요.",
+    "windowsunavailable": "시스템 서비스를 사용할 수 없습니다. Cindy를 다시 설치하세요.",
+    "windowsEnable": "승인 후 활성화",
+    "windowsDisable": "서비스 제거",
+    "windowsError": "승인이 완료되지 않았습니다. 이 컴퓨터에서 다시 시도하세요.",
+    "permissionsTitle": "원격 데스크톱 권한",
+    "permissionsIntro": "데스크톱을 보려면 화면 기록 권한이, 조작하려면 손쉬운 사용 권한도 필요합니다. 컴퓨터에서 허용하면 상태가 자동으로 갱신됩니다.",
+    "permissionsReady": "시스템 권한이 준비되었습니다. 다시 연결할 수 있습니다.",
+    "screenRecording": "화면 기록",
+    "accessibility": "손쉬운 사용",
+    "screenRecordingHelp": "시스템 설정을 열고 현재 Cindy 앱의 화면 기록을 허용하세요. 재시작을 요청하면 Cindy를 다시 연 후 연결하세요.",
+    "accessibilityHelp": "설정을 열고 시스템 권한 안내에 표시된 앱의 손쉬운 사용을 허용하세요. 돌아오면 실제 입력 권한을 자동 확인합니다.",
+    "permissionChecking": "확인 중…",
+    "permissionGranted": "허용됨",
+    "permissionUnknown": "확인되지 않음",
+    "permissionMissing": "허용되지 않음",
+    "openPermissionSettings": "권한 허용",
+    "recheckPermissions": "다시 확인",
+    "permissionActionFailed": "권한 안내를 열지 못했습니다. 컴퓨터의 원격 제어 설정에서 다시 시도하세요.",
+    "permissionCheckFailed": "권한을 확인하지 못했습니다. 컴퓨터가 온라인인지 확인하고 다시 시도하세요.",
+    "openGuideOnComputer": "컴퓨터에서 권한 안내 열기",
+    "permissionGuideOpened": "컴퓨터에 권한 안내를 표시했습니다. 컴퓨터에서 계속하세요.",
+    "reconnectAfterPermissions": "확인 후 다시 연결",
+    "closePermissionGuide": "닫기",
+    "title": "원격 데스크톱",
+    "allow": "원격 데스크톱 허용",
+    "allowHint": "같은 계정의 기기에서 이 컴퓨터의 모든 앱을 보고 조작하도록 허용합니다. 위의 기기 제어도 켜주세요.",
+    "permissionHint": "컴퓨터 시스템 설정에서 화면 기록과 손쉬운 사용을 허용한 후 다시 연결하세요.",
+    "beingControlled": "데스크톱을 원격으로 제어 중",
+    "beingViewed": "데스크톱을 원격으로 보는 중",
+    "disconnect": "연결 끊기",
+    "back": "뒤로",
+    "connect": "연결",
+    "connecting": "연결 중…",
+    "disconnected": "연결 끊김",
+    "compatibility": "호환 모드 · 낮은 프레임 속도",
+    "live": "실시간 화면",
+    "controlling": "제어 중",
+    "viewOnly": "보기 전용",
+    "upgrade": "컴퓨터의 Cindy를 업데이트하세요.",
+    "disabled": "컴퓨터의 설정 → 원격 제어에서 원격 데스크톱을 켜주세요.",
+    "busy": "데스크톱 입력을 사용 중입니다. 다른 기기의 제어를 해제하거나 Agent 작업이 끝날 때까지 기다리세요.",
+    "connectionError": "연결이 종료되었습니다. 컴퓨터가 온라인인지 확인하고 다시 연결하세요.",
+    "releaseControl": "제어 해제",
+    "takeControl": "제어 시작",
+    "pointer": "트랙패드",
+    "touch": "터치",
+    "pan": "화면 이동",
+    "keyboard": "키보드",
+    "rightClick": "오른쪽 클릭",
+    "fit": "화면 맞춤",
+    "display": "디스플레이",
+    "gestureHint": "두 손가락으로 확대/축소 및 스크롤합니다. 화면 이동 모드에서는 이동합니다. 길게 누른 후 움직이면 드래그합니다.",
+    "textPlaceholder": "컴퓨터에 텍스트 입력",
+    "sendText": "텍스트 전송",
+    "keys": "키",
+    "showDesktop": "데스크톱",
+    "allWindows": "모든 창"
+  },
   "ipcError": {
     "INVALID_PARAMS": "매개변수가 잘못되었습니다. 확인 후 다시 시도하세요.",
     "PRECONDITION_FAILED": "현재 상태에서는 이 작업을 수행할 수 없습니다. 잠시 후 다시 시도하세요.",
@@ -2074,8 +2137,8 @@
         "hostProfileApple": "Apple 칩 · 통합 메모리 약 {{memory}}GB",
         "hostProfileGeneric": "메모리 약 {{memory}}GB",
         "hostProfileUnknown": "이 컴퓨터의 메모리를 아직 확인할 수 없습니다",
-        "bestForYou": "가장 잘 맞음",
-        "alsoCoding": "코딩에도 좋음",
+        "bestForYou": "성능 추천",
+        "alsoCoding": "속도 대안",
         "packaging": {
           "mxfp8": "MXFP8",
           "mlx": "MLX",
@@ -2092,41 +2155,12 @@
         "noSearchResults": "일치하는 모델이 없습니다",
         "alreadyInstalled": "설치됨",
         "searchResults": "검색 결과",
-        "moreModels": "자주 쓰는 모델 더 보기",
-        "memoryWarning": "이 컴퓨터의 메모리가 부족합니다({{need}} GB 필요, 현재 약 {{have}} GB)",
+        "moreModels": "다른 후보 모델",
+        "memoryWarning": "추정 메모리 기준 미만({{need}} GB, 이 기기 약 {{have}} GB)",
         "manualDownload": "수동 다운로드",
         "manualDownloadPlaceholder": "Ollama 라이브러리 이름 또는 Hugging Face URL",
         "invalidLibraryName": "Ollama 라이브러리 이름을 입력하거나 huggingface.co 모델 페이지 URL을 붙여넣으세요",
         "advancedExactName": "고급: 정확한 라이브러리 이름",
-        "models": {
-          "qwen38-27b": {
-            "blurb": "로컬에서 돌릴 수 있는 가장 강한 밀집 모델. 코딩과 긴 작업에 적합합니다."
-          },
-          "gpt-oss-20b": {
-            "blurb": "OpenAI 오픈 20B. 16GB급 기기에서 가장 무난한 선택."
-          },
-          "gemma4-e2b": {
-            "blurb": "Gemma 4 최소형. 가벼운 기기에서도 돌아가며 비전을 지원합니다."
-          },
-          "gemma4-e4b": {
-            "blurb": "Google Gemma 4 소형. 가벼운 일상용이며 비전을 지원합니다."
-          },
-          "gemma4-12b": {
-            "blurb": "Gemma 4 중형. 일상 대화와 멀티모달에 더 안정적입니다."
-          },
-          "gemma4-31b": {
-            "blurb": "Gemma 4 대형. 대화와 멀티모달이 더 강하고, 메모리도 더 듭니다."
-          },
-          "gemma4-26b": {
-            "blurb": "Gemma 4 중대형 MoE. 활성 파라미터가 적어 중고사양에 맞습니다."
-          },
-          "ornith15-35b": {
-            "blurb": "Ornith 1.5 중형 MoE. 로컬 코딩과 에이전트 대안."
-          },
-          "glm-47-flash": {
-            "blurb": "Zhipu의 최신 코딩 모델. 30B MoE로 코드와 에이전트에 맞음."
-          }
-        },
         "onboardingTitle": "먼저 Ollama 런타임을 설치하세요",
         "onboardingBody": "Ollama를 설치하면 Ollama 앱을 열지 않고도 Cindy에서 로컬 모델을 다운로드하고 사용할 수 있습니다. Ollama는 무료 오픈소스 서드파티 런타임입니다.",
         "installInCindy": "Cindy에서 설치",
@@ -2195,8 +2229,8 @@
         "cancelDownload": "미완료 다운로드 삭제",
         "notRecommended": "이 Mac은 Qwen3.8 27B에 필요한 32GB 메모리 기준에 미달합니다. 정확한 라이브러리 이름을 입력해 직접 다운로드할 수 있습니다.",
         "sizeHint": "약 {{size}} · 통합 메모리 {{memory}}GB 필요",
-        "sizeHintApple": "약 {{size}} · 통합 메모리 {{memory}}GB 필요",
-        "sizeHintGeneric": "약 {{size}} · 메모리 {{memory}}GB 필요",
+        "sizeHintApple": "다운로드 {{size}} · 예상 통합 메모리 {{memory}} GB",
+        "sizeHintGeneric": "다운로드 {{size}} · 예상 메모리 {{memory}} GB",
         "deleteFromCindy": "Cindy에서 제거",
         "deleteConfirmTitle": "Cindy에서 Ollama를 제거할까요?",
         "deleteConfirmBody": "Cindy 연결만 제거합니다. Ollama에 이미 받은 모델은 디스크에 남고 서비스도 멈추지 않습니다.",
@@ -2205,7 +2239,8 @@
         "deleteModelConfirmBody": "이 컴퓨터에서 받은 모델 파일을 삭제하고 Cindy에서도 제거합니다. 필요하면 나중에 다시 받을 수 있습니다.",
         "deleteModelConfirm": "삭제",
         "deleteModelDone": "{{name}}을(를) 삭제했습니다",
-        "deleteModelFailed": "삭제하지 못했습니다. Ollama가 실행 중인지 확인한 뒤 다시 시도해 주세요."
+        "deleteModelFailed": "삭제하지 못했습니다. Ollama가 실행 중인지 확인한 뒤 다시 시도해 주세요.",
+        "noRecommendation": "아직 이 컴퓨터의 메모리에 맞고 근거가 충분한 추천 모델이 없습니다. 아래에서 후보를 직접 선택할 수 있습니다."
       },
       "xdSignin": {
         "badge": "추천",
@@ -5047,7 +5082,8 @@
         "nodeChildSpawn": "Node 프로그램이 패키지에 신고된 하위 프로세스 시작을 호스트에 요청할 수 있습니다",
         "nodeChildSpawnDetail": "자신의 패키지 안에 신고된 JS 파일만 시작할 수 있으며(메인 프로그램과 동일한 로컬 권한), 임의의 명령은 실행할 수 없습니다. 플러그인이 비활성화되거나 종료되면 하위 프로세스도 함께 종료됩니다.",
         "skill": "AI 어시스턴트에 스킬 \"{{name}}\"을(를) 추가합니다",
-        "skillDetail": "스킬은 AI가 자신의 지시로 읽어들여 실행하는 지시 파일입니다. 사용자의 전체 권한으로 Claude Code와 Codex의 모든 프로젝트에 적용되며, 이 플러그인의 샌드박스에 제한되지 않습니다. 플러그인이 활성화된 동안 계속 사용 가능하며, 비활성화하거나 제거하면 삭제됩니다. 특정 폴더에서만 플러그인을 끄더라도 숨겨지지 않습니다. 여기서는 스킬 전문을 미리 볼 수 없습니다 — 신뢰할 수 있는 플러그인만 설치하세요."
+        "skillDetail": "스킬은 AI가 자신의 지시로 읽어들여 실행하는 지시 파일입니다. 사용자의 전체 권한으로 Claude Code와 Codex의 모든 프로젝트에 적용되며, 이 플러그인의 샌드박스에 제한되지 않습니다. 플러그인이 활성화된 동안 계속 사용 가능하며, 비활성화하거나 제거하면 삭제됩니다. 특정 폴더에서만 플러그인을 끄더라도 숨겨지지 않습니다. 여기서는 스킬 전문을 미리 볼 수 없습니다 — 신뢰할 수 있는 플러그인만 설치하세요.",
+        "routineEvents": "루틴 이벤트"
       },
       "connections": {
         "confirmTitle": "연결 주소 추가",
@@ -7257,6 +7293,8 @@
       "composerPlaceholderLatin": "{{name}} 에게 말 걸기…"
     },
     "globalSettings": {
+      "restoreHint": "기본값으로 복원하면 클라이언트의 기본 모델 설정을 따릅니다. 개별 파트너의 사용자 지정 모델은 유지됩니다.",
+      "restoreFailed": "기본값을 복원하지 못했습니다. 다시 시도해 주세요.",
       "title": "파트너",
       "description": "파트너 전체에 적용되는 설정입니다. 개별 파트너 설정은 각자의 페이지에 있어요.",
       "rosterNote": "기본 제공되는 구성원은 버전마다 늘어납니다."
@@ -12130,6 +12168,67 @@
     "embedding": "의미가 비슷한 콘텐츠를 찾습니다.",
     "compression": "긴 내용을 간결하게 줄입니다."
   },
+  "routines": {
+    "title": "루틴",
+    "add": "루틴 추가",
+    "back": "루틴으로 돌아가기",
+    "error": "루틴을 업데이트하지 못했습니다. 설정을 확인하고 다시 시도하세요.",
+    "empty": "루틴을 추가하여 팀원이 할 일과 실행 시점을 지정하세요.",
+    "enabled": "활성화됨",
+    "paused": "일시 중지됨",
+    "runNow": "지금 실행",
+    "running": "실행 중…",
+    "name": "이름",
+    "instructions": "지침",
+    "when": "실행 시점",
+    "addTrigger": "트리거 추가",
+    "removeTrigger": "트리거 제거",
+    "schedule": "일정",
+    "hourly": "매시간",
+    "daily": "매일",
+    "weekdays": "평일",
+    "weekly": "매주",
+    "monthly": "매월",
+    "interval": "간격",
+    "advanced": "고급…",
+    "everyMinutes": "{{count}}분마다",
+    "minutes": "분",
+    "expression": "Cron 표현식",
+    "timezone": "시간대",
+    "delete": "루틴 삭제",
+    "save": "루틴 저장",
+    "deleteConfirm": "이 루틴을 삭제하고 대기 중인 실행을 취소할까요?",
+    "keep": "루틴 유지",
+    "history": "실행 기록",
+    "noRuns": "이 루틴은 아직 실행되지 않았습니다.",
+    "field": "필드",
+    "operator": "조건",
+    "value": "값",
+    "addFilter": "조건 추가",
+    "removeFilter": "조건 제거",
+    "pluginCapability": "선언된 이벤트를 발행하여 직접 설정한 루틴만 실행합니다.",
+    "time": "시간",
+    "day": "날짜",
+    "weekday": "요일",
+    "status": {
+      "queued": "대기 중",
+      "running": "실행 중",
+      "success": "완료됨",
+      "failed": "실패함",
+      "interrupted": "중단됨",
+      "cancelled": "취소됨"
+    },
+    "sourceStatus": {
+      "listening": "수신 중",
+      "disconnected": "수신 중지됨",
+      "error": "연결 소스 확인 필요"
+    },
+    "operators": {
+      "equals": "같음",
+      "contains": "포함",
+      "not-equals": "같지 않음"
+    }
+  },
   "cindyMakeDoctor": {
     "description": "Cindy 빌드에 필요한 로컬 환경을 확인합니다. 사용법: /cindy-make-doctor",
     "title": "Cindy Make · 환경 검사",
@@ -12240,7 +12339,6 @@
       "expand": "업스트림 결과 보기",
       "collapse": "업스트림 결과 숨기기",
       "count": "관련 가능성이 있는 열린 Issue 또는 PR {{count}}개를 찾았습니다",
-
       "kind": {
         "issue": "이슈",
         "pr": "PR"

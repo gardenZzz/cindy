@@ -199,7 +199,10 @@ async function readSessionAgentKindFromDb(sessionId: string): Promise<AgentKind 
 
 const defaultRegenerateDeps: RegenerateTitleDeps = {
   readSessionAgentKind: readSessionAgentKindFromDb,
-  collectMaterial: regenerateTitleMaterial,
+  collectMaterial: (sessionId, recentLimit, latestTurnIsInFlight) =>
+    regenerateTitleMaterial(sessionId, recentLimit, latestTurnIsInFlight, {
+      preferHookUserText: true,
+    }),
   generateTitle: async (sessionId, agentKind, prompt) => {
     if (agentKind === 'cursor') {
       const title = await generateCursorSessionTitle(prompt, sessionId);

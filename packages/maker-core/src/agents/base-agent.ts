@@ -621,6 +621,8 @@ export interface AgentDeps {
    * 其它 agent 不消费此字段。
    */
   resolvePiAgentHome?: (remoteHostId?: string | null) => string | undefined;
+  /** Native user context root, separate from Cindy's models/auth runtime home. */
+  resolvePiGlobalContextHome?: (remoteHostId?: string | null) => string | undefined;
 
   /**
    * Pi-only: advisory metadata for Cindy UI/command projection. This resolver
@@ -1568,6 +1570,28 @@ export class AgentNotAuthenticatedError extends Error {
   }
 }
 
+/**
+ * An adapter failed before returning a handle and has confirmed its process stopped.
+ * Maker unwraps the cause after releasing only this startup's host resources.
+ */
+export class AgentStartupStoppedError extends Error {
+  constructor(cause: unknown) {
+    super(cause instanceof Error ? cause.message : String(cause), { cause });
+    this.name = 'AgentStartupStoppedError';
+  }
+}
+
+/** An adapter failed before returning a handle, but its process has not confirmed exit. */
+export class AgentStartupCleanupPendingError extends Error {
+  readonly whenStopped: Promise<void>;
+
+  constructor(message: string, options: { cause: unknown; whenStopped: Promise<void> }) {
+    super(message, { cause: options.cause });
+    this.name = 'AgentStartupCleanupPendingError';
+    this.whenStopped = options.whenStopped;
+  }
+}
+
 export interface BotRuntimeSkillEntry {
   name: string;
   runtimeCommandName?: string;
@@ -1846,6 +1870,9 @@ export const MAIN_OWNED_SEND_CONTEXT = Symbol('cindy.main-owned-send-context');
 /** Call-local user content before Session replaces images with generated descriptions. */
 export const AUTO_REVIEW_SOURCE_CONTENT = Symbol('cindy.auto-review-source-content');
 
+/** Host-restored user authorization for this send; never accepted from wire options. */
+export const AUTO_REVIEW_USER_INTENT = Symbol('cindy.auto-review-user-intent');
+
 export interface MainOwnedSendContext {
   readonly origin: TurnPermissionOrigin;
   /** Main-authenticated user text before channel/persona/context decoration. */
@@ -1858,6 +1885,7 @@ export interface MainOwnedSendContext {
  */
 export interface SendOptions {
   readonly [AUTO_REVIEW_SOURCE_CONTENT]?: UserMessage['content'];
+  readonly [AUTO_REVIEW_USER_INTENT]?: string;
   /** Host-authenticated metadata; never accept an equivalent string-keyed wire field. */
   readonly [MAIN_OWNED_SEND_CONTEXT]?: MainOwnedSendContext;
   /**

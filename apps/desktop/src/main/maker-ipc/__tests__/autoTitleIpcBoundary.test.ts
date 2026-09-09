@@ -174,6 +174,7 @@ describe('maker:regenerate-title — 当前 turn 状态', () => {
       's-running',
       expect.any(Number),
       expect.any(Function),
+      { preferHookUserText: true },
     );
   });
 
@@ -200,6 +201,7 @@ describe('maker:regenerate-title — 当前 turn 状态', () => {
       's-completed',
       expect.any(Number),
       expect.any(Function),
+      { preferHookUserText: true },
     );
   });
 
@@ -230,6 +232,7 @@ describe('maker:regenerate-title — 当前 turn 状态', () => {
       's-new-turn',
       expect.any(Number),
       expect.any(Function),
+      { preferHookUserText: true },
     );
   });
 
@@ -255,6 +258,7 @@ describe('maker:regenerate-title — 当前 turn 状态', () => {
       's-snapshot-race',
       expect.any(Number),
       expect.any(Function),
+      { preferHookUserText: true },
     );
   });
 });
