@@ -1,8 +1,9 @@
-import type { Schedule } from '@cindy/maker-scheduler';
+import { asModelAgentKind, type Schedule } from '@cindy/maker-scheduler';
 
 import {
   buildPreRunHook,
   resolvePersistedScheduleEffort,
+  scheduleAgentKindForForm,
   type ScheduleFormState,
   type ScheduleModelEfforts,
 } from './scheduleFormLogic';
@@ -20,6 +21,8 @@ export interface ProjectScheduleConfig {
   manual?: boolean;
   intervalMs?: number;
   agentKind?: AgentKind;
+  /** 显式模型选择的 Harness；省略时保留旧配置的跟随绑定任务语义。 */
+  modelAgentKind?: 'claude-code' | 'codex' | 'pi';
   model?: string;
   /** 显式来源(供应商)id;省略 = 使用该 Agent 的原生默认来源。 */
   providerId?: string;
@@ -63,6 +66,7 @@ export function scheduleToProjectConfig(
     manual: schedule.manual,
     intervalMs: schedule.intervalMs,
     agentKind: schedule.agentKind,
+    modelAgentKind: asModelAgentKind(schedule.modelAgentKind),
     model: schedule.model,
     providerId: schedule.providerId || undefined,
     effort: schedule.effort,
@@ -92,7 +96,8 @@ export function formToProjectConfig(
     recurring: form.recurring,
     manual: form.manual,
     intervalMs: form.intervalMs,
-    agentKind: form.agentKind,
+    agentKind: scheduleAgentKindForForm(form),
+    modelAgentKind: form.model.trim() ? form.modelAgentKind : undefined,
     model: form.model.trim() || undefined,
     providerId: form.providerId.trim() || undefined,
     effort: resolvePersistedScheduleEffort(form, modelEfforts),

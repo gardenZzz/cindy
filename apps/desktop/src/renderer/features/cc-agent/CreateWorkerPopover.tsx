@@ -1,3 +1,4 @@
+import { useModelPickerAgents } from '@/hooks/useAvailableAgents';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useNavigate } from 'react-router-dom';
@@ -126,6 +127,7 @@ export function CreateWorkerPopover({
   // device-link 被控端不一定装了 cursor-agent，远程创建面板不翻 Cursor 段。
   const cursorAvailable = useCursorAvailable() && !deviceId;
   const piCaps = useAgentCapabilities('pi', deviceId);
+  const pickerAgents = useModelPickerAgents(agent, deviceId);
   const localProviders = useProviders();
   const remoteProviders = useDeviceProviders(deviceId);
   const providers = deviceId ? remoteProviders.providers : localProviders.providers;
@@ -751,31 +753,38 @@ export function CreateWorkerPopover({
         </div>
 
         <div className="mb-4 grid grid-cols-[auto_minmax(0,1fr)] gap-4">
-          <div className="min-w-0">
-            <div className="mb-2 text-12 font-medium uppercase tracking-[0.5px] text-[var(--text-tertiary)]">
-              {t('orca.createWorker.agentLabel')}
-            </div>
-            {/* 与「新建」页同款 AgentSelect 下拉(取代定宽分段器;引擎数量不再挤布局)。
-                Cursor 本机未装 / device-link 远程时用 hiddenVendors 藏项。 */}
-            <AgentSelect
+          {deviceId && remoteProviders.unsupported ? (
+            <VendorSegmentedSwitcher
               value={vendorKey}
-              side="bottom"
-              hiddenVendors={
-                cursorAvailable ? undefined : (['cursor'] as const satisfies readonly MakerVendor[])
-              }
-              onChange={(next) =>
-                updateAgent(
-                  next === 'codex'
-                    ? 'codex'
-                    : next === 'cursor'
-                      ? 'cursor'
-                      : next === 'pi'
-                        ? 'pi'
-                        : 'claude-code',
-                )
-              }
+              width={220}
+              ariaLabel={t('orca.createWorker.agentLabel')}
+              onChange={(next) => updateAgent(next === 'codex' ? 'codex' : next === 'pi' ? 'pi' : 'claude-code')}
             />
-          </div>
+          ) : (
+            <div className="min-w-0">
+              <div className="mb-2 text-12 font-medium uppercase tracking-[0.5px] text-[var(--text-tertiary)]">
+                {t('orca.createWorker.agentLabel')}
+              </div>
+              <AgentSelect
+                value={vendorKey}
+                side="bottom"
+                hiddenVendors={
+                  cursorAvailable ? undefined : (['cursor'] as const satisfies readonly MakerVendor[])
+                }
+                onChange={(next) =>
+                  updateAgent(
+                    next === 'codex'
+                      ? 'codex'
+                      : next === 'cursor'
+                        ? 'cursor'
+                        : next === 'pi'
+                          ? 'pi'
+                          : 'claude-code',
+                  )
+                }
+              />
+            </div>
+          )}
 
           <div className="min-w-0">
             <div className="mb-2 text-12 font-medium uppercase tracking-[0.5px] text-[var(--text-tertiary)]">
@@ -792,6 +801,16 @@ export function CreateWorkerPopover({
                 <FastModeToggle enabled={fast} onToggle={() => setFast((v) => !v)} />
               )}
               <ModelSelector
+                fastModeConfigurable={['codex', 'pi']}
+                unifiedAgents={sshRemote ? (pickerAgents ?? ['claude-code', 'codex']).filter((kind) => kind !== 'pi') : pickerAgents}
+                onUnifiedSelect={deviceId && remoteProviders.unsupported ? undefined : (selection) => {
+                  const nextAgent = selection.engine === 'cc' ? 'claude-code' : selection.engine;
+                  updateAgent(nextAgent);
+                  setModel(selection.modelId);
+                  setProviderSource(selection.providerId);
+                  setEffort(selection.effort ?? '');
+                  setFast(selection.fast);
+                }}
                 modelId={model}
                 effort={effort}
                 onModelChange={updateModel}

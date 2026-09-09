@@ -276,6 +276,7 @@ async function mergePiRuntimeSkillStatuses(
         ...(skill.description ? { description: skill.description } : {}),
         source: 'skill' as const,
         path: skill.sourcePath,
+        origin: 'package' as const,
         scope: 'user' as const,
         enabled: true,
         runtimeStatus: skill.runtimeCommandName ? 'loaded' as const : 'unknown' as const,
@@ -1596,13 +1597,18 @@ export class Maker {
         && sessionMeta.reviewMode !== true
         && !sessionMeta.remoteHostId
       ));
-    const result = await this.requireAgent(agentKind).listAgentSkills({
+    const agent = this.requireAgent(agentKind);
+    const session = sessionId ? this.getSession(sessionId) : undefined;
+    const filter = (result: ListAgentSkillsResult) => agent.filterActiveSkillCommands(
+      result, agentOpts.remoteHostId ?? sessionMeta?.remoteHostId ?? undefined,
+      session?.agentKind === agentKind ? session.getDisabledSkillPaths() : undefined,
+    );
+    const result = filter(await agent.listAgentSkills({
       ...agentOpts,
       ...(sessionId ? { sessionId } : {}),
       includeManagedPiPackages,
-    });
+    }));
     if (agentKind !== 'pi' || !sessionId) return result;
-    const session = this.getSession(sessionId);
     if (
       session?.agentKind !== 'pi'
       || !opts.workingDir
@@ -1610,7 +1616,7 @@ export class Maker {
     ) {
       return result;
     }
-    return mergePiRuntimeSkillStatuses(result, session.getRuntimeCapabilities());
+    return filter(await mergePiRuntimeSkillStatuses(result, session.getRuntimeCapabilities()));
   }
 
   /** ChatInput `@` palette entries, routed by agent kind. */

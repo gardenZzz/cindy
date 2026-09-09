@@ -32,6 +32,7 @@ export interface RemoteScheduleWriteInput {
    */
   intervalMs?: number | null;
   agentKind: RemoteScheduleAgentKind;
+  modelAgentKind?: RemoteScheduleAgentKind;
   model?: string;
   providerId?: string;
   effort?: string;
@@ -102,6 +103,7 @@ export interface RemoteSchedule {
   manual?: boolean;
   intervalMs?: number;
   agentKind?: RemoteScheduleAgentKind;
+  modelAgentKind?: RemoteScheduleAgentKind;
   model?: string;
   providerId?: string;
   effort?: string;

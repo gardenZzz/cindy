@@ -306,6 +306,17 @@ export function __resetAvailableAgentsCacheForTest(): void {
   agentsCacheInvalidationScheduled.clear();
 }
 
+/** Model pickers keep the current Harness visible while excluding unregistered runtimes. */
+export function useModelPickerAgents(current: string, deviceId?: string | null): readonly RuntimeAgentKind[] | undefined {
+  const { availableVendors, loaded } = useAvailableAgents(deviceId);
+  if (!loaded) return undefined;
+  const runtimeCurrent: RuntimeAgentKind =
+    current === 'codex' || current === 'pi' ? current : 'claude-code';
+  return (['claude-code', 'codex', 'pi'] as const).filter(
+    (agent) => agent === runtimeCurrent || availableVendors.has(toVendor(agent)),
+  );
+}
+
 /** Synchronous projection of the same runtime roster used by the client picker. */
 export function getCachedAvailableVendors(): ReadonlySet<MakerVendor> | null {
   return agentsCache.get('')?.vendors ?? null;

@@ -1,4 +1,5 @@
 import type { RoutineInput } from '@cindy/maker-scheduler';
+import type { BotToolsetContext } from '../shared/botRemoteCapabilities';
 import { contextBridge, ipcRenderer, webUtils } from 'electron';
 import { DESKTOP_LOCAL, type RemoteDesktopApi } from '../shared/remoteDesktop';
 import { DEVICE_LINK_PUSH } from '../shared/deviceLinkIpc';
@@ -503,6 +504,7 @@ function createIpcFanOut(channel: string): FanOut {
 // Stage 2 C1: cc-agent:* push channel fanout 全部退役 (renderer 已切到 maker:event 等),
 // 老 7 个 fanOut + fanOutUserMessagePersisted 一起拿掉。
 const fanOutUpdateStatus = createIpcFanOut('update-status');
+const fanOutSkillhubLocalStateChanged = createIpcFanOut('skillhub:local-state-changed');
 const fanOutDbSlimmingStartupProgress = createIpcFanOut(
   DB_SLIMMING_STARTUP_PROGRESS_CHANGED_CHANNEL,
 );
@@ -825,6 +827,8 @@ interface CrossAgentMigrationItem {
 }
 
 interface PluginListItem {
+  /** Present only when queried for a Bot runtime context. */
+  available?: boolean;
   id: string;
   name: string;
   description: string;
@@ -2964,6 +2968,9 @@ contextBridge.exposeInMainWorld('electronAPI', {
   // ~/.claude/{skills,commands,agents}，project 来源由调用方传入的 projectRoot 决定。
   // 返回商店层 Skill[] 与兼容用 sources[]；scan 本身只读。
   skillhub: {
+    setEnabled: (params: { absolutePath: string; skillId?: string; enabled: boolean }): Promise<{ cindyEnabled: boolean }> =>
+      ipcRenderer.invoke('skillhub:set-enabled', params),
+    onLocalStateChanged: fanOutSkillhubLocalStateChanged,
     scan: (params: {
       projects?: import('../main/skillhub/scanner').ProjectInput[];
     }): Promise<{
@@ -2971,6 +2978,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
       error?: string;
       skills?: import('../main/skillhub/scanner').Skill[];
       sources?: import('../main/skillhub/scanner').SourceReport[];
+      pendingCleanups?: Array<{ token: string; name: string }>;
     }> => ipcRenderer.invoke('skillhub:scan', params),
 
     readSkill: (params: {
@@ -3389,11 +3397,15 @@ contextBridge.exposeInMainWorld('electronAPI', {
     cancelInstall: (name: string): Promise<{ success: boolean }> =>
       ipcRenderer.invoke('skillhub:cancel-install', { name }),
 
-    // 卸载（删本地文件夹）—— main 会校验目标必须有 registry 记录
+    // Main 原生确认并复核当前扫描实体后移入系统回收站。
     uninstall: (
       absolutePath: string,
-    ): Promise<{ success: true } | { success: false; errorCode: string; message: string }> =>
-      ipcRenderer.invoke('skillhub:uninstall', { absolutePath }),
+      skillId?: string,
+    ): Promise<{ success: true; cleanupToken?: string } | { success: false; errorCode: string; message: string }> =>
+      ipcRenderer.invoke('skillhub:uninstall', { absolutePath, skillId }),
+
+    retryUninstallCleanup: (token: string): Promise<{ complete: boolean }> =>
+      ipcRenderer.invoke('skillhub:retry-uninstall-cleanup', token),
 
     /** 在 main 内选择并检查本地包，成功时签发绑定当前 renderer 的短期导入授权。 */
     pickLocal: (): Promise<
@@ -5701,9 +5713,9 @@ contextBridge.exposeInMainWorld('electronAPI', {
     onLocalModelInstallProgress: fanOutMakerLocalModelInstallProgress,
 
     // 自定义 MCP 服务器配置 CRUD（可选 bearer token 另走通用 safeStorage IPC，不经这里）。
-    listCustomMcpServers: (): Promise<{
-      servers: import('../shared/customMcp').CustomMcpConfig[];
-    }> => ipcRenderer.invoke('maker:mcp:custom:list'),
+    listCustomMcpServers: (context?: import('../shared/customMcp').CustomMcpListContext): Promise<import('../shared/customMcp').CustomMcpListResult> => context === undefined
+      ? ipcRenderer.invoke('maker:mcp:custom:list')
+      : ipcRenderer.invoke('maker:mcp:custom:list', context),
     createCustomMcpServer: (
       config: import('../shared/customMcp').CustomMcpConfig,
     ): Promise<{ ok: true }> => ipcRenderer.invoke('maker:mcp:custom:create', config),
@@ -5780,8 +5792,9 @@ contextBridge.exposeInMainWorld('electronAPI', {
       dataOwnerId: string | null,
       ownerGeneration: number,
       map: Record<string, boolean>,
+      policy?: import('../shared/modelVisibility').ModelVisibilityPolicy,
     ): Promise<void> =>
-      ipcRenderer.invoke('maker:model-visibility:sync', dataOwnerId, ownerGeneration, map),
+      ipcRenderer.invoke('maker:model-visibility:sync', dataOwnerId, ownerGeneration, map, policy),
     claimLegacyModelVisibilityOwner: (): ModelVisibilityLegacyOwnerClaim => {
       const value: unknown = ipcRenderer.sendSync('maker:model-visibility:legacy-owner-claim-sync');
       return isModelVisibilityLegacyOwnerClaim(value)
@@ -7263,8 +7276,8 @@ contextBridge.exposeInMainWorld('electronAPI', {
 
     // ── Plugin system (Phase 1) ──────────────────────────────────────────
     plugins: {
-      list: (workingDir?: string): Promise<PluginListItem[]> =>
-        ipcRenderer.invoke('maker:plugins:list', workingDir),
+      list: (workingDir?: string, includeHidden?: boolean, botContext?: Omit<BotToolsetContext, 'workingDir'>): Promise<PluginListItem[]> =>
+        ipcRenderer.invoke('maker:plugins:list', workingDir, includeHidden, botContext),
       getState: (
         id: string,
         workingDir?: string,

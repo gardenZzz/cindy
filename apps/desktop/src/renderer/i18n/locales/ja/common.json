@@ -3208,12 +3208,29 @@
       "runtimeUnknown": "{{packageName}} には Pi {{range}} が必要ですが、現在の Cindy の Pi バージョンが要件を満たすか確認できませんでした。",
       "warning": {
         "no-resources": "この拡張機能には Pi リソースが見つかりません。",
+        "analysisIncomplete": "Pi の操作は完了しましたが、Cindy の後続分析または補助ビルドは完了しませんでした。",
         "inspection-failed": "Cindy はインストール済み内容を検査できませんでしたが、それを理由に無効化しません。Pi がネイティブに処理します。",
         "inspection-limit": "Cindy は詳細分析の上限で表示を停止しました。パッケージは Pi のネイティブローダーで引き続き利用できます。",
         "unsupported-filter": "Cindy はこの Pi リソースフィルターをまだ表示できません。パッケージとフィルターは Pi がネイティブに処理します。",
         "unsafe-source": "保存済みソースには認証情報または非公開 URL パラメーターが含まれています。Cindy はこの画面で機密項目だけを隠し、Pi のパッケージ動作はブロックしません。"
       },
+      "recovery": {
+        "check-credentials": "ソースの認証情報を確認してください。",
+        "check-permissions": "ファイルとディレクトリの権限を確認してください。",
+        "check-network": "ネットワーク接続を確認してください。",
+        "check-source": "パッケージ名またはリポジトリアドレスを確認してください。",
+        "check-version": "指定したパッケージのバージョンを確認してください。",
+        "check-runtime": "Pi の実行環境が利用可能か確認してください。",
+        "free-disk-space": "ディスクの空き容量を増やしてください。",
+        "check-build-dependencies": "拡張機能のビルド依存関係を確認してください。",
+        "refresh-package-state": "拡張機能一覧を更新して現在の状態を確認してください。",
+        "inspect-state-before-retry": "拡張機能の現在の状態を確認してから、未完了の手順を再試行してください。"
+      },
       "failure": {
+        "commandFailed": "Pi のネイティブパッケージコマンドが失敗しました。",
+        "commandNotStarted": "Pi のネイティブパッケージコマンドを開始できませんでした。",
+        "commandTimedOut": "Pi のネイティブパッケージコマンドがタイムアウトしました。",
+        "commandUnknown": "Pi のネイティブパッケージコマンドの結果を確認できませんでした。",
         "sourceUnavailable": "ソースにアクセスできません。ネットワークまたは URL を確認するか、別のソースをお試しください。",
         "packageNotFound": "パッケージが見つかりません。パッケージ名またはリポジトリ URL を確認してください。",
         "versionNotFound": "そのバージョンが見つかりません。利用可能なバージョンを選んで再試行してください。",
@@ -7373,6 +7390,16 @@
       "thisDevice": "このコンピュータ",
       "offlineDescription": "{{name}} はオフラインです。{{device}} が再接続すると続けられます。",
       "preparing": "準備ができるのを待っています…"
+    },
+    "capabilities": {
+      "title": "機能",
+      "search": "機能を検索",
+      "loading": "読み込み中…",
+      "skill": "スキル",
+      "mcp": "MCP",
+      "toolset": "組み込みツール",
+      "unavailable": "利用不可",
+      "empty": "一致する機能はありません"
     }
   },
   "common": {
@@ -7555,6 +7582,7 @@
       "stop": "生成を停止"
     },
     "pluginSetup": {
+      "reopen": "もう一度開く",
       "title": "{{name}} の設定",
       "assessmentReadFailed": "プラグインの設定状態を読み取れませんでした。",
       "setupIncomplete": "プラグインの設定が完了していません。",
@@ -7862,7 +7890,7 @@
           },
           "bypassPermissions": {
             "label": "フルアクセス",
-            "description": "通常のツールは確認なしで実行しますが、Pi 拡張のインストール、更新、アンインストールには引き続き確認が必要です。最もリスクが高いため、信頼できるタスクでのみ使用してください。"
+            "description": "追加確認なしで任意のファイル編集とネットワークコマンド実行を許可します。最もリスクが高いため、信頼できるタスクでのみ使用してください。"
           }
         }
       }
@@ -8844,7 +8872,7 @@
       "contextRebuild": {
         "labelOverflow": "コンテキストを整理して続行しました",
         "labelTimeout": "直前の応答がなかったため、整理して続行しました",
-        "labelStrip": "大きな画像を除いて続行しました",
+        "labelStrip": "履歴の画像を整理しました",
         "toggleHint": "引き継ぎ内容を表示",
         "handoffTitle": "引き継ぎ内容——整理後にこの会話の続きへ渡したコンテキスト要約(チャット履歴には含まれず、ここでのみ表示)",
         "handoffTitleEnglishSource": "引き継ぎ内容——整理後にこの会話の続きへ渡したコンテキスト要約。原文は英語(チャット履歴には含まれず、ここでのみ表示)"
@@ -9407,6 +9435,8 @@
         "all": "すべて"
       },
       "filterSortBy": {
+        "created": "作成日時",
+        "activity": "最近のアクティビティ",
         "recency": "時間順",
         "manual": "手動",
         "priority": "優先度"
@@ -9422,7 +9452,7 @@
       "filterTaskSortHeading": "セッション順",
       "filterProjectOrderHeading": "プロジェクト順",
       "filterProjectOrder": {
-        "activity": "最近のアクティビティ順",
+        "activity": "セッションの並び順に従う",
         "custom": "手動"
       },
       "filterProjectOrderTip": {
@@ -10804,6 +10834,7 @@
     }
   },
   "commandPalette": {
+    "viewSkillDetails": "スキルの詳細を見る",
     "projectSkillNotLoaded": "現在の Pi タスクでは、このプロジェクト Skill はまだ読み込まれていません。新しいタスクでは自動的に読み込みを試みます。"
   },
   "skillhub": {
@@ -10962,10 +10993,10 @@
         "market": "Market に戻る",
         "skillhub": "SkillHub に戻る"
       },
-      "uninstall": "アンインストール",
+      "uninstall": "スキルをアンインストール",
       "uninstallDialog": {
-        "title": "{{name}} をアンインストールしますか?",
-        "description": "ローカルフォルダを削除します\n{{path}}\nこの操作は取り消せません。",
+        "title": "「{{name}}」をアンインストールしますか？",
+        "description": "ローカルファイルと編集内容をゴミ箱に移動します。復元できます。\n\nこのスキルを共有する他の Agent にも影響します。公開済みバージョンや別の場所のインストールには影響しません。",
         "confirm": "アンインストール",
         "cancel": "キャンセル"
       },
@@ -11364,6 +11395,27 @@
     "marketEdit": {
       "saved": "マーケット表示情報を保存しました",
       "displayNameRequired": "表示名を入力してください"
+    },
+    "management": {
+      "disabled": "無効",
+      "enabledLabel": "スキル「{{name}}」を有効にする",
+      "moreLabel": "スキル「{{name}}」を管理",
+      "activationHint": "Cindy 内のスキルの読み込みにのみ適用されます。Agent の起動または再起動後に反映されます。",
+      "enabledToast": "スキル「{{name}}」を有効にしました。Agent の起動または再起動後に反映されます",
+      "disabledToast": "スキル「{{name}}」を無効にしました。Agent の起動または再起動後に反映されます",
+      "toggleFailed": "スキルの設定を保存できませんでした。もう一度お試しください",
+      "uninstallFailed": "スキルをゴミ箱に移動できませんでした。ファイルのアクセス権を確認して再試行してください",
+      "refreshRequired": "スキルの変更中、または読み込み元が変更されています。一覧を更新して再試行してください",
+      "globalScope": "インストール先: グローバルスキル",
+      "projectScope": "プロジェクト: {{project}}",
+      "trashDescription": "ローカルファイルと編集内容をゴミ箱に移動します。復元できます。",
+      "unlinkDescription": "ローカルのスキル登録のみを削除します。元のファイルと編集内容は保持されます。",
+      "sharedImpact": "このスキルを共有する他の Agent にも影響します。公開済みバージョンや別の場所のインストールには影響しません。",
+      "managedElsewhere": "このスキルは別のパッケージまたは共有ディレクトリで管理されています。提供元で削除してください",
+      "managedByPlugin": "このスキルはプラグインが提供しています。提供元のプラグインページで管理してください。",
+      "cleanupIncomplete": "「{{name}}」のアンインストール後のクリーンアップが未完了です。再試行するか、後でスキルを開き直して続行してください。完了するまで再インストールはできません。",
+      "retryCleanup": "整理を再試行",
+      "cleanupComplete": "整理が完了しました"
     }
   },
   "makerExperimental": {
@@ -11462,7 +11514,7 @@
       "codexAutoReviewUnavailable": "自動レビューは一時的に利用できません。現在の操作をブロックし、デフォルト権限に切り替えました。もう一度実行してください。必要な場合は確認します。",
       "hostShellCommandBlocked": "Cindy は内蔵 iOS シミュレータを迂回するシェルコマンドをブロックしました。デバイスの操作、アプリの起動、画面操作、スクリーンショット、診断には iOS シミュレータツールを使用してください。",
       "upstreamResponseIdleTimeout": "モデルから長時間応答がなかったため、無限待機を避けるためこのターンを自動中断しました。完了したツール呼び出しは保持されています。次のメッセージを送信して続行できます。",
-      "codexHistoryOversized": "履歴に過大な画像があり、リモート圧縮を完了できません。Cindy がそれらの画像を省略し、このタスクのまま続けます。",
+      "codexHistoryOversized": "画像履歴の自動復旧と続行が完了しませんでした。「続けて」と送信して、このタスクを再開してください。",
       "codexHistoryOversizedRemote": "履歴に過大な画像があり、リモート圧縮を完了できません。Codex を実行している端末でこのタスクを開いて再送信してください。Cindy が画像を省略して続けます。",
       "codexCompactionNotConverging": "Codex がコンテキストの圧縮を繰り返しても効果がないため、無限ループを避けるためこのターンを自動中断しました。容量を占めているのは会話ではなく、圧縮では削れないシステムプロンプトとツール定義であることがほとんどです。新しいセッションを開始してください。",
       "codexCompactionNotConvergingModelSwitch": "Codex がコンテキストの圧縮を繰り返しても効果がないため、無限ループを避けるためこのターンを自動中断しました。このセッションは途中でモデルを切り替えており、Codex は切り替え前のモデルの上限でコンテキストを判定し続けています。元のモデルに戻すか、新しいセッションを開始してください。",

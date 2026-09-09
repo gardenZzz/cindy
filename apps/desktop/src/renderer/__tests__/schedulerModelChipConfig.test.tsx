@@ -99,6 +99,8 @@ function renderChip(overrides: {
   const onChangeFast = overrides.onChangeFast ?? vi.fn();
   const view = render(
     <ModelEffortChip
+      onSelect={vi.fn()}
+      onFollowSession={vi.fn()}
       agentKind="cursor"
       modelValue="composer-2.5"
       onChangeModel={onChangeModel}
@@ -168,6 +170,8 @@ describe('scheduler model chip 与聊天面板对齐', () => {
 
     const view = render(
       <ModelEffortChip
+        onSelect={vi.fn()}
+        onFollowSession={vi.fn()}
         agentKind="pi"
         modelValue="gpt-5.5"
         onChangeModel={vi.fn()}
@@ -178,7 +182,7 @@ describe('scheduler model chip 与聊天面板对齐', () => {
       />,
     );
 
-    expect(view.getByText('GPT-5.5 · effortLevels.low')).toBeTruthy();
+    expect(view.getByText(/GPT-5.5 via proxy · effortLevels\.low/)).toBeTruthy();
   });
 
   it('trigger 图标:Cursor 无来源时用 CursorMark 兜底,其它 agent 保持无图标', () => {

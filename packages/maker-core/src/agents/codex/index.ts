@@ -10,7 +10,7 @@
  *  - ✅ Approval:  setRequestHandler 接 commandExecution / fileChange RequestApproval
  *                  → dispatchInteraction (复用 Claude 那条 PermissionPrompt 通道)
  *  - ✅ 运行时切:  setModel / setEffort / setPermissionMode 都生效, 下一 turn 自动透传
- *  - ✅ Fork:      thread/fork(lastTurnId)；旧历史回退 fork + rollback → 新 thread_id
+ *  - ✅ Fork:      thread/fork(lastTurnId)；分页历史查询原生边界，旧 daemon 回退 rollback
  *  - ✅ oneShot:   走 host 临时 thread (起标题), Phase 4 删 SDK dep 后唯一通路
  *
  * 输出契约:
@@ -28,6 +28,7 @@ import { structuredPatch } from 'diff';
 
 import {
   BaseAgent,
+  INHERITED_CAPABILITY_SELECTION,
   CodexResumePreparationBlockedError,
   OneShotError,
   AgentNotAuthenticatedError,
@@ -42,6 +43,7 @@ import {
   type SendOptions,
   type TurnPermissionPolicy,
 } from '../base-agent.js';
+import { skillEntryPath, snapshotDisabledSkillLaunch, currentDisabledSkillLaunchPaths } from '../shared/skill-activation.js';
 import type { AgentCredentialMode } from '../../interfaces/auth-adapter.js';
 import type {
   Capabilities,
@@ -182,6 +184,7 @@ import {
 } from './rollout-sanitize.js';
 import { CodexHistoryRecoveryRequiredError, isCodexHistoryRecoveryRequired } from './history-recovery.js';
 import { CodexForkError, type CodexForkStage } from './fork-error.js';
+import { resolveForkTurnAnchor } from './fork-turn-anchor.js';
 import { parseReconnectAttemptMessage } from '../shared/network-error.js';
 import { extractNonSecretErrorSignals } from '@cindy/maker-shared/error-redaction';
 import { AppServerHost, type ThreadEventHandlers, type ThreadSubscription } from './app-server/host.js';
@@ -4424,7 +4427,7 @@ export class CodexAgent extends BaseAgent {
           model: opts.model,
         });
     const resolveCodexThreadContextWindow = this.deps.resolveCodexThreadContextWindow;
-    const initialCustomContextWindow = !reviewMode && !opts.remoteHostId
+    const initialCustomContextWindow = !reviewMode
       ? await resolveCodexThreadContextWindow?.(opts.providerId, opts.model) ?? null
       : null;
     const customContextCatalogIdentity = (
@@ -4438,7 +4441,9 @@ export class CodexAgent extends BaseAgent {
       opts.model,
       initialCustomContextWindow,
     );
-    const usesCustomContextHost = initialCustomContextCatalogIdentity !== null;
+    // SSH shares a daemon across tasks; its context settings belong to each
+    // thread/start or thread/resume config, never a local single-session host.
+    const usesCustomContextHost = !opts.remoteHostId && initialCustomContextCatalogIdentity !== null;
     const resolveModelSwitchCatalogIdentity = async (
       newModel: string,
       setOpts?: { providerId?: string | null },
@@ -4446,7 +4451,7 @@ export class CodexAgent extends BaseAgent {
       const providerId = setOpts && Object.hasOwn(setOpts, 'providerId')
         ? setOpts.providerId
         : mutableProviderId;
-      const contextWindow = reviewMode || opts.remoteHostId
+      const contextWindow = reviewMode
         ? null
         : await resolveCodexThreadContextWindow?.(providerId, newModel) ?? null;
       return customContextCatalogIdentity(newModel, contextWindow);
@@ -4841,6 +4846,30 @@ export class CodexAgent extends BaseAgent {
         reviewMode ? undefined : opts.botRuntimeProfile?.skillPolicy,
       ),
     );
+    const disabledSkillPaths = opts.remoteHostId || opts.botRuntimeProfile || reviewMode
+      ? [] : [...(this.deps.getDisabledSkillPaths?.() ?? [])];
+    const disabledSkillLaunch = snapshotDisabledSkillLaunch(disabledSkillPaths);
+    const disabledSkillSnapshot = disabledSkillLaunch.identities;
+    if (disabledSkillPaths.length > 0) {
+      try {
+        const response = await host.request<{ config?: Record<string, unknown> }>(
+          Method.ConfigRead, { cwd: opts.workingDir, includeLayers: false },
+          { timeoutMs: CRITICAL_THREAD_RPC_TIMEOUT_MS },
+        );
+        assertCurrentHost('Local Skill configuration');
+        const nativeSkills = asRecord(response.config?.skills).config;
+        capabilityRoutingConfig = mergeCodexSkillConfigOverrides(
+          mergeCodexSkillConfigOverrides(
+            Array.isArray(nativeSkills) ? { 'skills.config': nativeSkills } : {},
+            capabilityRoutingConfig,
+          ),
+          { 'skills.config': currentDisabledSkillLaunchPaths(disabledSkillLaunch).map((source) => ({ path: skillEntryPath(source), enabled: false })) },
+        );
+      } catch (error) {
+        releaseHostBindingLeaseIfNeeded();
+        throw new Error(`Cannot prepare local Skill configuration: ${error instanceof Error ? error.message : String(error)}`);
+      }
+    }
     capabilityRoutingConfig = {
       ...capabilityRoutingConfig,
       ...botMcpConfig,
@@ -5487,6 +5516,7 @@ export class CodexAgent extends BaseAgent {
       reason: string;
       cleanup: () => Promise<void>;
       retireHostOnFailure?: boolean;
+      closeHandleOnFailure?: boolean;
     }): Promise<boolean> => {
       try {
         await params.cleanup();
@@ -5509,13 +5539,13 @@ export class CodexAgent extends BaseAgent {
             });
           }
         }
-        terminateHandleAfterThreadCleanupFailure(params.reason);
+        if (params.closeHandleOnFailure !== false) terminateHandleAfterThreadCleanupFailure(params.reason);
         return false;
       }
     };
     const releaseCurrentThreadSubscription = async (
       reason: string,
-      opts: { retireHostOnFailure?: boolean } = {},
+      opts: { retireHostOnFailure?: boolean; closeHandleOnFailure?: boolean } = {},
     ): Promise<boolean> => {
       const currentSubscription = subscription;
       if (!currentSubscription) return true;
@@ -5524,6 +5554,7 @@ export class CodexAgent extends BaseAgent {
         reason,
         cleanup: () => currentSubscription.release(),
         retireHostOnFailure: opts.retireHostOnFailure ?? true,
+        closeHandleOnFailure: opts.closeHandleOnFailure,
       });
       if (subscription === currentSubscription) subscription = null;
       return released;
@@ -7692,7 +7723,7 @@ export class CodexAgent extends BaseAgent {
       // 先立终态墓碑:下面合成的本地收口据此走 suppressTerminalUi 分支(只清状态、
       // 不再推一遍终态 UI),迟到的 item / error 也一并被 stale guard 拦住。
       if (turnId) terminalErroredTurnIds.add(turnId);
-      eventQueue.push({
+      const timeoutEvent: AgentEvent = {
         type: 'error',
         data: {
           // reason 与 claude-code 侧共用同一稳定 key(renderer i18n 映射,规则 18);
@@ -7708,7 +7739,34 @@ export class CodexAgent extends BaseAgent {
           msSinceLastEvent: msSinceLast,
         },
         source: 'codex',
-      });
+      };
+      // Main can only relink an idle native thread. Publishing this error before
+      // interrupt ACK made its one-shot recovery see busy and abandon the task.
+      const deferOversizedError =
+        opts?.reason === CODEX_HISTORY_OVERSIZED_REASON && !pendingTurnId && !!turnId;
+      const interruptedSend = overloadRetry;
+      let timeoutEmitted = false;
+      const emitTimeout = (settled = false): void => {
+        if (timeoutEmitted || closed) return;
+        timeoutEmitted = true;
+        if (!deferOversizedError || !interruptedSend?.isCancelled()) eventQueue.push(timeoutEvent);
+        if (deferOversizedError && settled) {
+          // Session drains terminal errors with an idle tail. Do not leave its
+          // drain watchdog armed when Main cannot recover this thread.
+          eventQueue.push({
+            type: 'status',
+            data: { status: 'Done', ...usageTracker.snapshot(), isRunning: false },
+            source: 'codex',
+          });
+        }
+      };
+      if (deferOversizedError) {
+        eventQueue.push({
+          type: 'status',
+          data: { status: 'Compacting...', ...usageTracker.snapshot(), isRunning: true },
+          source: 'codex',
+        });
+      } else emitTimeout();
       if (pendingTurnId) {
         // 重连提示可能早于 turnStarted 到达。此时 turn/start 仍在飞，不能只清掉
         // 看门狗：迟到的 response / turnStarted 必须被隔离，否则用户已经看到终态后
@@ -7776,17 +7834,26 @@ export class CodexAgent extends BaseAgent {
       // 进入旧 transport。
       const turnGenBeforeInterrupt = turnStartGeneration;
       void (async () => {
+        // All ACK/release outcomes use the same authoritative-success decision.
+        const settleInterruptedTurn = (fallback?: TurnCompletedParams): boolean => {
+          const completedNormally = deferOversizedError &&
+            reconnectStallDeferredTurnCompletion?.turn.status === 'completed';
+          if (completedNormally) terminalErroredTurnIds.delete(turnId);
+          const settled = settleReconnectStallCleanup(turnId, fallback);
+          if (settled && deferOversizedError && !completedNormally) emitTimeout(true);
+          return settled;
+        };
         const interrupted = await interruptTurnForPermissionTighten(turnId, {
           suppressFailureEvent: true,
         });
         if (interrupted) {
-          if (!settleReconnectStallCleanup(turnId, {
+          if (!settleInterruptedTurn({
               threadId,
               turn: { id: turnId, status: 'failed' },
             } as TurnCompletedParams)) clearReconnectStallCleanup(turnId);
           return;
         }
-        if (settleReconnectStallCleanup(turnId)) {
+        if (settleInterruptedTurn()) {
           log.info('reconnect-stall turn completed while interrupt was settling; keeping shared host', {
             threadId,
             turnId,
@@ -7823,6 +7890,17 @@ export class CodexAgent extends BaseAgent {
           'upstream-idle watchdog: turn interrupt not confirmed — closing this codex host so the next send rebuilds it',
           { threadId, turnId },
         );
+        let completedDuringRelease = false;
+        if (deferOversizedError) {
+          // Keep the terminal stream open through unsubscribe, including a failed
+          // release. This caller closes the handle after publishing its one result.
+          await releaseCurrentThreadSubscription('reconnect-stall subscription release', {
+            retireHostOnFailure: false,
+            closeHandleOnFailure: false,
+          });
+          completedDuringRelease = settleInterruptedTurn();
+          if (!completedDuringRelease) emitTimeout();
+        }
         try {
           // thread/unsubscribe 失败本身不能先强退共享 host：同 turn 的权威
           // completion 仍可能在 close 等待期间到达。先只终止当前 handle，等下方
@@ -7831,7 +7909,7 @@ export class CodexAgent extends BaseAgent {
         } catch (e) {
           log.warn('upstream-idle watchdog close threw', { error: String(e) });
         }
-        if (settleReconnectStallCleanup(turnId)) {
+        if (completedDuringRelease || settleInterruptedTurn()) {
           log.info('reconnect-stall turn completed during handle close; keeping shared host', {
             threadId,
             turnId,
@@ -9665,6 +9743,16 @@ export class CodexAgent extends BaseAgent {
       // including the paths that defer UI settlement or return early. Item
       // history is only needed while approval attribution is still mutable.
       observedModelItemIdsByTurn.delete(turn.id);
+      if (reconnectStallCleanupTurnId === turn.id) {
+        // Retain the authoritative terminal and its reply until the interrupt
+        // handshake settles; do not consume data needed by normal completion.
+        reconnectStallDeferredTurnCompletion ??= params;
+        log.debug('deferring reconnect-stall turn completion until interrupt settles', {
+          threadId,
+          turnId: turn.id,
+        });
+        return;
+      }
       const assistantReply = assistantReplyByTurn.get(turn.id);
       assistantReplyByTurn.delete(turn.id);
       const finalAssistantText = assistantReply?.finalText ?? assistantReply?.lastText ?? '';
@@ -9704,19 +9792,6 @@ export class CodexAgent extends BaseAgent {
           type: 'status',
           data: { status: 'Done', ...usageTracker.snapshot(), isRunning: false },
           source: 'codex',
-        });
-        return;
-      }
-      if (reconnectStallCleanupTurnId === turn.id) {
-        // The watchdog already published the terminal error and is still
-        // waiting for turn/interrupt. Keep the local busy guard until the
-        // handshake settles, but retain this authoritative completion: it
-        // proves the old turn ended and the host event path is alive, so a
-        // double interrupt rejection must not retire healthy sibling sessions.
-        reconnectStallDeferredTurnCompletion ??= params;
-        log.debug('deferring reconnect-stall turn completion until interrupt settles', {
-          threadId,
-          turnId: turn.id,
         });
         return;
       }
@@ -12006,6 +12081,7 @@ export class CodexAgent extends BaseAgent {
     }
     // ── AgentSessionHandle ──────────────────────────────────────────────────
     const handle: AgentSessionHandle = {
+      disabledSkillPaths: disabledSkillSnapshot,
       reviewAutoPermissionAction: async (action) => {
         const decision = await reviewAutoAction(action);
         if (decision.unavailable) autoReviewUnavailableNotice.notify();
@@ -12051,7 +12127,7 @@ export class CodexAgent extends BaseAgent {
         const capabilitySelectionText =
           (sendOpts as CodexInternalSendOptions | undefined)?.[
             CODEX_INHERITED_CAPABILITY_SELECTION
-          ] ?? userMessageText(message.content);
+          ] ?? sendOpts?.[INHERITED_CAPABILITY_SELECTION] ?? userMessageText(message.content);
         assertCurrentHost('turn/start');
         resubscribeAfterTransportErrorIfNeeded();
         // 新 turn 总是携带当前 (可能已收紧的) 策略, 上一轮残留的延迟中断标记
@@ -13511,7 +13587,7 @@ export class CodexAgent extends BaseAgent {
    * 与 Claude 不同:
    *  - Claude fork 可 truncate 到指定 message uuid (sdkForkSession upToMessageId)
    *  - Codex 新消息保存原生 turn id,直接用 lastTurnId 精确 fork
-   *  - 老消息没有原生锚点时,仍先 fork latest 再 rollback 尾部 turn
+   *  - 老消息没有原生锚点时,分页 daemon 查 turn 元数据；旧 daemon 才用 rollback
    *
    * opts.upToMessageId 在 Codex 这里被忽略。uuidMap 返回空 — Codex 不使用
    * Claude message uuid；原生 turn 锚点由 usedNativeForkAnchor 单独声明可复用。
@@ -13577,7 +13653,7 @@ export class CodexAgent extends BaseAgent {
   async forkSdkSession(opts: ForkSdkSessionOptions): Promise<ForkSdkSessionResult> {
     const log = this.deps.logger.child('codex/fork');
     const tailTurnsToDrop = normalizeTailTurnsToDrop(opts.tailTurnsToDrop);
-    const lastTurnId = normalizeNativeForkTurnId(opts.lastTurnId);
+    let lastTurnId = normalizeNativeForkTurnId(opts.lastTurnId);
     const forkCredentialMode = resolveAgentCredentialMode({
       agentKind: 'codex',
       providerId: opts.providerId,
@@ -13680,6 +13756,19 @@ export class CodexAgent extends BaseAgent {
         // Check before allocating a child: indexed native history must go through
         // Cindy's handoff recovery, never a file rewrite that invalidates Codex's DB.
         await assertCodexRolloutRewriteSupported(preparedSourcePath || await this.findRolloutPath(opts.sourceSdkSessionId));
+      }
+      if (
+        !lastTurnId && (tailTurnsToDrop > 0 || opts.forkAtTimestampMs !== undefined) && !opts.stripEncryptedReasoning
+        && codexUserAgentAtLeast(initResp.userAgent, [0, 153, 4])
+      ) {
+        // Older/failed messages have no persisted UI anchor. Paginated threads
+        // reject rollback, so resolve the requested boundary with metadata only
+        // before allocating a child. Never rewrite indexed rollout files.
+        lastTurnId = await resolveForkTurnAnchor(
+          (method, params) => host.request(method, params),
+          opts.sourceSdkSessionId,
+          opts.forkAtTimestampMs,
+        );
       }
       const usedNativeForkAnchor = Boolean(
         lastTurnId && !opts.stripEncryptedReasoning && supportsCodexNativeTurnFork(initResp.userAgent),

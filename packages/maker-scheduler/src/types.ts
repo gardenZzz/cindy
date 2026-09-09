@@ -1,5 +1,13 @@
 export type ScheduleKind = 'cron';
 export type AgentKind = 'claude-code' | 'codex' | 'cursor' | 'pi';
+/** Explicit model-picker Harness. Cursor is not a catalog engine. */
+export type ModelAgentKind = 'claude-code' | 'codex' | 'pi';
+
+export function asModelAgentKind(
+  kind: AgentKind | null | undefined,
+): ModelAgentKind | undefined {
+  return kind === 'claude-code' || kind === 'codex' || kind === 'pi' ? kind : undefined;
+}
 export type ScheduleStatus = 'active' | 'paused' | 'expired';
 export type ScheduleWorkspaceKind = 'project' | 'dialogue';
 export type ScheduleExecutionMode = 'agent' | 'script';
@@ -213,6 +221,8 @@ export interface Schedule {
    */
   intervalMs?: number;
   agentKind: AgentKind;
+  /** Explicit model-picker Harness. Absent on legacy schedules: bound tasks keep their live Harness. */
+  modelAgentKind?: ModelAgentKind;
   model?: string;
   /**
    * 显式选定的供应商(来源)id。undefined / 空 → 回落该 agent 原生默认来源
@@ -345,6 +355,8 @@ export interface CreateScheduleInput {
   /** Interval 语义间隔（毫秒）。详见 Schedule.intervalMs。 */
   intervalMs?: number;
   agentKind: AgentKind;
+  /** Explicit model-picker Harness. Absent on legacy schedules: bound tasks keep their live Harness. */
+  modelAgentKind?: ModelAgentKind;
   model?: string;
   /**
    * 显式选定的供应商(来源)id。undefined / 空 → 回落该 agent 原生默认来源

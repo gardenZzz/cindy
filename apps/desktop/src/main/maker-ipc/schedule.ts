@@ -43,6 +43,7 @@ import { ipcMain, BrowserWindow, app } from 'electron';
 import type { AgentKind, Maker } from '@cindy/maker-core';
 import type {
   Scheduler,
+  Schedule,
   CreateScheduleInput,
   UpdateScheduleInput,
   ListFilter,
@@ -50,6 +51,7 @@ import type {
   SchedulerEvent,
 } from '@cindy/maker-scheduler';
 import {
+  asModelAgentKind,
   BUILTIN_TEMPLATES,
   applyTemplateParams,
   stabilizePreRunHookForCreate,
@@ -258,6 +260,31 @@ export function normalizeLegacyDeviceLinkIntervalClear<
   return { ...patch, intervalMs: undefined };
 }
 
+/** Old Mobile submits a full form without the explicit Harness field. Normalize only
+ * that trusted remote shape; prompt-only patches and local partial updates keep their semantics.
+ * Compare with the saved form Harness (not its override) so an untouched old form cannot
+ * accidentally undo an existing cross-Harness choice. Run inside updateFromCurrent's lock.
+ */
+export function normalizeLegacyDeviceLinkModelSelection(
+  existing: Schedule,
+  patch: UpdateScheduleInput,
+  isRemoteInvoke: boolean,
+): UpdateScheduleInput {
+  if (!isRemoteInvoke || Object.prototype.hasOwnProperty.call(patch, 'modelAgentKind')
+    || typeof patch.cronExpr !== 'string' || typeof patch.agentKind !== 'string'
+    || (patch.model !== undefined && typeof patch.model !== 'string')
+    || !Object.prototype.hasOwnProperty.call(patch, 'manual')
+    || !Object.prototype.hasOwnProperty.call(patch, 'notify')
+    || !(patch.targetSessionId ?? existing.targetSessionId)) return patch;
+  const model = patch.model?.trim() || undefined;
+  if (patch.agentKind === existing.agentKind && model === (existing.model?.trim() || undefined)) return patch;
+  return { ...patch, modelAgentKind: model ? asModelAgentKind(patch.agentKind) : undefined,
+    // The old bound form omits empty model/provider/effort and has no Fast control.
+    // Clear the previous route when the visible selection changes instead of retaining
+    // a provider or Fast preference belonging to the old Harness/model.
+    model, providerId: patch.providerId, effort: patch.effort, fastMode: patch.fastMode ?? false };
+}
+
 function listAllTemplates(): ScheduleTemplate[] {
   const projectTemplates: ScheduleTemplate[] = [];
   return [...BUILTIN_TEMPLATES, ...projectTemplates];
@@ -282,9 +309,11 @@ function buildCreateScheduleInput(
     manual: overrides.manual,
     intervalMs: overrides.intervalMs,
     agentKind: overrides.agentKind ?? template.agentKind ?? 'claude-code',
+    modelAgentKind: overrides.modelAgentKind,
     model: overrides.model ?? template.model,
     providerId: overrides.providerId ?? template.providerId,
     effort: overrides.effort ?? template.effort,
+    fastMode: overrides.fastMode ?? template.fastMode,
     workingDir: overrides.workingDir,
     useWorktree: overrides.useWorktree ?? template.useWorktree ?? false,
     targetSessionId: overrides.targetSessionId,
@@ -351,9 +380,13 @@ export function registerScheduleHandlers(getMaker?: () => Maker | null): void {
       scheduler.updateFromCurrent(scheduleId, (existing) =>
         stabilizePreRunHookForUpdate(
           existing,
-          normalizeLegacyDeviceLinkIntervalClear(
-            normalizeNullableIntervalMs(
-              patch as UpdateScheduleInput & { intervalMs?: number | null },
+          normalizeLegacyDeviceLinkModelSelection(
+            existing,
+            normalizeLegacyDeviceLinkIntervalClear(
+              normalizeNullableIntervalMs(
+                patch as UpdateScheduleInput & { intervalMs?: number | null },
+              ),
+              isDeviceLinkInvoke(),
             ),
             isDeviceLinkInvoke(),
           ),

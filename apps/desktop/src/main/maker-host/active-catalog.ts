@@ -1468,7 +1468,7 @@ function computeMerged(): Catalog {
             /^(?:(?:codex|openai|chatgpt)\/)?gpt-/.test(model.id) &&
             model.contextWindow > 272_000 &&
             !(
-              (agent === 'codex' || agent === 'claude-code') &&
+              (agent === 'codex' || agent === 'claude-code' || agent === 'pi') &&
               hasLocalContextWindowOverride(
                 localOverrides,
                 provider.id,
@@ -1556,7 +1556,7 @@ function computeMerged(): Catalog {
             /^(?:(?:codex|openai|chatgpt)\/)?gpt-/.test(next.id) &&
             next.contextWindow > 272_000 &&
             !(
-              (agent === 'codex' || agent === 'claude-code') &&
+              (agent === 'codex' || agent === 'claude-code' || agent === 'pi') &&
               hasLocalContextWindowOverride(
                 localOverrides,
                 provider.id,

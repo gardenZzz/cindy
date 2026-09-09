@@ -1,16 +1,17 @@
+import { useModelPickerAgents } from '@/hooks/useAvailableAgents';
 import * as React from 'react';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { ChevronDown, ExternalLink, Folder, MessageCircle, Timer, SlidersHorizontal } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import { Popover, PopoverTrigger, PopoverContent } from '@/components/ui/popover';
 import { Tip } from '@/components/ui/tooltip';
-import { agentKindToVendor } from '@/components/sidebar/VendorIcon';
-import { AgentSelect } from '@/components/new-chat/AgentSelect';
 import {
   addRecentFolder,
   FolderPickerPopover,
   type FolderPickerOption,
 } from '@/components/new-chat/FolderPickerPopover';
+import { AgentSelect } from '@/components/new-chat/AgentSelect';
+import { agentKindToVendor } from '@/components/sidebar/VendorIcon';
 import { useCursorAvailable } from '@/hooks/useCursorAvailable';
 import { useDetectCwd } from '@/hooks/useWorktreeQueries';
 import { useAgentCapabilities, type ModelDescriptor } from '@/hooks/useAgentCapabilities';
@@ -226,6 +227,7 @@ export function AgentTabs({ value, onChange, disabled }: { value: AgentKind; onC
     />
   );
 }
+
 
 export function ScheduleSettingsButton({
   cwd,
@@ -1119,6 +1121,8 @@ export function resolveModelChipIconKind({
 }
 
 export function ModelEffortChip({
+  onSelect,
+  onFollowSession,
   agentKind,
   modelValue,
   onChangeModel,
@@ -1132,6 +1136,8 @@ export function ModelEffortChip({
   fastMode,
   onChangeFast,
 }: {
+  onSelect: NonNullable<React.ComponentProps<typeof ModelSelectorContent>['onUnifiedSelect']>;
+  onFollowSession: () => void;
   agentKind: AgentKind;
   modelValue: string;
   onChangeModel: (v: string) => void;
@@ -1150,7 +1156,7 @@ export function ModelEffortChip({
   onChangeProviderId: (providerId: string) => void;
   /** 0 个 / 引导连接来源时跳设置→供应商页;不传则来源轨不显示「连接」入口。 */
   onNavigateToProviders?: () => void;
-  /** Fast 模式状态 + 回调(与聊天一致,收进模型选择器 Edit 配置列)。heartbeat 态不传 → Edit 无 Fast。 */
+  /** Fast 模式状态 + 回调(与聊天一致,收进模型选择器 Edit 配置列)。绑定任务同样保存，下一次触发时应用。 */
   fastMode?: boolean;
   onChangeFast?: (v: boolean) => void;
 }) {
@@ -1179,6 +1185,7 @@ export function ModelEffortChip({
     },
     [disabled, discovery],
   );
+  const pickerAgents = useModelPickerAgents(agentKind);
   const caps = useAgentCapabilities(agentKind);
   // 触发器(trigger)展示用:仍按 codex/ 折扣模型的 XD 网关来源可见性过滤,算出当前
   // 选中模型名。下拉内容本体改用聊天的 ModelSelectorContent(它内部按来源/api-key 自行
@@ -1205,9 +1212,9 @@ export function ModelEffortChip({
   const followsSessionModel = usesBoundSessionModel({ followSession, model: modelValue });
   const effectiveId = followsSessionModel ? '' : modelValue || getScheduleDefaultModel(agentKind);
   const current = models.find((m) => m.id === effectiveId);
-  // 档位能力按 (生效来源, 模型) 解析,不用扁平 capabilities:Pi + 自定义 API 同 id 时
-  // 扁平表给的是跨来源交集,会塌成空,chip 于是显示「默认档」且吃掉用户挑的档位
-  // (见 resolveScheduleModelEfforts)。
+  const sourceId = effectiveSourceIdForModel(providers, providerId || null, effectiveId, agentKind);
+  const source = providers.find((provider) => provider.id === sourceId);
+  const catalogModel = source ? getModel(source, effectiveId, agentKind) : undefined;
   const modelEfforts = useMemo(
     () =>
       resolveScheduleModelEfforts({
@@ -1221,9 +1228,12 @@ export function ModelEffortChip({
       }),
     [providers, providerId, effectiveId, agentKind, current],
   );
-  const allowedEfforts = modelEfforts.efforts;
   const fallbackEffort = (modelEfforts.defaultEffort ?? 'high') as EffortValue;
-  const effectiveEffort: EffortValue = effortValue && allowedEfforts.includes(effortValue) ? effortValue : fallbackEffort;
+  const effectiveEffort: EffortValue = effortValue && modelEfforts.efforts.includes(effortValue)
+    ? effortValue
+    : fallbackEffort;
+  const modelLabel = catalogModel?.name || current?.displayName || effectiveId;
+  const agentLabel = t(`newChat.modelSelector.trigger.agent.${agentKind === 'claude-code' ? 'claudeCode' : agentKind}`);
   const effortLabel = (e: EffortValue) => t(`effortLevels.${e}`);
   const display = followsSessionModel
     ? [
@@ -1233,9 +1243,8 @@ export function ModelEffortChip({
         : null,
       effortValue ? effortLabel(effortValue) : null,
     ].filter(Boolean).join(' · ')
-    : current
-      ? `${current.displayName} · ${allowedEfforts.length ? effortLabel(effectiveEffort) : t('scheduler.chips.model.effortDefault')}`
-      : t('scheduler.chips.model.default');
+    : [agentLabel, modelLabel, effectiveEffort ? effortLabel(effectiveEffort as EffortValue) : null,
+      fastMode ? '⚡' : null].filter(Boolean).join(' · ');
 
   // railSources 仅用于 nativeDefault 归一化(下拉宽度由 ModelSelectorContent 内容自适应,见 w-auto)。
   const vendorKey = agentKind === 'claude-code' ? 'cc' : agentKind;
@@ -1353,6 +1362,9 @@ export function ModelEffortChip({
         {/* 直接复用聊天的下拉内容本体(唯一真源:聊天选择器改了这里跟着变)。
             来源轨 / 模型分组 / 搜索 / effort / 空态全套自带;followSession 行为 opt-in。 */}
         <ModelSelectorContent
+          fastModeConfigurable={['codex', 'pi']}
+          unifiedAgents={pickerAgents}
+          onUnifiedSelect={onSelect}
           vendorKey={vendorKey}
           modelId={effectiveId}
           effort={effectiveEffort}
@@ -1390,9 +1402,7 @@ export function ModelEffortChip({
                   active: isFollowingSession,
                   label: t('scheduler.chips.model.followSession'),
                   onFollow: () => {
-                    onChangeModel('');
-                    onChangeEffort('');
-                    onChangeProviderId('');
+                    onFollowSession();
                   },
                 }
               : undefined
