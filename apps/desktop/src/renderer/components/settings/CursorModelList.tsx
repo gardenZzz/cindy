@@ -5,13 +5,14 @@
  * 因此这里**不复用** `UnifiedModelList` -- 后者绑死 `ProviderView`、停用轴(「⋯」菜单 +
  * 已停用分区)、分歧 chip 与分别调整模式,Cursor 一项都用不上;复用就得合成一个只在
  * UI 层存在的假 `ProviderView`,反而捅穿本 spec 要守的「Cursor 不进可路由 catalog」边界。
- * 视觉与交互节奏对齐既有供应商详情,代码不共用。右栏卡片是固定高度 +
- * overflow-hidden,本列表必须自己吃掉剩余高度并 overflow-y-auto,否则
- * 31 个模型会被裁掉且滚轮无处可去(对齐 UnifiedModelList 的滚动契约)。
+ * 但**版式必须与第三方自定义端点一致**:工具行走共用的 `ModelListToolbar`,行/分组的
+ * 间距、logo、hover 与滚动契约照抄 UnifiedModelList —— 分叉过一次就再也对不齐。
+ * 右栏卡片是固定高度 + overflow-hidden,本列表必须自己吃掉剩余高度并 overflow-y-auto,
+ * 否则 31 个模型会被裁掉且滚轮无处可去。
  *
  * 只做两件事(与真实供应商的「显示轴」语义一致):
- *   - 列出本机缓存到的全部 Cursor 模型,每行一个显示开关(「全部显示 / 全部隐藏」批量)。
- *   - Auto 永远列出且不带开关(它是目录为空时的唯一兜底)。
+ *   - 列出本机缓存到的全部 Cursor 模型,每行一个显示开关(「管理」菜单批量)。
+ *   - Auto 永远列出且不带开关(它是目录为空时的唯一兜底),因此也不计入「已选 N 个」。
  *
  * 显示 override 复用现有 `modelVisibilityPrefs`,key = `cursor:cursor:${modelId}`
  * (providerId 用合成字面量 `cursor`,与设置页左栏哨兵 id / providerModelMemory 槽同字面量)。
@@ -31,14 +32,21 @@ import { ChevronDown, RefreshCw } from 'lucide-react';
 
 import { cn } from '@/lib/utils';
 import { Switch } from '@/components/ui/switch';
+import { Spinner } from '@/components/ui/spinner';
+import { DropdownMenuItem, DropdownMenuLabel } from '@/components/ui/dropdown-menu';
+import { CursorMark } from '@/components/icons/CursorMark';
+import { ProviderLogoMark } from '@/components/icons/ProviderLogoMark';
+import { modelBrand } from '@/lib/modelDisplayNames';
 import { useAgentCapabilities } from '@/hooks/useAgentCapabilities';
 import type { ModelDescriptor } from '@/hooks/useAgentCapabilities';
 import {
   isModelEnabled,
+  resetModelVisibilities,
   setManyVisibility,
   setModelVisibility,
   useModelVisibilityVersion,
 } from '@/state/modelVisibilityPrefs';
+import { ModelListToolbar } from './ModelListToolbar';
 
 /**
  * Cursor 产品的 Auto 模型 id -- 与 @cindy/maker-core 的
@@ -87,6 +95,19 @@ function cursorGroupOf(displayName: string, isAuto: boolean): CursorGroupKey {
   return 'other';
 }
 
+/** 与 UnifiedModelList 同规则(>=1000 → K,>=1M → M)。 */
+function formatContextWindow(tokens: number): string {
+  if (tokens >= 1_000_000) {
+    const m = tokens / 1_000_000;
+    return `${Number.isInteger(m) ? m : Number(m.toFixed(1))}M`;
+  }
+  if (tokens >= 1000) {
+    const k = tokens / 1000;
+    return `${Number.isInteger(k) ? k : Number(k.toFixed(0))}K`;
+  }
+  return String(tokens);
+}
+
 /** 刷新进行中的就地状态;由父组件驱动,本组件只渲染。 */
 export interface CursorRefreshState {
   /** 进行中 -> 按钮禁用并显示进度。 */
@@ -111,6 +132,7 @@ export function CursorModelList({ onRefresh, onCancel, refresh }: CursorModelLis
   const { capabilities } = useAgentCapabilities(CURSOR_AGENT_KIND);
   // visibilityVersion 让开关变更后(设置页 / 聊天页)实时重算,即便本组件未重挂。
   const visibilityVersion = useModelVisibilityVersion();
+  const [query, setQuery] = useState('');
 
   const models = capabilities?.availableModels ?? [];
   const autoIndex = useMemo(
@@ -127,20 +149,31 @@ export function CursorModelList({ onRefresh, onCancel, refresh }: CursorModelLis
   }, [models, autoIndex, visibilityVersion]);
 
   const toggleable = rows.filter((r) => !r.isAuto);
-  const allOn = toggleable.length > 0 && toggleable.every((r) => isModelEnabled(CURSOR_AGENT_KIND, CURSOR_VISIBILITY_PROVIDER_ID, r.model));
-  const refreshDisabled = refresh.running || refresh.unavailableReason !== null;
+  // 「已选 N 个」与 UnifiedModelList 同口径:只数有显示轴的行,Auto(常显兜底)不计。
+  const selectedCount = toggleable.filter((r) =>
+    isModelEnabled(CURSOR_AGENT_KIND, CURSOR_VISIBILITY_PROVIDER_ID, r.model),
+  ).length;
+  const allOn = toggleable.length > 0 && selectedCount === toggleable.length;
+  const refreshDisabled = refresh.unavailableReason !== null;
+  // 搜索只筛当前列表,不写任何开关(与 UnifiedModelList 的菜单/筛选分工一致)。
+  const showSearch = toggleable.length > 8;
+  const visibleRows = useMemo(() => {
+    const q = query.trim().toLowerCase();
+    if (!q) return rows;
+    return rows.filter((r) => `${r.model.displayName} ${r.model.id}`.toLowerCase().includes(q));
+  }, [rows, query]);
 
   // 分组(版式对齐 UnifiedModelList:多组才出折叠头,单组平铺)。Auto 恒在 cursor 组首位。
   const groups = useMemo(() => {
-    const byKey = new Map<CursorGroupKey, typeof rows>();
-    for (const r of rows) {
+    const byKey = new Map<CursorGroupKey, typeof visibleRows>();
+    for (const r of visibleRows) {
       const key = cursorGroupOf(r.model.displayName || r.model.id, r.isAuto);
       const list = byKey.get(key) ?? [];
       list.push(r);
       byKey.set(key, list);
     }
     return CURSOR_GROUP_ORDER.filter((k) => byKey.has(k)).map((k) => ({ key: k, rows: byKey.get(k)! }));
-  }, [rows]);
+  }, [visibleRows]);
   const showGroupHeaders = groups.length > 1;
   const [collapsedMap, setCollapsedMap] = useState<Record<string, boolean>>({});
   // visibilityVersion 变化会重算 rows ⇒ 开关实时;折叠态只认用户点击,不持久化
@@ -157,17 +190,16 @@ export function CursorModelList({ onRefresh, onCancel, refresh }: CursorModelLis
         ? t('settings.providers.cursor.models.refreshUnavailableAuth')
         : null;
 
-  // 与 UnifiedModelList 同规则(>=1000 → K,>=1M → M);行内上下文长度对齐正常供应商版式。
-  const formatContextWindow = (tokens: number): string => {
-    if (tokens >= 1_000_000) {
-      const m = tokens / 1_000_000;
-      return `${Number.isInteger(m) ? m : Number(m.toFixed(1))}M`;
+  const bulk = (action: 'show' | 'hide' | 'reset') => {
+    const ids = toggleable.map((r) => r.model.id);
+    if (action === 'reset') {
+      resetModelVisibilities(
+        CURSOR_VISIBILITY_PROVIDER_ID,
+        ids.map((modelId) => ({ agent: CURSOR_AGENT_KIND, modelId })),
+      );
+      return;
     }
-    if (tokens >= 1000) {
-      const k = tokens / 1000;
-      return `${Number.isInteger(k) ? k : Number(k.toFixed(0))}K`;
-    }
-    return String(tokens);
+    setManyVisibility(CURSOR_AGENT_KIND, CURSOR_VISIBILITY_PROVIDER_ID, ids, action === 'show');
   };
 
   // 空态:缓存里只有 Auto(或连 Auto 都没有) = 还没探过 / 探测失败。
@@ -180,15 +212,9 @@ export function CursorModelList({ onRefresh, onCancel, refresh }: CursorModelLis
         <div className="flex items-center gap-2.5">
           <PillButton
             label={refreshLabel}
-            disabled={refreshDisabled}
+            disabled={refresh.running || refreshDisabled}
             onClick={onRefresh}
-            icon={
-              refresh.running ? (
-                <span className="animate-spin inline-flex">
-                  <RefreshCw size={14} />
-                </span>
-              ) : null
-            }
+            icon={refresh.running ? <Spinner icon={RefreshCw} size={14} spinning /> : null}
           />
           {refresh.running && (
             <PillButton
@@ -208,139 +234,184 @@ export function CursorModelList({ onRefresh, onCancel, refresh }: CursorModelLis
 
   return (
     <div className="flex min-h-0 flex-1 flex-col">
-      {/* 工具行:与 UnifiedModelList 同版式 —— 区块标题常驻左侧,刷新(图标)+ 全部开关在右;
-          Cursor 单 agent,无「分别调整」。模型计数已上 DetailHeader,此处不再重复。
-          工具行 shrink-0,只有下方清单滚动。 */}
-      <div className="flex shrink-0 items-center gap-3 px-5 py-2.5">
-        <span className="shrink-0 text-13 font-medium" style={{ color: 'var(--text-secondary)' }}>
-          {t('settings.providers.models.available')}
-        </span>
-        {refreshHint && (
-          <span className="text-12" style={{ color: 'var(--text-tertiary)' }}>
-            {refreshHint}
-          </span>
-        )}
-        <span className="min-w-0 flex-1" />
-        <button
-          type="button"
-          onClick={refresh.running ? onCancel : onRefresh}
-          disabled={refreshDisabled}
-          aria-busy={refresh.running}
-          aria-label={refresh.running ? t('settings.providers.cursor.models.cancelRefresh') : refreshLabel}
-          title={refresh.running ? t('settings.providers.cursor.models.cancelRefresh') : refreshLabel}
-          className={cn(
-            'flex h-7 w-7 shrink-0 select-none items-center justify-center rounded-full transition-colors hover:bg-[var(--surface-hover)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--focus-ring-soft)]',
-            (refresh.running || refreshDisabled) && 'cursor-not-allowed opacity-60',
-          )}
-          style={{ color: 'var(--text-secondary)' }}
-        >
-          {refresh.running ? (
-            <span className="animate-spin inline-flex">
-              <RefreshCw size={14} />
-            </span>
-          ) : (
-            <RefreshCw size={14} />
-          )}
-        </button>
-        <button
-          type="button"
-          onClick={() =>
-            setManyVisibility(
-              CURSOR_AGENT_KIND,
-              CURSOR_VISIBILITY_PROVIDER_ID,
-              toggleable.map((r) => r.model.id),
-              !allOn,
-            )
-          }
-          className="shrink-0 text-12 font-medium transition-opacity hover:opacity-80"
-          style={{ color: 'var(--text-secondary)' }}
-        >
-          {t(allOn ? 'settings.providers.models.disableAll' : 'settings.providers.models.enableAll')}
-        </button>
-      </div>
+      {/* 工具行与可路由供应商共用 ModelListToolbar;Cursor 单 agent,没有「排列」与
+          用途筛选,菜单里只留批量选择。刷新进行中时同一个按钮即取消入口。 */}
+      <ModelListToolbar
+        selectedCount={selectedCount}
+        hint={refreshHint ?? t('settings.providers.models.manage.hint')}
+        refresh={{
+          onClick: refresh.running ? onCancel : onRefresh,
+          label: refresh.running
+            ? t('settings.providers.cursor.models.cancelRefresh')
+            : refreshLabel,
+          busy: refresh.running,
+          disabled: refreshDisabled,
+        }}
+        menu={
+          <>
+            <DropdownMenuLabel>
+              {t('settings.providers.models.manage.selection')}
+            </DropdownMenuLabel>
+            <DropdownMenuItem disabled={allOn} onSelect={() => bulk('show')}>
+              {t('settings.providers.models.manage.showAll')}
+            </DropdownMenuItem>
+            <DropdownMenuItem disabled={selectedCount === 0} onSelect={() => bulk('hide')}>
+              {t('settings.providers.models.manage.hideAll')}
+            </DropdownMenuItem>
+            <DropdownMenuItem onSelect={() => bulk('reset')}>
+              {t('settings.providers.models.manage.reset')}
+            </DropdownMenuItem>
+          </>
+        }
+        search={showSearch ? { value: query, onChange: setQuery } : undefined}
+      />
 
-      <div className="flex min-h-0 flex-1 flex-col gap-4 overflow-y-auto px-5 pb-4 pt-0.5">
-        {groups.map((g) => {
-          const collapsed = showGroupHeaders && (collapsedMap[g.key] ?? false);
-          return (
-            <div key={g.key} className="flex flex-col">
-              {showGroupHeaders && (
-                <button
-                  type="button"
-                  onClick={() => setCollapsedMap((m) => ({ ...m, [g.key]: !collapsed }))}
-                  aria-expanded={!collapsed}
-                  className="flex items-center gap-1 self-start pb-0.5 text-left transition-opacity hover:opacity-80"
-                >
-                  <span
-                    className="inline-flex transition-transform duration-150"
-                    style={{ color: 'var(--text-tertiary)', transform: collapsed ? 'rotate(-90deg)' : 'none' }}
-                  >
-                    <ChevronDown size={12} />
-                  </span>
-                  <span
-                    className="text-11 font-semibold uppercase"
-                    style={{ color: 'var(--text-tertiary)', letterSpacing: '0.4px' }}
-                  >
-                    {t(CURSOR_GROUP_LABEL_KEY[g.key])}
-                  </span>
-                  <span
-                    className="text-11 tabular-nums"
-                    style={{ color: 'var(--text-tertiary)', opacity: 0.6 }}
-                  >
-                    {g.rows.length}
-                  </span>
-                </button>
-              )}
-              {!collapsed &&
-                g.rows.map(({ model, isAuto }) => {
-                  const enabled = isAuto || isModelEnabled(CURSOR_AGENT_KIND, CURSOR_VISIBILITY_PROVIDER_ID, model);
-                  return (
-                    <div
-                      key={model.id}
-                      className="flex items-center justify-between py-2"
-                      style={{ borderBottom: '1px solid var(--settings-theme-card-border)' }}
+      {/* 唯一滚动区,与上方固定工具行以 1px 细线分隔。视觉左右边距 20px =
+          容器 px-3 + 行 px-2(行悬停底色要包住内容),与 UnifiedModelList 同。 */}
+      <div
+        className="min-h-0 flex-1 overflow-y-auto border-t"
+        style={{ borderColor: 'var(--settings-theme-card-border)' }}
+      >
+        <div className="flex flex-col gap-4 px-3 pb-4 pt-1.5">
+          {groups.length === 0 ? (
+            <div className="py-4 text-center text-13" style={{ color: 'var(--text-tertiary)' }}>
+              {t('settings.providers.models.noResults')}
+            </div>
+          ) : (
+            groups.map((g) => {
+              // 搜索时强制展开(否则匹配项藏在折叠组里看不到);仅多组时才有折叠头。
+              const collapsed =
+                showGroupHeaders && !query.trim() && (collapsedMap[g.key] ?? false);
+              return (
+                <div key={g.key} className="flex flex-col">
+                  {showGroupHeaders && (
+                    <button
+                      type="button"
+                      onClick={() => setCollapsedMap((m) => ({ ...m, [g.key]: !collapsed }))}
+                      aria-expanded={!collapsed}
+                      className="flex items-center gap-1 self-start px-2 pb-0.5 text-left transition-opacity hover:opacity-80"
                     >
-                      <div className="flex min-w-0 flex-col">
-                        <span className="truncate text-13 font-medium" style={{ color: 'var(--text-primary)' }}>
-                          {model.displayName || model.id}
+                      {/* chevron 用 transform 旋转(compositor-only,规则 7);折叠时 -90°。 */}
+                      <span
+                        className="inline-flex transition-transform duration-150"
+                        style={{
+                          color: 'var(--text-tertiary)',
+                          transform: collapsed ? 'rotate(-90deg)' : 'none',
+                        }}
+                      >
+                        <ChevronDown size={12} />
+                      </span>
+                      <span
+                        className="text-11 font-medium uppercase"
+                        style={{ color: 'var(--text-tertiary)', letterSpacing: '0.5px' }}
+                      >
+                        {t(CURSOR_GROUP_LABEL_KEY[g.key])}
+                      </span>
+                      <span
+                        className="text-11 tabular-nums"
+                        style={{ color: 'var(--text-tertiary)', opacity: 0.6 }}
+                      >
+                        {g.rows.length}
+                      </span>
+                    </button>
+                  )}
+                  {!collapsed &&
+                    g.rows.map(({ model, isAuto }) => {
+                      const enabled =
+                        isAuto ||
+                        isModelEnabled(CURSOR_AGENT_KIND, CURSOR_VISIBILITY_PROVIDER_ID, model);
+                      // 行内 logo 与可路由供应商同源:按 model id 认厂牌,认不出(Composer /
+                      // Auto 等 Cursor 第一方)落回 Cursor 自己的标记。
+                      const logoKind = modelBrand({ id: model.id })?.logoKind;
+                      return (
+                        <div
+                          key={model.id}
+                          className="group flex items-center gap-3 rounded-lg px-2 py-[7px] transition-colors hover:bg-[var(--settings-menu-bg-hover)]"
+                        >
+                          <span
+                            className="flex h-6 w-6 shrink-0 items-center justify-center text-[var(--text-secondary)]"
+                            aria-hidden="true"
+                          >
+                            {logoKind ? (
+                              <ProviderLogoMark
+                                providerId={CURSOR_VISIBILITY_PROVIDER_ID}
+                                logoKind={logoKind}
+                                size={19}
+                              />
+                            ) : (
+                              <CursorMark size={17} />
+                            )}
+                          </span>
+                          <span
+                            className="min-w-0 truncate text-14 font-medium"
+                            style={{
+                              color: enabled
+                                ? 'var(--settings-section-title)'
+                                : 'var(--text-tertiary)',
+                            }}
+                          >
+                            {model.displayName || model.id}
+                          </span>
                           {isAuto && (
-                            <span className="ml-2 text-11" style={{ color: 'var(--text-tertiary)' }}>
+                            <span
+                              className="shrink-0 rounded-full bg-[var(--surface-chip)] px-2 py-0.5 text-11 font-medium"
+                              style={{ color: 'var(--text-secondary)' }}
+                            >
                               {t('settings.providers.cursor.models.autoHint')}
                             </span>
                           )}
-                        </span>
-                        {model.efforts && model.efforts.length > 0 && (
-                          <span className="truncate text-11" style={{ color: 'var(--text-tertiary)' }}>
-                            {t('settings.providers.cursor.models.effortHint', { count: model.efforts.length })}
-                          </span>
-                        )}
-                      </div>
-                      <div className="flex shrink-0 items-center gap-2">
-                        {model.contextWindow > 0 && (
-                          <span className="text-12 tabular-nums" style={{ color: 'var(--text-tertiary)' }}>
-                            {formatContextWindow(model.contextWindow)}
-                          </span>
-                        )}
-                        {isAuto ? (
-                          <span className="text-11" style={{ color: 'var(--text-tertiary)' }}>
-                            {t('settings.providers.cursor.models.autoAlwaysOn')}
-                          </span>
-                        ) : (
-                          <Switch
-                            checked={enabled}
-                            onCheckedChange={(v) =>
-                              setModelVisibility(CURSOR_AGENT_KIND, CURSOR_VISIBILITY_PROVIDER_ID, model.id, v)
-                            }
-                            aria-label={model.displayName || model.id}
-                          />
-                        )}
-                      </div>
-                    </div>
-                  );
-                })}
-            </div>
-          );
-        })}
+                          {model.efforts && model.efforts.length > 0 && (
+                            <span
+                              className="shrink-0 text-11"
+                              style={{ color: 'var(--text-tertiary)' }}
+                            >
+                              {t('settings.providers.cursor.models.effortHint', {
+                                count: model.efforts.length,
+                              })}
+                            </span>
+                          )}
+                          <span className="min-w-0 flex-1" />
+                          {/* 上下文长度保留在行内(UnifiedModelList 把它收进高级设置抽屉,
+                              Cursor 没有那个抽屉,收起来就等于删掉这条探测结果)。 */}
+                          {model.contextWindow > 0 && (
+                            <span
+                              className="shrink-0 text-12 tabular-nums"
+                              style={{ color: 'var(--text-tertiary)' }}
+                            >
+                              {formatContextWindow(model.contextWindow)}
+                            </span>
+                          )}
+                          {isAuto ? (
+                            /* Auto 没有显示轴(常显兜底)⇒ 没有开关;占同宽空位保证跨行对齐,
+                               与 UnifiedModelList 的能力模型行同处理。 */
+                            <>
+                              <span className="shrink-0 text-11" style={{ color: 'var(--text-tertiary)' }}>
+                                {t('settings.providers.cursor.models.autoAlwaysOn')}
+                              </span>
+                              <span className="w-9 shrink-0" />
+                            </>
+                          ) : (
+                            <Switch
+                              checked={enabled}
+                              onCheckedChange={(v) =>
+                                setModelVisibility(
+                                  CURSOR_AGENT_KIND,
+                                  CURSOR_VISIBILITY_PROVIDER_ID,
+                                  model.id,
+                                  v,
+                                )
+                              }
+                              aria-label={model.displayName || model.id}
+                            />
+                          )}
+                        </div>
+                      );
+                    })}
+                </div>
+              );
+            })
+          )}
+        </div>
       </div>
     </div>
   );
