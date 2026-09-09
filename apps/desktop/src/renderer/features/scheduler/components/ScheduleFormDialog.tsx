@@ -18,7 +18,8 @@ import type { UtilityTextAttemptReason, UtilityTextFailure } from '../../../../s
 import { useFeishuBot } from '@/hooks/useFeishuBot';
 import { useProjectPickerOptions } from '@/hooks/useProjectPickerOptions';
 import { useWecomGroupNotificationSettings } from '@/hooks/useWecomGroupNotificationSettings';
-import { asModelAgentKind, type Schedule, type CreateScheduleInput, type ScheduleTemplate, type UpdateScheduleInput } from '@cindy/maker-scheduler';
+// ⚠ 必须走 /types:主入口会连带导出 engine,renderer 打包会撞 node:buffer。
+import { asModelAgentKind, type Schedule, type CreateScheduleInput, type ScheduleTemplate, type UpdateScheduleInput } from '@cindy/maker-scheduler/types';
 import { applyTemplateParams } from '@cindy/maker-scheduler/template-engine';
 import { ScriptCapabilityMultiSelect } from './ScriptCapabilityMultiSelect';
 

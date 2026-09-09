@@ -9,7 +9,8 @@
  */
 
 import { useCallback, useRef, useState } from 'react';
-import { asModelAgentKind, type CreateScheduleInput, type Schedule, type ScheduleTemplate, type ScheduleWorkspaceKind } from '@cindy/maker-scheduler';
+// ⚠ 必须走 /types:主入口会连带导出 engine,renderer 打包会撞 node:buffer。
+import { asModelAgentKind, type CreateScheduleInput, type Schedule, type ScheduleTemplate, type ScheduleWorkspaceKind } from '@cindy/maker-scheduler/types';
 import { getPersistedVendorModel } from '@/state/newMakerDraft';
 import type { Session } from '@/lib/ccAgent.types';
 import {

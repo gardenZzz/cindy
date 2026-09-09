@@ -1,4 +1,6 @@
-import { asModelAgentKind, type Schedule } from '@cindy/maker-scheduler';
+// ⚠ 必须走 /types 子路径:主入口会连带导出 engine(node:buffer / EventEmitter),
+// renderer Vite 会 externalize 成 __vite-browser-external,打包失败。
+import { asModelAgentKind, type Schedule } from '@cindy/maker-scheduler/types';
 
 import {
   buildPreRunHook,
