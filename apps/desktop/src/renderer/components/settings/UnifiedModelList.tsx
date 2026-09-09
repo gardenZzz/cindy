@@ -27,23 +27,20 @@ import { modelManagementState } from './modelManagementState';
 
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useTranslation } from 'react-i18next';
-import { ChevronDown, Info, Lock, RefreshCw, Search, SlidersHorizontal } from 'lucide-react';
+import { ChevronDown, Info, Lock, SlidersHorizontal } from 'lucide-react';
 
 import { cn } from '@/lib/utils';
 import { toast } from '@/lib/toast';
 import { Tip } from '@/components/ui/tooltip';
 import { Switch } from '@/components/ui/switch';
-import { Spinner } from '@/components/ui/spinner';
 import {
-  DropdownMenu,
-  DropdownMenuTrigger,
-  DropdownMenuContent,
   DropdownMenuItem,
   DropdownMenuLabel,
   DropdownMenuSeparator,
   DropdownMenuRadioGroup,
   DropdownMenuRadioItem,
 } from '@/components/ui/dropdown-menu';
+import { ModelListToolbar } from './ModelListToolbar';
 import { useConfirmDialog } from '@/components/ui/confirm-dialog-provider';
 import { ProviderLogoMark } from '@/components/icons/ProviderLogoMark';
 import {
@@ -929,164 +926,105 @@ export function UnifiedModelList({
 
   return (
     <div className={cn('flex min-h-0 flex-col', compactList ? 'shrink-0' : 'flex-1')}>
-      {/* 第一行说明模型选择与管理，第二行仅筛选当前列表。排列和批量配置在菜单里
-          明确分组，任何筛选或排列操作都不写入模型开关。 */}
+      {/* 工具行与 CursorModelList 共用 ModelListToolbar;这里只注入本列表特有的
+          排列/批量菜单与用途筛选。 */}
       {!compactEmpty && (
-        <div className="flex flex-col gap-2 px-5 pb-2 pt-2.5">
-          <div className="flex flex-wrap items-center gap-x-3 gap-y-2">
-            <div className="min-w-0 flex-1">
-              <div className="flex flex-wrap items-baseline gap-x-2">
-                <span className="text-13 font-medium text-[var(--text-primary)]">
-                  {t('settings.providers.models.manage.title')}
-                </span>
-                <span className="text-11 text-[var(--text-tertiary)]">
-                  {t('settings.providers.models.manage.selected', { count: selectedCount })}
-                </span>
-              </div>
-              <p className="mt-0.5 text-11 text-[var(--text-tertiary)]">
-                {t(
-                  selectionAvailable
-                    ? 'settings.providers.models.manage.hint'
-                    : 'settings.providers.models.manage.connectionRequired',
-                )}
-              </p>
-            </div>
-            {onRefresh && (
-              <button
-                type="button"
-                onClick={onRefresh}
-                disabled={refreshing || refreshDisabled}
-                aria-busy={refreshing}
-                aria-label={refreshLabel}
-                title={refreshLabel}
-                className={cn(
-                  'flex h-7 w-7 shrink-0 select-none items-center justify-center rounded-full transition-colors hover:bg-[var(--surface-hover)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--focus-ring-soft)]',
-                  (refreshing || refreshDisabled) && 'cursor-not-allowed opacity-60',
-                )}
-                style={{ color: 'var(--text-secondary)' }}
-              >
-                <Spinner icon={RefreshCw} size={14} spinning={refreshing} />
-              </button>
-            )}
-            {unionRows.length > 0 && (
-              <DropdownMenu>
-                <DropdownMenuTrigger asChild>
-                  <button
-                    type="button"
-                    className="flex h-7 shrink-0 items-center gap-1 rounded-full px-2 text-12 text-[var(--text-secondary)] hover:bg-[var(--surface-hover)]"
-                  >
-                    {t('settings.providers.models.manage.menu')}
-                    <ChevronDown size={12} aria-hidden />
-                  </button>
-                </DropdownMenuTrigger>
-                <DropdownMenuContent align="end">
-                  <DropdownMenuLabel>
-                    {t('settings.providers.models.manage.arrange')}
-                  </DropdownMenuLabel>
-                  <DropdownMenuRadioGroup
-                    value={managementView}
-                    onValueChange={(value) => {
-                      if (value === 'brand' || value === 'model') setManagementView(value);
-                    }}
-                  >
-                    <DropdownMenuRadioItem value="brand">
-                      {t('settings.providers.models.manage.byBrand')}
-                    </DropdownMenuRadioItem>
-                    <DropdownMenuRadioItem value="model">
-                      {t('settings.providers.models.manage.byName')}
-                    </DropdownMenuRadioItem>
-                  </DropdownMenuRadioGroup>
-                  <DropdownMenuSeparator />
-                  <DropdownMenuLabel>
-                    {t('settings.providers.models.manage.selection')}
-                  </DropdownMenuLabel>
-                  <DropdownMenuItem
-                    disabled={!selectionAvailable || selectedCount === selectableRows.length}
-                    onSelect={() => handleBulk('show')}
-                  >
-                    {t('settings.providers.models.manage.showAll')}
-                  </DropdownMenuItem>
-                  <DropdownMenuItem
-                    disabled={!selectionAvailable || selectedCount === 0}
-                    onSelect={() => handleBulk('hide')}
-                  >
-                    {t('settings.providers.models.manage.hideAll')}
-                  </DropdownMenuItem>
-                  <DropdownMenuItem
-                    disabled={!selectionAvailable || selectableRows.length === 0}
-                    onSelect={() => handleBulk('reset')}
-                  >
-                    {t('settings.providers.models.manage.reset')}
-                  </DropdownMenuItem>
-                </DropdownMenuContent>
-              </DropdownMenu>
-            )}
-          </div>
-          {/* 第二行只在真有筛选控件时才占位:单类型 + 模型少的来源(本机 Ollama 等)
-              两个都不渲染,不留一条空行。 */}
-          {(showKindFilter || showSearch) && (
-            <div className="flex flex-wrap items-center gap-x-3 gap-y-2">
-              {showKindFilter && (
-                <div
-                  className="flex flex-wrap items-center gap-0.5 rounded-full p-0.5"
-                  style={{ backgroundColor: 'var(--surface-elevated)' }}
-                  role="group"
-                  aria-label={t('settings.providers.models.kindFilter.aria')}
-                >
-                  {(['all', ...presentCategories] as Array<ModelCategory | 'chat' | 'all'>).map(
-                    (kind) => (
-                      <button
-                        key={kind}
-                        type="button"
-                        onClick={() => setKindFilter(kind)}
-                        aria-pressed={kindFilter === kind}
-                        className={cn(
-                          'h-6 rounded-full px-2.5 text-12 transition-colors',
-                          kindFilter === kind
-                            ? 'bg-[var(--surface-hover)] font-medium text-[var(--text-primary)]'
-                            : 'text-[var(--text-secondary)] hover:text-[var(--text-primary)]',
-                        )}
-                      >
-                        {kind === 'all'
-                          ? t('settings.providers.models.kindFilter.all')
-                          : kind === 'chat'
-                            ? t('settings.providers.models.kindFilter.chat')
-                            : t(CATEGORY_LABEL_KEY[kind])}
-                      </button>
-                    ),
-                  )}
-                </div>
-              )}
-              <span className="min-w-0 flex-1" />
-              {showSearch && (
-                /* basis 200px 但允许收缩:窄窗口(右栏可被压到 ~270px)时先压缩搜索框,
-             不让 chip 组被 overflow-hidden 裁掉(PR #1102 review)。 */
-                <div
-                  className="flex h-8 min-w-0 basis-[200px] items-center gap-2 rounded-full px-3"
-                  style={{
-                    backgroundColor: 'var(--surface-elevated)',
-                    border: '1px solid var(--border-default)',
+        <ModelListToolbar
+          selectedCount={selectedCount}
+          hint={t(
+            selectionAvailable
+              ? 'settings.providers.models.manage.hint'
+              : 'settings.providers.models.manage.connectionRequired',
+          )}
+          refresh={
+            onRefresh
+              ? {
+                  onClick: onRefresh,
+                  label: refreshLabel,
+                  busy: refreshing,
+                  disabled: refreshing || refreshDisabled,
+                }
+              : undefined
+          }
+          menu={
+            unionRows.length > 0 ? (
+              <>
+                <DropdownMenuLabel>
+                  {t('settings.providers.models.manage.arrange')}
+                </DropdownMenuLabel>
+                <DropdownMenuRadioGroup
+                  value={managementView}
+                  onValueChange={(value) => {
+                    if (value === 'brand' || value === 'model') setManagementView(value);
                   }}
                 >
-                  <Search
-                    size={14}
-                    className="shrink-0"
-                    style={{ color: 'var(--text-tertiary)' }}
-                  />
-                  <input
-                    type="text"
-                    value={query}
-                    onChange={(e) => setQuery(e.target.value)}
-                    placeholder={t('settings.providers.models.search')}
-                    aria-label={t('settings.providers.models.search')}
-                    className="min-w-0 flex-1 bg-transparent text-13 outline-none placeholder:text-[var(--text-placeholder)]"
-                    style={{ color: 'var(--settings-section-title)' }}
-                  />
-                </div>
-              )}
-            </div>
-          )}
-        </div>
+                  <DropdownMenuRadioItem value="brand">
+                    {t('settings.providers.models.manage.byBrand')}
+                  </DropdownMenuRadioItem>
+                  <DropdownMenuRadioItem value="model">
+                    {t('settings.providers.models.manage.byName')}
+                  </DropdownMenuRadioItem>
+                </DropdownMenuRadioGroup>
+                <DropdownMenuSeparator />
+                <DropdownMenuLabel>
+                  {t('settings.providers.models.manage.selection')}
+                </DropdownMenuLabel>
+                <DropdownMenuItem
+                  disabled={!selectionAvailable || selectedCount === selectableRows.length}
+                  onSelect={() => handleBulk('show')}
+                >
+                  {t('settings.providers.models.manage.showAll')}
+                </DropdownMenuItem>
+                <DropdownMenuItem
+                  disabled={!selectionAvailable || selectedCount === 0}
+                  onSelect={() => handleBulk('hide')}
+                >
+                  {t('settings.providers.models.manage.hideAll')}
+                </DropdownMenuItem>
+                <DropdownMenuItem
+                  disabled={!selectionAvailable || selectableRows.length === 0}
+                  onSelect={() => handleBulk('reset')}
+                >
+                  {t('settings.providers.models.manage.reset')}
+                </DropdownMenuItem>
+              </>
+            ) : undefined
+          }
+          filters={
+            showKindFilter ? (
+              <div
+                className="flex flex-wrap items-center gap-0.5 rounded-full p-0.5"
+                style={{ backgroundColor: 'var(--surface-elevated)' }}
+                role="group"
+                aria-label={t('settings.providers.models.kindFilter.aria')}
+              >
+                {(['all', ...presentCategories] as Array<ModelCategory | 'chat' | 'all'>).map(
+                  (kind) => (
+                    <button
+                      key={kind}
+                      type="button"
+                      onClick={() => setKindFilter(kind)}
+                      aria-pressed={kindFilter === kind}
+                      className={cn(
+                        'h-6 rounded-full px-2.5 text-12 transition-colors',
+                        kindFilter === kind
+                          ? 'bg-[var(--surface-hover)] font-medium text-[var(--text-primary)]'
+                          : 'text-[var(--text-secondary)] hover:text-[var(--text-primary)]',
+                      )}
+                    >
+                      {kind === 'all'
+                        ? t('settings.providers.models.kindFilter.all')
+                        : kind === 'chat'
+                          ? t('settings.providers.models.kindFilter.chat')
+                          : t(CATEGORY_LABEL_KEY[kind])}
+                    </button>
+                  ),
+                )}
+              </div>
+            ) : undefined
+          }
+          search={showSearch ? { value: query, onChange: setQuery } : undefined}
+        />
       )}
 
       {/* 分组 + 模型行 + 底部「已停用」分区:唯一滚动区,与上方固定工具行以
