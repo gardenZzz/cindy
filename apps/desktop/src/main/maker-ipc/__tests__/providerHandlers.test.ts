@@ -480,6 +480,27 @@ describe('model-disable:set handler', () => {
     expect(deps.setModelsDisabled).toHaveBeenCalledWith('xd', ['seedream-5', 'seedance-2'], true);
   });
 
+  it.each(['audioModels', 'embeddingModels'] as const)(
+    'accepts media-only members in %s and rejects unknown IDs',
+    async (field) => {
+      const harness = new IpcHarness();
+      const provider = { ...catalogView('xd', {}), [field]: [{ id: 'media-only', name: 'Media' }] };
+      const deps = makeDeps({ listProviders: async () => [provider] });
+      registerProviderHandlers(harness, deps);
+
+      await expect(harness.invoke(MAKER_INVOKE.MODEL_DISABLE_SET, {
+        kind: 'model', providerId: 'xd', modelIds: ['media-only'], disabled: true,
+      })).resolves.toEqual({ ok: true });
+      expect(deps.setModelsDisabled).toHaveBeenCalledWith('xd', ['media-only'], true);
+      expect(deps.broadcastChanged).toHaveBeenCalledOnce();
+
+      await expect(harness.invoke(MAKER_INVOKE.MODEL_DISABLE_SET, {
+        kind: 'model', providerId: 'xd', modelIds: ['unknown'], disabled: true,
+      })).rejects.toThrow(/INVALID_PARAMS/);
+      expect(deps.setModelsDisabled).toHaveBeenCalledTimes(1);
+    },
+  );
+
   it('停用按目录成员校验:未知 providerId / 未知 modelId → INVALID_PARAMS,不写', async () => {
     const harness = new IpcHarness();
     const deps = makeDeps({ listProviders: async () => xdCatalog() });
@@ -941,6 +962,23 @@ describe('provider:models-auto-refresh handler', () => {
       harness.invoke(MAKER_INVOKE.PROVIDER_MODELS_AUTO_REFRESH, 'providers-open'),
     ).rejects.toThrow(/PERMISSION_DENIED/);
     expect(requestModelsAutoRefresh).not.toHaveBeenCalled();
+  });
+});
+
+describe('provider OAuth sender boundary', () => {
+  it.each([false, true])('rejects all OAuth mutations before side effects (missing guard=%s)', async (missing) => {
+    const harness = new IpcHarness();
+    const guard = vi.fn(() => { throwIpcError('PERMISSION_DENIED', 'untrusted sender'); });
+    const deps = makeDeps({ assertTrustedSender: missing ? undefined : guard });
+    registerProviderHandlers(harness, deps);
+    for (const channel of [MAKER_INVOKE.PROVIDER_OAUTH_LOGIN, MAKER_INVOKE.PROVIDER_OAUTH_LOGOUT, MAKER_INVOKE.PROVIDER_OAUTH_CANCEL]) {
+      await expect(harness.invokeFrom(123, channel, 'openai-account')).rejects.toThrow(/PERMISSION_DENIED/);
+    }
+    if (!missing) expect(guard).toHaveBeenCalledTimes(3);
+    expect(deps.oauthLogin).not.toHaveBeenCalled();
+    expect(deps.oauthLogout).not.toHaveBeenCalled();
+    expect(deps.oauthCancel).not.toHaveBeenCalled();
+    expect(deps.beginRouteMutation).not.toHaveBeenCalled();
   });
 });
 
@@ -2377,7 +2415,7 @@ describe('provider:custom:* CRUD handlers', () => {
     await expect(second).resolves.toEqual({ ok: true });
     expect(calls).toEqual(['remove-1', 'restore-1', 'remove-2']);
     const savedAuth = (await listCustomProviders())[0]?.auth;
-    expect(savedAuth?.method === 'oauth' ? savedAuth.oauth.clientId : undefined).toBe(
+    expect(savedAuth?.method === 'oauth' ? savedAuth.oauth?.clientId : undefined).toBe(
       'winning-client',
     );
   });
