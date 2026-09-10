@@ -307,9 +307,10 @@ describe('ProvidersSection - Cursor 模型清单与显示开关 (spec #21 / S1)'
   it('真实供应商(Anthropic)行与刷新行为不受影响', async () => {
     cursorState.installed = true;
     cursorState.auth = { authenticated: true, identity: 'x' };
-    // Anthropic 行仍存在且可被选中(不选 Cursor 时)。
+    // Anthropic 行仍存在且可被选中(不选 Cursor 时)。ListRow 标题走 provider.name,
+    // 不再用 settings.providers.anthropic.title。
     renderAt();
-    expect(await screen.findByText('settings.providers.anthropic.title')).not.toBeNull();
+    expect(await screen.findByRole('button', { name: 'Anthropic' })).not.toBeNull();
     // 选中 Cursor 不应破坏 Anthropic 行的 DOM 存在性(只是让位详情)。
     await selectCursor();
     // 模型开关只作用于 Cursor 段;Anthropic 的 builtin 刷新 aria 不出现在 Cursor 详情。

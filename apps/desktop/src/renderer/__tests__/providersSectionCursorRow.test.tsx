@@ -170,7 +170,8 @@ describe('ProvidersSection — Cursor 伪行', () => {
   it('未安装也出现左栏行;未选中时右栏仍是真实供应商,页面无底部独立卡片', async () => {
     renderAt();
 
-    expect(await screen.findByText('settings.providers.anthropic.title')).not.toBeNull();
+    // ListRow 标题走 provider.name（main 多账号改版），不再渲染 anthropic.title key。
+    expect(await screen.findByRole('button', { name: 'Anthropic' })).not.toBeNull();
     expect(cursorRow()).not.toBeNull();
     // 详情正文只在右栏出现:底部大卡片若还在,这段文案会与供应商详情同时存在。
     expect(screen.queryByText('settings.providers.cursor.missingDescription')).toBeNull();
