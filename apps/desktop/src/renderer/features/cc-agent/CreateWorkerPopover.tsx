@@ -1,4 +1,4 @@
-import { useModelPickerAgents } from '@/hooks/useAvailableAgents';
+import { useAvailableAgents, useModelPickerAgents } from '@/hooks/useAvailableAgents';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useNavigate } from 'react-router-dom';
@@ -22,7 +22,6 @@ import { VendorSegmentedSwitcher } from '@/components/new-chat/VendorSegmentedSw
 import { agentKindToVendor } from '@/components/sidebar/VendorIcon';
 import type { MakerVendor } from '@/lib/ccAgent.types';
 import { useAgentCapabilities } from '@/hooks/useAgentCapabilities';
-import { useCursorAvailable } from '@/hooks/useCursorAvailable';
 import { useDeviceProviders } from '@/hooks/useDeviceProviders';
 import { useProviders } from '@/hooks/useProviders';
 import { filterChatBridgedCodexProviders } from '@/lib/providerModels';
@@ -124,10 +123,13 @@ export function CreateWorkerPopover({
   const ccCaps = useAgentCapabilities('claude-code', deviceId);
   const codexCaps = useAgentCapabilities('codex', deviceId);
   const cursorCaps = useAgentCapabilities('cursor', deviceId);
-  // device-link 被控端不一定装了 cursor-agent，远程创建面板不翻 Cursor 段。
-  const cursorAvailable = useCursorAvailable() && !deviceId;
   const piCaps = useAgentCapabilities('pi', deviceId);
   const pickerAgents = useModelPickerAgents(agent, deviceId);
+  // Harness 是否可选一律看运行时 roster(ADR 0006):远程按被控端上报的结果，不用控制端
+  // 本机的探测代答；roster 未知(首帧 / 拉取失败)按可用处理，否则加载中的那一帧会把用户
+  // 已选的 Cursor 判成「没装」并在下面的 effect 里改写掉。
+  const { availableVendors, loaded: rosterLoaded } = useAvailableAgents(deviceId);
+  const cursorAvailable = !rosterLoaded || availableVendors.has('cursor');
   const localProviders = useProviders();
   const remoteProviders = useDeviceProviders(deviceId);
   const providers = deviceId ? remoteProviders.providers : localProviders.providers;
@@ -360,8 +362,8 @@ export function CreateWorkerPopover({
     }
   }, [currentModel, currentModelSupportsFast, fast]);
 
-  // 记忆里停在 cursor 但本机没装 cursor-agent（或这是 device-link 远程面板）时回落，
-  // 避免提交一个 spawn 必失败的 agent。
+  // 记忆里停在 cursor 但 roster **确认**没有它时回落，避免提交一个 spawn 必失败的 agent。
+  // roster 未知时不回落 —— 那是加载态，不是「没装」（ADR 0006）。
   useEffect(() => {
     if (agent === 'cursor' && !cursorAvailable) {
       setAgent('codex');

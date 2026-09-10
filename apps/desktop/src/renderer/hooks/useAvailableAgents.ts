@@ -15,6 +15,7 @@
  */
 import { useEffect, useState } from 'react';
 
+import type { AgentKind } from '@cindy/maker-core';
 import type { MakerVendor } from '@/lib/ccAgent.types';
 import { createLogger } from '@/lib/logger';
 import {
@@ -47,15 +48,32 @@ function refreshRemoteCapabilitiesOnce(deviceId: string): void {
   remoteCapabilitiesRefreshInFlight.set(deviceId, pending);
 }
 
-type RuntimeAgentKind = 'claude-code' | 'codex' | 'pi';
+/**
+ * Harness 取值全集。被控端上报的 roster 是信任边界、必须校验,但校验表**不能是内联
+ * 字面量**——那正是 Cursor 在上游重构里掉队的原因(ADR 0006)。`Record<AgentKind, true>`
+ * 让编译器在 `AgentKind` 增长时强制补齐:漏一个直接编译不过,不会静默收窄。
+ * 键序即选择器列表序。
+ */
+const RUNTIME_AGENT_KINDS: Record<AgentKind, true> = {
+  'claude-code': true,
+  codex: true,
+  cursor: true,
+  pi: true,
+};
+const RUNTIME_AGENT_KIND_ORDER = Object.keys(RUNTIME_AGENT_KINDS) as readonly AgentKind[];
+
+function isRuntimeAgentKind(value: unknown): value is AgentKind {
+  return typeof value === 'string'
+    && Object.prototype.hasOwnProperty.call(RUNTIME_AGENT_KINDS, value);
+}
 
 /** runtime agent id → NewMaker vendor(其余保持同名)。 */
-function toVendor(agent: RuntimeAgentKind): MakerVendor {
+function toVendor(agent: AgentKind): MakerVendor {
   return agent === 'claude-code' ? 'cc' : agent;
 }
 
 interface MakerApiShape {
-  listAvailableAgents: () => Promise<RuntimeAgentKind[]>;
+  listAvailableAgents: () => Promise<AgentKind[]>;
   onAgentsChanged: (cb: () => void) => () => void;
 }
 interface DeviceLinkShape {
@@ -74,13 +92,14 @@ function getDeviceLink(): DeviceLinkShape | null {
   return (window as unknown as { electronAPI?: { deviceLink?: DeviceLinkShape } }).electronAPI?.deviceLink ?? null;
 }
 
-async function fetchAvailableAgents(deviceId?: string | null): Promise<RuntimeAgentKind[]> {
+async function fetchAvailableAgents(deviceId?: string | null): Promise<AgentKind[]> {
   if (deviceId) {
     const dl = getDeviceLink();
     if (!dl) throw new Error('device-link IPC not available');
     const raw = await dl.invoke(deviceId, 'maker:list-available-agents', []);
-    return Array.isArray(raw) ? (raw.filter((v): v is RuntimeAgentKind =>
-      v === 'claude-code' || v === 'codex' || v === 'pi') as RuntimeAgentKind[]) : [];
+    // 只做「是不是一个已知 Harness」的信任边界校验,不再按控制端认识的那几个二次
+    // 收窄——远程的能力判断归被控端(ADR 0006)。
+    return Array.isArray(raw) ? raw.filter(isRuntimeAgentKind) : [];
   }
   const api = getMakerApi();
   if (!api) throw new Error('maker IPC not available');
@@ -224,7 +243,7 @@ function loadAvailableAgents(deviceId?: string | null): Promise<ReadonlySet<Make
 }
 
 export interface UseAvailableAgentsResult {
-  /** runtime 已注册的 vendor 集合(cc/codex/pi);loaded=false 时为空。 */
+  /** runtime 已注册的 vendor 集合(cc/codex/cursor/pi);loaded=false 时为空。 */
   availableVendors: ReadonlySet<MakerVendor>;
   /** 首次结果是否已返回。未加载完成时消费方不应据此隐藏任何入口。 */
   loaded: boolean;
@@ -307,12 +326,12 @@ export function __resetAvailableAgentsCacheForTest(): void {
 }
 
 /** Model pickers keep the current Harness visible while excluding unregistered runtimes. */
-export function useModelPickerAgents(current: string, deviceId?: string | null): readonly RuntimeAgentKind[] | undefined {
+export function useModelPickerAgents(current: string, deviceId?: string | null): readonly AgentKind[] | undefined {
   const { availableVendors, loaded } = useAvailableAgents(deviceId);
+  // roster 未知(首帧 / 拉取失败)→ 不过滤,由调用方按「先别隐藏任何入口」处理。
   if (!loaded) return undefined;
-  const runtimeCurrent: RuntimeAgentKind =
-    current === 'codex' || current === 'pi' ? current : 'claude-code';
-  return (['claude-code', 'codex', 'pi'] as const).filter(
+  const runtimeCurrent: AgentKind = isRuntimeAgentKind(current) ? current : 'claude-code';
+  return RUNTIME_AGENT_KIND_ORDER.filter(
     (agent) => agent === runtimeCurrent || availableVendors.has(toVendor(agent)),
   );
 }

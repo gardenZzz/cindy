@@ -14,7 +14,7 @@ vi.mock('../useAgentCapabilities', () => ({
   refreshLocalCapabilities: vi.fn(async () => {}),
 }));
 
-type RuntimeAgentKind = 'claude-code' | 'codex' | 'pi';
+type RuntimeAgentKind = 'claude-code' | 'codex' | 'cursor' | 'pi';
 type PresenceListener = (snapshot: { deviceId: string; online: boolean }) => void;
 type StatusListener = (payload: { status: 'stopped' | 'connecting' | 'online' }) => void;
 
@@ -271,5 +271,73 @@ describe('useAvailableAgents roster cache', () => {
       await second.promise;
     });
     await waitFor(() => expect(remounted.result.current.availableVendors.has('pi')).toBe(true));
+  });
+
+  it('keeps a Cursor the controlee reports instead of narrowing it away', async () => {
+    const { api } = installDeviceLinkApi();
+    api.invoke.mockResolvedValue(['claude-code', 'cursor']);
+    const { useAvailableAgents } = await import('../useAvailableAgents');
+    const { result } = renderHook(() => useAvailableAgents('device-1'));
+    await waitFor(() => expect(result.current.loaded).toBe(true));
+    expect(result.current.availableVendors).toEqual(new Set(['cc', 'cursor']));
+  });
+});
+
+describe('useModelPickerAgents Harness set', () => {
+  beforeEach(() => {
+    vi.resetModules();
+    vi.clearAllMocks();
+    delete (window as unknown as { electronAPI?: unknown }).electronAPI;
+  });
+
+  it('lists every Harness the runtime roster registers, Cursor included', async () => {
+    const { api } = installMakerApi();
+    api.listAvailableAgents.mockResolvedValue(['claude-code', 'codex', 'cursor', 'pi']);
+    const { useModelPickerAgents } = await import('../useAvailableAgents');
+    const { result } = renderHook(() => useModelPickerAgents('claude-code'));
+    await waitFor(() => expect(result.current).toBeDefined());
+    expect(result.current).toEqual(['claude-code', 'codex', 'cursor', 'pi']);
+  });
+
+  it('omits a Harness the roster does not register', async () => {
+    const { api } = installMakerApi();
+    api.listAvailableAgents.mockResolvedValue(['claude-code', 'codex']);
+    const { useModelPickerAgents } = await import('../useAvailableAgents');
+    const { result } = renderHook(() => useModelPickerAgents('claude-code'));
+    await waitFor(() => expect(result.current).toBeDefined());
+    expect(result.current).toEqual(['claude-code', 'codex']);
+  });
+
+  it('keeps the current Harness visible even when the roster lacks it', async () => {
+    const { api } = installMakerApi();
+    api.listAvailableAgents.mockResolvedValue(['claude-code']);
+    const { useModelPickerAgents } = await import('../useAvailableAgents');
+    const { result } = renderHook(() => useModelPickerAgents('cursor'));
+    await waitFor(() => expect(result.current).toBeDefined());
+    expect(result.current).toEqual(['claude-code', 'cursor']);
+  });
+
+  it('gates nothing while the roster is still unknown', async () => {
+    const pending = deferred<RuntimeAgentKind[]>();
+    const { api } = installMakerApi();
+    api.listAvailableAgents.mockReturnValue(pending.promise);
+    const { useModelPickerAgents } = await import('../useAvailableAgents');
+    const { result } = renderHook(() => useModelPickerAgents('cursor'));
+    await act(async () => {});
+    expect(result.current).toBeUndefined();
+    await act(async () => {
+      pending.resolve(['claude-code', 'cursor']);
+      await pending.promise;
+    });
+    await waitFor(() => expect(result.current).toEqual(['claude-code', 'cursor']));
+  });
+
+  it('does not narrow the Harness set a controlee reports', async () => {
+    const { api } = installDeviceLinkApi();
+    api.invoke.mockResolvedValue(['claude-code', 'cursor']);
+    const { useModelPickerAgents } = await import('../useAvailableAgents');
+    const { result } = renderHook(() => useModelPickerAgents('claude-code', 'device-1'));
+    await waitFor(() => expect(result.current).toBeDefined());
+    expect(result.current).toEqual(['claude-code', 'cursor']);
   });
 });
