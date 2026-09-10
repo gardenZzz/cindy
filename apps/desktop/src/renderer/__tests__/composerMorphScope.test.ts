@@ -59,12 +59,14 @@ describe('composer morph scope', () => {
 // Select & Dropdown:「Panel width must bind to the trigger width — never narrower
 // or wider than the control that opened it」。工具条形态的 trigger 按内容 hug、
 // 面板固定 196px,直接放进设置字段会让短标签(Claude / Pi)下面板明显宽于 trigger。
-describe('设置字段里的 AgentSelect 宽度契约', () => {
+describe('设置字段里的选择器宽度契约', () => {
   it('两处设置场景都用 field 形态,不得把工具条形态塞进字段', () => {
     for (const src of [settingsModel, workspacePrefs]) {
       expect(src).toContain('<ModelSelector');
-      expect(src).toContain('<AgentSelect');
       expect(src).toContain('triggerVariant="field"');
+      // Harness 自 ADR 0006 起只在模型面板内切,设置字段里不再并挂 AgentSelect;
+      // 它的 field 形态契约由 composer 侧的用例继续兜(见下一条)。
+      expect(src).not.toContain('<AgentSelect');
     }
   });
 
