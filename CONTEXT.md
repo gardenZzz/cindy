@@ -8,8 +8,19 @@ Cindy 桌面/移动客户端:连接人与外部编码 Agent、模型和工具,�
 
 **Agent**:
 由 Cindy 连接与编排的外部编码智能体运行时(Claude Code、Codex 等),Agent Loop
-属于上游厂商,Cindy 只负责连接层。
-_Avoid_: 智能体、代理(UI 译法裁决见 `i18n/GLOSSARY.md` 的 Agent / Subagent / Proxy 条)
+属于上游厂商,Cindy 只负责连接层。指被连接的那个实体本身;「这个会话跑在哪一个上」
+那个可选项叫 Harness。
+_Avoid_: 智能体、代理(UI 译法裁决见 `i18n/GLOSSARY.md` 的 Agent / Subagent / Proxy 条);
+拿 Agent 指代选择项(那是 Harness)
+
+**Harness**:
+Cindy 里「这个会话 / 自动化 / 伙伴跑在哪个 Agent 上」的那个可选槽位,当前四个取值:
+Claude Code、Codex、Cursor、Pi。同一概念在代码里有三个内部名——`AgentKind`(标识
+正本)、`MakerVendor` / `vendorKey`(多一个 `orca`,那是协同模式不是 Harness)、统一
+选择器回调里的 `engine`;产品面与文档一律说 Harness。可选集合由**运行时 roster**
+(`maker:list-available-agents`)决定,不由各入口自行枚举(见 ADR 0006)。
+_Avoid_: 引擎(是否作 UI 类目名尚未裁决,见 `i18n/GLOSSARY.md` 的 Engine 条);
+vendor / 供应商(本仓 vendor 另指模型提供方)
 
 **ACP (Agent Client Protocol)**:
 Zed / JetBrains 主导的开放标准,规定「客户端 ↔ Agent CLI」之间基于 stdio + JSON-RPC
@@ -18,7 +29,7 @@ _Avoid_: 不带限定词的「协议」——本仓另有 `cindy-protocol`(Cindy
 自有 wire protocol),两者互不相干
 
 **Cursor**:
-经官方 ACP 通道接入的第三个 Agent(上游产品 Cursor 的编码 agent,二进制名
+经官方 ACP 通道接入的 Agent(上游产品 Cursor 的编码 agent,二进制名
 `cursor-agent`);产品面统一称 "Cursor",kind 标识为 `cursor`。
 _Avoid_: Cursor Agent、Cursor CLI(通道/二进制是实现细节,不作产品名)
 

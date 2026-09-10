@@ -253,7 +253,7 @@ OAuth 2.0 Device Authorization Grant 中由用户在另一设备验证页输入�
 
 ### Harness
 
-用户确认并公开提交 Issue 时显示承载当前 Agent 的运行框架。五语暂统一保留英文 Harness；具体值固定使用 Claude Code、Codex、Pi 的公开全名，不使用 cc/cx/pi 等内部缩写。
+用户确认并公开提交 Issue 时显示承载当前 Agent 的运行框架。五语暂统一保留英文 Harness；具体值固定使用 Claude Code、Codex、Cursor、Pi 的公开全名，不使用 cc/cx/pi 等内部缩写。可选值集合以运行时 roster 为准（ADR 0006），本条只约束**写法**，不构成「只有这四个」的枚举承诺。
 
 ### Hunyuan
 
