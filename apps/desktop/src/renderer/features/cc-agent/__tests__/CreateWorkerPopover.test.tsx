@@ -221,8 +221,8 @@ vi.mock('../workerModelAvailability', () => ({
   selectWorkerModels: ({ agent }: { agent: 'codex' | 'claude-code' }) => mocks.modelsByAgent[agent],
 }));
 
-// MorphPopover 形变依赖 getBoundingClientRect / rAF,jsdom 下无意义;AgentSelect
-// 测例同口径只保留开合与内容渲染,方便点选项切引擎。
+// MorphPopover 形变依赖 getBoundingClientRect / rAF,jsdom 下无意义;只保留开合
+// 与内容渲染。
 vi.mock('@/components/ui/morph-popover', async () => {
   const React = await vi.importActual<typeof import('react')>('react');
   return {
@@ -242,12 +242,6 @@ vi.mock('@/components/ui/morph-popover', async () => {
     ),
   };
 });
-
-/** 打开 AgentSelect 下拉并点选引擎(vendor = MakerVendor: cc / codex / cursor / pi)。 */
-function selectWorkerAgent(vendor: 'cc' | 'codex' | 'cursor' | 'pi') {
-  fireEvent.click(screen.getByRole('button', { name: 'newChat.agentSelect.trigger.aria' }));
-  fireEvent.click(screen.getByTestId(`agent-select-option-${vendor}`));
-}
 
 describe('CreateWorkerPopover', () => {
   beforeEach(() => {
@@ -288,13 +282,12 @@ describe('CreateWorkerPopover', () => {
     expect(panel?.className).toContain('w-[500px]');
     expect(panel?.className).toContain('p-6');
 
-    const agentSelect = screen.getByRole('button', {
-      name: 'newChat.agentSelect.trigger.aria',
-    });
-    const pairedFields = agentSelect.closest('.grid');
-    expect(pairedFields?.className).toContain('grid-cols-[auto_minmax(0,1fr)]');
-    expect(pairedFields?.contains(screen.getByTestId('model-selector'))).toBe(true);
+    // 面板是唯一能改 Harness 的地方:既没有并挂的引擎下拉,也没有老的分栏 tablist
+    // (model-selector-unified.md「设置类入口」/ ADR 0006)。
+    expect(screen.queryByRole('button', { name: 'newChat.agentSelect.trigger.aria' })).toBeNull();
     expect(screen.queryByRole('tablist', { name: 'orca.createWorker.agentLabel' })).toBeNull();
+    const modelField = screen.getByTestId('model-selector').closest('.grid');
+    expect(modelField?.className).toContain('grid-cols-1');
 
     const permissionMode = screen.getByTestId('worker-permission-mode');
     expect(permissionMode.textContent).toContain('orca.createWorker.permissionLabel');
@@ -605,7 +598,10 @@ describe('CreateWorkerPopover', () => {
     expect(initialMarkup).not.toContain('orca.createWorker.noAvailableModels');
   });
 
-  it('converges each agent preference independently after switching agents', async () => {
+  // 面板改造前这里是「切 Harness → 组件自己挑一个可用模型收敛」的两步流程。现在
+  // Harness 与模型同一次提交定下（model-selector-unified.md），组件照单接收；
+  // 存量里那条已下架的 claude-removed 不得漏进来。
+  it('adopts the Harness and model from a single panel selection', async () => {
     window.localStorage.setItem(
       'workerCreationPrefs',
       JSON.stringify({
@@ -623,7 +619,7 @@ describe('CreateWorkerPopover', () => {
     await waitFor(() =>
       expect(screen.getByTestId('model-selector').textContent).toBe('codex/gpt-5.5'),
     );
-    selectWorkerAgent('cc');
+    fireEvent.click(screen.getByTestId('pick-claude-model'));
 
     await waitFor(() =>
       expect(screen.getByTestId('model-selector').textContent).toBe('claude-sonnet-4-6'),
@@ -1096,9 +1092,9 @@ describe('CreateWorkerPopover', () => {
   });
 
   it('saves the complete selected configuration after switching Harness twice', async () => {
-    // 切 tab 的恢复读的是 prefs:切走前必须把当前 agent 的 live 编辑快照进内存
-    // prefs,否则「选好来源/改好 effort 还没提交就切了个 tab」会被静默回滚到打开
-    // 弹窗时的旧值(codex review)。
+    // 每次换 Harness 都由面板一次交付 (Harness, 来源, 模型, effort),组件照单落库,
+    // 不留「Harness 换了、来源还是上一个 Harness 的」中间态。往返两次仍以最后一次
+    // 面板选择为准 —— 中途的 live 编辑不会在切走再切回后借尸还魂。
     window.localStorage.setItem(
       'workerCreationPrefs',
       JSON.stringify({
@@ -1136,11 +1132,11 @@ describe('CreateWorkerPopover', () => {
     );
     fireEvent.click(screen.getByTestId('pick-xd-row-bare'));
     fireEvent.click(screen.getByTestId('edit-active-effort'));
-    selectWorkerAgent('cc');
+    fireEvent.click(screen.getByTestId('pick-claude-model'));
     await waitFor(() =>
       expect(screen.getByTestId('model-selector').textContent).toContain('claude-sonnet-4-6'),
     );
-    selectWorkerAgent('codex');
+    fireEvent.click(screen.getByTestId('pick-codex-config'));
     await waitFor(() =>
       expect(screen.getByTestId('model-selector').dataset.currentProvider).toBe('xd'),
     );

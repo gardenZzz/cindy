@@ -1,7 +1,6 @@
 import type {
   ImDefaultAgentKind,
   ImDefaultAgentSettings,
-  ImDefaultEffort,
   ImDefaultSettingsPatch,
   ImDefaultSettingsState,
 } from '../../../shared/imDefaultSettings';
@@ -17,26 +16,6 @@ import type {
  * available 为空(该 agent 当下一个可用模型都没有)时原样保留已存值: 宁可
  * 维持用户选过的值, 也不把它抹成空字符串。
  */
-export function resolveAgentSwitchSettings(args: {
-  current: ImDefaultAgentSettings;
-  available: ReadonlyArray<{ id: string; efforts?: readonly string[] }>;
-  /**
-   * 强度解析, **必须传 changeModel 用的那一个**(组件里的 resolveEffort)。
-   */
-  resolveEffort: (modelId: string, requested: ImDefaultEffort) => ImDefaultEffort;
-  resolveProviderId: (modelId: string, providerId: string | null) => string | null;
-}): ImDefaultAgentSettings {
-  const { current, available, resolveEffort, resolveProviderId } = args;
-  if (available.length === 0) return current;
-  const keptModel = available.find((m) => m.id === current.model);
-  const model = keptModel ?? available[0]!;
-  return {
-    model: model.id,
-    providerId: resolveProviderId(model.id, keptModel ? current.providerId : null),
-    effort: resolveEffort(model.id, current.effort),
-  };
-}
-
 export function buildAgentSettingsPatch(
   agentKind: ImDefaultAgentKind,
   nextSettings: ImDefaultAgentSettings,

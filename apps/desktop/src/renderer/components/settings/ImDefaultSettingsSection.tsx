@@ -15,11 +15,9 @@ import { MessageSquare, AlertTriangle } from 'lucide-react';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 
-import { AgentSelect } from '@/components/new-chat/AgentSelect';
 import { ModelSelector } from '@/components/new-chat/ModelSelector';
 import { PermissionSelector } from '@/components/new-chat/PermissionSelector';
 import { type ModelDescriptor, useAgentCapabilities } from '@/hooks/useAgentCapabilities';
-import { useCursorAvailable } from '@/hooks/useCursorAvailable';
 import { useProviders } from '@/hooks/useProviders';
 import { deriveModelsFromProviders } from '@/lib/providerModels';
 import { toast } from '@/lib/toast';
@@ -37,15 +35,11 @@ import {
   type ImDefaultSettingsState,
   isImDefaultEffort,
 } from '../../../shared/imDefaultSettings';
-import {
-  agentKindToDraftVendor,
-  draftVendorToAgentKind,
-} from '../../../shared/agentKindDraftVendor';
+import { agentKindToDraftVendor } from '../../../shared/agentKindDraftVendor';
 import { DefaultOverrideControls } from './DefaultOverrideControls';
 import {
   buildAgentSettingsPatch,
   mergeSettingsPatch,
-  resolveAgentSwitchSettings,
 } from './imDefaultSettingsLogic';
 
 function agentKindOfVendor(vendor: string): ImDefaultAgentKind {
@@ -86,9 +80,6 @@ export function ImDefaultSettingsSection({
   const codex = useAgentCapabilities('codex');
   const pi = useAgentCapabilities('pi');
   const cursor = useAgentCapabilities('cursor');
-  // 本机没装 cursor-agent 时不列出 Cursor(fail-closed,与创建入口同口径):
-  // 选了也建不出会话。已存的 cursor 选择仍由 AgentSelect 的「当前值必显」保留。
-  const cursorAvailable = useCursorAvailable();
   const [settings, setSettings] = useState<ImDefaultSettingsState | null>(null);
   const [pending, setPending] = useState(false);
 
@@ -263,18 +254,6 @@ export function ImDefaultSettingsSection({
           : null
       : null;
 
-  const changeAgent = (agentKind: ImDefaultAgentKind) => {
-    if (agentKind === settings.agentKind) return;
-    const next = resolveAgentSwitchSettings({
-      current: settings.agents[agentKind],
-      available: modelsByAgent[agentKind],
-      resolveEffort: (modelId, requested) => resolveEffort(agentKind, modelId, requested),
-      resolveProviderId: (modelId, providerId) =>
-        resolveProviderId(agentKind, modelId, providerId),
-    });
-    void persist({ agentKind, ...buildAgentSettingsPatch(agentKind, next) });
-  };
-
   const changeModel = (
     model: string,
     providerId: string | null = activeSettings.providerId,
@@ -339,58 +318,45 @@ export function ImDefaultSettingsSection({
         />
       </div>
 
-      <div className="grid gap-4 md:grid-cols-[minmax(0,0.95fr)_minmax(0,1.05fr)]">
-        <div className="flex flex-col gap-2">
-          <span className="text-12 font-medium text-[var(--text-secondary)]">
-            {t('settings.imBot.defaults.agentLabel')}
-          </span>
-          <AgentSelect
-            value={agentKindToDraftVendor(settings.agentKind)}
-            triggerVariant="field"
-            side="bottom"
-            disabled={pending}
-            ariaContext={t('settings.imBot.defaults.agentLabel')}
-            hiddenVendors={cursorAvailable ? undefined : (['cursor'] as const)}
-            onChange={(next) => {
-              if (next !== 'orca') changeAgent(draftVendorToAgentKind(next));
-            }}
-          />
-        </div>
-        <div className="flex flex-col gap-2">
-          <span className="text-12 font-medium text-[var(--text-secondary)]">
-            {t('settings.imBot.defaults.modelLabel')}
-          </span>
-          <ModelSelector
-            fastModeConfigurable={false}
-            unifiedAgents={pickerAgents}
-            onUnifiedSelect={({ engine, modelId, providerId, effort }) => {
-              const agentKind = agentKindOfVendor(engine);
-              return persist({
-                agentKind,
-                ...buildAgentSettingsPatch(agentKind, {
-                  ...settings.agents[agentKind],
-                  model: modelId,
-                  providerId,
-                  effort: isImDefaultEffort(effort)
-                    ? effort
-                    : resolveEffort(agentKind, modelId, ''),
-                }),
-              });
-            }}
-            modelId={activeSettings.model}
-            effort={activeSettings.effort}
-            onModelChange={(modelId) => changeModel(modelId)}
-            onEffortChange={changeEffort}
-            vendorKey={agentKindToDraftVendor(settings.agentKind)}
-            currentProviderId={activeSettings.providerId}
-            onProviderChange={(providerId, modelId, reconciledEffort) => {
-              changeModel(modelId ?? activeSettings.model, providerId, reconciledEffort);
-            }}
-            switching={pending}
-            triggerVariant="field"
-            popoverSide="bottom"
-          />
-        </div>
+      {/* Harness 与模型一次提交（model-selector-unified.md「设置类入口」）：在面板里
+          切 Harness，不再并挂一个独立的 Harness 控件——两个控件改同一件事必然出现
+          显示不一致。可选 Harness 由运行时 roster 决定（ADR 0006）。
+          field 形态的面板宽度绑定 trigger 宽度（DESIGN.md §4），压到半栏会让下拉窄
+          到截断模型名，所以给它整行。 */}
+      <div className="flex min-w-0 flex-col gap-2">
+        <span className="text-12 font-medium text-[var(--text-secondary)]">
+          {t('settings.imBot.defaults.modelLabel')}
+        </span>
+        <ModelSelector
+          fastModeConfigurable={false}
+          unifiedAgents={pickerAgents}
+          onUnifiedSelect={({ engine, modelId, providerId, effort }) => {
+            const agentKind = agentKindOfVendor(engine);
+            return persist({
+              agentKind,
+              ...buildAgentSettingsPatch(agentKind, {
+                ...settings.agents[agentKind],
+                model: modelId,
+                providerId,
+                effort: isImDefaultEffort(effort)
+                  ? effort
+                  : resolveEffort(agentKind, modelId, ''),
+              }),
+            });
+          }}
+          modelId={activeSettings.model}
+          effort={activeSettings.effort}
+          onModelChange={(modelId) => changeModel(modelId)}
+          onEffortChange={changeEffort}
+          vendorKey={agentKindToDraftVendor(settings.agentKind)}
+          currentProviderId={activeSettings.providerId}
+          onProviderChange={(providerId, modelId, reconciledEffort) => {
+            changeModel(modelId ?? activeSettings.model, providerId, reconciledEffort);
+          }}
+          switching={pending}
+          triggerVariant="field"
+          popoverSide="bottom"
+        />
       </div>
 
       {/* 飞书专属: 群里新建任务统一用的权限档(默认自动审批) —— 群里 @bot 开话题、

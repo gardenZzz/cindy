@@ -80,7 +80,9 @@ vi.mock('@/components/new-chat/ModelSelector', () => ({
   ModelIconMark: () => null,
 }));
 
-vi.mock('@/hooks/useAvailableAgents', () => ({ useModelPickerAgents: () => ['claude-code', 'codex', 'pi'] }));
+vi.mock('@/hooks/useAvailableAgents', () => ({
+  useModelPickerAgents: () => ['claude-code', 'codex', 'cursor', 'pi'],
+}));
 
 vi.mock('@/hooks/useAgentCapabilities', () => ({
   getCachedCapabilities: () => null,

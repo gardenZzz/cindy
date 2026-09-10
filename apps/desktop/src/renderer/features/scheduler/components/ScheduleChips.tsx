@@ -10,9 +10,6 @@ import {
   FolderPickerPopover,
   type FolderPickerOption,
 } from '@/components/new-chat/FolderPickerPopover';
-import { AgentSelect } from '@/components/new-chat/AgentSelect';
-import { agentKindToVendor } from '@/components/sidebar/VendorIcon';
-import { useCursorAvailable } from '@/hooks/useCursorAvailable';
 import { useDetectCwd } from '@/hooks/useWorktreeQueries';
 import { useAgentCapabilities, type ModelDescriptor } from '@/hooks/useAgentCapabilities';
 import { useProviders } from '@/hooks/useProviders';
@@ -191,43 +188,6 @@ export function ProjectChip({
     </FolderPickerPopover>
   );
 }
-
-/**
- * Scheduler compatibility adapter: keep the persisted scheduler kind shape,
- * while sharing the same AgentSelect dropdown used by IM settings and chat.
- */
-export function AgentTabs({ value, onChange, disabled }: { value: AgentKind; onChange: (v: AgentKind) => void; disabled?: boolean }) {
-  // 本机没装 cursor-agent 还让选 Cursor，只会建出一条到触发时才失败的自动化
-  // （定时任务在 runner 里按 agentKind 起会话，那时才发现 agent 未注册）。
-  // 与 CreateWorkerPopover 同一处置；hook 内部 fail-closed（未知也不露出），
-  // 已选中的值由 AgentSelect 自身保留，不会把存量任务的 Cursor 选择抹掉。
-  const cursorAvailable = useCursorAvailable();
-  return (
-    <AgentSelect
-      value={agentKindToVendor(value)}
-      disabled={disabled}
-      hiddenVendors={cursorAvailable ? undefined : (['cursor'] as const)}
-      side="top"
-      // ScheduleFormDialog 是 Radix modal。MorphPopover 的 custom portal 不在
-      // Dialog focus scope 内，动画结束聚焦选中项时会被拉回并立即自动收起；
-      // 此处使用 Radix Popover，让嵌套焦点与 outside-interaction 语义正确组合。
-      useMorphPopover={false}
-      overlayContentClassName="z-[10010]"
-      onChange={(vendor) => {
-        onChange(
-          vendor === 'cc'
-            ? 'claude-code'
-            : vendor === 'cursor'
-              ? 'cursor'
-              : vendor === 'pi'
-                ? 'pi'
-                : 'codex',
-        );
-      }}
-    />
-  );
-}
-
 
 export function ScheduleSettingsButton({
   cwd,
@@ -1362,7 +1322,10 @@ export function ModelEffortChip({
         {/* 直接复用聊天的下拉内容本体(唯一真源:聊天选择器改了这里跟着变)。
             来源轨 / 模型分组 / 搜索 / effort / 空态全套自带;followSession 行为 opt-in。 */}
         <ModelSelectorContent
-          fastModeConfigurable={['codex', 'pi']}
+          // 派发端(scheduler runner)对 Codex / Cursor / Pi 都认 fastMode,UI 不给设
+          // 属于单方面收窄。Cursor 的 Fast 是 per-model 能力,面板逐行判,放开不会
+          // 列出不支持的行。Claude Code 恒不传,确保「不影响 Claude」。
+          fastModeConfigurable={['codex', 'cursor', 'pi']}
           unifiedAgents={pickerAgents}
           onUnifiedSelect={onSelect}
           vendorKey={vendorKey}

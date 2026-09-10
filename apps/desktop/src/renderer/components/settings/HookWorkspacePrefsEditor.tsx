@@ -43,11 +43,8 @@ import { cn } from '@/lib/utils';
 import { toast } from '@/lib/toast';
 import { extractIpcError } from '@/utils/ipcError';
 import { useAgentCapabilities, type AgentCapabilities } from '@/hooks/useAgentCapabilities';
-import { useCursorAvailable } from '@/hooks/useCursorAvailable';
-import { AgentSelect } from '@/components/new-chat/AgentSelect';
 import { ModelSelector } from '@/components/new-chat/ModelSelector';
 import { PermissionSelector } from '@/components/new-chat/PermissionSelector';
-import type { MakerVendor } from '@/lib/ccAgent.types';
 import {
   getProviderModelEffort,
   setProviderModelChoice,
@@ -68,7 +65,6 @@ import {
   AGENT_KINDS,
   HOOK_DEFAULT_PERMISSION_MODE,
   isKnownAgent,
-  patchForAgentChange,
   patchForModelChange,
   resolveEffectiveRow,
   type ImDefaultsLike,
@@ -497,21 +493,7 @@ function toVendorKey(agentKind: string | null): 'cc' | 'codex' | 'cursor' | 'pi'
   return agentKind === 'codex' || agentKind === 'pi' || agentKind === 'cursor' ? agentKind : 'cc';
 }
 
-/**
- * 选择器的 vendor key → hook prefs 的 agentKind。
- * MakerVendor 还含 'orca' 等本编辑器不支持的值 —— 分段只有 Claude/Codex 两项,该分支
- * 物理不可达;若未来有人把别的 vendor 接进来,fail-fast 好过静默写成 claude-code
- * 偏好(Copilot review)。
- */
-function toAgentKind(vendor: MakerVendor): KnownAgent {
-  if (vendor === 'codex') return 'codex';
-  if (vendor === 'pi') return 'pi';
-  if (vendor === 'cursor') return 'cursor';
-  if (vendor === 'cc') return 'claude-code';
-  throw new Error(`WorkspacePrefsEditor: unsupported vendor '${vendor}' for hook prefs`);
-}
-
-/** 目录卡片内的偏好编辑行(完整模型配置 / 权限;Cursor 仍用独立引擎下拉叠在统一选择器上)。alias 为该行当前生效别名。 */
+/** 目录卡片内的偏好编辑行(完整模型配置 / 权限,Harness 在面板内切)。alias 为该行当前生效别名。 */
 export function WorkspacePrefsEditor({
   alias,
   state,
@@ -526,7 +508,6 @@ export function WorkspacePrefsEditor({
   const codexCaps = useAgentCapabilities('codex');
   const piCaps = useAgentCapabilities('pi');
   const cursorCaps = useAgentCapabilities('cursor');
-  const cursorAvailable = useCursorAvailable();
   const capsByAgent = useMemo(
     () =>
       ({
@@ -549,9 +530,9 @@ export function WorkspacePrefsEditor({
   const disabled = !state.editable || state.pendingWs === alias;
   const vendorKey = toVendorKey(eff.agentKind.id);
 
-  const pickerAgents = useModelPickerAgents(
-    vendorKey === 'cc' ? 'claude-code' : vendorKey === 'pi' ? 'pi' : vendorKey === 'codex' ? 'codex' : 'claude-code',
-  );
+  // 直接传运行时 agentKind:经 vendorKey 中转的那条三分支会把 cursor 折成
+  // claude-code,「当前已选恒显」在 Cursor 上就失效了(ADR 0006)。
+  const pickerAgents = useModelPickerAgents(eff.agentKind.id ?? 'claude-code');
 
   /** 落一个模型选择(分段行与 flat 行共用): 随手写入 (agent, model) 配对并校准 effort。 */
   const applyModel = (next: string) => {
@@ -564,27 +545,8 @@ export function WorkspacePrefsEditor({
 
   return (
     <div className="flex flex-wrap items-end gap-2">
-      {/* Cursor 仍走独立引擎下拉叠在统一 ModelSelector 上;三引擎切 Harness 由面板 onUnifiedSelect 完成。 */}
-      <PrefsField
-        label={t('settings.tina.prefs.agentLabel')}
-        className="w-[168px] shrink-0 basis-[168px]"
-      >
-        <AgentSelect
-          value={vendorKey}
-          triggerVariant="field"
-          dense
-          side="bottom"
-          ariaContext={`${t('settings.tina.prefs.agentLabel')} · ${alias}`}
-          disabled={disabled}
-          hiddenVendors={cursorAvailable ? undefined : (['cursor'] as const)}
-          reselectEmitsChange
-          onChange={(next) => {
-            const nextAgent = toAgentKind(next);
-            if (nextAgent === prefs.agentKind) return;
-            state.applyPatch(alias, patchForAgentChange(nextAgent));
-          }}
-        />
-      </PrefsField>
+      {/* Harness 只在面板里切,不再并挂独立引擎下拉(model-selector-unified.md「设置类
+          入口」);可选 Harness 由运行时 roster 决定(ADR 0006)。 */}
       {/* 模型 + 思考强度同一个控件, **composer 同款全功能标准面板**(2026-07 用户
           定稿基准: 全软件一个模型选择面板, 处处同行为, 差异只有样式):供应商分段、
           订阅来源、推理强度全开。来源(providerId)是纯客户端维度, 落本地

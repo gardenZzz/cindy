@@ -37,13 +37,6 @@ export interface PrefsAgentCaps {
   permissionModes: Array<{ id: string }>;
 }
 
-export function patchForAgentChange(next: string | null): HookPrefsPatch {
-  if (next === null) {
-    return { agentKind: null, model: null, effort: null };
-  }
-  return { agentKind: next, model: null, effort: null };
-}
-
 /** 换 model 的联动 patch(agentKind 随手配对写入 + effort 校准)。 */
 export function patchForModelChange(
   agentKind: string,

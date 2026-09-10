@@ -13,14 +13,12 @@ import {
   providerOffersModel,
 } from '@cindy/model-providers';
 
-import { AgentSelect } from '@/components/new-chat/AgentSelect';
 import { FastModeToggle } from '@/components/new-chat/FastModeToggle';
 import { FullAccessConfirmContent } from '@/components/new-chat/FullAccessConfirmContent';
 import { ModelSelector } from '@/components/new-chat/ModelSelector';
 import { PermissionSelector } from '@/components/new-chat/PermissionSelector';
 import { VendorSegmentedSwitcher } from '@/components/new-chat/VendorSegmentedSwitcher';
 import { agentKindToVendor } from '@/components/sidebar/VendorIcon';
-import type { MakerVendor } from '@/lib/ccAgent.types';
 import { useAgentCapabilities } from '@/hooks/useAgentCapabilities';
 import { useDeviceProviders } from '@/hooks/useDeviceProviders';
 import { useProviders } from '@/hooks/useProviders';
@@ -754,38 +752,26 @@ export function CreateWorkerPopover({
           )}
         </div>
 
-        <div className="mb-4 grid grid-cols-[auto_minmax(0,1fr)] gap-4">
-          {deviceId && remoteProviders.unsupported ? (
+        <div
+          className={cn(
+            'mb-4 grid gap-4',
+            // 兼容列表在场才留出它那一栏；正常分支模型选择器独占整行，塞进 auto 栏会被压窄。
+            deviceId && remoteProviders.unsupported
+              ? 'grid-cols-[auto_minmax(0,1fr)]'
+              : 'grid-cols-1',
+          )}
+        >
+          {/* 被控端老到连模型来源都枚举不了时保留兼容列表(model-selector-unified.md
+              §A 版);这一档 roster 通道大概率同样不可达，fail-open 会退化成无依据的
+              全部放开，所以窄化保留、不含 Cursor(ADR 0006 例外条)。
+              正常分支不再并挂独立 Harness 控件：面板内一次提交 Harness + 来源 + 模型。 */}
+          {deviceId && remoteProviders.unsupported && (
             <VendorSegmentedSwitcher
               value={vendorKey}
               width={220}
               ariaLabel={t('orca.createWorker.agentLabel')}
               onChange={(next) => updateAgent(next === 'codex' ? 'codex' : next === 'pi' ? 'pi' : 'claude-code')}
             />
-          ) : (
-            <div className="min-w-0">
-              <div className="mb-2 text-12 font-medium uppercase tracking-[0.5px] text-[var(--text-tertiary)]">
-                {t('orca.createWorker.agentLabel')}
-              </div>
-              <AgentSelect
-                value={vendorKey}
-                side="bottom"
-                hiddenVendors={
-                  cursorAvailable ? undefined : (['cursor'] as const satisfies readonly MakerVendor[])
-                }
-                onChange={(next) =>
-                  updateAgent(
-                    next === 'codex'
-                      ? 'codex'
-                      : next === 'cursor'
-                        ? 'cursor'
-                        : next === 'pi'
-                          ? 'pi'
-                          : 'claude-code',
-                  )
-                }
-              />
-            </div>
           )}
 
           <div className="min-w-0">
@@ -804,7 +790,9 @@ export function CreateWorkerPopover({
               )}
               <ModelSelector
                 fastModeConfigurable={['codex', 'pi']}
-                unifiedAgents={sshRemote ? (pickerAgents ?? ['claude-code', 'codex']).filter((kind) => kind !== 'pi') : pickerAgents}
+                // SSH 远程 Lead 跑不了 Pi，这是部署约束、可以窄化；但 roster 未知时
+                // 不能拿一份硬编码清单兜底 —— 那会把 Cursor 一并抹掉（ADR 0006）。
+                unifiedAgents={sshRemote ? pickerAgents?.filter((kind) => kind !== 'pi') : pickerAgents}
                 onUnifiedSelect={deviceId && remoteProviders.unsupported ? undefined : (selection) => {
                   const nextAgent = selection.engine === 'cc' ? 'claude-code' : selection.engine;
                   updateAgent(nextAgent);

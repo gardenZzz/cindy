@@ -12,11 +12,12 @@ const capabilityMockState = vi.hoisted(() => ({
     supported: { supported: true };
     unsupportedPermissionModes: string[];
   } | null,
-  cursorAvailable: true,
+  /** 运行时 roster 投影 —— Harness 可选集合的唯一来源(ADR 0006)。 */
+  pickerAgents: ['claude-code', 'codex', 'cursor', 'pi'] as readonly string[] | undefined,
 }));
 
-/** 捕获引擎下拉的 props —— 断言 Cursor 的可选性与选中回调。 */
-const agentSelectMock = vi.hoisted(() => ({
+/** 捕获模型面板的 props —— Harness 可选集合与一次提交的选中回调都在这里。 */
+const modelSelectorMock = vi.hoisted(() => ({
   props: [] as Array<Record<string, unknown>>,
 }));
 
@@ -65,27 +66,23 @@ vi.mock('@/hooks/useProviders', () => ({
   useProviders: () => ({ providers: [] }),
 }));
 
-vi.mock('@/hooks/useCursorAvailable', () => ({
-  useCursorAvailable: () => capabilityMockState.cursorAvailable,
-  useCursorAvailability: () => capabilityMockState.cursorAvailable,
-}));
-
-vi.mock('@/components/new-chat/AgentSelect', () => ({
-  AgentSelect: (props: Record<string, unknown>) => {
-    agentSelectMock.props.push(props);
-    return null;
-  },
-}));
-
 vi.mock('@/hooks/useAvailableAgents', () => ({
-  useModelPickerAgents: () => ['claude-code', 'codex', 'pi'],
+  useModelPickerAgents: () => capabilityMockState.pickerAgents,
 }));
 
 vi.mock('@/components/new-chat/ModelSelector', () => ({
-  ModelSelector: ({ onUnifiedSelect, fastModeConfigurable }: {
-    onUnifiedSelect: (selection: object) => void; fastModeConfigurable: boolean;
-  }) => <button data-testid="select-codex" data-fast-configurable={String(fastModeConfigurable)}
-    onClick={() => onUnifiedSelect({ engine: 'codex', modelId: 'gpt-5.5', providerId: 'xd', effort: 'low', fast: false })}>Select Codex</button>,
+  ModelSelector: (props: Record<string, unknown>) => {
+    modelSelectorMock.props.push(props);
+    const onUnifiedSelect = props.onUnifiedSelect as (selection: object) => void;
+    return (
+      <>
+        <button data-testid="select-codex" data-fast-configurable={String(props.fastModeConfigurable)}
+          onClick={() => onUnifiedSelect({ engine: 'codex', modelId: 'gpt-5.5', providerId: 'xd', effort: 'low', fast: false })}>Select Codex</button>
+        <button data-testid="select-cursor"
+          onClick={() => onUnifiedSelect({ engine: 'cursor', modelId: 'composer-1', providerId: null, effort: undefined, fast: false })}>Select Cursor</button>
+      </>
+    );
+  },
 }));
 
 vi.mock('@/components/new-chat/PermissionSelector', () => ({
@@ -135,8 +132,8 @@ describe('ImDefaultSettingsSection Pi channel warning', () => {
     capabilityMockState.loadingAgent = null;
     capabilityMockState.errorAgent = null;
     capabilityMockState.piTurnPermissionPolicy = null;
-    capabilityMockState.cursorAvailable = true;
-    agentSelectMock.props.length = 0;
+    capabilityMockState.pickerAgents = ['claude-code', 'codex', 'cursor', 'pi'];
+    modelSelectorMock.props.length = 0;
     window.electronAPI = {
       maker: {
         imDefaultSettingsGet: vi.fn(async () => defaults('pi')),
@@ -274,13 +271,10 @@ describe('ImDefaultSettingsSection Pi channel warning', () => {
         imDefaultSettingsSet: setSpy,
       },
     } as unknown as typeof window.electronAPI;
-    agentSelectMock.props.length = 0;
     render(<ImDefaultSettingsSection channel="telegram" />);
-    await screen.findByText('settings.imBot.defaults.agentLabel');
+    await screen.findByText('settings.imBot.defaults.modelLabel');
 
-    const props = agentSelectMock.props.at(-1);
-    expect(props?.hiddenVendors).toBeUndefined();
-    (props?.onChange as (next: string) => void)('cursor');
+    fireEvent.click(screen.getByTestId('select-cursor'));
     await waitFor(() => expect(setSpy).toHaveBeenCalled());
 
     expect(setSpy).toHaveBeenCalledWith(
@@ -289,13 +283,25 @@ describe('ImDefaultSettingsSection Pi channel warning', () => {
     );
   });
 
-  it('hides Cursor when cursor-agent is not installed on this machine', async () => {
-    capabilityMockState.cursorAvailable = false;
-    agentSelectMock.props.length = 0;
+  it('lists Harnesses straight from the runtime roster, with no second Harness control', async () => {
+    modelSelectorMock.props.length = 0;
     render(<ImDefaultSettingsSection channel="telegram" />);
-    await screen.findByText('settings.imBot.defaults.agentLabel');
+    await screen.findByText('settings.imBot.defaults.modelLabel');
 
-    expect(agentSelectMock.props.at(-1)?.hiddenVendors).toContain('cursor');
+    expect(modelSelectorMock.props.at(-1)?.unifiedAgents).toEqual([
+      'claude-code', 'codex', 'cursor', 'pi',
+    ]);
+    // 面板是唯一能改 Harness 的地方,不再并挂独立控件(model-selector-unified.md)。
+    expect(screen.queryByText('settings.imBot.defaults.agentLabel')).toBeNull();
+  });
+
+  it('omits Cursor when the roster does not register it', async () => {
+    capabilityMockState.pickerAgents = ['claude-code', 'codex', 'pi'];
+    modelSelectorMock.props.length = 0;
+    render(<ImDefaultSettingsSection channel="telegram" />);
+    await screen.findByText('settings.imBot.defaults.modelLabel');
+
+    expect(modelSelectorMock.props.at(-1)?.unifiedAgents).not.toContain('cursor');
   });
 
   it('does not warn for Pi on conditional-policy channels (telegram / dingtalk)', async () => {

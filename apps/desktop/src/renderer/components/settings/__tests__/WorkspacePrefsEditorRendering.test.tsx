@@ -5,12 +5,11 @@
  *
  * 回归目标(2026-07 用户定稿): 这一行曾自建裸下拉,把 'claude-code' 原始 id 直接
  * 露给用户、自己拼一遍可选模型清单、effort 显示未经 i18n 的 low/medium/high。
- * 这里锁三件事: 三个字段分别落在 AgentSelect / ModelSelector / PermissionSelector
- * 上;effort 没有独立控件(并进模型 trigger);禁用态整行同步。
+ * 这里锁三件事: 模型与权限分别落在 ModelSelector / PermissionSelector 上;
+ * effort 没有独立控件(并进模型 trigger);禁用态整行同步。
  *
- * agent 字段自 2026-08-03 起复用新建对话工具条的引擎下拉(AgentSelect, #1350) ——
- * 定宽三等分的分段器每多一个引擎就窄一截。控件内部行为(展开/打勾/焦点/重选不回调)
- * 由 __tests__/agentSelect.test.tsx 负责,这里只验「用了它、参数对、写入对」。
+ * Harness 自 ADR 0006 起只在模型面板内切,不再并挂独立引擎下拉;可选集合由运行时
+ * roster 决定,本文件只验「传对了、写入对」,不验面板内部行为。
  */
 
 import { cleanup, fireEvent, render, screen } from '@testing-library/react';
@@ -41,8 +40,11 @@ vi.mock('@/hooks/useAgentCapabilities', () => ({
         },
 }));
 
-vi.mock('@/hooks/useAvailableAgents', () => ({ useModelPickerAgents: () => ['claude-code', 'codex', 'pi'] }));
+const pickerAgentsMock = vi.hoisted(() => ({ value: ['claude-code', 'codex', 'cursor', 'pi'] }));
+vi.mock('@/hooks/useAvailableAgents', () => ({ useModelPickerAgents: () => pickerAgentsMock.value }));
 
+// AgentSelect 的 mock 保留:它是「不再并挂独立引擎下拉」那条断言的检测器 —— 没有它,
+// 组件真的把 AgentSelect 加回来时也不会渲染出 agent-select，断言会空跑。
 vi.mock('@/components/new-chat/AgentSelect', () => ({
   AgentSelect: (props: {
     value: string;
@@ -181,9 +183,9 @@ describe('WorkspacePrefsEditor 复用标准选择器', () => {
   it('模型与权限使用标准 field,模型内切 Harness', () => {
     render(<WorkspacePrefsEditor alias="cindy" state={stateWith()} maxVisibleModelRows={6} />);
 
-    const agent = screen.getByTestId('agent-select');
-    expect(agent.getAttribute('data-value')).toBe('cc');
-    expect(agent.getAttribute('data-trigger-variant')).toBe('field');
+    // Harness 只在面板里切:不再并挂独立引擎下拉(ADR 0006)。
+    expect(screen.queryByTestId('agent-select')).toBeNull();
+    expect(screen.queryByText('settings.tina.prefs.agentLabel')).toBeNull();
     const model = screen.getByTestId('model-selector');
     expect(model.getAttribute('data-fast-configurable')).toBe('false');
     expect(model.getAttribute('data-model')).toBe('claude-opus-4-8');
@@ -275,9 +277,9 @@ describe('WorkspacePrefsEditor 复用标准选择器', () => {
     render(<WorkspacePrefsEditor alias="cindy" state={stateWith()} />);
 
     expect(screen.getByTestId('model-selector').getAttribute('data-effort')).toBe('high');
-    // effort 并进模型选择器;Cursor 引擎仍占用独立 agent 字段
+    // effort 与 Harness 都并进模型选择器,不留独立字段
     expect(screen.queryByText('settings.tina.prefs.effortLabel')).toBeNull();
-    expect(screen.getByText('settings.tina.prefs.agentLabel')).toBeTruthy();
+    expect(screen.queryByText('settings.tina.prefs.agentLabel')).toBeNull();
     expect(screen.getByText('settings.tina.prefs.modelLabel')).toBeTruthy();
     expect(screen.getByText('settings.tina.prefs.permissionLabel')).toBeTruthy();
   });
@@ -424,12 +426,9 @@ describe('WorkspacePrefsEditor 复用标准选择器', () => {
 
   // 读屏可及名:三个字段都带「字段名 · 行别名」上下文,多卡片同屏行与行可区分
   // (三个字段统一经 ariaContext 前置到各自 trigger 的 aria-label)。
-  it('三个字段都带 alias 化 ariaContext', () => {
+  it('两个字段都带 alias 化 ariaContext', () => {
     render(<WorkspacePrefsEditor alias="cindy" state={stateWith()} />);
 
-    expect(screen.getByTestId('agent-select').getAttribute('data-aria-context')).toBe(
-      'settings.tina.prefs.agentLabel · cindy',
-    );
     expect(screen.getByTestId('model-selector').getAttribute('data-aria-context')).toBe(
       'settings.tina.prefs.modelLabel · cindy',
     );
