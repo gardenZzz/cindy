@@ -1187,6 +1187,26 @@ describe('overlayCursorUnifiedEntries', () => {
       }).map((entry) => entry.modelId),
     ).toEqual(['gpt-5.5']);
   });
+
+  it('agents 不含 cursor 但当前已选是 Cursor 模型时,仍列得出那一条', () => {
+    expect(
+      overlayCursorUnifiedEntries({
+        models: [gpt, composer],
+        agents: ['claude-code', 'codex', 'pi'],
+        keepModel: { providerId: null, modelId: 'composer-1', agent: 'cursor' },
+      }).map((entry) => entry.modelId),
+    ).toEqual(['composer-1']);
+  });
+
+  it('agents 不含 cursor 且当前已选不是 Cursor 时,整段仍不出现', () => {
+    expect(
+      overlayCursorUnifiedEntries({
+        models: [gpt, composer],
+        agents: ['claude-code', 'codex', 'pi'],
+        keepModel: { providerId: 'openai', modelId: 'gpt-5.5', agent: 'codex' },
+      }),
+    ).toEqual([]);
+  });
 });
 
 describe('routeProviderIdOf —— 合成槽的唯一出口', () => {

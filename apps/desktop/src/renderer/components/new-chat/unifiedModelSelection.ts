@@ -815,7 +815,8 @@ function cursorUnifiedEntry(model: CursorOverlayModel): UnifiedModelEntry {
 
 /**
  * 把 Cursor ACP 模型拼进联合列表。不进 catalog / UNIFIED_AGENT_PRIORITY。
- * `agents` 不含 cursor 时返回空;keepModel.agent === 'cursor' 时保住当前 ACP 行。
+ * `agents` 不含 cursor 时整段不出;两道门(roster 与 isVisible)都让位于
+ * keepModel.agent === 'cursor' —— 当前已选的那一行恒在。
  */
 export function overlayCursorUnifiedEntries(args: {
   models?: readonly CursorOverlayModel[];
@@ -823,16 +824,20 @@ export function overlayCursorUnifiedEntries(args: {
   isVisible?: (providerId: string, model: CatalogModel, agent: AgentKind) => boolean;
   keepModel?: { providerId: string | null; modelId: string; agent: AgentKind } | null;
 }): UnifiedModelEntry[] {
-  if (args.agents && !args.agents.includes('cursor')) return [];
   const models = args.models;
   if (!models || models.length === 0) return [];
   const keep = args.keepModel;
+  // 整段早退必须发生在 keepModel 豁免**之后**:否则一份已经存着 Cursor 模型的配置,
+  // 在没装 Cursor / roster 还没回来的机器上打开选择器只看到空段,像是配置被清掉了
+  // (ADR 0006)。豁免只放行「已选的那一条」,不是把整段放开。
+  const rosterAllowsCursor = !args.agents || args.agents.includes('cursor');
   const out: UnifiedModelEntry[] = [];
   for (const model of models) {
     const keepSelected =
       keep?.agent === 'cursor' &&
       keep.modelId === model.id &&
       (keep.providerId === null || keep.providerId === CURSOR_UNIFIED_SOURCE_ID);
+    if (!keepSelected && !rosterAllowsCursor) continue;
     if (
       !keepSelected &&
       args.isVisible &&
