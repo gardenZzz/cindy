@@ -1022,6 +1022,8 @@ export function UnifiedModelList({
 
   return (
     <div className={cn('flex min-h-0 flex-col', compactList ? 'shrink-0' : 'flex-1')}>
+      {/* 第一行说明模型选择与管理，第二行仅筛选当前列表。排列和批量配置在菜单里
+          明确分组，任何筛选或排列操作都不写入模型开关。 */}
       {/* 工具行与 CursorModelList 共用 ModelListToolbar;这里只注入本列表特有的
           排列/批量菜单与用途筛选。 */}
       {!compactEmpty && (
@@ -1086,62 +1088,6 @@ export function UnifiedModelList({
               </>
             ) : undefined
           }
-          filters={
-            showKindFilter ? (
-              <div
-                className="flex flex-wrap items-center gap-0.5 rounded-full p-0.5"
-                style={{ backgroundColor: 'var(--surface-elevated)' }}
-                role="group"
-                aria-label={t('settings.providers.models.kindFilter.aria')}
-              >
-                {(['all', ...presentCategories] as Array<ModelCategory | 'chat' | 'all'>).map(
-                  (kind) => (
-                    <button
-                      key={kind}
-                      type="button"
-                      onClick={() => setKindFilter(kind)}
-                      aria-pressed={kindFilter === kind}
-                      className={cn(
-                        'h-6 rounded-full px-2.5 text-12 transition-colors',
-                        kindFilter === kind
-                          ? 'bg-[var(--surface-hover)] font-medium text-[var(--text-primary)]'
-                          : 'text-[var(--text-secondary)] hover:text-[var(--text-primary)]',
-                      )}
-                    >
-                      {kind === 'all'
-                        ? t('settings.providers.models.kindFilter.all')
-                        : kind === 'chat'
-                          ? t('settings.providers.models.kindFilter.chat')
-                          : t(CATEGORY_LABEL_KEY[kind])}
-                    </button>
-                  ),
-                )}
-              </div>
-            ) : undefined
-          }
-          search={showSearch ? { value: query, onChange: setQuery } : undefined}
-        />
-      )}
-
-      {/* 分组 + 模型行 + 底部「已停用」分区:唯一滚动区,与上方固定工具行以
-          1px 细线分隔。视觉左右边距 20px = 容器 px-3 + 行 px-2(行悬停底色要包住内容)。 */}
-      <div
-        className={cn('min-h-0 overflow-y-auto border-t', compactList ? 'shrink-0' : 'flex-1')}
-        style={{ borderColor: 'var(--settings-theme-card-border)' }}
-      >
-        <div className={cn('flex flex-col gap-4 px-3 pt-1.5', compactList ? 'pb-2' : 'pb-4')}>
-          {groups.length === 0 && hiddenRows.length === 0 && disabledRows.length === 0 ? (
-            <div
-              className={cn(compactEmpty ? 'px-2 py-2 text-left' : 'py-4 text-center', 'text-13')}
-              style={{ color: 'var(--text-tertiary)' }}
-            >
-              {query.trim()
-                ? t('settings.providers.models.noResults')
-                : (emptyMessage ?? t('settings.providers.models.noResults'))}
-            </div>
-          ) : (
-            groups.map((g) => {
-              // 搜索时强制展开(否则匹配项藏在折叠组里看不到);仅多组时才有折叠头。
           filters={
             showKindFilter ? (
               <div
