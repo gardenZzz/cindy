@@ -410,6 +410,7 @@ export interface AgentIslandStrings {
   needsInput: string;
   completed: string;
   error: string;
+  outputLimit: string;
   input: string;
   done: string;
   running: string;
@@ -438,6 +439,7 @@ export const DEFAULT_AGENT_ISLAND_STRINGS: AgentIslandStrings = {
   needsInput: 'Needs input',
   completed: 'Completed',
   error: 'Error',
+  outputLimit: 'The model reached its output limit, so this response may be incomplete. Send the next message to continue.',
   input: 'Input',
   done: 'Done',
   running: 'Running',

@@ -308,7 +308,8 @@ import {
 import * as cindyMediaBlobStore from './cindy-media/blobStore';
 import * as cindyChatAttachments from './cindy-media/chatAttachments';
 import { getFixedDirectoryStats, openOrCreateFixedDirectory } from './cindy-media/fixedDirectory';
-import { openMakeToolsDirectory } from './cindy-make/toolsDirectory';
+import { openMakeSourceDirectory, openMakeToolsDirectory } from './cindy-make/toolsDirectory';
+import { makeSourceRoot, readCindySourceStatus } from './cindy-make/sourcePreparation.js';
 import { createStorageIpcHandlers } from './cindy-media/storageIpc';
 import {
   collectDatabaseSizeWarningStatus,
@@ -592,6 +593,7 @@ import {
   loadXaiModelsFromDiskCache,
   refreshXaiModelsFromHttp,
 } from './maker-host/model-discovery/xai.js';
+import { notifyOpenAiMediaCredentialChanged } from './maker-host/model-discovery/openai-media.js';
 import { refreshCustomMcpProviders } from './mcp-integrations/custom-mcp-registry.js';
 import {
   clearXaiRateLimitSnapshot,
@@ -5364,6 +5366,9 @@ const registerIpcHandlers = () => {
       source: 'host_config',
       ref: `provider:${providerId}`,
     });
+    if (providerId === 'openai-images') {
+      notifyOpenAiMediaCredentialChanged();
+    }
     // 向所有窗口广播 PROVIDER_CHANGED:useProviders 依赖此消息刷新连接态快照(多窗口同步)。
     for (const win of BrowserWindow.getAllWindows()) {
       if (!win.isDestroyed()) {
@@ -7281,6 +7286,21 @@ const registerIpcHandlers = () => {
     async (event): Promise<{ success: boolean }> => {
       assertTrustedAppRendererEvent(event);
       return openMakeToolsDirectory(app.getPath('userData'), {
+        openPath: (directory) => shell.openPath(directory),
+      });
+    },
+  );
+
+  ipcMain.handle('app:get-cindy-make-source-status', async (event) => {
+    assertTrustedAppRendererEvent(event);
+    return readCindySourceStatus(makeSourceRoot(app.getPath('userData')));
+  });
+
+  ipcMain.handle(
+    'app:open-cindy-make-source-dir',
+    async (event): Promise<{ success: boolean }> => {
+      assertTrustedAppRendererEvent(event);
+      return openMakeSourceDirectory(app.getPath('userData'), {
         openPath: (directory) => shell.openPath(directory),
       });
     },
