@@ -997,6 +997,10 @@ const GENERATED_DEFAULTS = {
     "light": "#a78bfa",
     "dark": "#a78bfa"
   },
+  "engine-badge-cursor": {
+    "light": "#6A8499",
+    "dark": "#6A8499"
+  },
   "perm-item-selected-bg": {
     "light": "#f8f8f6",
     "dark": "#3c3c3a"
@@ -2564,6 +2568,7 @@ registerColor('fast-accent', GENERATED_DEFAULTS["fast-accent"], 'Fast 开启态�
 registerColor('engine-badge-cc', GENERATED_DEFAULTS["engine-badge-cc"], 'Claude Code 引擎徽标色 — Anthropic 陶土橙(light/dark 同值)');
 registerColor('engine-badge-codex', GENERATED_DEFAULTS["engine-badge-codex"], 'Codex 引擎徽标色 — 官方渐变中段蓝(light/dark 同值)');
 registerColor('engine-badge-pi', GENERATED_DEFAULTS["engine-badge-pi"], 'Pi 引擎徽标色 — 自选紫,上游无官方品牌色(light/dark 同值)');
+registerColor('engine-badge-cursor', GENERATED_DEFAULTS["engine-badge-cursor"], 'Cursor 引擎徽标色 — 冷灰蓝,仓内无官方品牌色(light/dark 同值)');
 // Permission selector
 registerColor('perm-item-selected-bg', GENERATED_DEFAULTS["perm-item-selected-bg"], 'Warm White — selected item bg');
 
