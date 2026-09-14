@@ -124,7 +124,12 @@ ${JSON.stringify({ skills, tools, previous: previous ? { ...previous, name: inpu
       signal: AbortSignal.timeout(100000),
       beforeDispatch: async (selection) => {
         assertOwner();
-        assertEnabled(selection);
+        if (selection.agentKind === 'cursor') return false;
+        assertEnabled({
+          agentKind: selection.agentKind,
+          providerId: selection.providerId,
+          model: selection.model,
+        });
         return true;
       },
     });

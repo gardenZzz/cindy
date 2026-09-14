@@ -357,7 +357,7 @@ export function getEffectiveBotModelChain(
   return defaultBotModelChain({ providers: providers?.providers ?? [],
     isModelEnabled,
     preferredRoute: {
-      harness: draft.vendor === 'cc' || draft.vendor === 'orca' ? 'claude' : draft.vendor,
+      harness: draft.vendor === 'codex' || draft.vendor === 'pi' ? draft.vendor : 'claude',
       providerId: selected.providerId ?? null, model: selected.model,
       effort: selected.effort ?? '', fastMode: draft.fastModeByModel[selected.model] === true,
     },

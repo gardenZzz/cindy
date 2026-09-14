@@ -200,14 +200,6 @@ beforeEach(() => {
       agent: {
         getCursorBinaryStatus: vi.fn(async () => ({ installed: false })),
       },
-      auth: {
-        getState: vi.fn(async () => ({ authenticated: false })),
-        triggerLogin: vi.fn(),
-        cancelLogin: vi.fn(),
-        logout: vi.fn(),
-        onStateChanged: vi.fn(() => () => undefined),
-        onLoginProgress: vi.fn(() => () => undefined),
-      },
       setProviderOrder: vi.fn(async () => ({ ok: true })),
     },
     openChatGPTApp: vi.fn(async () => ({ success: true })),
@@ -861,14 +853,6 @@ describe('ProvidersSection — 深链定位', () => {
         onProviderOAuthProgress,
         agent: {
           getCursorBinaryStatus: vi.fn(async () => ({ installed: false })),
-        },
-        auth: {
-          getState: vi.fn(async () => ({ authenticated: false })),
-          triggerLogin: vi.fn(),
-          cancelLogin: vi.fn(),
-          logout: vi.fn(),
-          onStateChanged: vi.fn(() => () => undefined),
-          onLoginProgress: vi.fn(() => () => undefined),
         },
         setProviderOrder: vi.fn(async () => ({ ok: true })),
       },

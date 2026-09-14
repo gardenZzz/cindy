@@ -932,7 +932,7 @@ export function applyAppDefaultModelSelection(selection: AppDefaultModelSelectio
   const base = stored ? sanitize(stored) : currentDraft;
   const prefs = base.lastByVendor[base.vendor];
   const current: BotModelRoute | null = prefs.model ? {
-    harness: base.vendor === 'cc' || base.vendor === 'orca' ? 'claude' : base.vendor,
+    harness: base.vendor === 'codex' || base.vendor === 'pi' ? base.vendor : 'claude',
     model: prefs.model, providerId: prefs.providerId ?? null, effort: prefs.effort ?? '',
     fastMode: base.fastModeByModel[prefs.model] === true,
   } : null;

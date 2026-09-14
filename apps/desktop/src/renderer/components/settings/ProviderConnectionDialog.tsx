@@ -287,6 +287,16 @@ function FieldLabel({ children }: { children: React.ReactNode }) {
   );
 }
 
+/** 上下文窗口文本是否可提交:空 = 清除窗口;非空须整体合法(分组分隔符 + BigInt 上界)。 */
+function isCommittableWindowText(text: string): boolean {
+  const trimmed = text.trim();
+  if (trimmed === '') return true;
+  if (!/^[0-9]+(?:[,_ ][0-9]+)*$/.test(trimmed)) return false;
+  const parsed = BigInt(trimmed.replace(/[,_ ]/g, ''));
+  return parsed > 0n && parsed <= BigInt(Number.MAX_SAFE_INTEGER);
+}
+
+
 /**
  * 预设模板下拉——统一的 Popover 菜单(与外观设置 FamilyDropdown 同款样式)。
  * 不用原生 <select>:其展开菜单由系统绘制,不吃主题 token,视觉与应用内其它下拉不一致。
@@ -476,6 +486,8 @@ export function ProviderConnectionDialog({
   const [imageGenerationHelpPinned, setImageGenerationHelpPinned] = useState(false);
   const [imageGenerationHelpHovered, setImageGenerationHelpHovered] = useState(false);
   const [imageGenerationHelpFocused, setImageGenerationHelpFocused] = useState(false);
+  // 上下文窗口输入的行级草稿。保存前拦未完成/非法文本。
+  const [windowDrafts, setWindowDrafts] = useState<Record<string, string>>({});
   // 预设模板（仅新建态展示；目录 presets 段，随 OSS 热更）。
   const [presets, setPresets] = useState<ProviderPreset[]>(() => [...(BUNDLED_CATALOG.presets ?? [])]);
   const [appliedPreset, setAppliedPreset] = useState<string | null>(null);
