@@ -1913,6 +1913,16 @@
           "$value": "{reference.defaults.engine-badge-pi.dark}"
         }
       },
+      "engine-badge-cursor": {
+        "light": {
+          "$type": "color",
+          "$value": "{reference.defaults.engine-badge-cursor.light}"
+        },
+        "dark": {
+          "$type": "color",
+          "$value": "{reference.defaults.engine-badge-cursor.dark}"
+        }
+      },
       "perm-item-selected-bg": {
         "light": {
           "$type": "color",
