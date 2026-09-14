@@ -79,6 +79,7 @@ import {
 import {
   isAgentSelectableModel,
   pickRecommendedAgent,
+  nativeModelAgents,
   resolveModelIconKind,
 } from '@cindy/model-providers';
 import type { AgentKind, CatalogModel, ProviderView } from '@cindy/model-providers';
@@ -331,7 +332,7 @@ export function isCapabilityRow(row: UnionModelRow, userProvider: boolean): bool
   });
 }
 
-/** A normal list toggle enables recommended engines; compatibility engines remain opt-in. */
+/** A normal list toggle enables native engines; compatibility engines remain opt-in. */
 export function modelVisibilityTargets(
   provider: ProviderView,
   row: UnionModelRow,
@@ -349,8 +350,8 @@ export function modelVisibilityTargets(
       const model = row.byAgent[agent];
       return model && isAgentSelectableModel(model, { userProvider }) ? [{ agent, modelId: model.id }] : [];
     });
-  // Choosing a model is not consent to enable every harness. Advanced per-engine choices
-  // stay where the user made them; an ordinary enable only needs one usable recommended route.
+  // A model-level enable activates every native engine, not only the recommended one.
+  // Compatibility engines are untouched; an explicit enable may fall back if none are native.
   const usable = row.avail.filter((agent) => {
     const model = row.byAgent[agent];
     return (
@@ -361,6 +362,8 @@ export function modelVisibilityTargets(
       model.availability !== 'requires_payment'
     );
   });
+  const native = nativeModelAgents(provider, row.byAgent).filter(agent => usable.includes(agent));
+  if (native.length) return native.map(agent => ({ agent, modelId: row.byAgent[agent]!.id }));
   const defaults = usable.filter((agent) => row.byAgent[agent]?.defaultEnabled !== false);
   const agent = pickRecommendedAgent(provider, row.id, defaults.length ? defaults : usable);
   const model = agent ? row.byAgent[agent] : undefined;

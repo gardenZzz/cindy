@@ -2435,6 +2435,9 @@ contextBridge.exposeInMainWorld('electronAPI', {
    * fire-and-forget。
    */
   syncNewMakerDraft: (snapshot: {
+    appDefaultModelRequestId?: string;
+    ownerStamp: import('../shared/dataOwnerPush').DataOwnerPushStamp;
+    selectedRoute?: import('../shared/botModelChain').BotModelRoute;
     lastByVendor: Partial<
       Record<
         'cc' | 'codex' | 'cursor' | 'pi',
@@ -2445,6 +2448,10 @@ contextBridge.exposeInMainWorld('electronAPI', {
     modelChosenByVendor: Partial<Record<'cc' | 'codex' | 'cursor' | 'pi', boolean>>;
     fastModeByModel: Record<string, boolean>;
     effortByModel: Record<string, string>;
+    providerModelMemory?: Record<string, {
+      effortByModel: Record<string, string>;
+      fastByModel: Record<string, boolean>;
+    }>;
     /** 「新建会话默认启用 worktree」勾选记忆(vendor 无关根字段,远程草稿播种用)。 */
     worktreeEnabled: boolean;
   }): void => ipcRenderer.send('maker:sync-new-maker-draft', snapshot),
@@ -7068,14 +7075,14 @@ contextBridge.exposeInMainWorld('electronAPI', {
         ipcRenderer.invoke('maker:auth:get-state', agentKind),
       triggerLogin: (
         agentKind: AgentKind,
-        options?: { mode?: 'browser' | 'device-code'; ownerId?: string },
+        options?: { mode?: 'browser' | 'device-code' | 'local'; ownerId?: string },
       ): Promise<unknown> => ipcRenderer.invoke('maker:auth:trigger-login', agentKind, options),
       cancelLogin: (
         agentKind: AgentKind,
         options?: { releaseOwner?: boolean; ownerId?: string },
       ): Promise<void> => ipcRenderer.invoke('maker:auth:cancel-login', agentKind, options),
-      logout: (agentKind: AgentKind): Promise<void> =>
-        ipcRenderer.invoke('maker:auth:logout', agentKind),
+      logout: (agentKind: AgentKind, ownerScope?: { dataOwnerId: string | null; ownerGeneration: number }): Promise<void> =>
+        ipcRenderer.invoke('maker:auth:logout', agentKind, ownerScope),
       onStateChanged: fanOutMakerAuthStateChanged,
       onLoginProgress: fanOutMakerAuthLoginProgress,
     },

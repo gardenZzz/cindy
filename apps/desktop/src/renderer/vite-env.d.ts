@@ -2402,6 +2402,9 @@ interface ElectronAPI {
   }) => void;
 
   syncNewMakerDraft: (snapshot: {
+    appDefaultModelRequestId?: string;
+    ownerStamp: import('../shared/dataOwnerPush').DataOwnerPushStamp;
+    selectedRoute?: import('../shared/botModelChain').BotModelRoute;
     lastByVendor: Partial<
       Record<
         'cc' | 'codex' | 'cursor' | 'pi',
@@ -2412,6 +2415,10 @@ interface ElectronAPI {
     modelChosenByVendor: Partial<Record<'cc' | 'codex' | 'cursor' | 'pi', boolean>>;
     fastModeByModel: Record<string, boolean>;
     effortByModel: Record<string, string>;
+    providerModelMemory?: Record<string, {
+      effortByModel: Record<string, string>;
+      fastByModel: Record<string, boolean>;
+    }>;
     /** 「新建会话默认启用 worktree」勾选记忆(vendor 无关根字段,远程草稿播种用)。 */
     worktreeEnabled: boolean;
   }) => void;
@@ -2442,6 +2449,7 @@ interface ElectronAPI {
   /** 被控端本地 main → 自身 renderer:控制端写穿的草稿「模型 effort/fast」pref(调本地 setter)。 */
   onMakerDraftPrefApply: (
     cb: (payload: {
+      appDefaultSelection?: import('../shared/appDefaultModelSelection').AppDefaultModelSelection;
       agent: AgentKind;
       providerId: string;
       modelId: string;
@@ -6305,13 +6313,13 @@ interface ElectronAPI {
       getState: (agentKind: AgentKind) => Promise<CodexAuthState>;
       triggerLogin: (
         agentKind: AgentKind,
-        options?: { mode?: 'browser' | 'device-code'; ownerId?: string },
+        options?: { mode?: 'browser' | 'device-code' | 'local'; ownerId?: string },
       ) => Promise<CodexAuthState>;
       cancelLogin: (
         agentKind: AgentKind,
         options?: { releaseOwner?: boolean; ownerId?: string },
       ) => Promise<void>;
-      logout: (agentKind: AgentKind) => Promise<void>;
+      logout: (agentKind: AgentKind, ownerScope?: { dataOwnerId: string | null; ownerGeneration: number }) => Promise<void>;
       onStateChanged: (
         cb: (s: { agentKind: AgentKind } & CodexAuthState) => void,
       ) => () => void;

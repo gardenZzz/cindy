@@ -340,7 +340,7 @@ const rendererConfig = {
       ...CODEMIRROR_OPTIMIZE_EXCLUDES,
       ...INTERNAL_PURE_PACKAGE_EXCLUDES,
     ],
-    include: ['@tiptap/react'],
+    include: ['@tiptap/react', 'highlight.js'],
     // @cindy/maker-core 顶层 re-export 了 import './x.md?raw' 的模块(system-prompt
     // 等),renderer 对 maker-core 的引用虽多为 import type,但 vite/esbuild 预打包仍会把
     // 整包源码拉进图,而 plugin-vite 的 esbuild 预构建不认 ?raw 查询,缺 loader 即 build

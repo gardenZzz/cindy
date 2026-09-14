@@ -4,6 +4,8 @@ import {
   type DraftPushSlot,
   type DraftVendorKey,
 } from '../../shared/agentKindDraftVendor.js';
+import { normalizeBotModelChain, type BotModelRoute } from '../../shared/botModelChain.js';
+import { isDataOwnerPushStamp, type DataOwnerPushStamp } from '../../shared/dataOwnerPush.js';
 import {
   DEFAULT_ORCA_WORKER_PERMISSION_MODE,
   resolveOrcaWorkerPermissionMode,
@@ -39,6 +41,9 @@ interface VendorPrefsSnapshot {
 }
 
 export interface NewMakerDraftSnapshot {
+  /** Model picker preferences captured in the same owner-fenced envelope. */
+  providerModelMemory?: ProviderModelMemorySnapshot;
+  selectedRoute?: BotModelRoute;
   lastByVendor: Partial<Record<VendorKey, VendorPrefsSnapshot>>;
   /** 每个 vendor 是否由用户在 New Maker picker 明确选过模型；旧 renderer 缺省不提供。 */
   modelChosenByVendor?: Partial<Record<VendorKey, boolean>>;
@@ -53,6 +58,12 @@ export interface NewMakerDraftSnapshot {
 }
 
 let cache: NewMakerDraftSnapshot | null = null;
+let selectedRouteOwner: string | undefined;
+const defaultListeners = new Set<(confirmedRequestId?: string) => void>();
+export function subscribeNewMakerDefaults(listener: (confirmedRequestId?: string) => void): () => void {
+  defaultListeners.add(listener);
+  return () => { defaultListeners.delete(listener); };
+}
 
 export interface WorkerCreationPrefsSnapshot {
   workerPermissionMode: OrcaWorkerPermissionMode;
@@ -77,8 +88,37 @@ export type ProviderModelMemorySnapshot = Record<
 let providerMemoryCache: ProviderModelMemorySnapshot | null = null;
 
 /** Renderer push handler 调; 整体替换缓存 (而不是合并), 跟 source of truth 对齐。 */
-export function setNewMakerDraftCache(snapshot: NewMakerDraftSnapshot): void {
+export function setNewMakerDraftCache(snapshot: NewMakerDraftSnapshot, ownerScope?: string, confirmedRequestId?: string): void {
   cache = snapshot;
+  selectedRouteOwner = ownerScope;
+  for (const listener of defaultListeners) listener(confirmedRequestId);
+}
+
+/** One owner-fenced mirror for both ordinary task defaults and Bot defaults. */
+export function syncNewMakerDraftCache(
+  raw: unknown,
+  activeOwner: DataOwnerPushStamp,
+  ownerScope: string,
+  boundaryPending: boolean,
+): boolean {
+  if (boundaryPending || !raw || typeof raw !== 'object' || Array.isArray(raw)) return false;
+  const p = raw as Partial<NewMakerDraftSnapshot> & { ownerStamp?: unknown; appDefaultModelRequestId?: unknown };
+  if (!isDataOwnerPushStamp(p.ownerStamp)
+    || p.ownerStamp.dataOwnerId !== activeOwner.dataOwnerId
+    || p.ownerStamp.ownerGeneration !== activeOwner.ownerGeneration) return false;
+  const record = (value: unknown) => !!value && typeof value === 'object' && !Array.isArray(value);
+  if (!record(p.lastByVendor) || !record(p.fastModeByModel) || !record(p.effortByModel)) return false;
+  setNewMakerDraftCache({
+    selectedRoute: normalizeBotModelChain([p.selectedRoute])[0],
+    ...(record(p.providerModelMemory) ? { providerModelMemory: p.providerModelMemory } : {}),
+    lastByVendor: p.lastByVendor!,
+    ...(record(p.modelChosenByVendor) ? { modelChosenByVendor: p.modelChosenByVendor } : {}),
+    fastModeByModel: p.fastModeByModel!,
+    effortByModel: p.effortByModel!,
+    worktreeEnabled: p.worktreeEnabled === true,
+  }, ownerScope, typeof p.appDefaultModelRequestId === 'string' && p.appDefaultModelRequestId.length <= 64
+    ? p.appDefaultModelRequestId : undefined);
+  return true;
 }
 
 /** Renderer localStorage workerCreationPrefs 的 main 端内存镜像。 */
@@ -177,7 +217,7 @@ export interface RemoteNewMakerDefaults {
 export function getRemoteNewMakerDefaults(
   agentKind: AgentKind,
 ): RemoteNewMakerDefaults {
-  const vendor: VendorKey = agentKindToDraftVendor(agentKind);
+  const vendor = agentKindToDraftVendor(agentKind);
   // providerModelMemory(草稿列表行真实读源)与「该 vendor 是否选过模型」无关:即便 cache 未就绪 /
   // 该 vendor 无选中模型(lastByVendor 空),只要被控端有模型级预设就要全量回给控制端,
   // 否则 req1「完整镜像被控端草稿模型列表」在这条边界上回落 capabilities 默认。故在所有早返回里都带上它。
@@ -220,4 +260,22 @@ export function buildNewMakerDraftChangedPayload(): Record<
     cursor: getRemoteNewMakerDefaults('cursor'),
     pi: getRemoteNewMakerDefaults('pi'),
   };
+}
+
+/** Read only the active owner’s current selection; never reuse another account’s mirror. */
+export function getSelectedNewMakerRoute(ownerScope: string): BotModelRoute | undefined {
+  return selectedRouteOwner === ownerScope ? cache?.selectedRoute : undefined;
+}
+
+/** Same snapshot as the selected route; never consume the unfenced legacy preference cache. */
+export function getNewMakerModelTuning(ownerScope: string, agent: AgentKind,
+  providerId: string, model: string): { effort?: string; fastMode?: boolean } {
+  if (selectedRouteOwner !== ownerScope || !cache) return {};
+  const memory = cache.providerModelMemory;
+  const provider = memory?.[`${agent}:${providerId}`];
+  const legacy = memory?.[`${agent}:*`];
+  const effort = provider?.effortByModel?.[model] ?? legacy?.effortByModel?.[model] ?? cache.effortByModel[model];
+  const fastMode = provider?.fastByModel?.[model] ?? legacy?.fastByModel?.[model] ?? cache.fastModeByModel[model];
+  return { ...(typeof effort === 'string' ? { effort } : {}),
+    ...(typeof fastMode === 'boolean' ? { fastMode } : {}) };
 }

@@ -1,3 +1,4 @@
+import { shouldShowOpenPathError } from '../../../../shared/openPathResult';
 /**
  * RunHistoryPane — 右侧执行历史面板
  * ---------------------------------------------------------------------------
@@ -226,7 +227,7 @@ export function RunHistoryPane({
     if (!dest.workingDir) return;
     try {
       const result = await window.electronAPI.openPath(dest.workingDir);
-      if (!result.success) toast.error(result.error || t('scheduler.detail.openWorkdirFailed'));
+      if (shouldShowOpenPathError(result)) toast.error(result.error || t('scheduler.detail.openWorkdirFailed'));
     } catch {
       toast.error(t('scheduler.detail.openWorkdirFailed'));
     }
