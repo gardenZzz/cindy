@@ -1,6 +1,6 @@
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { defineConfig, loadEnv } from 'vite';
+import { defineConfig, loadEnv, type Plugin } from 'vite';
 import { desktopClientBuildEnv } from '../../scripts/shared/client-endpoint-build-env.mjs';
 
 const configDir = path.dirname(fileURLToPath(import.meta.url));
@@ -15,6 +15,24 @@ const loginFixturesStub = path.resolve(
 // development rebuild lets Rollup invalidate that burst as one graph update,
 // keeping the watcher peak bounded without changing packaged builds.
 const DEV_WATCH_BUILD_DELAY_MS = 250;
+
+// Vite's CJS namespace helper does `getOwnPropertyDescriptor(o,s).get` with no
+// null check. `ws` exports a constructor whose `for...in` keys include
+// inherited EventEmitter statics (no own descriptor) → packaged startup throws.
+function safeCjsNamespaceInterop(): Plugin {
+  return {
+    name: 'safe-cjs-namespace-interop',
+    renderChunk(code) {
+      const assign =
+        /const l\s*=\s*Object\.getOwnPropertyDescriptor\(o,\s*s\);\s*Object\.defineProperty\(n,\s*s,\s*l\.get\s*\?\s*l\s*:/g;
+      const next = code.replace(
+        assign,
+        'const l=Object.getOwnPropertyDescriptor(o,s);if(!l)continue;Object.defineProperty(n,s,l.get?l:',
+      );
+      return next === code ? null : next;
+    },
+  };
+}
 
 export default defineConfig(({ mode }) => {
   const env = loadEnv(mode, process.cwd(), 'VITE_');
@@ -33,6 +51,7 @@ export default defineConfig(({ mode }) => {
       ? (process.env[key] ?? '')
       : (allEnv[key] ?? '');
   return {
+    plugins: [safeCjsNamespaceInterop()],
     resolve: {
       // 仅 fixtures 生产排除条件(v6.17 允许范围):production 构建把
       // '@cindy/auth-client/fixtures' 整模块替换为空 stub,dev 构建保留真模块。
