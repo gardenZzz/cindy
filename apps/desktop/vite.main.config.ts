@@ -19,17 +19,29 @@ const DEV_WATCH_BUILD_DELAY_MS = 250;
 // Vite's CJS namespace helper does `getOwnPropertyDescriptor(o,s).get` with no
 // null check. `ws` exports a constructor whose `for...in` keys include
 // inherited EventEmitter statics (no own descriptor) → packaged startup throws.
+function patchCjsNamespaceInterop(code: string): string | null {
+  // Minify renames the helper locals (`o,s,l` vs `e,r,n`); match any identifiers.
+  const assign =
+    /const\s+(\w+)\s*=\s*Object\.getOwnPropertyDescriptor\(\s*(\w+)\s*,\s*(\w+)\s*\)\s*;\s*Object\.defineProperty\(\s*(\w+)\s*,\s*\3\s*,\s*\1\.get\s*\?\s*\1\s*:/g;
+  const next = code.replace(
+    assign,
+    'const $1=Object.getOwnPropertyDescriptor($2,$3);if(!$1)continue;Object.defineProperty($4,$3,$1.get?$1:',
+  );
+  return next === code ? null : next;
+}
+
 function safeCjsNamespaceInterop(): Plugin {
   return {
     name: 'safe-cjs-namespace-interop',
-    renderChunk(code) {
-      const assign =
-        /const l\s*=\s*Object\.getOwnPropertyDescriptor\(o,\s*s\);\s*Object\.defineProperty\(n,\s*s,\s*l\.get\s*\?\s*l\s*:/g;
-      const next = code.replace(
-        assign,
-        'const l=Object.getOwnPropertyDescriptor(o,s);if(!l)continue;Object.defineProperty(n,s,l.get?l:',
-      );
-      return next === code ? null : next;
+    // Vite minify runs as a post renderChunk; patch the emitted helper after that.
+    enforce: 'post',
+    apply: 'build',
+    generateBundle(_options, bundle) {
+      for (const chunk of Object.values(bundle)) {
+        if (chunk.type !== 'chunk') continue;
+        const next = patchCjsNamespaceInterop(chunk.code);
+        if (next) chunk.code = next;
+      }
     },
   };
 }
