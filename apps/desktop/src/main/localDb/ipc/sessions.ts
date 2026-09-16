@@ -1671,7 +1671,6 @@ export function registerSessionIpc(
     const sid = requireString(id, 'id');
     const p = requireObject(patch, 'patch');
     return updateSessionInDb(sid, p, opts);
-main
   });
 
   // 窄口径会话元数据编辑(status / title / pinnedAt)。专为 device-link 控制端**远程**
