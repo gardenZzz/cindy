@@ -27,6 +27,13 @@ export interface ModelListToolbarProps {
   selectedCount: number;
   /** 标题下一行的说明;未连接 / 未登录等降级文案由调用方换。 */
   hint: string;
+  /**
+   * #4466 统一模型滚动语义:供应商详情只留一个滚动区,工具行吸顶并带上
+   * 卡片底色(`sticky top-0 z-10 bg-[var(--settings-theme-card-bg)]` +
+   * data-testid=provider-model-toolbar)。Cursor 等嵌入在自有滚动区里的
+   * 调用方传 false 保持原样。
+   */
+  sticky?: boolean;
   /** 刷新入口;省略则不渲染图标按钮。 */
   refresh?: {
     onClick: () => void;
@@ -48,6 +55,7 @@ export interface ModelListToolbarProps {
 export function ModelListToolbar({
   selectedCount,
   hint,
+  sticky = false,
   refresh,
   menu,
   filters,
@@ -58,7 +66,13 @@ export function ModelListToolbar({
   return (
     // 第一行说明模型选择与管理，第二行仅筛选当前列表。排列和批量配置在菜单里
     // 明确分组，任何筛选或排列操作都不写入模型开关。
-    <div className="flex shrink-0 flex-col gap-2 px-5 pb-2 pt-2.5">
+    <div
+      data-testid={sticky ? 'provider-model-toolbar' : undefined}
+      className={cn(
+        'flex shrink-0 flex-col gap-2 px-5 pb-2 pt-2.5',
+        sticky && 'sticky top-0 z-10 bg-[var(--settings-theme-card-bg)]',
+      )}
+    >
       <div className="flex flex-wrap items-center gap-x-3 gap-y-2">
         <div className="min-w-0 flex-1">
           <div className="flex flex-wrap items-baseline gap-x-2">

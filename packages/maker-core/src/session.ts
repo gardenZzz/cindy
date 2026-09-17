@@ -58,6 +58,7 @@ import type {
 } from './agents/base-agent.js';
 import {
   AUTO_REVIEW_SOURCE_CONTENT,
+  AUTO_REVIEW_USER_INTENT,
   TurnDispatchRejectedError,
   TurnDispatchUnconfirmedError,
 } from './agents/base-agent.js';
@@ -290,6 +291,8 @@ function appendManagedImageReferences(
 }
 
 export interface SessionSendOptions extends SendOptions {
+  /** Host-owned authorization refresh after all async preparation, before vendor dispatch. */
+  resolveAutoReviewUserIntent?: () => Promise<string>;
   /**
    * Turn reservation 建立后的原子准备钩子。
    *
@@ -737,6 +740,7 @@ export class Session {
       onAccepted,
       onDispatching,
       onTurnReserved,
+      resolveAutoReviewUserIntent,
       ...handleOpts
     } = opts ?? {};
     const cancelledBeforeReservation = (): SessionSendResult | null =>
@@ -882,6 +886,11 @@ export class Session {
           });
           return cancelledAfterVision;
         }
+      }
+      if (resolveAutoReviewUserIntent) {
+        handleOpts[AUTO_REVIEW_USER_INTENT] = await resolveAutoReviewUserIntent();
+        const cancelledAfterAuthorization = finishCancelledBeforeDispatch();
+        if (cancelledAfterAuthorization !== null) return cancelledAfterAuthorization;
       }
       reservation.phase = 'dispatching';
       // 越过 dispatch 边界才记 origin — cancelled-before-dispatch 早返回不会到这,
