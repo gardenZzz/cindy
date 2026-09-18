@@ -1,5 +1,7 @@
 import type { ImMessageSource } from '../../shared/imMessageSource';
 import { readBotAuthorizationCard } from '../../shared/botAuthorization';
+import { confirmRemoteUsers, reserveRemoteUser } from './remoteUserHandoff';
+import { readRemoteHistoryCache, remoteHistoryCacheWriter } from './remoteHistoryCache';
 /**
  * makerChatStore — Module-level store for Maker chat (Claude / Codex), sharded by sessionId.
  * ---------------------------------------------------------------------------
@@ -141,6 +143,7 @@ import { clearSessionStarting, markSessionStarting } from '@/lib/sessionStarting
 import { createLogger } from '@/lib/logger';
 import {
   markSessionAutomaticHistoryLoadCompleted,
+  readSessionScroll,
   resetSessionAutomaticHistoryLoadCompletion,
 } from '@/lib/sessionScrollStore';
 import {
@@ -446,6 +449,8 @@ export interface ChatMessage {
    * UI 可以据此显示 spinner / 灰色态（本轮不做，留给后续）。
    */
   isPendingPersist?: boolean;
+  /** Renderer-only position; DB acknowledgement does not yet transfer ownership to history. */
+  localSendPrecedingClientIds?: readonly string[];
   /**
    * 意识拦截(订阅槽①):本条用户消息被某意识钩子拦下(未入库、未起 turn)。
    * 气泡照常显示(未发出),其下渲一条 error 红条,内容 = 意识返回的文本
@@ -850,9 +855,13 @@ export interface PendingGhostGrantConfirm {
    * 往目录里存文件;reveal_path = 允许当前 Agent 获得单个媒体仓本机路径;
    * fs_write = 意识申请写工作目录文件(会话 permission 为
    * 逐条确认档时逐次弹,同目录本会话批一次);workspace = 意识申请以该目录
-   * 为工作区在侧边栏创建/复用会话入口(不过户字节)。
+   * 为工作区在侧边栏创建/复用会话入口(不过户字节);
+   * forge_source = Forge 打包/骨架/安装的源码目录在工作目录外;
+   * outside_workdir = 文档/电脑等内置工具读写工作目录外的路径。
    */
-  lane: 'attachments' | 'dir' | 'save_dir' | 'reveal_path' | 'fs_write' | 'workspace';
+  lane: 'attachments' | 'dir' | 'save_dir' | 'reveal_path' | 'fs_write' | 'workspace' | 'forge_source' | 'outside_workdir';
+  sourceTool?: string;
+  operation?: 'read' | 'write';
   items: Array<{
     name: string;
     absPath: string;
@@ -2399,6 +2408,8 @@ export interface SessionChatState {
   taskUpdates?: ReadonlyMap<string, AgentTaskUpdate>;
   isStreaming: boolean;
   agentStatus: AgentStatus;
+  /** A task with an explicit product title must not be auto-renamed from its first message. */
+  autoTitleDisabled?: boolean;
   error: string | null;
   /** 当前 terminal error 是否为可恢复的账号用量限制，以及可识别的重置时刻。 */
   usageLimitRecovery?: UsageLimitRecoveryHint | null;
@@ -3780,7 +3791,42 @@ function retainedWindowKeepsGapCursor(
   return cursorIndex > 0;
 }
 
-function _trimMessagesIfNeeded(sessionId: string): void {
+// A just-closed reading window is still a warm navigation target. Trimming it
+// to the tail forces an around-message IPC/backfill before restoring the reader.
+// Reuse existing session storage, with bounded reservations derived from current
+// state so clear/purge/epoch changes cannot resurrect a separate stale copy.
+const WARM_READING_WINDOWS = 2;
+const WARM_READING_MAX_MESSAGES = 1000;
+const WARM_READING_MAX_CHARACTERS = 32 * 1024 * 1024;
+
+function _trimMessagesIfNeeded(): void {
+  const retained = new Set<string>();
+  let characters = 0;
+  const now = Date.now();
+  // Reverse before sorting so equal timestamps also prefer the latest leave.
+  const recent = [..._lastViewedAt.entries()].reverse().sort((a, b) => b[1] - a[1]);
+  for (const [id, lastViewed] of recent) {
+    if (retained.size >= WARM_READING_WINDOWS) break;
+    const state = sessions.get(id);
+    const scroll = readSessionScroll(id);
+    if (!state?.historyLoaded || _activeViewSessions.has(id) || _isSessionBusy(id, state) ||
+      now - lastViewed >= DEMOTE_IDLE_MS || scroll?.isNearBottom !== false ||
+      state.messages.length <= TRIM_THRESHOLD || state.messages.length > WARM_READING_MAX_MESSAGES) continue;
+    const anchor = scroll.messageClientId ?? scroll.restoreClientId;
+    if (!anchor || !state.messages.some((message) => message.clientId === anchor)) continue;
+    const size = state.messages.reduce((sum, message) => sum + message.content.length, 0);
+    if (characters + size > WARM_READING_MAX_CHARACTERS) continue;
+    characters += size;
+    retained.add(id);
+  }
+  // Admission or a background update can displace another window. Apply the
+  // original guarded/epoch-aware trim to it immediately, not on its next visit.
+  for (const id of sessions.keys()) {
+    if (!retained.has(id)) _trimSessionMessages(id);
+  }
+}
+
+function _trimSessionMessages(sessionId: string): void {
   const state = sessions.get(sessionId);
   if (!state || state.messages.length <= TRIM_THRESHOLD) return;
   if (_isSessionBusy(sessionId, state)) return;
@@ -4040,7 +4086,7 @@ function leaveView(sessionId: string): void {
         : {}),
     }));
   }
-  _trimMessagesIfNeeded(sessionId);
+  _trimMessagesIfNeeded();
 }
 
 function _demoteIdleSessions(): void {
@@ -4476,7 +4522,8 @@ function applyInputProjection(
       ...locallyDispatchedQueueItems,
     ].reduce<ChatMessage[]>((messages, item) => {
       if (messages.some((message) => message.clientId === item.clientId)) return messages;
-      return [...messages, { ...item.chatMessage, isPendingPersist: true }];
+      const row = { ...item.chatMessage, isPendingPersist: true };
+      return [...messages, remoteProjection ? reserveRemoteUser(row, messages) : row];
     }, dedupedMessages);
     // Codex 原生重连已经被 host 接管、进入凭证切换等待或明确回落时，原生进行态行
     // 必须让位给 Cindy 的接管行、凭证切换状态或终态错误。没有这些字段的普通
@@ -7861,7 +7908,7 @@ function initGlobalListeners(options: GlobalListenerOptions = {}): void {
           : s,
       );
       // MEM-OPT-1: trim non-active sessions after turn completes
-      queueMicrotask(() => _trimMessagesIfNeeded(sessionId));
+      queueMicrotask(_trimMessagesIfNeeded);
     }
     // 视觉桥用户提示事件（source==='vision-bridge' + reason 枚举 + isTerminal:false）：
     // 已在 dispatchStreamEventPayload 的 case 'error' 分流为 toast，不进 error-banner /
@@ -10867,6 +10914,10 @@ function createRemoteHistoryView(sessionId: string) {
     view: undefined, intentQueue: { tail: Promise.resolve() }, isCurrent: () => false,
   };
   const owner = getDataOwnerGeneration();
+  // Begin the protected disk read before taking write tokens for remote requests.
+  const cached = readRemoteHistoryCache<HistoryChatMessage>(deviceId, sessionId);
+  let writeCache: ReturnType<typeof remoteHistoryCacheWriter> | undefined;
+  let persistTimer: ReturnType<typeof setTimeout> | undefined;
   const isCurrent = (): boolean => isDataOwnerGenerationCurrent(owner)
     && remoteProjectsStore.getSessionDeviceId(sessionId) === deviceId
     && remoteHistoryViews.get(sessionId)?.view === view;
@@ -10881,12 +10932,16 @@ function createRemoteHistoryView(sessionId: string) {
   };
   const view = new HistoryViewController<HistoryChatMessage>({
     page: async (before) => {
+      const writer = remoteHistoryCacheWriter(deviceId, sessionId);
       const page = await call<HistoryViewPage<Message>>('local-db:messages:view', [sessionId, { before }]);
       if (page == null) throw new Error('[CHANNEL_NOT_ALLOWED] History view is unavailable');
+      writeCache = writer;
       return { ...page, items: mapHistoryViewMessages(page.items, mapRows) };
     },
     details: async (ref, after) => {
+      const writer = remoteHistoryCacheWriter(deviceId, sessionId);
       const page = await call<HistoryDetailPage<Message>>('local-db:messages:work-details', [sessionId, ref, { after }]);
+      writeCache = writer;
       return { ...page, messages: mapRows(page.messages) };
     },
     expanded: async (refs) => {
@@ -10904,8 +10959,18 @@ function createRemoteHistoryView(sessionId: string) {
   remoteHistoryViews.set(sessionId, entry);
   view.setNetworkAvailable(!isRemoteDeviceMarkedDisconnected(deviceId));
   view.subscribe(() => {
+    if (persistTimer) clearTimeout(persistTimer);
     if (!isCurrent() || !sessions.has(sessionId)) return;
     const snapshot = view.getSnapshot();
+    if (isHistoryViewUnavailable(snapshot.error)) {
+      writeCache = undefined;
+      // Keep the last usable mirror until the raw fallback succeeds and replaces it.
+      setState(sessionId, (state) => ({ ...state, messages: confirmRemoteUsers(state.messages,
+        new Set(state.messages.filter((row) => !row.isPendingPersist).map((row) => row.clientId))) }));
+    } else if (snapshot.ready && !snapshot.loading && !snapshot.error && writeCache) {
+      const writer = writeCache;
+      persistTimer = setTimeout(() => { if (isCurrent()) writer(snapshot); }, 1200);
+    }
     if (!snapshot.ready) {
       if (view.isActive() && isHistoryViewUnavailable(snapshot.error)) {
         void reconcileRemoteMessages(sessionId, { force: true }).catch(() => undefined);
@@ -10915,11 +10980,18 @@ function createRemoteHistoryView(sessionId: string) {
     const available = historyViewLeaves(snapshot.items).flatMap((item) => item.type === 'messages' ? item.messages : []);
     for (const detail of snapshot.details.values()) available.push(...detail.messages);
     setState(sessionId, (state) => ({ ...state, historyLoaded: true,
-      messages: mergeMessages(available, state.messages.filter((message) => !message.cacheHydrated), { addOnly: true }),
+      messages: confirmRemoteUsers(
+        mergeMessages(available, state.messages.filter((message) => !message.cacheHydrated), { addOnly: true }),
+        new Set(available.filter((message) => message.role === 'user').map((message) => message.clientId)),
+      ),
       hasMoreMessages: snapshot.hasMore, isLoadingMore: snapshot.loading,
       oldestMessageId: snapshot.nextCursor,
       historyWindowHasIsland: false,
     }));
+  });
+  void view.restoreCachedView(async () => {
+    const snapshot = await cached;
+    return isCurrent() ? snapshot : null;
   });
   return view;
 }
@@ -10930,6 +11002,7 @@ function ensureInitialMessages(sessionId: string): void {
   if (deviceId && isRemoteDeviceMarkedDisconnected(deviceId)) {
     _historyLoadOrigin.set(sessionId, deviceId);
     noteInputProjectionOrigin(sessionId, deviceId);
+    createRemoteHistoryView(sessionId);
     hydrateRemoteMessagesFromCache(sessionId);
     return;
   }
@@ -11067,9 +11140,7 @@ function ensureInitialMessages(sessionId: string): void {
       const snapshot = view.getSnapshot();
       if (!snapshot.error && snapshot.ready) {
         if (isCurrentHistoryLoad()) {
-          // This path bypasses the raw latest-page cache write. Retire that old
-          // cache instead of persisting an incomplete projection as raw history.
-          clearCachedMessages(historyOriginAtStart!, sessionId);
+          // The structured snapshot is persisted through the same mirror-cache barriers.
           settleCacheHydration(sessionId);
         }
         releaseHistoryFetchIfCurrent(sessionId, historyFetchToken);
@@ -11468,6 +11539,7 @@ async function continuePlanResolutionAfterIdleDiscovery(sessionId: string): Prom
  */
 function reloadMessages(sessionId: string, opts?: { allowCacheHydrate?: boolean }): void {
   discardPendingTextDelta(sessionId);
+  if (!opts?.allowCacheHydrate) invalidateRemoteMessageCache(sessionId);
   // 代际递增:作废 in-flight 的 loadOlderMessages 追页窗口(见 _messagesEpoch 注释)。
   invalidateMessageHistoryWindow(sessionId);
   invalidateHistoryFetch(sessionId);
@@ -11492,7 +11564,6 @@ function reloadMessages(sessionId: string, opts?: { allowCacheHydrate?: boolean 
     // 标记没了而盘上那份还是 rewind 之前的窗口 —— 下次离线冷启动照样 hydrate 出已被软删
     // 的消息(review: codex P1)。所以同时把盘上那份清掉:缓存是纯优化,重载后的首拉
     // 成功时会重新写上。
-    invalidateRemoteMessageCache(sessionId);
   }
   setState(sessionId, (s) => {
     const optimisticRecords = remoteOptimisticSendRecords(sessionId);
@@ -13084,7 +13155,8 @@ function completeRemoteOptimisticMaterialization(
     const messages = state.messages.map((message) => {
       if (message.clientId !== clientId || message.isPendingPersist !== true) return message;
       changed = true;
-      return { ...queued.chatMessage, isPendingPersist: true };
+      return { ...queued.chatMessage, isPendingPersist: true,
+        ...(message.localSendPrecedingClientIds ? { localSendPrecedingClientIds: message.localSendPrecedingClientIds } : {}) };
     });
     return changed ? { ...state, pendingQueue, messages } : state;
   });
@@ -13461,6 +13533,7 @@ function maybeAutoNameUnnamedSession(
   agentKind: AgentKind,
 ): void {
   if (!seed?.isUserText) return;
+  if (sessions.get(sessionId)?.autoTitleDisabled === true) return;
   scheduleAutoName(sessionId, seed.text, agentKind, true);
 }
 
@@ -13741,7 +13814,9 @@ async function sendMessageCore(
     setState(sessionId, (s) =>
       s.messages.some((m) => m.clientId === queued.clientId)
         ? s
-        : { ...s, messages: [...s.messages, { ...queued.chatMessage, isPendingPersist: true }] },
+        : { ...s, messages: [...s.messages, deviceLinkRemote
+          ? reserveRemoteUser({ ...queued.chatMessage, isPendingPersist: true }, s.messages)
+          : { ...queued.chatMessage, isPendingPersist: true }] },
     );
   }
 
@@ -14144,7 +14219,7 @@ async function steerMessageCore(
     setState(sessionId, (s) =>
       s.messages.some((message) => message.clientId === queued.clientId)
         ? s
-        : { ...s, messages: [...s.messages, { ...queued.chatMessage, isPendingPersist: true }] },
+        : { ...s, messages: [...s.messages, reserveRemoteUser({ ...queued.chatMessage, isPendingPersist: true }, s.messages)] },
     );
   }
   const rollbackOptimisticSteer = () => {
@@ -15492,7 +15567,9 @@ function parseGhostGrantConfirmRequest(request: {
     lane !== 'save_dir' &&
     lane !== 'reveal_path' &&
     lane !== 'fs_write' &&
-    lane !== 'workspace'
+    lane !== 'workspace' &&
+    lane !== 'forge_source' &&
+    lane !== 'outside_workdir'
   )
     return null;
   if (typeof request.ghostId !== 'string' || typeof request.ghostName !== 'string') return null;
@@ -15524,6 +15601,10 @@ function parseGhostGrantConfirmRequest(request: {
     ghostId: request.ghostId,
     ghostName: request.ghostName,
     lane,
+    ...(typeof request.sourceTool === 'string' ? { sourceTool: request.sourceTool } : {}),
+    ...(request.operation === 'read' || request.operation === 'write'
+      ? { operation: request.operation }
+      : {}),
     items,
   };
 }
@@ -16183,6 +16264,8 @@ function setSessionRuntime(
     planModeEnabled?: boolean;
     /** Seed before SessionView hydrates the DB row; sendMessage reads this for SSH routing. */
     remoteHostId?: string | null;
+    /** Disable automatic first-message renaming for product-owned titled sessions. */
+    autoTitleDisabled?: boolean;
   },
 ): void {
   if (!sessionId) return;
@@ -16193,11 +16276,13 @@ function setSessionRuntime(
     const nextRemoteHostId = Object.hasOwn(opts, 'remoteHostId')
       ? (opts.remoteHostId ?? null)
       : s.remoteHostId;
+    const nextAutoTitleDisabled = opts.autoTitleDisabled ?? s.autoTitleDisabled;
     if (
       s.agentKind === nextAgentKind &&
       s.fastMode === nextFastMode &&
       s.planModeEnabled === nextPlanMode &&
-      s.remoteHostId === nextRemoteHostId
+      s.remoteHostId === nextRemoteHostId &&
+      s.autoTitleDisabled === nextAutoTitleDisabled
     )
       return s;
     return {
@@ -16206,6 +16291,7 @@ function setSessionRuntime(
       fastMode: nextFastMode,
       planModeEnabled: nextPlanMode,
       remoteHostId: nextRemoteHostId,
+      autoTitleDisabled: nextAutoTitleDisabled,
       ...(s.planModeEnabled !== nextPlanMode ? { planModeRev: s.planModeRev + 1 } : {}),
     };
   });
@@ -16750,7 +16836,9 @@ function collapseConsecutiveAutoResumeRows(messages: ChatMessage[]): ChatMessage
       }
       continue;
     }
-    if (isSubstantiveChatRow(message)) sawCardSinceContent = false;
+    // Without a later resume card there is no boundary to resolve. In particular,
+    // refreshing input projection for cached history must not rescan old tool text.
+    if (sawCardSinceContent && isSubstantiveChatRow(message)) sawCardSinceContent = false;
   }
   return changed && out ? out : messages;
 }

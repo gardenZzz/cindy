@@ -3044,6 +3044,16 @@
           "$type": "shadow",
           "$value": "{reference.defaults.shadow-menu.dark}"
         }
+      },
+      "slider-thumb-shadow": {
+        "light": {
+          "$type": "shadow",
+          "$value": "{reference.defaults.slider-thumb-shadow.light}"
+        },
+        "dark": {
+          "$type": "shadow",
+          "$value": "{reference.defaults.slider-thumb-shadow.dark}"
+        }
       }
     }
   }

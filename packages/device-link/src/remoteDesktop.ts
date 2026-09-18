@@ -131,6 +131,8 @@ export interface RemoteDesktopCapabilities {
   trickleIce?: boolean;
   systemAudio?: boolean;
   displayModes?: boolean;
+  /** System mode changes can keep the lease and restore on disconnect. */
+  resolutionRestore?: boolean;
   /** Can temporarily lay out the desktop at the viewer's requested dimensions. */
   viewerDisplay?: boolean;
   viewerDisplayRestore?: boolean;
@@ -138,6 +140,11 @@ export interface RemoteDesktopCapabilities {
   cursorOverlay?: boolean;
   clipboardText?: boolean;
   clipboardContent?: boolean;
+  clipboardSync?: boolean;
+  /** Bounded single-message clipboard payloads, with legacy chunk fallback. */
+  clipboardInline?: boolean;
+  privacyScreen?: boolean;
+  hostMute?: boolean;
 }
 export type DesktopPermission = "screenRecording" | "accessibility";
 export type DesktopPermissionStatus =
@@ -162,6 +169,15 @@ export interface RemoteDesktopLease {
   controlling: boolean;
 }
 export type RemoteDesktopRequest =
+  | {
+      op: "privacyScreen";
+      lease: string;
+      enabled: boolean;
+      lockOnExit?: boolean;
+    }
+  | { op: "hostMute"; lease: string; enabled: boolean }
+  | { op: "clipboardSync"; lease: string; enabled: boolean }
+  | { op: "clipboardVersion"; lease: string }
   | RemoteDesktopIceRequest
   | ClipboardContentRequest
   | { op: "capabilities" }
@@ -185,7 +201,7 @@ export type RemoteDesktopRequest =
   | { op: "displayModes"; lease: string }
   | { op: "viewerDisplay"; lease: string; width: number; height: number }
   | { op: "restoreViewerDisplay"; lease: string }
-  | { op: "resolution"; lease: string; modeId: string };
+  | { op: "resolution"; lease: string; modeId: string; temporary?: boolean };
 
 export function parseRemoteDesktopRequest(
   value: unknown,
@@ -217,6 +233,26 @@ export function parseRemoteDesktopRequest(
   if (typeof v.lease !== "string" || v.lease.length > 128 || !v.lease)
     throw new Error("INVALID_LEASE");
   const lease = v.lease;
+  if (v.op === "privacyScreen" && typeof v.enabled === "boolean") {
+    if (v.lockOnExit !== undefined && typeof v.lockOnExit !== "boolean")
+      throw new Error("INVALID_REQUEST");
+    return {
+      op: v.op,
+      lease,
+      enabled: v.enabled,
+      ...(typeof v.lockOnExit === "boolean"
+        ? { lockOnExit: v.lockOnExit }
+        : {}),
+    };
+  }
+  if (
+    (v.op === "privacyScreen" ||
+      v.op === "clipboardSync" ||
+      v.op === "hostMute") &&
+    typeof v.enabled === "boolean"
+  )
+    return { op: v.op, lease, enabled: v.enabled };
+  if (v.op === "clipboardVersion") return { op: v.op, lease };
   if (v.op === "ice") {
     if (!isDesktopAttemptId(v.attemptId) || !isDesktopIceCursor(v.after))
       throw new Error("INVALID_REQUEST");
@@ -289,8 +325,16 @@ export function parseRemoteDesktopRequest(
     v.op === "resolution" &&
     typeof v.modeId === "string" &&
     /^[0-9]{1,10}$/.test(v.modeId)
-  )
-    return { op: v.op, lease, modeId: v.modeId };
+  ) {
+    if (v.temporary !== undefined && typeof v.temporary !== "boolean")
+      throw new Error("INVALID_REQUEST");
+    return {
+      op: v.op,
+      lease,
+      modeId: v.modeId,
+      ...(v.temporary === true ? { temporary: true } : {}),
+    };
+  }
   if (v.op === "offer" && typeof v.sdp === "string" && v.sdp.length <= 64_000) {
     if (v.cursorOverlay !== undefined && typeof v.cursorOverlay !== "boolean")
       throw new Error("INVALID_REQUEST");

@@ -4,6 +4,7 @@ import {
   REMOTE_DESKTOP_ICE_SERVERS,
   REMOTE_DESKTOP_MAX_FRAME_BYTES,
   RemoteDesktopViewerSession,
+  REMOTE_DESKTOP_CONNECTION_TIMEOUT_MS,
   viewerDisplaySize,
   RemoteDesktopViewerMedia,
   remoteDesktopFailureKey,
@@ -60,6 +61,7 @@ export class DesktopViewerController {
   private wantsControl = true;
   private retryAt = 0;
   private retryDelay = 1000;
+  private connectionTimer: ReturnType<typeof setTimeout> | null = null;
   private frameBusy: string | null = null;
   private heartbeatBusy: string | null = null;
   private streaming = false;
@@ -111,6 +113,20 @@ export class DesktopViewerController {
   }
   private publish(patch: Partial<ViewerSnapshot>): void {
     this.state = { ...this.state, ...patch };
+    const waiting =
+      this.scope.active &&
+      !this.disposed &&
+      !this.state.error &&
+      (!this.state.ready || this.state.status === 'reconnecting');
+    if (!waiting) {
+      if (this.connectionTimer !== null) clearTimeout(this.connectionTimer);
+      this.connectionTimer = null;
+    } else if (this.connectionTimer === null) {
+      // Transient failures and media fallback must not renew the total budget.
+      this.connectionTimer = setTimeout(() => {
+        this.fail(new Error('DESKTOP_CONNECTION_TIMEOUT'));
+      }, REMOTE_DESKTOP_CONNECTION_TIMEOUT_MS);
+    }
     if (!this.disposed) this.changed(this.state);
   }
   private request = async <T>(
@@ -134,6 +150,8 @@ export class DesktopViewerController {
     if (this.disposed || scope.generation < this.scope.generation) return;
     if (scope.generation === this.scope.generation && scope.active === this.scope.active) return;
     this.cancel();
+    if (this.connectionTimer !== null) clearTimeout(this.connectionTimer);
+    this.connectionTimer = null;
     this.scope = scope;
     this.resuming = scope.resume === true;
     this.retryDelay = 1000;
@@ -340,23 +358,37 @@ export class DesktopViewerController {
   async resolution(modeId: string): Promise<void> {
     const lease = this.session.lease;
     if (!lease) return;
-    if (this.state.caps?.viewerDisplay && this.state.caps.viewerDisplayRestore) {
+    if (
+      this.state.caps?.resolutionRestore ||
+      (this.state.caps?.viewerDisplay && this.state.caps.viewerDisplayRestore)
+    ) {
       const mode = (await this.displayModes()).find((item) => item.id === modeId);
       if (this.session.lease !== lease) return;
       if (!mode) throw new Error('DESKTOP_DISPLAY_MODE_MISSING');
-      if ([mode.width, mode.height].every((size) => size >= 320 && size <= 2560)) {
-        await this.fitDisplay(mode.width, mode.height, true);
+      if (
+        this.state.caps?.resolutionRestore ||
+        [mode.width, mode.height].every((size) => size >= 320 && size <= 2560)
+      ) {
+        await this.fitDisplay(
+          mode.width,
+          mode.height,
+          true,
+          this.state.caps?.resolutionRestore ? mode.id : undefined,
+        );
         return;
       }
     }
-    await this.request({ op: 'resolution', lease: lease.lease, modeId });
-    this.cancel(true);
-    this.resuming = false;
-    void this.connect();
+    throw new Error('DESKTOP_DISPLAY_MODES_UNAVAILABLE');
   }
-  async fitDisplay(width: number, height: number, exactResolution = false): Promise<void> {
+  async fitDisplay(
+    width: number,
+    height: number,
+    exactResolution = false,
+    modeId?: string,
+  ): Promise<void> {
     if (
       exactResolution &&
+      !modeId &&
       ![width, height].every((value) => Number.isInteger(value) && value >= 320 && value <= 2560)
     )
       throw new Error('DESKTOP_DISPLAY_MODE_MISSING');
@@ -365,7 +397,7 @@ export class DesktopViewerController {
     if (
       !size ||
       !lease?.controlling ||
-      !this.state.caps?.viewerDisplay ||
+      !(modeId ? this.state.caps?.resolutionRestore : this.state.caps?.viewerDisplay) ||
       this.state.controlPending
     )
       return;
@@ -374,7 +406,7 @@ export class DesktopViewerController {
     this.media.reset();
     const sourceDisplayId = this.state.displayId;
     try {
-      const next = await this.session.fitDisplay(size.width, size.height);
+      const next = await this.session.fitDisplay(size.width, size.height, false, modeId);
       if (this.session.lease !== lease) return;
       const caps = this.state.caps;
       this.publish({
@@ -389,6 +421,7 @@ export class DesktopViewerController {
       this.runtime.receive({
         type: 'videoSettings',
         ...size,
+        ...(modeId ? { restore: true } : {}),
         audio: this.state.settings.audio && this.state.caps?.systemAudio === true,
       });
       await this.session.control(true);
@@ -550,6 +583,8 @@ export class DesktopViewerController {
   dispose(): void {
     this.cancel();
     this.disposed = true;
+    if (this.connectionTimer !== null) clearTimeout(this.connectionTimer);
+    this.connectionTimer = null;
     for (const t of this.timers) clearInterval(t);
     for (const off of this.unsubscribers) off();
     this.runtime.dispose();

@@ -4,6 +4,9 @@ import type {
   RemoteDesktopRequest,
 } from "./remoteDesktop.js";
 
+// Whole foreground connection/recovery budget, including retries and first frame.
+export const REMOTE_DESKTOP_CONNECTION_TIMEOUT_MS = 60_000;
+
 export type DesktopViewerRequest = <T>(
   request: RemoteDesktopRequest,
   beforeSend?: () => void,
@@ -164,6 +167,7 @@ export class RemoteDesktopViewerSession {
     width: number,
     height: number,
     restore = false,
+    modeId?: string,
   ): Promise<RemoteDesktopLease> {
     const lease = this.active;
     if (!lease?.controlling) throw new Error("DESKTOP_VIEW_ONLY");
@@ -173,9 +177,11 @@ export class RemoteDesktopViewerSession {
       if (this.active !== lease) throw new Error("DESKTOP_LEASE_EXPIRED");
     };
     const operation = this.request<RemoteDesktopLease>(
-      restore
-        ? { op: "restoreViewerDisplay", lease: lease.lease }
-        : { op: "viewerDisplay", lease: lease.lease, width, height },
+      modeId
+        ? { op: "resolution", lease: lease.lease, modeId, temporary: true }
+        : restore
+          ? { op: "restoreViewerDisplay", lease: lease.lease }
+          : { op: "viewerDisplay", lease: lease.lease, width, height },
       check,
     );
     this.controlPending = operation;
@@ -244,6 +250,7 @@ export function viewerDisplaySize(
 
 /** Only transient connection errors may restart a viewer. Explicit stop wins. */
 export function remoteDesktopFailureKey(code: string): string | null {
+  if (/DESKTOP_CONNECTION_TIMEOUT/.test(code)) return "connectionTimeout";
   if (/ACCESS_REVOKED/.test(code)) return "accessRevoked";
   if (/REMOTE_DISABLED/.test(code)) return "remoteDisabled";
   if (/DESKTOP_BUSY/.test(code)) return "connectionBusy";

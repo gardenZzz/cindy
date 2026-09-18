@@ -28,7 +28,7 @@ import {
 import type { CSSProperties, ReactNode } from 'react';
 import { useLocation, useNavigate, useOutletContext, useParams } from 'react-router-dom';
 import { dbToMakerAgentKind, normalizeDbAgentKind } from '../../../shared/agentKindConversion';
-import { useTranslation } from 'react-i18next';
+import { useStableTranslation as useTranslation } from '@/hooks/useStableTranslation';
 import {
   isCodexResumeNotReadyProjectionError,
   type AgentInputReference,
@@ -57,9 +57,13 @@ import {
 
 import { cn, basename } from '@/lib/utils';
 import { Spinner } from '@/components/ui/spinner';
+import { BotWorkingStatus } from '@/features/bots/BotWorkingStatus';
 import { setRemoteReceiptDisplayReady } from '@/lib/sessionAttentionStore';
 import { shortSessionId } from '@/lib/sessionId';
 import { ChatInput } from '@/components/new-chat/ChatInput';
+import { CindyMakeComposerMask } from '@/components/cindy-make/CindyMakeComposerMask';
+import { getCindyMakeComposerPhase } from '@/lib/cindyMakeComposer';
+import { useCindyMakeState } from '@/lib/cindyMakeState';
 import { GoalIndicator } from '@/components/new-chat/GoalIndicator';
 import { PinnedPlanPanel } from '@/components/new-chat/PinnedPlanPanel';
 import { sessionsStore } from '@/lib/sessionsStore';
@@ -81,7 +85,6 @@ import { PlanViewerCard } from '@/components/new-chat/PlanViewerCard';
 import { PlanActionCard } from '@/components/new-chat/PlanActionCard';
 import { InteractionPromptHost } from '@/components/interaction-portal';
 import {
-  hasBotAssistantOutputInCurrentTurn,
   MessageStream,
   type InlinePlanVisibility,
 } from '@/components/chat/MessageStream';
@@ -134,6 +137,7 @@ import { ackErrorAlertHandled } from '@/lib/errorAlertAck';
 import { useAttachments } from '@/hooks/useAttachments';
 import { useCCSessions } from '@/hooks/useCCSessions';
 import { SessionContentHeaderRegistration } from './SessionContentHeader';
+import { resolveSessionInterruptCandidate } from './sessionInterruptBannerModel';
 import { useSessionBinding } from '@/hooks/useSessionBinding';
 import { useVendorAuthGate } from '@/hooks/useVendorAuthGate';
 import { useProviders } from '@/hooks/useProviders';
@@ -197,11 +201,12 @@ import {
 import { openBackgroundTasksTab } from '@/features/right-sidebar/lib/openBackgroundTasksTab';
 import { openSubagentsTab } from '@/features/right-sidebar/lib/openSubagentsTab';
 import { BotAvatar } from '@/features/bots/BotAvatar';
+import { BotSessionContentHeaderRegistration } from '@/features/bots/BotSessionContentHeader';
 import {
-  BotSessionContentHeaderRegistration,
-  type BotChatIdentity,
-} from '@/features/bots/BotSessionContentHeader';
-import { botComposerPlaceholderKey } from '@/features/bots/botChatPresentation';
+  botComposerPlaceholderKey,
+  resolveBotChatIdentity,
+  type BotChatBinding,
+} from '@/features/bots/botChatPresentation';
 import { isCurrentSubagentRunsChange } from '@/features/right-sidebar/plugins/subagents/subagentChangeFence';
 import { startSubagentTabDiscovery } from './subagentTabDiscovery';
 import { subscribeChatTaskFocus } from '@/features/right-sidebar/plugins/background-tasks/chatTaskFocusIntent';
@@ -483,9 +488,9 @@ interface CCAgentSessionViewProps {
   /**
    * 本对话所属的伙伴身份（仅 Bot 路由传）。传入即把这个聊天当成「跟 TA 聊天」渲染：
    * 顶栏换成伙伴 lockup、assistant 气泡挂 TA 的头像、输入框使用伙伴称呼，保留标准权限入口。
-   * 判定仍与 `session.source === 'bot'` 双重成立才生效——URL 不是身份。
+   * 调用方须先验证持久归属并绑定 sessionId；运行快照不决定伙伴界面身份。
    */
-  botIdentity?: BotChatIdentity;
+  botIdentity?: BotChatBinding;
   /** Entry-time read boundary for a Bot chat; preserved after the live read position advances. */
   botUnreadBoundaryAt?: number | null;
 }
@@ -939,10 +944,9 @@ export function CCAgentSessionView({
       : null;
   const isOrcaLeadSessionView = session?.orcaRole === 'lead';
 
-  // 「这是一场跟伙伴的对话」的单一判据:路由声明的身份 + 任务自己的 source 双重成立。
-  // 只有 URL 说了不算 —— 那是导航投影,不是身份。
-  const botChatIdentity: BotChatIdentity | null =
-    botIdentity && session?.source === 'bot' ? botIdentity : null;
+  // Bot route gates have already checked durable ownership. The async runtime
+  // snapshot may be absent during load/reconnect; it must never change the skin.
+  const botChatIdentity = resolveBotChatIdentity(botIdentity, sessionId);
   // 伙伴没有 RunningStatusBar，折叠呼吸灯继续留在输入框上方，不能随状态行一起消失。
   const showCenteredControlledBanner =
     hasControlledBanner && (!controlledBannerCollapsed || Boolean(botChatIdentity));
@@ -1772,6 +1776,23 @@ export function CCAgentSessionView({
     updateQueueItem,
     chatDisplaySnapshot,
   } = useCCAgentChat(sessionId, handleTitleUpdate, { chatRealtime });
+  const makeState = useCindyMakeState();
+  const cindyMakeComposerPhase = useMemo(
+    () =>
+      getCindyMakeComposerPhase({
+        session,
+        report: remoteDeviceId
+          ? undefined
+          : Object.values(makeState.tasks ?? {}).find(
+              (report) => report.task?.sessionId === sessionId,
+            ),
+        messages,
+        historyLoaded,
+        busy: isAgentBusy,
+        error,
+      }),
+    [session, sessionId, remoteDeviceId, makeState, messages, historyLoaded, isAgentBusy, error],
+  );
   useEffect(() => {
     if (!sessionId || !isOrcaLeadSessionView || !historyLoaded) return;
     const recoveredAssignment = getRecoverableDeferredUiAssignment({
@@ -2149,29 +2170,72 @@ export function CCAgentSessionView({
       setSessionInterruptAcked(false);
     }
   }, [syntheticContinuationPending, sessionInterruptAcked]);
+  // main 真值回填(#4513):双时间戳候选对任何在飞 turn 都成立,而运行态抑制依赖的
+  // status(isRunning) 事件在协同 worker 会话上可能缺失/迟到(消息流与状态流是两条通道,
+  // 实测「流式输出中误显中断横幅」)。候选出现(activeTurnStartedAt 变化)时向 main 查一次
+  // 权威运行态;null=未确认,在真值回来前不把候选当中断证据(决策见 sessionInterruptBannerModel.ts)。
+  // 真值必须绑定所属会话:路由复用本组件(无 key 的 :sessionId 路由),A(在飞)→B(真中断)
+  // 切会话时旧 true 若直接锁存 ack,会把 B 的横幅永久抑制(P1)。查询 effect 切会话先置
+  // null,但锁存 effect 同批次仍能读到旧快照 —— 因此锁存与判定都只认同会话的真值。
+  const [mainTurnActive, setMainTurnActive] = useState<{
+    sessionId: string;
+    inTurn: boolean;
+  } | null>(null);
+  const activeTurnStartedAt = session?.activeTurnStartedAt ?? null;
+  useEffect(() => {
+    if (!sessionId || activeTurnStartedAt == null) {
+      setMainTurnActive(null);
+      return;
+    }
+    let cancelled = false;
+    setMainTurnActive(null);
+    window.electronAPI.maker
+      .getSessionTurnActive(sessionId)
+      .then((result) => {
+        if (!cancelled) setMainTurnActive({ sessionId, inTurn: result?.inTurn === true });
+      })
+      .catch(() => {
+        // 查询失败按未确认处理:宁可漏显横幅,不把在飞 turn 误判成中断。
+        if (!cancelled) setMainTurnActive(null);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [sessionId, activeTurnStartedAt]);
+  // 同会话真值:只认归属当前 sessionId 的查询结果,旧会话残留的 true 不得锁存
+  // 新会话的 ack(路由复用切会话 P1)。sessionId 变化时查询 effect 先置 null,
+  // 但同批次的锁存 effect 仍能读到旧快照 —— 这里按 sessionId 过滤兜底。
+  const mainTurnActiveForSession = mainTurnActive && mainTurnActive.sessionId === sessionId
+    ? mainTurnActive.inTurn
+    : null;
   // sessionId 必须在 deps 里:running→running 切会话时 isRunning 布尔值不变(true→true),
   // 只依赖它会漏掉新会话的"跑起来即熄灭"锁存——上面的 reset effect 把 acked 清成 false 后
   // 没人再置回。此时切入时拉的 session 快照天然 startedAt > endedAt(turn 在飞,ended 未写),
   // 用户点 stop 的瞬间 isRunning 落 false、ended 落库广播还没到,双时间戳判定短暂成立,
   // 「应用退出中断」横幅会闪现一帧(假阳性)。带上 sessionId 让每次切换后按新会话当前
-  // isRunning 重新锁存。
+  // isRunning 重新锁存。mainTurnActiveForSession === true 同样锁存(同会话真值回填,见上)。
   useEffect(() => {
-    if (agentStatus.isRunning || remoteTurnActive) setSessionInterruptAcked(true);
-  }, [sessionId, agentStatus.isRunning, remoteTurnActive]);
-  const interruptedFromSession = useMemo(() => {
-    if (sessionInterruptAcked || remoteTurnActive) return false;
-    const started = session?.activeTurnStartedAt ?? null;
-    if (!started) return false;
-    const ended = session?.lastTurnEndedAt ?? 0;
-    const cleared = session?.clearedAt ? Date.parse(session.clearedAt) : 0;
-    return started > ended && started > cleared;
-  }, [
-    session?.activeTurnStartedAt,
-    session?.lastTurnEndedAt,
-    session?.clearedAt,
-    sessionInterruptAcked,
-    remoteTurnActive,
-  ]);
+    if (agentStatus.isRunning || remoteTurnActive || mainTurnActiveForSession === true) setSessionInterruptAcked(true);
+  }, [sessionId, agentStatus.isRunning, remoteTurnActive, mainTurnActiveForSession]);
+  const interruptedFromSession = useMemo(
+    () =>
+      resolveSessionInterruptCandidate({
+        acked: sessionInterruptAcked,
+        remoteTurnActive,
+        mainTurnActive: mainTurnActiveForSession,
+        activeTurnStartedAt,
+        lastTurnEndedAt: session?.lastTurnEndedAt ?? null,
+        clearedAtMs: session?.clearedAt ? Date.parse(session.clearedAt) : null,
+      }),
+    [
+      activeTurnStartedAt,
+      session?.lastTurnEndedAt,
+      session?.clearedAt,
+      sessionInterruptAcked,
+      remoteTurnActive,
+      mainTurnActiveForSession,
+    ],
+  );
   // 打开会话且中断判定不成立(peer 已忽略 / 续跑已完成 / 用户已操作)时重算告警:
   // 红点是 pending-alerts 的派生,这里只触发重查,由差分决定清不清 —— 不直接清点,
   // 否则会抹掉同一会话上仍未处理的错误尾行告警。
@@ -3356,6 +3420,7 @@ export function CCAgentSessionView({
       },
     ) => {
       if (readOnly) return false;
+      if (cindyMakeComposerPhase) return false;
       const deliveryMode = opts?.deliveryMode ?? 'queue';
       const originalMessage = message;
       const navigationRequestVersion =
@@ -3638,6 +3703,7 @@ export function CCAgentSessionView({
       vendorAuthGate,
       remoteDeviceId,
       sessionHandoffPreparing,
+      cindyMakeComposerPhase,
     ],
   );
 
@@ -3807,9 +3873,10 @@ export function CCAgentSessionView({
   ]);
 
   const handleBeforeVoiceInputStart = useCallback(async () => {
+    if (cindyMakeComposerPhase) return false;
     const { proceed } = await vendorAuthGate.checkAndConfirm('codex', { purpose: 'voice-input' });
     return proceed;
-  }, [vendorAuthGate]);
+  }, [vendorAuthGate, cindyMakeComposerPhase]);
 
   // M32: Retry — ErrorBanner 的 retryText 现在只是兼容展示值。真正的
   // recovery target 由 main coordinator 持有，避免把已发出的文本重新走普通
@@ -4412,6 +4479,7 @@ export function CCAgentSessionView({
   const shareSelectionBlocked =
     Boolean(sessionBinding.attached) ||
     worktreePreparing ||
+    Boolean(cindyMakeComposerPhase) ||
     Boolean(
       pendingPlanReview ||
       pendingPermission ||
@@ -4478,11 +4546,6 @@ export function CCAgentSessionView({
   const composerRuntimeVisible =
     !pendingPlanReview &&
     (agentStatus.isRunning || backgroundTasksActive || runningWorkflow !== null);
-  const botAssistantOutputStarted = useMemo(
-    () => Boolean(botChatIdentity) && hasBotAssistantOutputInCurrentTurn(messages),
-    [botChatIdentity, messages],
-  );
-  const botThinkingVisible = composerRuntimeVisible && !botAssistantOutputStarted;
 
   const content = (
     // Layout: single scroll container (full height) + sticky input overlay at bottom.
@@ -4564,6 +4627,7 @@ export function CCAgentSessionView({
           if (hasSplitGroupSessionType(e.dataTransfer.types)) return;
           e.preventDefault();
           e.stopPropagation();
+          if (cindyMakeComposerPhase) return;
           dragCounterRef.current += 1;
           if (dragCounterRef.current === 1) setIsDragOver(true);
         }}
@@ -4571,7 +4635,7 @@ export function CCAgentSessionView({
           if (hasSplitGroupSessionType(e.dataTransfer.types)) return;
           e.preventDefault();
           e.stopPropagation();
-          e.dataTransfer.dropEffect = 'copy';
+          e.dataTransfer.dropEffect = cindyMakeComposerPhase ? 'none' : 'copy';
         }}
         onDragLeave={(e) => {
           if (hasSplitGroupSessionType(e.dataTransfer.types)) return;
@@ -4586,6 +4650,7 @@ export function CCAgentSessionView({
           e.stopPropagation();
           dragCounterRef.current = 0;
           setIsDragOver(false);
+          if (cindyMakeComposerPhase) return;
           // .cindy / .cshare 已被窗口级 capture 接管(装入 / 导入链路),
           // 只清理拖拽 UI 状态,不当附件消费。
           if (isGlobalDropIntercepted(e.nativeEvent)) return;
@@ -4738,19 +4803,24 @@ export function CCAgentSessionView({
               style={{ width: inputWidth }}
             >
               {botChatIdentity ? (
-                botThinkingVisible ? (
-                  <div
-                    data-testid="bot-thinking-indicator"
-                    role="status"
-                    aria-live="polite"
-                    className="mx-auto flex items-center gap-2 px-2 py-[6px] text-12 text-[var(--text-tertiary)]"
-                    style={{ width: inputWidth }}
-                  >
-                    {botAssistantAvatar}
-                    <Spinner size={12} />
-                    <span>{t('ccAgent.agentStatus.thinking')}</span>
-                  </div>
-                ) : null
+                <BotWorkingStatus
+                  key={sessionId}
+                  sessionId={remoteDeviceId ? undefined : sessionId ?? undefined}
+                  visible={composerRuntimeVisible}
+                  status={
+                    pendingPermission ? 'Waiting on approval'
+                      : pendingAskUser ? 'Waiting on input'
+                        : composerStatus
+                  }
+                  messages={messages}
+                  startedAt={agentStatus.startedAt}
+                  foregroundRunning={agentStatus.isRunning || isStreaming}
+                  backgroundWorkActive={
+                    backgroundTasksActive || runningWorkflow !== null || Boolean(agentStatus.sideTaskRunning)
+                  }
+                  avatar={botAssistantAvatar}
+                  inputWidth={inputWidth}
+                />
               ) : !pendingPlanReview || (hasControlledBanner && controlledBannerCollapsed) ? (
                 <RunningStatusBar
                   key={sessionId}
@@ -5118,9 +5188,10 @@ export function CCAgentSessionView({
                  既处理不了确认又无法继续发送或排队消息。
                  优先级 (高 → 低):
                    1. attached (远程接管中)  → TakeoverMask  (90px)
-                   2. worktreePreparing      → WorktreeCreatingOverlay (90px, 视觉同款)
-                   3. 默认                    → ChatInput
-                 两个 mask 共用 TakeoverMask 同款外形 (90px h / 12px round / sidebar
+                   2. Cindy Make 准备 / 首次执行 → CindyMakeComposerMask (90px, 视觉同款)
+                   3. worktreePreparing      → WorktreeCreatingOverlay (90px, 视觉同款)
+                   4. 默认                    → ChatInput
+                 这些 mask 共用 TakeoverMask 同款外形 (90px h / 12px round / sidebar
                  border), 切到 ChatInput 时高度变大, 与 takeover 收回回到 ChatInput
                  的体验一致。 */}
               {pendingPlanReview ||
@@ -5135,6 +5206,11 @@ export function CCAgentSessionView({
                   channel={sessionBinding.identity?.channel ?? 'feishu'}
                   userId={sessionBinding.identity?.userId ?? null}
                   displayName={sessionBinding.displayName}
+                />
+              ) : cindyMakeComposerPhase ? (
+                <CindyMakeComposerMask
+                  phase={cindyMakeComposerPhase}
+                  onStop={!readOnly && isAgentBusy ? handleStopSession : undefined}
                 />
               ) : worktreePreparing && smoothedBranchName ? (
                 <WorktreeCreatingOverlay branchName={smoothedBranchName} />
