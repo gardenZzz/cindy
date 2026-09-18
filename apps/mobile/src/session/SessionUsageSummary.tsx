@@ -54,7 +54,7 @@ export function SessionUsageSummary({
     source !== "api" &&
     source !== "unavailable"
       ? t(`session.menu.usage.source.${source}`)
-      : (session.providerId ?? mobileAgentLabelFromUnknown(session.agentKind)));
+      : mobileAgentLabelFromUnknown(session.agentKind));
   // Overall and model-specific limits both constrain the task; never hide an exhausted one.
   const rows = accountUsageRows(account, t, i18n.language);
   const rawContext =
