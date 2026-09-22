@@ -2056,12 +2056,15 @@ function CursorDetail() {
         done: progress.done,
         total: progress.total,
       });
-      if (!progress.running && progress.done === 0 && progress.total === 0) {
-        // 结束收口:不 toast(成功 / 取消 / 失败由目录变更 / 日志侧呈现)。
+      // 收口帧带 error = 本轮真失败(取消不带)。失败必须出声:最常见的那条
+      // (上游 `Failed to initialize session services`,即 cursor-agent 连不上网)
+      // 点多少次都不会成功,静默收口只会让人以为按钮没接线。
+      if (!progress.running && progress.error) {
+        toast.error(t('settings.providers.cursor.models.refreshFailed'));
       }
     });
     return () => off();
-  }, []);
+  }, [t]);
 
   const refresh = useCallback(
     async (opts: { force?: boolean } = {}) => {
@@ -2346,59 +2349,51 @@ function CursorDetail() {
 
         {/* 模型清单 + 显示开关（spec #21 / #26）移出 detail:UnifiedModelList 同款
             通栏工具行(px-5 自带内边距),塞 pl-12 缩进里会和正常供应商版式错位;
-            改由下方 DetailHeader 之外通栏渲染,对齐其它供应商的分隔线 + 全宽列表。 */}
-
+            改由下方作为 DetailHeader children 通栏渲染,与其它供应商同处一个滚动区。 */}
       </div>
     );
 
   return (
-    <div className="flex min-h-0 flex-1 flex-col">
-      <DetailHeader
-        icon={<CursorMark size={18} />}
-        title={t('settings.providers.cursor.title')}
-        subtitle={t('settings.providers.cursor.optionalHint')}
-        badge={badgeLabel ? <CustomTag label={badgeLabel} /> : undefined}
-        modelCount={cursorModelCount}
-        trailing={
-          <div className="flex shrink-0 items-center gap-2.5">
-            {action}
-            <RowIconButton
-              icon={
-                <RefreshCw
-                  size={14}
-                  className={probe.kind === 'loading' || installing ? 'animate-spin' : undefined}
-                />
-              }
-              label={t('settings.providers.cursor.refreshAria')}
-              onClick={() => void refresh({ force: true })}
-              disabled={probe.kind === 'loading' || installing || authBusy}
-            />
-          </div>
-        }
-        detail={body}
-      />
+    <DetailHeader
+      icon={<CursorMark size={18} />}
+      title={t('settings.providers.cursor.title')}
+      subtitle={t('settings.providers.cursor.optionalHint')}
+      badge={badgeLabel ? <CustomTag label={badgeLabel} /> : undefined}
+      modelCount={cursorModelCount}
+      trailing={
+        <div className="flex shrink-0 items-center gap-2.5">
+          {action}
+          <RowIconButton
+            icon={
+              <RefreshCw
+                size={14}
+                className={probe.kind === 'loading' || installing ? 'animate-spin' : undefined}
+              />
+            }
+            label={t('settings.providers.cursor.refreshAria')}
+            onClick={() => void refresh({ force: true })}
+            disabled={probe.kind === 'loading' || installing || authBusy}
+          />
+        </div>
+      }
+      detail={body}
+    >
       {/* 已安装且不在登录流程时才列;探测编排由 #28 接线。
-          详情头固定,清单在 CursorModelList 内独立滚动(卡片 overflow-hidden)。 */}
+          详情头固定,清单跟着详情走同一个滚动区(#4466:工具行 sticky)。
+          当兄弟节点挂在 DetailHeader 外时两边都 flex-1,中间会空出半页。 */}
       {probe.kind === 'installed' && !loginUrl && (
-        <>
-          <div
-            className="shrink-0 border-t"
-            style={{ borderColor: 'var(--settings-theme-card-border)' }}
-          />
-          <CursorModelList
-            onRefresh={() => void handleRefreshModels()}
-            onCancel={() => void handleCancelRefresh()}
-            refresh={{
-              running: refreshState.running,
-              done: refreshState.done,
-              total: refreshState.total,
-              unavailableReason:
-                auth.kind !== 'authenticated' ? 'not-authenticated' : null,
-            }}
-          />
-        </>
+        <CursorModelList
+          onRefresh={() => void handleRefreshModels()}
+          onCancel={() => void handleCancelRefresh()}
+          refresh={{
+            running: refreshState.running,
+            done: refreshState.done,
+            total: refreshState.total,
+            unavailableReason: auth.kind !== 'authenticated' ? 'not-authenticated' : null,
+          }}
+        />
       )}
-    </div>
+    </DetailHeader>
   );
 }
 

@@ -7,8 +7,9 @@
  * UI 层存在的假 `ProviderView`,反而捅穿本 spec 要守的「Cursor 不进可路由 catalog」边界。
  * 但**版式必须与第三方自定义端点一致**:工具行走共用的 `ModelListToolbar`,行/分组的
  * 间距、logo、hover 与滚动契约照抄 UnifiedModelList —— 分叉过一次就再也对不齐。
- * 右栏卡片是固定高度 + overflow-hidden,本列表必须自己吃掉剩余高度并 overflow-y-auto,
- * 否则 31 个模型会被裁掉且滚轮无处可去。
+ * 滚动契约同 #4466:本列表**不持有**滚动区,它挂在 `DetailHeader` 的 children 里,
+ * 由详情区那一个 `overflow-y-auto` 统管,工具行在其中 sticky。自己再吃一层 flex-1 +
+ * overflow 的话,详情头与列表会各占半页高度,中间空出一大片(实测 #4466 后的回归)。
  *
  * 只做两件事(与真实供应商的「显示轴」语义一致):
  *   - 列出本机缓存到的全部 Cursor 模型,每行一个显示开关(「管理」菜单批量)。
@@ -233,10 +234,11 @@ export function CursorModelList({ onRefresh, onCancel, refresh }: CursorModelLis
   }
 
   return (
-    <div className="flex min-h-0 flex-1 flex-col">
+    <div className="flex flex-col">
       {/* 工具行与可路由供应商共用 ModelListToolbar;Cursor 单 agent,没有「排列」与
           用途筛选,菜单里只留批量选择。刷新进行中时同一个按钮即取消入口。 */}
       <ModelListToolbar
+        sticky
         selectedCount={selectedCount}
         hint={refreshHint ?? t('settings.providers.models.manage.hint')}
         refresh={{
@@ -266,10 +268,11 @@ export function CursorModelList({ onRefresh, onCancel, refresh }: CursorModelLis
         search={showSearch ? { value: query, onChange: setQuery } : undefined}
       />
 
-      {/* 唯一滚动区,与上方固定工具行以 1px 细线分隔。视觉左右边距 20px =
+      {/* 列表本身不持有滚动:详情区(provider-detail-scroll)是唯一滚动区,工具行
+          在其中 sticky —— 与可路由供应商同一套语义(#4466)。视觉左右边距 20px =
           容器 px-3 + 行 px-2(行悬停底色要包住内容),与 UnifiedModelList 同。 */}
       <div
-        className="min-h-0 flex-1 overflow-y-auto border-t"
+        className="border-t"
         style={{ borderColor: 'var(--settings-theme-card-border)' }}
       >
         <div className="flex flex-col gap-4 px-3 pb-4 pt-1.5">

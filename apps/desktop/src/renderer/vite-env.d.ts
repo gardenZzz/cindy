@@ -6461,9 +6461,14 @@ interface ElectronAPI {
       refreshCursorModels: () => Promise<{ started: boolean }>;
       /** 取消进行中的探测;已探到的结果已落盘。 */
       cancelCursorModelRefresh: () => Promise<{ cancelled: boolean }>;
-      /** 探测进度推送(已探 n / 总数 + running)。 */
+      /** 探测进度推送(已探 n / 总数 + running;收口帧带 error,取消为 null)。 */
       onCursorModelRefreshProgress: (
-        cb: (progress: { done: number; total: number; running: boolean }) => void,
+        cb: (progress: {
+          done: number;
+          total: number;
+          running: boolean;
+          error?: string | null;
+        }) => void,
       ) => () => void;
     };
 

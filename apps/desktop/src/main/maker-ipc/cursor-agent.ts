@@ -33,7 +33,20 @@ const log = createLogger('maker-ipc:cursor-agent');
 export type CursorBinaryStatusView = { installed: boolean };
 export type CursorAgentInstallResult = { installed: boolean };
 export type CursorRefreshModelsResult = { started: boolean };
-export type CursorRefreshProgress = { done: number; total: number; running: boolean };
+export type CursorRefreshProgress = {
+  done: number;
+  total: number;
+  running: boolean;
+  /**
+   * 本轮失败原因(仅 running:false 的收口帧带);null = 成功或用户取消。
+   *
+   * 不带这一位的话失败就只剩一行 main 日志:设置页转两秒、清单一个字不变、
+   * 没有任何提示 —— 用户只能理解成「刷新按钮没接线」(实测最常见的失败是
+   * 上游 cursor-agent 的 `Failed to initialize session services`,即网络不通,
+   * 点多少次都不会成功,更需要说出来)。
+   */
+  error?: string | null;
+};
 
 /** 广播探测进度到所有本地窗口(设置页据此显示「已探 n / 总数」)。 */
 function broadcastCursorRefreshProgress(progress: CursorRefreshProgress): void {
@@ -112,7 +125,13 @@ export function registerCursorAgentIpc(): void {
         onDone: ({ aborted, error }) => {
           // 结束(完成 / 取消 / 失败)广播一次 running:false 收口;agent 侧
           // publishListedModels -> PROVIDER_CHANGED 已刷新选择器。
-          broadcastCursorRefreshProgress({ done: 0, total: 0, running: false });
+          // 取消是用户意图,不算失败 ⇒ 不带 error(设置页据此决定是否报错)。
+          broadcastCursorRefreshProgress({
+            done: 0,
+            total: 0,
+            running: false,
+            error: aborted ? null : error,
+          });
           if (aborted) {
             log.info('cursor model refresh cancelled');
           } else if (error) {

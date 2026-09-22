@@ -9,25 +9,29 @@
  *  - 「全部隐藏」为除 Auto 外每个模型写显式关闭;「全部显示」同理。
  *  - 空态:缓存只有 Auto(或空)给空态文案而非空白。
  *  - 未安装 / 未登录 -> 刷新入口禁用并提示原因。
+ *  - 刷新失败的收口帧要报错(取消不报):静默收口会被当成「按钮没接线」。
+ *  - 清单与详情共用同一个滚动区(#4466),工具行在区内吸顶。
  */
 
-import { cleanup, fireEvent, render, screen } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, screen } from '@testing-library/react';
 import { MemoryRouter, Route, Routes } from 'react-router-dom';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import type { ProviderView } from '@cindy/model-providers';
 import type { AgentCapabilities } from '@/hooks/useAgentCapabilities';
 
-const { providersState, cursorState, cursorCaps, visibility, setManySpy } = vi.hoisted(() => ({
-  providersState: { providers: [] as unknown[] },
-  cursorState: {
-    installed: false,
-    auth: { authenticated: false } as { authenticated: boolean; identity?: string },
-  },
-  cursorCaps: { availableModels: [] } as Pick<AgentCapabilities, 'availableModels'>,
-  visibility: { map: {} as Record<string, boolean> },
-  setManySpy: vi.fn(),
-}));
+const { providersState, cursorState, cursorCaps, visibility, setManySpy, refreshProgress } =
+  vi.hoisted(() => ({
+    providersState: { providers: [] as unknown[] },
+    cursorState: {
+      installed: false,
+      auth: { authenticated: false } as { authenticated: boolean; identity?: string },
+    },
+    cursorCaps: { availableModels: [] } as Pick<AgentCapabilities, 'availableModels'>,
+    visibility: { map: {} as Record<string, boolean> },
+    setManySpy: vi.fn(),
+    refreshProgress: { emit: null as ((p: unknown) => void) | null },
+  }));
 
 vi.mock('react-i18next', () => ({
   useTranslation: () => ({ t: (key: string) => key, i18n: { language: 'zh-CN' } }),
@@ -102,6 +106,7 @@ vi.mock('@/state/modelVisibilityPrefs', async () => {
 vi.mock('@/components/settings/CustomProviderDialog', () => ({ CustomProviderDialog: () => null }));
 
 import { ProvidersSection } from '@/components/settings/ProvidersSection';
+import { toast } from '@/lib/toast';
 import { __testing as cursorAvailabilityTesting } from '@/state/cursorAvailability';
 
 function makeProvider(id: string, over?: Partial<ProviderView>): ProviderView {
@@ -126,6 +131,7 @@ beforeEach(() => {
   // 装没装是模块级缓存(启动预热 + 单飞行),不清会把上一条用例的结果带进下一条,
   // 后面改 cursorState.installed 全部失效。
   cursorAvailabilityTesting.reset();
+  refreshProgress.emit = null;
   cursorState.installed = false;
   cursorState.auth = { authenticated: false };
   cursorCaps.availableModels = [];
@@ -141,6 +147,15 @@ beforeEach(() => {
       agent: {
         getCursorBinaryStatus: vi.fn(async () => ({ installed: cursorState.installed })),
         installCursorAgent: vi.fn(async () => ({ installed: true })),
+        refreshCursorModels: vi.fn(async () => ({ started: true })),
+        cancelCursorModelRefresh: vi.fn(async () => ({ cancelled: true })),
+        // 进度回调存起来,用例据此模拟 main 侧的收口帧(成功 / 取消 / 失败)。
+        onCursorModelRefreshProgress: vi.fn((cb: (p: unknown) => void) => {
+          refreshProgress.emit = cb;
+          return () => {
+            refreshProgress.emit = null;
+          };
+        }),
       },
       auth: {
         getState: vi.fn(async () => cursorState.auth),
@@ -283,7 +298,7 @@ describe('ProvidersSection - Cursor 模型清单与显示开关 (spec #21 / S1)'
     expect(await screen.findByText('settings.providers.cursor.models.refreshUnavailableAuth')).not.toBeNull();
   });
 
-  it('模型清单在右栏内独立滚动,工具行不进滚动区', async () => {
+  it('模型清单与详情共用同一个滚动区,工具行在区内吸顶', async () => {
     cursorState.installed = true;
     cursorState.auth = { authenticated: true, identity: 'x' };
     cursorCaps.availableModels = [
@@ -294,14 +309,49 @@ describe('ProvidersSection - Cursor 模型清单与显示开关 (spec #21 / S1)'
     renderAt();
     await selectCursor();
 
+    // #4466:详情区是唯一滚动区,清单不再自己开一层(自开一层会与详情各占半页,
+    // 中间空出一大片)。
     const row = await screen.findByText('Opus 5');
     const scroller = row.closest('.overflow-y-auto');
     expect(scroller).not.toBeNull();
-    expect(scroller!.className).toContain('min-h-0');
-    expect(scroller!.className).toContain('flex-1');
-    // 工具行固定在滚动区外,长清单滚走时「模型 / 已选 N 个 / 管理」仍在。
-    const toolbar = screen.getByText('settings.providers.models.manage.title');
-    expect(toolbar.closest('.overflow-y-auto')).toBeNull();
+    expect(scroller!.getAttribute('data-testid')).toBe('provider-detail-scroll');
+    // 工具行在滚动区内 sticky:长清单滚走时「模型 / 已选 N 个 / 管理」仍留在视口。
+    const toolbar = screen.getByTestId('provider-model-toolbar');
+    expect(toolbar.className).toContain('sticky');
+    expect(toolbar.closest('[data-testid="provider-detail-scroll"]')).toBe(scroller);
+  });
+
+  it('刷新失败的收口帧要报错;取消不报错', async () => {
+    cursorState.installed = true;
+    cursorState.auth = { authenticated: true, identity: 'x' };
+    cursorCaps.availableModels = [
+      { id: 'auto', displayName: 'Auto', contextWindow: 200_000, efforts: [], defaultEffort: null },
+      { id: 'claude-opus-5', displayName: 'Opus 5', contextWindow: 300_000, efforts: ['low'], defaultEffort: 'low' },
+    ] as AgentCapabilities['availableModels'];
+
+    renderAt();
+    await selectCursor();
+    await screen.findByText('Opus 5');
+    expect(refreshProgress.emit).not.toBeNull();
+
+    // 取消(error 为 null)= 用户意图,不该弹错。
+    act(() => {
+      refreshProgress.emit!({ done: 0, total: 0, running: false, error: null });
+    });
+    expect(toast.error).not.toHaveBeenCalled();
+
+    // 真失败(上游最常见的那条:cursor-agent 连不上网)必须出声,否则用户只能
+    // 理解成「刷新按钮没接线」。
+    act(() => {
+      refreshProgress.emit!({
+        done: 0,
+        total: 0,
+        running: false,
+        error:
+          'acp session/new error -32603: Internal error (Failed to initialize session services)',
+      });
+    });
+    expect(toast.error).toHaveBeenCalledWith('settings.providers.cursor.models.refreshFailed');
   });
 
   it('真实供应商(Anthropic)行与刷新行为不受影响', async () => {
