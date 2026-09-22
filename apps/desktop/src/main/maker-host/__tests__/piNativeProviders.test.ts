@@ -144,6 +144,17 @@ afterEach(() => {
 });
 
 describe('ChatGPT image capability authority (#2674)', () => {
+  it.each([true, false, undefined])('defaults new subscription models to images while preserving %s', (supportsImageInput) => {
+    const catalog = structuredClone(BUNDLED_CATALOG);
+    catalog.providers.find((provider) => provider.id === 'openai')!.models.pi = [{
+      id: 'chatgpt/new-model-without-metadata', name: 'New model', contextWindow: 128_000,
+      efforts: [], defaultEffort: null, supportsImageInput,
+    }];
+    const model = buildPiSubscriptionNativeProviders(catalog, 'http://127.0.0.1:4567/', new Map())
+      .providers.find((provider) => provider.id === 'openai-codex')?.models[0];
+    expect(model?.input).toEqual(supportsImageInput === false ? ['text'] : ['text', 'image']);
+  });
+
   it.each(['gpt-5.6-luna', 'gpt-5.6-sol', 'gpt-5.6-terra'])(
     'keeps %s visual through the independent Pi catalog despite text-only Codex discovery',
     (id) => {
@@ -1179,6 +1190,22 @@ describe('buildPiNativeProvidersFromConfigs', () => {
       xhigh: 'xhigh',
       max: 'max',
     });
+  });
+
+  it('materializes the inherited picker tiers as the exact Pi runtime map', () => {
+    setActiveCatalog(BUNDLED_CATALOG);
+    const catalog = getActiveCatalog();
+    const descriptors = deriveAvailableModels(catalog, 'pi');
+    const runtime = buildPiSubscriptionNativeProviders(catalog, 'http://127.0.0.1:4567/');
+    for (const id of ['chatgpt/gpt-6-astra', 'chatgpt/gpt-5.6-sol']) {
+      const model = catalog.providers.find(p => p.id === 'openai')!.models.pi!.find(m => m.id === id)!;
+      const native = runtime.providers.find(p => p.id === 'openai-codex')!.models.find(m => m.id === id)!;
+      expect(descriptors.find(m => m.id === id)?.efforts).toEqual(model.efforts);
+      expect(Object.entries(native.thinkingLevelMap!).filter(([, value]) => value !== null)
+        .map(([level]) => level)).toEqual(model.efforts);
+      expect(native.thinkingLevelMap?.minimal).toBeNull();
+      expect(native.thinkingLevelMap?.max).toBe('max');
+    }
   });
 
   it('keeps a retired OpenAI profile private to its native subscription resume', () => {

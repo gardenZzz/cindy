@@ -3022,6 +3022,10 @@ interface ElectronAPI {
   cindyMakeMerge: (
     input: import('../shared/cindyMakeMerge').CindyMakeMergeRequest,
   ) => Promise<import('../shared/cindyMakeMerge').CindyMakeMergeState | undefined>;
+  getCindyMakeSettings: () => Promise<import('../shared/cindyMakeSettings').CindyMakeSettings>;
+  setCindyMakeSyncLatestBeforeBuild: (
+    enabled: boolean,
+  ) => Promise<import('../shared/cindyMakeSettings').CindyMakeSettings>;
   getCindyMakeHistory: (
     selected?: string,
   ) => Promise<import('../shared/cindyMakeHistory').CindyMakeHistoryState>;
@@ -3051,6 +3055,10 @@ interface ElectronAPI {
   openCindyMakeSourceDir: () => Promise<{ success: boolean }>;
   onCindyMakeState: (
     listener: (state: import('../shared/cindyMakeDoctor').CindyMakeGlobalState) => void,
+  ) => () => void;
+  /** A local Cindy Make build finished; Settings should refresh history and versions. */
+  onCindyMakeHistoryChanged: (
+    listener: (ownerStamp?: import('../shared/dataOwnerPush').DataOwnerPushStamp) => void,
   ) => () => void;
   /** Live global source status (Settings and the workflow share one operation). */
   onCindyMakeSourceStatus: (
@@ -3888,6 +3896,10 @@ interface ElectronAPI {
   openRemoteDesktop: (target: { deviceId: string; name: string }) => Promise<void>;
   remoteDesktopViewer: import('../shared/remoteDesktopViewer').RemoteDesktopViewerApi;
   remoteDesktop: import('../shared/remoteDesktop').RemoteDesktopApi;
+  sharedTask: {
+    host(command: import('@cindy/device-link').SharedTaskHostCommand): Promise<unknown>;
+    account(command: import('@cindy/device-link').SharedTaskAccountCommand): Promise<unknown>;
+  };
   deviceLink: {
     getState: () => Promise<{
       remoteControlEnabled: boolean;
@@ -6010,6 +6022,11 @@ interface ElectronAPI {
       requestId: string,
       decision: Record<string, unknown>,
     ) => Promise<{ accepted: boolean }>;
+
+    assistPluginOauth: (request: import('../shared/pluginOauth').LocalPluginOauthRequest) => Promise<{ accepted: boolean }>;
+    submitRemotePluginSecret: (request: import('../shared/pluginOauth').LocalPluginSecretRequest) => Promise<{ accepted: boolean }>;
+    submitRemotePluginConnection: (request: import('../shared/pluginOauth').LocalPluginConnectionRequest) => Promise<{ accepted: boolean }>;
+    pluginOauthDeviceCode: (request: import('../shared/pluginOauthDeviceCode').PluginOauthDeviceCodeRequest) => Promise<import('../shared/pluginOauthDeviceCode').PluginOauthDeviceCodeView | null>;
 
     /** Submit one inline plugin Secret through the local trusted-frame-only IPC. */
     submitPluginSetupInline: (request: {

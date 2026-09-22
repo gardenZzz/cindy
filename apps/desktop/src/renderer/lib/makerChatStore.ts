@@ -1,10 +1,15 @@
+import { remotePluginSetupErrorCode, type PluginSetupCommandError } from './pluginSetupCommandError';
+export type { PluginSetupCommandError } from './pluginSetupCommandError';
 import { emitTaskTagCatalog } from '@/features/task-tags/taskTagEvents';
 import { normalizeTaskTags } from '@cindy/maker-shared';
 import type { ImMessageSource } from '../../shared/imMessageSource';
+import { sharedTaskAuthorName } from '@cindy/maker-shared';
 import { readBotAuthorizationCard } from '../../shared/botAuthorization';
 import { applyCindyMakeCardAttention } from './cindyMakeAttention';
 import { confirmRemoteUsers, reserveRemoteUser } from './remoteUserHandoff';
 import { readRemoteHistoryCache, remoteHistoryCacheWriter } from './remoteHistoryCache';
+import { createPluginSecretPresentation, createPluginConnectionPresentation } from '../../shared/pluginOauth';
+import { parsePluginConnectionInput } from '@cindy/device-link';
 /**
  * makerChatStore — Module-level store for Maker chat (Claude / Codex), sharded by sessionId.
  * ---------------------------------------------------------------------------
@@ -111,6 +116,9 @@ import * as sessionService from '@/lib/sessionService';
 // device-link 透明传输:远程(被控设备)会话的操作/读取走隧道,本地会话零变化。
 import {
   makerApiFor,
+  assistRemotePluginOauth,
+  submitRemotePluginSecret,
+  submitRemotePluginConnection,
   makerApiForDevice,
   getSessionFor,
   listMessagesFor,
@@ -473,6 +481,7 @@ export interface ChatMessage {
    * 据此在气泡上方渲染"由自动化任务发送"标签。手动输入的消息无此字段。
    */
   automationOrigin?: MessageAutomationOrigin;
+  sharedAuthorName?: string;
   /** user 消息投递方式:普通新 turn 或运行中 steer。 */
   delivery?: 'turn' | 'steer';
   /** Hook 来源元数据(IM 平台 + 用户干净原文 + thread 上下文),UserMessage 据此渲染 Cindy 任务卡片。 */
@@ -726,6 +735,9 @@ export type PluginSetupAction = GhostSetupAllowedAction;
 type PluginSetupInlineFormAction = Extract<GhostSetupAllowedAction, { kind: 'inline_form' }>;
 
 export interface PendingPluginSetup {
+  remoteOauth?: true;
+  remoteSecret?: true;
+  remoteConnection?: true;
   reopenActionId?: string;
   requestId: string;
   revision: number;
@@ -776,6 +788,7 @@ export interface PluginSetupCommandInFlight {
 
 export interface PluginSetupInlineFormValues {
   value: string;
+  host?: string;
 }
 
 /**
@@ -2543,6 +2556,7 @@ export interface SessionChatState {
   pluginSetupViewerState: PluginSetupViewerState;
   /** Prevents duplicate commands until Main publishes a newer snapshot/dismissal. */
   pluginSetupCommandInFlight: PluginSetupCommandInFlight | null;
+  pluginSetupCommandError: PluginSetupCommandError | null;
   /**
    * F-AUQ-MIN-1: AskUserQuestion viewer display state. Only meaningful while
    * pendingAskUser != null. Reset to 'expanded' every time a new
@@ -2769,6 +2783,7 @@ export type SessionChatLightState = Pick<
   | 'pendingPluginSetup'
   | 'pluginSetupViewerState'
   | 'pluginSetupCommandInFlight'
+  | 'pluginSetupCommandError'
   | 'askUserViewerState'
   | 'askUserDraft'
   | 'pendingPlanReview'
@@ -2840,6 +2855,7 @@ function createInitialState(): SessionChatState {
     pendingPluginSetupQueue: [],
     pluginSetupViewerState: 'expanded',
     pluginSetupCommandInFlight: null,
+    pluginSetupCommandError: null,
     askUserViewerState: 'expanded',
     askUserDraft: null,
     pendingPlanReview: null,
@@ -2922,6 +2938,7 @@ export const EMPTY_SESSION_STATE: SessionChatState = Object.freeze({
   pendingPluginSetupQueue: [],
   pluginSetupViewerState: 'expanded',
   pluginSetupCommandInFlight: null,
+  pluginSetupCommandError: null,
   askUserViewerState: 'expanded',
   askUserDraft: null,
   pendingPlanReview: null,
@@ -6313,6 +6330,7 @@ export function handleStreamEvent(
           pendingPluginSetupQueue: remainingSetups,
           pluginSetupViewerState: 'expanded',
           pluginSetupCommandInFlight: null,
+          pluginSetupCommandError: null,
         };
       }
       const queuedSetupIndex = state.pendingPluginSetupQueue.findIndex(
@@ -6722,6 +6740,7 @@ function forceFinalizeOnSessionClosed(state: SessionChatState): SessionChatState
     pendingPluginSetupQueue: [],
     pluginSetupViewerState: 'expanded',
     pluginSetupCommandInFlight: null,
+    pluginSetupCommandError: null,
     askUserViewerState: 'expanded',
     askUserDraft: null,
     pendingPlanReview: null,
@@ -7020,6 +7039,7 @@ type LiveIngressContext = {
   ownerStamp?: unknown;
   remoteDeviceId?: string;
   ownerStampPresent?: boolean;
+  sourceEpoch?: number;
 };
 
 function isCurrentLiveIngress(context?: LiveIngressContext): boolean {
@@ -7031,7 +7051,7 @@ function isCurrentLiveIngress(context?: LiveIngressContext): boolean {
     return !hasStamp || isDataOwnerPushStampCurrent(context.ownerStamp);
   }
 
-  return isRemoteDataOwnerPushCurrent(context.remoteDeviceId, context.ownerStamp, hasStamp);
+  return isRemoteDataOwnerPushCurrent(context.remoteDeviceId, context.ownerStamp, hasStamp, context.sourceEpoch);
 }
 
 function isCurrentLocalLiveIngress(ownerStamp: unknown): boolean {
@@ -7043,6 +7063,7 @@ function isCurrentLocalLiveIngress(ownerStamp: unknown): boolean {
 
 function sameLiveIngressScope(a: LiveIngressContext, b: LiveIngressContext): boolean {
   if (a.remoteDeviceId !== b.remoteDeviceId) return false;
+  if (a.sourceEpoch !== b.sourceEpoch) return false;
   const aStamp = isDataOwnerPushStamp(a.ownerStamp) ? a.ownerStamp : null;
   const bStamp = isDataOwnerPushStamp(b.ownerStamp) ? b.ownerStamp : null;
   if (aStamp === null || bStamp === null) return aStamp === bStamp;
@@ -7447,6 +7468,9 @@ function parsePluginSetupInlineFormAction(
 
 /** Strict renderer boundary parser: unknown push data never reaches the card. */
 export function parsePendingPluginSetup(request: {
+  remoteOauth?: unknown;
+  remoteSecret?: unknown;
+  remoteConnection?: unknown;
   requestId?: unknown;
   revision?: unknown;
   terminal?: unknown;
@@ -7562,6 +7586,9 @@ export function parsePendingPluginSetup(request: {
   return {
     requestId: request.requestId,
     revision: request.revision,
+    ...(request.remoteOauth === true ? { remoteOauth: true as const } : {}),
+    ...(request.remoteSecret === true ? { remoteSecret: true as const } : {}),
+    ...(request.remoteConnection === true ? { remoteConnection: true as const } : {}),
     ...(request.terminal === true ? { terminal: true as const } : {}),
     ghost: {
       id: ghost.id,
@@ -8139,6 +8166,7 @@ function initGlobalListeners(options: GlobalListenerOptions = {}): void {
             pendingPluginSetup: parsed,
             pluginSetupViewerState: 'expanded',
             pluginSetupCommandInFlight: null,
+            pluginSetupCommandError: null,
           };
         }
         if (current.requestId === parsed.requestId) {
@@ -8148,6 +8176,7 @@ function initGlobalListeners(options: GlobalListenerOptions = {}): void {
             ...s,
             pendingPluginSetup: parsed,
             pluginSetupCommandInFlight: advanced ? null : s.pluginSetupCommandInFlight,
+            pluginSetupCommandError: advanced ? null : s.pluginSetupCommandError,
           };
         }
 
@@ -8571,12 +8600,14 @@ function initGlobalListeners(options: GlobalListenerOptions = {}): void {
         channel?: string;
         payload?: unknown;
         ownerStamp?: unknown;
+        sourceEpoch?: number;
       } | null;
       if (!push?.channel) return;
       const remoteIngress: LiveIngressContext = push.deviceId
         ? {
             remoteDeviceId: push.deviceId,
             ownerStamp: push.ownerStamp,
+            sourceEpoch: push.sourceEpoch,
             ownerStampPresent: Object.prototype.hasOwnProperty.call(push, 'ownerStamp'),
           }
         : {};
@@ -9355,6 +9386,7 @@ function selectLightState(state: SessionChatState): SessionChatLightState {
     pendingPluginSetup: state.pendingPluginSetup,
     pluginSetupViewerState: state.pluginSetupViewerState,
     pluginSetupCommandInFlight: state.pluginSetupCommandInFlight,
+    pluginSetupCommandError: state.pluginSetupCommandError,
     askUserViewerState: state.askUserViewerState,
     askUserDraft: state.askUserDraft,
     pendingPlanReview: state.pendingPlanReview,
@@ -9403,6 +9435,7 @@ function lightStateEquals(a: SessionChatLightState, b: SessionChatLightState): b
     a.pendingPluginSetup === b.pendingPluginSetup &&
     a.pluginSetupViewerState === b.pluginSetupViewerState &&
     a.pluginSetupCommandInFlight === b.pluginSetupCommandInFlight &&
+    a.pluginSetupCommandError === b.pluginSetupCommandError &&
     a.askUserViewerState === b.askUserViewerState &&
     a.askUserDraft === b.askUserDraft &&
     a.pendingPlanReview === b.pendingPlanReview &&
@@ -9954,6 +9987,7 @@ function reconcilePendingInteractions(
           pendingPluginSetupQueue: survivingQueue,
           pluginSetupViewerState: currentChanged ? 'expanded' : state.pluginSetupViewerState,
           pluginSetupCommandInFlight: nextCommand,
+          pluginSetupCommandError: currentChanged ? null : state.pluginSetupCommandError,
           pendingRemoteDesktopConfirmation: promotedRemoteDesktopConfirmation,
           pendingRemoteDesktopConfirmationQueue: remainingRemoteConfirmations,
         };
@@ -15059,6 +15093,7 @@ async function clearSessionAfterGuardImpl(sessionId: string, clearedAt: string):
       pendingPluginSetupQueue: [],
       pluginSetupViewerState: 'expanded',
       pluginSetupCommandInFlight: null,
+      pluginSetupCommandError: null,
       // F-AUQ-MIN-5: Clear session — wipe viewer state too.
       askUserViewerState: 'expanded',
       // F-AUQ-DRAFT: Clear session also wipes any in-progress draft.
@@ -15358,16 +15393,52 @@ function respondToPluginSetup(
   if (!sessionId) return;
   const state = getOrCreateState(sessionId);
   const pending = state.pendingPluginSetup;
-  if (!pending || pending.requestId !== requestId || state.pluginSetupCommandInFlight) return;
+  if (!pending || pending.requestId !== requestId) return;
+  if (state.pluginSetupCommandInFlight && !(action === 'cancel' && isRemoteSession(sessionId) &&
+    ((pending.remoteOauth && state.pluginSetupCommandInFlight.action === 'run_action') ||
+      ((pending.remoteSecret || pending.remoteConnection) && state.pluginSetupCommandInFlight.action === 'submit_form')))) return;
+
+  const owner = getDataOwnerGeneration();
+  const recordRemoteFailure = (command: PluginSetupCommandInFlight, error: unknown) => {
+    if (!isDataOwnerGenerationCurrent(owner)) return;
+    setState(sessionId, (current) => {
+      if (current.pluginSetupCommandInFlight !== command ||
+          current.pendingPluginSetup?.requestId !== requestId ||
+          current.pendingPluginSetup.revision !== pending.revision) return current;
+      return {
+        ...current,
+        pluginSetupCommandInFlight: null,
+        pluginSetupCommandError: { requestId, revision: pending.revision, code: remotePluginSetupErrorCode(error) },
+      };
+    });
+  };
 
   const selectedAction = actionId
     ? pending.steps.find((step) => step.action?.id === actionId)?.action
     : undefined;
   if (action === 'run_action') {
     if (!selectedAction || selectedAction.kind === 'inline_form') return;
+    if (isRemoteSession(sessionId) && (!pending.remoteOauth || selectedAction.kind !== 'oauth_connect')) return;
   } else if (action === 'submit_form') {
+    if (selectedAction?.kind === 'manage_connection' && isRemoteSession(sessionId) && pending.remoteConnection) {
+      let value: import('@cindy/device-link').PluginConnectionInput;
+      try { value = parsePluginConnectionInput({ host: values?.host, token: values?.value }); }
+      catch { return; }
+      const step = pending.steps.find(s => s.action?.id === selectedAction.id)!;
+      if (pending.terminal || !['pending', 'failed'].includes(step.phase)) return;
+      bumpInteractionReconcileEpoch(sessionId);
+      const command: PluginSetupCommandInFlight = { requestId, action, actionId: selectedAction.id };
+      setState(sessionId, s => ({ ...s, pluginSetupCommandInFlight: command, pluginSetupCommandError: null }));
+      void submitRemotePluginConnection(sessionId, { requestId, actionId: selectedAction.id,
+        expectedRevision: pending.revision, ghostId: pending.ghost.id, value,
+        presentation: createPluginConnectionPresentation(pending, step) }).catch((error) => {
+          // Never log the request, provider reply or IPC details from credential input.
+          recordRemoteFailure(command, error);
+        });
+      return;
+    }
     if (
-      isRemoteSession(sessionId) ||
+      (isRemoteSession(sessionId) && !pending.remoteSecret) ||
       !selectedAction ||
       selectedAction.kind !== 'inline_form' ||
       typeof values?.value !== 'string'
@@ -15384,17 +15455,28 @@ function respondToPluginSetup(
       action,
       actionId: selectedAction.id,
     };
-    setState(sessionId, (s) => ({ ...s, pluginSetupCommandInFlight: command }));
-    window.electronAPI.maker
-      .submitPluginSetupInline({
-        requestId,
-        actionId: selectedAction.id,
-        expectedRevision: pending.revision,
-        value,
-      })
-      .catch(() => {
+    setState(sessionId, (s) => ({ ...s, pluginSetupCommandInFlight: command, pluginSetupCommandError: null }));
+    const step = pending.steps.find((s) => s.action?.id === selectedAction.id)!;
+    const submission = {
+      requestId,
+      actionId: selectedAction.id,
+      expectedRevision: pending.revision,
+      value,
+    };
+    const operation = isRemoteSession(sessionId)
+      ? submitRemotePluginSecret(sessionId, {
+          ...submission,
+          ghostId: pending.ghost.id,
+          presentation: createPluginSecretPresentation(pending, step, field),
+        })
+      : window.electronAPI.maker.submitPluginSetupInline(submission);
+    operation
+      .catch((error) => {
+        if (isRemoteSession(sessionId)) { recordRemoteFailure(command, error); return; }
         // Do not attach IPC error details here: this path carries a secret.
         log.error('Failed to submit plugin setup form');
+        if (sessions.get(sessionId)?.pluginSetupCommandInFlight !== command) return;
+        toast.warning(i18n.t('newChat.pluginSetup.error.ACTION_FAILED'));
         setState(sessionId, (s) =>
           s.pluginSetupCommandInFlight === command ? { ...s, pluginSetupCommandInFlight: null } : s,
         );
@@ -15408,16 +15490,20 @@ function respondToPluginSetup(
     action,
     ...(actionId ? { actionId } : {}),
   };
-  setState(sessionId, (s) => ({ ...s, pluginSetupCommandInFlight: command }));
+  setState(sessionId, (s) => ({ ...s, pluginSetupCommandInFlight: command, pluginSetupCommandError: null }));
 
-  makerApiFor(sessionId)
-    .resolveInteraction(requestId, {
+  const remoteOauth = isRemoteSession(sessionId) && action === 'run_action' && actionId;
+  const operation = remoteOauth
+    ? assistRemotePluginOauth(sessionId, { ghostId: pending.ghost.id, requestId, actionId, expectedRevision: pending.revision })
+    : makerApiFor(sessionId).resolveInteraction(requestId, {
       kind: 'plugin_setup',
       action,
       ...(actionId ? { actionId } : {}),
       expectedRevision: pending.revision,
-    })
+    });
+  operation
     .catch((err) => {
+      if (remoteOauth) { recordRemoteFailure(command, err); return; }
       log.error('Failed to respond to plugin setup:', err);
       setState(sessionId, (s) =>
         s.pluginSetupCommandInFlight === command ? { ...s, pluginSetupCommandInFlight: null } : s,
@@ -17616,6 +17702,7 @@ function mapServerMessages(serverMsgs: Message[]): ChatMessage[] {
       // older Mobile clients into legacy Hook/system-card semantics.
       const hookSource = m.agentMeta?.imSource ?? m.agentMeta?.hookSource;
       return {
+        sharedAuthorName: sharedTaskAuthorName(m.agentMeta),
         clientId: m.clientId,
         role: m.role,
         content: parsed.text,

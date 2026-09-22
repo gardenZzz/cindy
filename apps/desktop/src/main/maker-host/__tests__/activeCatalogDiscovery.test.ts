@@ -379,19 +379,21 @@ describe('active-catalog discovered augment', () => {
 
   it('adds a newly discovered Grok model to Pi without a bundled model or public declaration', () => {
     setActiveCatalog(BUNDLED_CATALOG);
-    // grok-4.7 已在 bundled Pi 目录里（#4839），不能再拿它证明「清掉发现后消失」。
+    // Keep the discovery fixture independent of future bundled model releases.
+    const modelId = 'grok-discovery-only';
+    const models = () => getActiveCatalog().providers.find(p => p.id === 'xai')!.models.pi!;
+    expect(models().some(model => model.id === modelId)).toBe(false);
     setXaiDiscoveredModels([{
-      id: 'xai/grok-unbundled-probe', name: 'Grok Unbundled', contextWindow: 500_000,
+      id: `xai/${modelId}`, name: 'Discovered Grok', contextWindow: 500_000,
       maxOutput: 64_000, efforts: ['xhigh', 'high', 'medium', 'low'], defaultEffort: 'high',
     }]);
-    const models = () => getActiveCatalog().providers.find(p => p.id === 'xai')!.models.pi!;
-    expect(models().find(model => model.id === 'grok-unbundled-probe')).toMatchObject({
-      name: 'Grok Unbundled', contextWindow: 500_000, maxOutput: 64_000,
+    expect(models().find(model => model.id === modelId)).toMatchObject({
+      name: 'Discovered Grok', contextWindow: 500_000, maxOutput: 64_000,
       efforts: ['low', 'medium', 'high', 'xhigh'], defaultEffort: 'high',
       piApi: 'openai-responses',
     });
     setXaiDiscoveredModels(null);
-    expect(models().some(model => model.id === 'grok-unbundled-probe')).toBe(false);
+    expect(models().some(model => model.id === modelId)).toBe(false);
   });
 
   it('keeps discovered Pi models scoped to their Grok account', () => {
@@ -469,15 +471,15 @@ describe('active-catalog discovered augment', () => {
     const xai = getActiveCatalog().providers.find((provider) => provider.id === 'xai');
     expect(xai?.models['claude-code']?.find((model) => model.id === 'xai/grok-4.5')).toMatchObject({
       efforts: ['low', 'medium', 'high'],
-      defaultEffort: 'high',
+      defaultEffort: 'medium',
     });
     expect(xai?.models.pi?.find((model) => model.id === 'grok-4.5')).toMatchObject({
       efforts: ['low', 'medium', 'high'],
-      defaultEffort: 'high',
+      defaultEffort: 'medium',
     });
   });
 
-  it('uses the explicit SuperGrok default before registry defaults', () => {
+  it('uses the shared model default before the SuperGrok recommendation', () => {
     setActiveCatalog(BUNDLED_CATALOG);
     setXaiDiscoveredModels([
       { id: 'xai/grok-4.5', efforts: ['low', 'medium', 'high'], defaultEffort: 'low' },
@@ -486,11 +488,11 @@ describe('active-catalog discovered augment', () => {
     const xai = getActiveCatalog().providers.find((provider) => provider.id === 'xai');
     expect(xai?.models['claude-code']?.find((model) => model.id === 'xai/grok-4.5')).toMatchObject({
       efforts: ['low', 'medium', 'high'],
-      defaultEffort: 'low',
+      defaultEffort: 'medium',
     });
     expect(xai?.models.pi?.find((model) => model.id === 'grok-4.5')).toMatchObject({
       efforts: ['low', 'medium', 'high'],
-      defaultEffort: 'low',
+      defaultEffort: 'medium',
     });
     expect(xai?.models.pi?.find((model) => model.id === 'grok-4.6')).toMatchObject({
       efforts: ['low', 'medium', 'high'],

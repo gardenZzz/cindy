@@ -1,7 +1,10 @@
 import { listWorktreeRecycleStatus, controlWorktreeRecycle } from './worktree/recycleControls';
 import { registerFilePeerIpc } from './device-link/filePeer';
 import { registerLoginItemIpc } from './login-item-ipc.js';
-import { createLatestSourceVersionReader } from './cindy-make/latestSourceVersion.js';
+import {
+  createLatestSourceVersionReader,
+  sourceChannel,
+} from './cindy-make/latestSourceVersion.js';
 import { refreshCindySourceStatus } from './cindy-make/sourceStatusRefresh.js';
 import {
   configureUpstreamMerge,
@@ -17,6 +20,10 @@ import {
   openHistoryPersonalBuild,
   stopMakeHistoryBuild,
 } from './cindy-make/historyRuntime.js';
+import {
+  readCindyMakeSettings,
+  writeCindyMakeSyncLatestBeforeBuild,
+} from './cindy-make/settingsStore.js';
 import { retainProviderPresentationAfterAuthChange } from './maker-host/provider-presentation-store.js';
 import { codexAccountState } from './maker-host/codex-account-auth.js';
 import { syncSubscriptionAccountUsage } from './usage/subscriptionAccountUsage.js';
@@ -349,6 +356,7 @@ import {
   subscribeCindySourceStatus,
 } from './cindy-make/sourcePreparation.js';
 import { broadcastCindyMakeSourceStatus } from './cindy-make/sourceStatusBroadcast.js';
+import { broadcastCindyMakeHistoryChanged } from './cindy-make/historyBroadcast.js';
 import { cindyMakeManager } from './cindy-make/manager.js';
 import { broadcastCindyMakeState } from './cindy-make/stateBroadcast.js';
 import {
@@ -582,9 +590,14 @@ import { issueWritableDirectoryPickerGrant } from './maker-ipc/writableDirectory
 // 设备互联(跨设备远程控制): relay 连接 host + 开关/设备列表 IPC
 import {
   initDeviceLinkService,
+  getDeviceLinkStatus,
+  isSharedTaskAvailable,
   releaseDeviceLinkOwnershipBeforeLogout,
   handleDeviceLinkSystemResume,
 } from './device-link';
+import { closeSharedTasksBeforeLogout } from './device-link/sharedTaskRuntime.js';
+import { closeSharedTasksBeforeAccountHandover } from './device-link/sharedTaskAccountBoundary.js';
+import { registerSharedTaskIpc } from './device-link/sharedTaskIpc.js';
 import {
   getUpdateRelaunchControllers,
   hasInFlightRemoteInvokes,
@@ -2046,14 +2059,14 @@ async function teardownAuthAccountBoundary(reason: string): Promise<void> {
       // device-link 单持有者仲裁:必须在 dispose DbClient **之前**释放持有权行
       // (dispose 同步 clearCurrentDbClient,之后 store 不可用,只能等 15s+ 心跳
       // 过期,同机幸存实例接管变慢)。内部带 1.5s 超时,不会卡住登出。
-      try {
-        await releaseDeviceLinkOwnershipBeforeLogout();
-      } catch (err) {
-        authBoundaryLog.error(
-          `[bootstrap-electron] release device-link ownership on ${reason} failed (non-fatal):`,
-          err,
-        );
-      }
+      await closeSharedTasksBeforeAccountHandover({
+        closeSharedTasks: closeSharedTasksBeforeLogout,
+        releaseOwnership: releaseDeviceLinkOwnershipBeforeLogout,
+        onClosureFailure: () => markAccountBoundaryAbortedMidTeardown(reason),
+        onReleaseFailure: (err) => authBoundaryLog.error(
+          `[bootstrap-electron] release device-link ownership on ${reason} failed (non-fatal):`, err,
+        ),
+      });
       await lifecycleDbClientManager.dispose(reason);
     } finally {
       releaseEndedSuppression();
@@ -2070,14 +2083,14 @@ async function teardownAuthAccountBoundary(reason: string): Promise<void> {
   // device-link 单持有者仲裁:必须在 dispose DbClient **之前**释放持有权行
   // (dispose 同步 clearCurrentDbClient,之后 store 不可用,只能等 15s+ 心跳
   // 过期,同机幸存实例接管变慢)。内部带 1.5s 超时,不会卡住登出。
-  try {
-    await releaseDeviceLinkOwnershipBeforeLogout();
-  } catch (err) {
-    authBoundaryLog.error(
-      `[bootstrap-electron] release device-link ownership on ${reason} failed (non-fatal):`,
-      err,
-    );
-  }
+  await closeSharedTasksBeforeAccountHandover({
+    closeSharedTasks: closeSharedTasksBeforeLogout,
+    releaseOwnership: releaseDeviceLinkOwnershipBeforeLogout,
+    onClosureFailure: () => markAccountBoundaryAbortedMidTeardown(reason),
+    onReleaseFailure: (err) => authBoundaryLog.error(
+      `[bootstrap-electron] release device-link ownership on ${reason} failed (non-fatal):`, err,
+    ),
+  });
   try {
     await lifecycleDbClientManager.dispose(reason);
   } finally {
@@ -7532,7 +7545,7 @@ const registerIpcHandlers = () => {
         }
         return readCurrentCindySourceStatus(root, env);
       },
-      readLatest: (source) => readLatestSourceVersion(source, channel),
+      readLatest: (source) => readLatestSourceVersion(source, sourceChannel(source, channel)),
     });
   });
   // 源码准备是全局单例:进度广播给所有窗口,任意窗口都能停止它。
@@ -7547,10 +7560,27 @@ const registerIpcHandlers = () => {
   });
   configureCindyMakeTestRuntime(
     (id) => getMakerIfReady()?.getSession(id)?.isTurnRunning() ?? false,
+    broadcastCindyMakeHistoryChanged,
   );
   configureCindyMakeEditingGuard((id) => cindyMakeTestController.isUsingSession(id));
   registerMakeRemoteResources((id) => getMakerIfReady()?.getSession(id)?.isTurnRunning() ?? false);
-  configureMakeHistory((id) => getMakerIfReady()?.getSession(id)?.isTurnRunning() ?? false);
+  configureMakeHistory(
+    (id) => getMakerIfReady()?.getSession(id)?.isTurnRunning() ?? false,
+    broadcastCindyMakeHistoryChanged,
+  );
+  ipcMain.handle('app:get-cindy-make-settings', (event) => {
+    assertTrustedAppRendererEvent(event);
+    return readCindyMakeSettings();
+  });
+  ipcMain.handle(
+    'app:set-cindy-make-sync-latest-before-build',
+    (event, enabled: unknown) => {
+      assertTrustedAppRendererEvent(event);
+      if (typeof enabled !== 'boolean')
+        throwIpcError('INVALID_PARAMS', 'Invalid Cindy Make setting');
+      return writeCindyMakeSyncLatestBeforeBuild(enabled);
+    },
+  );
   ipcMain.handle('app:cindy-make-history', async (event, selected?: unknown) => {
     assertTrustedAppRendererEvent(event);
     if (
@@ -9525,6 +9555,7 @@ app.on('ready', async () => {
   // owning modules above; future collections/actions do not add tunnel channels.
   registerRemoteResourcesIpc();
   registerDeviceLinkIpc();
+  registerSharedTaskIpc(isSharedTaskAvailable, () => getDeviceLinkStatus() === 'online');
   registerFilePeerIpc();
   registerRemoteDesktopIpc(isGlobalVoiceInputOverlaySender);
   void startupPurgeDrain

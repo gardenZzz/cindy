@@ -1848,7 +1848,7 @@ describe('chatBridgeCapabilitiesForRoute', () => {
           modelIdRewrite: { stripPrefix: 'chat/' },
         },
       },
-      models: { codex: [{ id: 'chat/model-a', name: 'Chat Model A' }] },
+      models: { codex: [{ id: 'chat/model-a', name: 'Chat Model A', efforts: ['high'] }] },
     } as never]);
     setCustomProviderKeyReader(() => 'locked-chat-key');
     host.registerComposed(
@@ -2754,7 +2754,7 @@ describe('codex proxy host', () => {
           expect.any(Function), expect.any(Function), expect.any(Function), expect.any(Function), expect.any(Function),
           expect.any(Function), expect.any(Function), expect.any(Function), expect.any(Function),
           expect.any(Function), expect.any(Function), expect.any(Function), expect.any(Function),
-          expect.any(Function),
+          expect.any(Function), expect.any(Function), // frozen custom-provider effort
         ],
         transformResponse: expect.any(Function),
         routingTransform: expect.any(Function),
@@ -2781,7 +2781,7 @@ describe('codex proxy host', () => {
     );
     expect(requestScopedTransforms).toHaveLength(1);
     expect(requestScopedTransforms[0]?.errorMode).toBe('reject-request');
-    const strip = mockState.createAnthropicCompatProxy.mock.calls[0][0].transformRequest.at(-1);
+    const strip = mockState.createAnthropicCompatProxy.mock.calls[0][0].transformRequest.at(-2);
     const body = { model: 'gpt-5', input: [] };
     strip(body, { url: '/responses' });
     expect(mockState.stripNonAnthropicFields).toHaveBeenCalledWith(body, { url: '/responses' });
@@ -3396,6 +3396,107 @@ describe('codex proxy host', () => {
     const host = await freshCodexProxyHost();
 
     expect(host.getCodexProxyEndpoint()).toBe(`${XD_GATEWAY_BASE_URL}/v1`);
+  });
+
+  it('reconciles a saved Responses effort on every catalog refresh without borrowing another route', async () => {
+    const host = await freshCodexProxyHost();
+    const { buildUserProvider } = await import('@cindy/model-providers');
+    const { setCustomProviders } = await import('../active-catalog.js');
+    const { setSessionProvider, clearSessionProvider } = await import('../session-provider-store.js');
+    const provider = (id: string, efforts: readonly ('high' | 'max')[]) => buildUserProvider({
+      id, name: 'Fixture', runtimes: {
+        codex: { baseUrl: 'https://fixture.example/v1', wireProtocol: 'openai-responses', models: [{
+          id: 'same-model', name: 'Same model', reasoning: true, reasoningEfforts: [...efforts],
+        }] },
+      },
+    });
+    mockState.createAnthropicCompatProxy.mockResolvedValueOnce({
+      url: 'http://127.0.0.1:43210', dispose: vi.fn(async () => undefined),
+    });
+    host.setCodexProxyAuthInjection('env-key');
+    host.registerComposed('effort-session', 'effort-thread', '');
+    setSessionProvider('effort-session', 'selected-route');
+    try {
+      await host.ensureCodexProxyReady();
+      const original = { model: 'same-model', input: [], reasoning: { effort: 'max', summary: 'auto' } };
+      for (const efforts of [['high', 'max'], ['high'], [], ['high', 'max']] as const) {
+        setCustomProviders([provider('other-route', ['high', 'max']), provider('selected-route', efforts)]);
+        let current: unknown = original;
+        for (const transform of mockState.createAnthropicCompatProxy.mock.calls[0][0].transformRequest) {
+          const next = transform(current, { method: 'POST', url: '/responses', headers: { 'thread-id': 'effort-thread' } });
+          if (next !== null && next !== undefined) current = next;
+        }
+        expect(current).toHaveProperty('reasoning.summary', 'auto');
+        if (!efforts.length) expect(current).not.toHaveProperty('reasoning.effort');
+        else expect(current).toHaveProperty('reasoning.effort', efforts[efforts.length - 1]);
+        expect(original.reasoning.effort).toBe('max');
+      }
+    } finally {
+      clearSessionProvider('effort-session');
+      setCustomProviders([]);
+    }
+  });
+
+  it.each([
+    ['env-key', null, 'xd'],
+    ['oauth-bearer', null, 'openai'],
+    ['env-key', 'openai', 'xd'],
+    ['env-key', null, 'oauth-fixture'],
+  ] as const)('uses effective capabilities for %s / session %s / destination %s', async (auth, selected, destination) => {
+    const host = await freshCodexProxyHost();
+    const { BUNDLED_CATALOG } = await import('@cindy/model-providers');
+    const { setActiveCatalog } = await import('../active-catalog.js');
+    const { setSessionProvider, clearSessionProvider } = await import('../session-provider-store.js');
+    const catalog = structuredClone(BUNDLED_CATALOG);
+    const oauth = structuredClone(catalog.providers.find(p => p.id === 'xai')!);
+    // Exercise explicit legacy rows; the bundled v4 registry otherwise projects over them.
+    delete catalog.modelRegistry;
+    oauth.id = 'oauth-fixture';
+    if (destination === 'oauth-fixture') catalog.providers.unshift(oauth);
+    const modelId = destination === 'oauth-fixture' ? 'xai/effort-fixture' : 'gpt-5.6-sol';
+    for (const provider of catalog.providers.filter(p => ['xd', 'openai', 'oauth-fixture'].includes(p.id))) {
+      const template = provider.models.codex![0];
+      const id = destination === 'oauth-fixture' && provider.id !== destination ? 'gpt-5.6-sol' : modelId;
+      provider.models.codex = [{ ...template, id, efforts: ['high', 'max'], defaultEffort: 'high' }];
+    }
+    const target = catalog.providers.find(p => p.id === destination)!.models.codex![0];
+    host.setCodexProxyAuthInjection(auth);
+    host.registerComposed('implicit-effort-session', 'implicit-effort-thread', '');
+    if (selected) setSessionProvider('implicit-effort-session', selected);
+    else clearSessionProvider('implicit-effort-session');
+    mockState.createAnthropicCompatProxy.mockResolvedValueOnce({ url: 'http://127.0.0.1:43210', dispose: vi.fn(async () => undefined) });
+    try {
+      await host.ensureCodexProxyReady();
+      const original = { model: modelId, input: [], reasoning: { effort: 'max', summary: 'auto' } };
+      for (const efforts of [['high'], [], null, ['high', 'max']] as const) {
+        // An implicit OAuth provider must advertise membership to be selected at all.
+        if (efforts === null && destination === 'oauth-fixture') continue;
+        target.efforts = [...(efforts ?? [])];
+        catalog.providers.find(p => p.id === destination)!.models.codex = efforts === null ? [] : [target];
+        setActiveCatalog(structuredClone(catalog));
+        const activeCatalog = await import('../active-catalog.js');
+        activeCatalog.setDiscoveredCodexModels(catalog.providers.find(p => p.id === 'openai')!.models.codex!);
+        activeCatalog.setXdGatewayModels(catalog.providers.find(p => p.id === 'xd')!.models.codex!.map(m => ({
+          id: m.id, name: m.name, efforts: m.efforts, agents: ['codex'],
+        })));
+        const active = activeCatalog.getActiveCatalog();
+        expect(active.providers.find(p => p.id === destination)?.models.codex?.find(m => m.id === modelId)?.efforts).toEqual(efforts === null ? undefined : [...efforts]);
+        let current: unknown = original;
+        for (const transform of mockState.createAnthropicCompatProxy.mock.calls[0][0].transformRequest) {
+          current = transform(current, { method: 'POST', url: '/responses', headers: { 'thread-id': 'implicit-effort-thread' } }) ?? current;
+        }
+        expect(current).toHaveProperty('reasoning.summary', 'auto');
+        if (efforts?.length) expect(current).toHaveProperty('reasoning.effort', efforts.at(-1));
+        else expect(current).not.toHaveProperty('reasoning.effort');
+        expect(original.reasoning.effort).toBe('max');
+      }
+    } finally {
+      clearSessionProvider('implicit-effort-session');
+      const activeCatalog = await import('../active-catalog.js');
+      activeCatalog.setDiscoveredCodexModels([]);
+      activeCatalog.setXdGatewayModels([]);
+      setActiveCatalog(BUNDLED_CATALOG);
+    }
   });
 
   it('registers and unregisters composed prompt text by session id', async () => {
@@ -4113,6 +4214,8 @@ describe('codex proxy host', () => {
 
   it('applies the inherited Gateway route on the first collab_spawn transform pass', async () => {
     const host = await freshCodexProxyHost();
+    const { setXdGatewayModels } = await import('../active-catalog.js');
+    setXdGatewayModels([{ id: 'codex/gpt-5.6-sol', name: 'Fixture', agents: ['codex'], efforts: ['max'] }]);
     const { setSessionProvider, clearSessionProvider } = await import('../session-provider-store.js');
     mockState.createAnthropicCompatProxy.mockResolvedValueOnce({
       url: 'http://127.0.0.1:43210',
@@ -4161,6 +4264,7 @@ describe('codex proxy host', () => {
       host.unregister('session-openai-parent');
       clearSessionProvider('session-openai-parent');
       host.setCodexProxyGatewayKeyReader(() => null);
+      setXdGatewayModels([]);
     }
   });
 
@@ -5717,6 +5821,8 @@ describe('codex proxy host', () => {
 
   it('normalizes requests to ByteDance Seed Responses capabilities', async () => {
     const host = await freshCodexProxyHost();
+    const { setXdGatewayModels } = await import('../active-catalog.js');
+    setXdGatewayModels([{ id: 'bytedance-seed/seed-2.1-pro', name: 'Fixture', agents: ['codex'], efforts: ['high'] }]);
     const { setSessionProvider, clearSessionProvider } = await import('../session-provider-store.js');
     mockState.createAnthropicCompatProxy.mockResolvedValueOnce({
       url: 'http://127.0.0.1:43210',
@@ -5804,6 +5910,7 @@ describe('codex proxy host', () => {
     expect(summaryOnlyReasoning).toEqual({ model: 'bytedance-seed/seed-2.1-pro' });
 
     clearSessionProvider('session-seed');
+    setXdGatewayModels([]);
   });
 
   it('normalizes custom Volcengine Ark Responses routes regardless of the model alias', async () => {
@@ -5818,7 +5925,7 @@ describe('codex proxy host', () => {
         runtimes: {
           codex: {
             baseUrl: 'https://ark.cn-beijing.volces.com/api/v3',
-            models: [{ id: 'production-deployment', name: 'Production Deployment' }],
+            models: [{ id: 'production-deployment', name: 'Production Deployment', reasoning: true, reasoningEfforts: ['high'] }],
           },
         },
       }),
@@ -5888,7 +5995,7 @@ describe('codex proxy host', () => {
         runtimes: {
           codex: {
             baseUrl: 'https://gateway.volces.com/api/v3',
-            models: [{ id: 'production-deployment', name: 'Production Deployment' }],
+            models: [{ id: 'production-deployment', name: 'Production Deployment', reasoning: true, reasoningEfforts: ['high'] }],
           },
         },
       }),
@@ -6157,7 +6264,7 @@ describe('codex proxy host', () => {
         runtimes: {
           codex: {
             baseUrl,
-            models: [{ id: 'MiniMax-M3', name: 'MiniMax M3' }],
+            models: [{ id: 'MiniMax-M3', name: 'MiniMax M3', reasoning: true, reasoningEfforts: ['high'] }],
           },
         },
       }),
@@ -6222,7 +6329,7 @@ describe('codex proxy host', () => {
         runtimes: {
           codex: {
             baseUrl: 'https://example.com/v1',
-            models: [{ id: 'custom-model', name: 'Custom Model' }],
+            models: [{ id: 'custom-model', name: 'Custom Model', reasoning: true, reasoningEfforts: ['xhigh'] }],
           },
         },
       }),
@@ -6396,6 +6503,8 @@ describe('codex proxy host', () => {
     // xai 会话里非 xai/ 前缀的请求会被路由 scope 门放回默认上游(ChatGPT/网关),
     // xAI 兼容改写(挪 instructions / 剥 reasoning)必须同步跳过,否则默认上游收到被改坏的 body。
     const host = await freshCodexProxyHost();
+    const { setXdGatewayModels } = await import('../active-catalog.js');
+    setXdGatewayModels([{ id: 'gpt-5.5', name: 'Fixture', agents: ['codex'], efforts: ['high'] }]);
     const { setSessionProvider, clearSessionProvider } = await import('../session-provider-store.js');
     mockState.createAnthropicCompatProxy.mockResolvedValueOnce({
       url: 'http://127.0.0.1:43210',
@@ -6426,6 +6535,7 @@ describe('codex proxy host', () => {
     // instructions 未被挪进 input、reasoning 未被剥、model 未被 rewrite。
     expect(current).toEqual(original);
     clearSessionProvider('session-xai-foreign');
+    setXdGatewayModels([]);
   });
 
   it('restores native search when provider-oauth foreign-model fallback lands on Gateway', async () => {
@@ -6491,7 +6601,7 @@ describe('codex proxy host', () => {
     await host.ensureCodexProxyReady();
 
     const transforms = mockState.createAnthropicCompatProxy.mock.calls[0]?.[0]?.transformRequest ?? [];
-    expect(transforms).toHaveLength(25); // encrypted activeStrip, image generation activeStrip, provider-aware Guardian reviewer, locked Subagent route, instructions 注入, locked Subagent exec guard, Gateway 原生 web_search, 跨来源压缩块兼容, xAI ModelInput activeStrip, responses item id activeStrip(#4738), responses item id length activeStrip(#4227), exec function adapter, strict gateway history 兼容, xAI ModelInput sanitize, DeepSeek V4 custom tool 兼容, xAI Responses 兼容, XD Gateway Grok 兼容, ByteDance Seed tool 兼容, MiniMax effort 兼容, provider model rewrite, provider 参数归一, 视觉桥(短路), 工具 ID 校正, stripNonAnthropicFields, dump
+    expect(transforms).toHaveLength(26); // ordinary transforms + dump + frozen custom-provider effort
     const ctx = {
       method: 'POST',
       url: '/v1/responses',
@@ -7780,7 +7890,7 @@ describe('createModelRoutingTransform —— custom Provider native imagegen pre
     }
   });
 
-  it('repairs namespaced Responses history over HTTP without rewriting native fields or image JSON', async () => {
+  it.each([{ efforts: [] }, { efforts: ['high'] }, { efforts: ['high', 'max'] }] as const)('reconciles frozen namespaced Responses capabilities $efforts over HTTP without rewriting native fields or image JSON', async ({ efforts }) => {
     const received: Array<{ path: string; body: string }> = [];
     const upstream = createServer((req, res) => {
       const chunks: Buffer[] = [];
@@ -7805,7 +7915,7 @@ describe('createModelRoutingTransform —— custom Provider native imagegen pre
       runtimes: { codex: {
         baseUrl: `http://127.0.0.1:${(upstream.address() as AddressInfo).port}/v1`,
         wireProtocol: 'openai-responses', supportsImageGeneration: true,
-        models: [{ id: 'codex/native-model', name: 'Native model' }],
+        models: [{ id: 'codex/native-model', name: 'Native model', reasoning: true, reasoningEfforts: [...efforts] }],
       } },
     });
     const catalog = { ...BUNDLED_CATALOG, providers: [...BUNDLED_CATALOG.providers, provider] };
@@ -7814,10 +7924,15 @@ describe('createModelRoutingTransform —— custom Provider native imagegen pre
     const route = deriveCodexCustomProviderRoutes(catalog)[0]!;
     host.setCodexAppliedCustomProviderRoutes([route]);
     try {
-      await host.ensureCodexProxyReady();
-      const endpoint = host.getCodexProxyEndpoint();
+      await host.ensureCodexCustomContextProxyReady('frozen-effort', 'env-key', [route]);
+      const endpoint = host.getCodexCustomContextProxyEndpoint('frozen-effort');
+      // A later catalog/global Host must not lend capabilities to this frozen route.
+      provider.models.codex![0]!.efforts = efforts.length ? [] : ['max'];
+      setActiveCatalog(catalog);
+      host.setCodexAppliedCustomProviderRoutes(deriveCodexCustomProviderRoutes(catalog));
       const body = {
         model: 'codex/native-model', max_tokens: 123, vendor_field: { retain: true },
+        reasoning: { effort: 'max', summary: 'auto' },
         tools: [{ type: 'custom', name: 'exec', format: { type: 'text' } }],
         input: [
           { type: 'custom_tool_call', id: 'fc_legacy', call_id: 'call_same', name: 'exec', input: '你好' },
@@ -7826,7 +7941,7 @@ describe('createModelRoutingTransform —— custom Provider native imagegen pre
           { type: 'compaction', encrypted_content: 'opaque' },
         ],
       };
-      const repaired = { ...body, input: body.input.map((item, index) => index < 2
+      const repaired = { ...body, reasoning: { summary: 'auto', ...(efforts.length ? { effort: efforts.at(-1) } : {}) }, input: body.input.map((item, index) => index < 2
         ? { ...item, id: index === 0 ? 'ctc_legacy' : 'ctco_legacy' } : item) };
       const post = async (path: string, raw: string) => {
         const response = await fetch(`${endpoint}/_cindy/custom-provider/${route.routeId}/${path}`, {
@@ -7845,7 +7960,9 @@ describe('createModelRoutingTransform —— custom Provider native imagegen pre
       const imageBody = JSON.stringify({ ...body, model: 'gpt-image-2', prompt: 'draw' }, null, 2);
       await post('images/generations', imageBody);
       expect(received[2]?.body).toBe(imageBody);
+      expect(body.reasoning.effort).toBe('max');
     } finally {
+      await host.releaseCodexCustomContextProxy('frozen-effort');
       await host.disposeCodexProxy();
       host.setCodexAppliedCustomProviderRoutes([]);
       setCustomProviderKeyReader(() => null);
