@@ -602,7 +602,7 @@ export function hasLocalContextWindowOverride(
       entry &&
       (agent === 'pi'
         ? (!entry.agents || entry.agents.includes('pi'))
-        : agent !== 'cursor' && entryMembershipAgents(entry, policyProviderId).includes(agent)) &&
+        : entryMembershipAgents(entry, policyProviderId).includes(agent)) &&
       effectiveFields(entry, agent).contextWindow !== undefined
     );
   });
