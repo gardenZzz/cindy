@@ -57,7 +57,6 @@ import {
 import {
   getRecordingPermissionsAsync,
   requestRecordingPermissionsAsync,
-  setAudioModeAsync,
 } from 'expo-audio';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import { ScreenBackButton } from '@/components/MobilePrimitives';
@@ -1681,7 +1680,6 @@ export default function NewRemoteSessionScreen() {
     setVoiceError(null);
     discardPendingPrewarm();
     if (controller) void controller.cancel().catch(() => undefined);
-    void setAudioModeAsync({ allowsRecording: false }).catch(() => undefined);
   }, [setVoiceState]);
 
   useEffect(() => {
@@ -3149,7 +3147,6 @@ export default function NewRemoteSessionScreen() {
     let permissionRequestAbortController: AbortController | null = null;
     let startupSeq: number | null = null;
     let claimedPrewarm: PrewarmedMobileVoiceAsr | null = null;
-    let audioModeEnabled = false;
     let createdController: MobileVoiceControllerSession | null = null;
     try {
       if (!selectedDeviceId) {
@@ -3212,11 +3209,8 @@ export default function NewRemoteSessionScreen() {
       startupSeq = voiceStartupSeqRef.current + 1;
       voiceStartupSeqRef.current = startupSeq;
       voiceStartupInFlightRef.current = true;
-      await setAudioModeAsync({
-        allowsRecording: true,
-        playsInSilentMode: true,
-      });
-      audioModeEnabled = true;
+      // The capture backend owns audio-session configuration and teardown.
+      // Screen-level Expo mode changes also affect remote desktop PiP.
       // Open the device link in the background: voice dictation writes into the
       // local composer via the cloud ASR proxy and does not need the mobile↔desktop
       // link (only submitting the composed message later does). Awaiting it here
@@ -3251,18 +3245,8 @@ export default function NewRemoteSessionScreen() {
           CINDY_MANAGED_REFINER_PROVIDER,
         );
       if (voiceStartupSeqRef.current !== startupSeq) {
-        // Superseded while we awaited: close the claimed connection, and undo
-        // the recording audio mode this startup enabled — but audio mode is
-        // app-global, so leave it alone if a newer voice run (possibly on
-        // another screen after this one unmounted) is already starting/live.
+        // This run never opened the microphone; release only its claimed ASR.
         void prewarmedVoice?.asr.stop().catch(() => undefined);
-        if (
-          !voiceControllerSessionRef.current
-          && !voiceStartupInFlightRef.current
-          && !voiceRecordingActiveRef.current
-        ) {
-          await setAudioModeAsync({ allowsRecording: false }).catch(() => undefined);
-        }
         return;
       }
       const selectionBefore = takeRefinementContextTail(currentDraft.slice(0, initialSelection.start));
@@ -3344,7 +3328,6 @@ export default function NewRemoteSessionScreen() {
           voiceControllerSessionRef.current = null;
           voiceRecordingActiveRef.current = false;
           voiceStopInFlightRef.current = false;
-          await setAudioModeAsync({ allowsRecording: false }).catch(() => undefined);
         }
         await controller.cancel().catch(() => undefined);
         return;
@@ -3368,14 +3351,6 @@ export default function NewRemoteSessionScreen() {
           }
           await createdController.cancel().catch(() => undefined);
         }
-        if (
-          audioModeEnabled
-          && !voiceControllerSessionRef.current
-          && !voiceStartupInFlightRef.current
-          && !voiceRecordingActiveRef.current
-        ) {
-          await setAudioModeAsync({ allowsRecording: false }).catch(() => undefined);
-        }
         return;
       }
       const controller = voiceControllerSessionRef.current;
@@ -3386,7 +3361,6 @@ export default function NewRemoteSessionScreen() {
       voiceRecordingActiveRef.current = false;
       setVoiceState('error');
       setVoiceError(formatRemoteError(err));
-      await setAudioModeAsync({ allowsRecording: false }).catch(() => undefined);
     }
   }, [openLink, selectedDeviceId, setFirstMessageDraft, voiceIsProcessing, voiceState]);
 
@@ -3404,7 +3378,6 @@ export default function NewRemoteSessionScreen() {
     setVoiceError(null);
     try {
       const latestDraft = await controller.stop();
-      await setAudioModeAsync({ allowsRecording: false }).catch(() => undefined);
       setVoiceState('done');
       requestAnimationFrame(() => {
         firstMessageInputRef.current?.setNativeProps({ selection: firstMessageSelectionRef.current });
@@ -3415,7 +3388,6 @@ export default function NewRemoteSessionScreen() {
       voiceRecordingActiveRef.current = false;
       setVoiceState('error');
       setVoiceError(formatRemoteError(err));
-      await setAudioModeAsync({ allowsRecording: false }).catch(() => undefined);
       return null;
     } finally {
       voiceStopInFlightRef.current = false;
@@ -3483,7 +3455,6 @@ export default function NewRemoteSessionScreen() {
       voiceRecordingActiveRef.current = false;
       if (controller) void controller.cancel().catch(() => undefined);
       discardPendingPrewarm();
-      void setAudioModeAsync({ allowsRecording: false }).catch(() => undefined);
     };
   }, []);
 
@@ -5387,7 +5358,8 @@ export default function NewRemoteSessionScreen() {
             {creating ? <ActivityIndicator color={colors.textSecondary} /> : null}
           </View> : null}
 
-          <View style={styles.bottomCluster}>
+          <ScrollView style={{ flex: 1 }} contentContainerStyle={styles.bottomCluster}
+            keyboardShouldPersistTaps="handled" showsVerticalScrollIndicator={false}>
             <View style={styles.selectorStack}>
               <View style={styles.deviceSelectorWrap}>
               <Pressable
@@ -5946,7 +5918,7 @@ export default function NewRemoteSessionScreen() {
                 />
               </View>
             </View>
-          </View>
+          </ScrollView>
         </View>
       </ComposerKeyboardAvoidingView>
       <ContextSheet
@@ -6361,7 +6333,7 @@ const makeStyles = (colors: ThemeColors) => StyleSheet.create({
     flexShrink: 0,
   },
   bottomCluster: {
-    flex: 1,
+    flexGrow: 1,
     gap: spacing.lg,
     justifyContent: 'flex-end',
     paddingBottom: spacing.md,

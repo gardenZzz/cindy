@@ -24,6 +24,7 @@ export type RemoteMessageRole =
   | 'agent_switch';
 
 export interface RemoteSession {
+  tags?: import('@cindy/maker-shared').TaskTag[];
   id: string;
   userId: string;
   title: string;
@@ -121,7 +122,8 @@ export interface RemoteMessage {
   /** Large settled tool input released from the transcript mirror and recoverable by message id. */
   mobileToolInputProjection?: MobileToolInputProjection;
   systemCardData?: Record<string, unknown>;
-  systemCardType?: 'help' | 'context' | 'cost' | 'pwd' | 'status' | 'compact' | 'cmd' | 'goal-complete' | 'goal-resumed' | 'context-rebuild' | 'auto-resume' | 'learn' | 'agent-switch';
+  systemCardType?:
+    | 'help' | 'context' | 'cost' | 'pwd' | 'status' | 'compact' | 'cmd' | 'goal-complete' | 'goal-resumed' | 'context-rebuild' | 'auto-resume' | 'learn' | 'agent-switch';
 }
 
 export type RemoteAttachmentCategory = 'image' | 'pdf' | 'text' | 'office';
