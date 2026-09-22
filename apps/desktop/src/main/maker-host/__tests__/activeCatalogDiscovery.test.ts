@@ -379,18 +379,19 @@ describe('active-catalog discovered augment', () => {
 
   it('adds a newly discovered Grok model to Pi without a bundled model or public declaration', () => {
     setActiveCatalog(BUNDLED_CATALOG);
+    // grok-4.7 已在 bundled Pi 目录里（#4839），不能再拿它证明「清掉发现后消失」。
     setXaiDiscoveredModels([{
-      id: 'xai/grok-4.7', name: 'Grok 4.7', contextWindow: 500_000,
+      id: 'xai/grok-unbundled-probe', name: 'Grok Unbundled', contextWindow: 500_000,
       maxOutput: 64_000, efforts: ['xhigh', 'high', 'medium', 'low'], defaultEffort: 'high',
     }]);
     const models = () => getActiveCatalog().providers.find(p => p.id === 'xai')!.models.pi!;
-    expect(models().find(model => model.id === 'grok-4.7')).toMatchObject({
-      name: 'Grok 4.7', contextWindow: 500_000, maxOutput: 64_000,
+    expect(models().find(model => model.id === 'grok-unbundled-probe')).toMatchObject({
+      name: 'Grok Unbundled', contextWindow: 500_000, maxOutput: 64_000,
       efforts: ['low', 'medium', 'high', 'xhigh'], defaultEffort: 'high',
       piApi: 'openai-responses',
     });
     setXaiDiscoveredModels(null);
-    expect(models().some(model => model.id === 'grok-4.7')).toBe(false);
+    expect(models().some(model => model.id === 'grok-unbundled-probe')).toBe(false);
   });
 
   it('keeps discovered Pi models scoped to their Grok account', () => {

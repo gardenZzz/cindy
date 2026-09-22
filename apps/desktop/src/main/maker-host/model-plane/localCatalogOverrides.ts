@@ -598,13 +598,12 @@ export function hasLocalContextWindowOverride(
 ): boolean {
   return (['additions', 'patches'] as const).some((section) => {
     const entry = overrides[section][`${encodeURIComponent(providerId)}:${modelId}`];
-    return (
-      entry &&
-      (agent === 'pi'
-        ? (!entry.agents || entry.agents.includes('pi'))
-        : entryMembershipAgents(entry, policyProviderId).includes(agent)) &&
-      effectiveFields(entry, agent).contextWindow !== undefined
-    );
+    if (!entry || agent === 'cursor') return false;
+    const member =
+      agent === 'pi'
+        ? !entry.agents || entry.agents.includes('pi')
+        : entryMembershipAgents(entry, policyProviderId).includes(agent);
+    return member && effectiveFields(entry, agent).contextWindow !== undefined;
   });
 }
 
