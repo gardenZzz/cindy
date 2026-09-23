@@ -2346,6 +2346,8 @@
           "emptyState": "Cursor のモデルカタログがまだありません。「モデルを更新」で取得してください（Cursor ログインが必要）。",
           "refreshCta": "モデルを更新",
           "refreshing": "検出 {{done}} / {{total}}",
+          "refreshStarting": "Cursor に接続してモデルを検出中…",
+          "refreshingProgress": "モデルの推理強度を検出中（検出 {{done}} / {{total}}）…",
           "refreshUnavailableInstalled": "先に cursor-agent をインストール",
           "refreshUnavailableAuth": "先に Cursor にログイン",
           "autoHint": "フォールバック",

@@ -424,7 +424,9 @@ describe('ProvidersSection — 双栏管理', () => {
     const refreshingButton = screen.getByRole('button', {
       name: 'settings.providers.models.refreshingAria',
     });
-    expect(refreshingButton.getAttribute('title')).toBe('settings.providers.models.refreshingAria');
+    // 悬浮提示已换成 <Tip>(Radix),按钮上不再有原生 title;改钉「进行中禁用」——
+    // 这也正是上一行「连续点击只启动一个请求」的防连击语义。
+    expect((refreshingButton as HTMLButtonElement).disabled).toBe(true);
 
     await act(async () => {
       resolveRefresh({ ok: true, providerId: 'xd' });

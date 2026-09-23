@@ -2347,6 +2347,8 @@
           "emptyState": "No Cursor model catalog yet. Click \"Refresh models\" to fetch one (requires Cursor sign-in).",
           "refreshCta": "Refresh models",
           "refreshing": "Probed {{done}} / {{total}}",
+          "refreshStarting": "Connecting to Cursor to discover models…",
+          "refreshingProgress": "Discovering model effort tiers (probed {{done}} / {{total}})…",
           "refreshUnavailableInstalled": "Install cursor-agent first",
           "refreshUnavailableAuth": "Sign in to Cursor first",
           "autoHint": "fallback",

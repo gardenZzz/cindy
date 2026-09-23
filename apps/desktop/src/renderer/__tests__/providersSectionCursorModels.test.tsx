@@ -11,8 +11,11 @@
  *  - 未安装 / 未登录 -> 刷新入口禁用并提示原因。
  *  - 刷新失败的收口帧要报错(取消不报):静默收口会被当成「按钮没接线」。
  *  - 清单与详情共用同一个滚动区(#4466),工具行在区内吸顶。
+ *  - 刷新进行中:进度外显在工具行正文里,刷新按钮只报进度并禁用(连击不再取消),
+ *    取消唯一入口是正文那条文字链。
  */
 
+import type { Mock } from 'vitest';
 import { act, cleanup, fireEvent, render, screen } from '@testing-library/react';
 import { MemoryRouter, Route, Routes } from 'react-router-dom';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -111,6 +114,25 @@ import { __testing as cursorAvailabilityTesting } from '@/state/cursorAvailabili
 
 function makeProvider(id: string, over?: Partial<ProviderView>): ProviderView {
   return { id, name: id, source: 'builtin', agents: ['claude-code'], auth: { method: 'oauth' }, routing: {}, models: { 'claude-code': [] }, connected: false, ...over } as unknown as ProviderView;
+}
+
+/** beforeEach 每条用例重挂一份 electronAPI,取 mock 要现取,不能在模块级缓存。 */
+function cursorAgentApi(): { refreshCursorModels: Mock; cancelCursorModelRefresh: Mock } {
+  return (
+    window as unknown as {
+      electronAPI: {
+        maker: { agent: { refreshCursorModels: Mock; cancelCursorModelRefresh: Mock } };
+      };
+    }
+  ).electronAPI.maker.agent;
+}
+
+/** 两个非 Auto 模型 = 走非空清单路径(工具行),而不是空态的 pill 路径。 */
+function listedCursorModels(): AgentCapabilities['availableModels'] {
+  return [
+    { id: 'auto', displayName: 'Auto', contextWindow: 200_000, efforts: [], defaultEffort: null },
+    { id: 'claude-opus-5', displayName: 'Opus 5', contextWindow: 300_000, efforts: ['low'], defaultEffort: 'low' },
+  ] as AgentCapabilities['availableModels'];
 }
 
 function renderAt(search = '?tab=providers') {
@@ -352,6 +374,83 @@ describe('ProvidersSection - Cursor 模型清单与显示开关 (spec #21 / S1)'
       });
     });
     expect(toast.error).toHaveBeenCalledWith('settings.providers.cursor.models.refreshFailed');
+  });
+
+  it('刷新进行中:刷新按钮只报进度并禁用,连击不再取消后台探测', async () => {
+    cursorState.installed = true;
+    cursorState.auth = { authenticated: true, identity: 'x' };
+    cursorCaps.availableModels = listedCursorModels();
+
+    renderAt();
+    await selectCursor();
+    await screen.findByText('Opus 5');
+    const agent = cursorAgentApi();
+
+    // 第一下:正常发起刷新。
+    fireEvent.click(
+      screen.getByRole('button', { name: 'settings.providers.cursor.models.refreshCta' }),
+    );
+    await act(async () => {});
+    expect(agent.refreshCursorModels).toHaveBeenCalledTimes(1);
+
+    // main 侧进度帧到达(串行探 36 个,每个约 3s)。
+    act(() => {
+      refreshProgress.emit!({ done: 3, total: 36, running: true, error: null });
+    });
+
+    // 按钮报的是进度,不再切成「取消刷新」,并且在进行中禁用。
+    const busy = screen.getByRole('button', {
+      name: 'settings.providers.cursor.models.refreshing',
+    });
+    expect((busy as HTMLButtonElement).disabled).toBe(true);
+    // 第二下(用户以为没点上补一下)不得取消刚起的后台探测 —— 实测 342~354ms 秒取消
+    // 就是这个绑定造成的,探测从未跑完,Grok 4.7 的档位一直补不上。
+    fireEvent.click(busy);
+    await act(async () => {});
+    expect(agent.cancelCursorModelRefresh).not.toHaveBeenCalled();
+    // 取消入口全局只剩正文那一条,不与刷新按钮共用一个同名按钮。
+    expect(
+      screen.getAllByRole('button', { name: 'settings.providers.cursor.models.cancelRefresh' }),
+    ).toHaveLength(1);
+  });
+
+  it('刷新进行中:探测进度外显在工具行正文里,不只写进悬浮提示', async () => {
+    cursorState.installed = true;
+    cursorState.auth = { authenticated: true, identity: 'x' };
+    cursorCaps.availableModels = listedCursorModels();
+
+    renderAt();
+    await selectCursor();
+    await screen.findByText('Opus 5');
+
+    act(() => {
+      refreshProgress.emit!({ done: 12, total: 36, running: true, error: null });
+    });
+
+    // 正文副标题从「用开关选择常用的对话模型」换成带 done/total 的进度文案。
+    const progress = screen.getByText('settings.providers.cursor.models.refreshingProgress');
+    expect(progress.closest('[data-testid="provider-model-toolbar"]')).not.toBeNull();
+  });
+
+  it('点正文的「取消刷新」文字链 -> 调 cancelCursorModelRefresh', async () => {
+    cursorState.installed = true;
+    cursorState.auth = { authenticated: true, identity: 'x' };
+    cursorCaps.availableModels = listedCursorModels();
+
+    renderAt();
+    await selectCursor();
+    await screen.findByText('Opus 5');
+    const agent = cursorAgentApi();
+
+    act(() => {
+      refreshProgress.emit!({ done: 5, total: 36, running: true, error: null });
+    });
+
+    fireEvent.click(
+      screen.getByRole('button', { name: 'settings.providers.cursor.models.cancelRefresh' }),
+    );
+    await act(async () => {});
+    expect(agent.cancelCursorModelRefresh).toHaveBeenCalledTimes(1);
   });
 
   it('真实供应商(Anthropic)行与刷新行为不受影响', async () => {

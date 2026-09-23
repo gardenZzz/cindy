@@ -2346,6 +2346,8 @@
           "emptyState": "还没有 Cursor 模型目录。点击「刷新模型」拉取一次（需已登录 Cursor）。",
           "refreshCta": "刷新模型",
           "refreshing": "已探 {{done}} / {{total}}",
+          "refreshStarting": "正在连接 Cursor 探测模型…",
+          "refreshingProgress": "正在探测模型档位（已探 {{done}} / {{total}}）…",
           "refreshUnavailableInstalled": "需先安装 cursor-agent",
           "refreshUnavailableAuth": "需先登录 Cursor",
           "autoHint": "兜底",
