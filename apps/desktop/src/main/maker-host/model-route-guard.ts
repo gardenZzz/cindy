@@ -389,6 +389,13 @@ export function checkModelRoute(
   providerId: string | null,
   options: ModelRouteGuardOptions = {},
 ): ModelRouteVerdict {
+  // cursor 的模型由 cursor-agent 自己上报,没有任何 ProviderView 声明 'cursor'
+  // (见 defaultSessionSettings.hasProviderCatalog 与下方 materializeExclusiveProviderRoute
+  // 的同款约定),因此停用轴的整套判据都无从适用:统一面板给 cursor 行带的合成
+  // providerId='cursor' 会被「显式来源不在目录里」一条判成 explicit-source-unavailable,
+  // 会话内切到 Cursor 直接报「参数无效」。停用开关本就不覆盖 cursor(选择器的
+  // isRouteDisabled 对它恒 false),整条轴在此放行。
+  if (agent === 'cursor') return { kind: 'pass' };
   return applyExclusiveRoute(
     views,
     agent,

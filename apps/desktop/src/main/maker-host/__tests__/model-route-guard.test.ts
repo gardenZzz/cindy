@@ -589,6 +589,16 @@ describe('materializeExclusiveProviderRoute', () => {
       .toEqual({ kind: 'pass' });
   });
 
+  it('cursor 行带的合成 providerId 不当作「目录里不存在的显式来源」拒掉', () => {
+    // 统一面板给 cursor 行带 providerId='cursor'(cursor 没有 ProviderView),
+    // 以前会命中 explicit-source-unavailable,会话内切到 Cursor 报「参数无效」。
+    expect(checkModelRoute(xaiViews(), 'cursor', 'composer-1', 'cursor'))
+      .toEqual({ kind: 'pass' });
+    // 判别性:同样不存在的来源换成别的 agent 仍然要拒。
+    expect(checkModelRoute(xaiViews(), 'claude-code', 'claude-opus-5', 'cursor'))
+      .toEqual({ kind: 'reject', reason: 'explicit-source-unavailable' });
+  });
+
   it('裸 grok / xai/ 前缀在 xAI 已连接时钉死 xai', () => {
     expect(materializeExclusiveProviderRoute(xaiViews(), 'claude-code', 'grok-4.6', null))
       .toEqual({ kind: 'pin', providerId: 'xai' });
