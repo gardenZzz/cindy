@@ -137,7 +137,6 @@ export function ErrorTailErrorBanner({
   errorText: string;
   onContinue: () => Promise<void> | void;
   onDismiss: () => void;
-  viewVisible?: boolean;
   agentKind?: 'cc' | 'codex' | 'cursor' | 'pi';
   remoteHostId?: string;
   deviceLinkDeviceId?: string | null;

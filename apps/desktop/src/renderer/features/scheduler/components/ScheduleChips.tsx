@@ -30,7 +30,6 @@ import {
   setProviderModelFast,
 } from '@/state/providerModelMemory';
 import {
-  connectedProvidersForAgent,
   effectiveSourceIdForModel,
   getModel,
 } from '@cindy/model-providers';

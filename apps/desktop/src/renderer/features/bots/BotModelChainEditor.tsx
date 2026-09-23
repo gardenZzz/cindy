@@ -121,7 +121,6 @@ export function BotModelChainEditor({
         configurationEnabled
         unifiedPanel
         unifiedAgents={unifiedAgents}
-        unifiedSelectionPolicy="official"
         onUnifiedSelect={(selection) => {
           if (selection.engine === 'cursor') return;
           if (!visibleVendors.includes(selection.engine)) return;

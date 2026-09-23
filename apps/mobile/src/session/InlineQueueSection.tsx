@@ -36,7 +36,6 @@ import {
   type ThemeColors,
 } from '@/theme';
 import { radius, spacing, typeScale } from '@/theme/tokens';
-import { i18n } from '@/i18n';
 
 export interface InlineQueueSectionProps {
   projection: InputProjection;

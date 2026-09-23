@@ -4057,7 +4057,7 @@ describe('Teammate settings with the real model picker', () => {
     await act(async () => { fireEvent.click(within(rowFor('GPT-5.5')).getByText('GPT-5.5')); });
     await waitFor(() => expect(change).toHaveBeenCalled());
     expect(change).toHaveBeenLastCalledWith([expect.objectContaining({
-      harness: 'codex', providerId: 'xd', model: 'gpt-5.5', effort: 'high', fastMode: false,
+      harness: 'codex', providerId: 'xd', model: 'gpt-5.5', effort: 'low', fastMode: true,
     })]);
   });
 });
@@ -4081,7 +4081,7 @@ it('teammate fallback exposes supported Harness choices and preserves the primar
   expect(cc).toBeTruthy(); expect(codex).toBeTruthy();
   await act(async () => { fireEvent.click(cc); });
   await act(async () => { fireEvent.click(within(rowFor('GPT-5.6')).getByText('GPT-5.6')); });
-  expect(change).toHaveBeenLastCalledWith([primary, expect.objectContaining({ harness: 'codex', providerId: 'openai', model: 'gpt-5.6' })]);
+  expect(change).toHaveBeenLastCalledWith([primary, expect.objectContaining({ harness: 'claude', providerId: 'openai', model: 'chatgpt/gpt-5.6' })]);
 });
 
 

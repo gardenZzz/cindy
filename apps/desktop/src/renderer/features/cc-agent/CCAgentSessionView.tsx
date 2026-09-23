@@ -1634,10 +1634,6 @@ export function CCAgentSessionView({
   useEffect(() => {
     let cancelled = false;
     const agent = dbToMakerAgentKind(session?.agentKind);
-    // NEW_MAKER_DRAFT_CHANGED 现在已 fan-out cursor 槽(见 buildNewMakerDraftChangedPayload),
-    // 但远程 Cursor **会话内**的模型记忆镜像尚未接线,故仍保持空镜像降级 -- 关键是不读
-    // claudeCode 冒充。接线属独立范围,不在本 PR。
-    const vendorSlot = agent === 'claude-code' ? 'claudeCode' : agent;
     // SSH remote 显式禁用控制端本机 skill 扫描；本地无 workingDir 时 Claude 仍扫全局 skills。
     const wd = session?.workingDir;
     // 先同步清空:切换会话(尤其 local→remote)时 loadAllCommands 是异步的,清空可避免
@@ -1937,13 +1933,8 @@ export function CCAgentSessionView({
   // 真实会话 agentKind(pending switch intent 不影响)——压缩分流必须用它,
   // 否则 intent 乐观切到 pi 但真实会话仍在跑 claude-code 时会错调 compact-session(#1933 review)。
   const realAgentKind = dbToMakerAgentKind(session?.agentKind);
-  const isCodex = displayAgentKind === 'codex';
   const isCursor = displayAgentKind === 'cursor';
   const displayVendorKey = normalizeDbAgentKind(displayAgentKind);
-  // NEW_MAKER_DRAFT_CHANGED 现在已 fan-out cursor 槽(见 buildNewMakerDraftChangedPayload),
-  // 但远程 Cursor **会话内**的模型记忆镜像尚未接线,故仍保持空镜像降级 -- 关键是不读
-  // claudeCode 冒充。接线属独立范围,不在本 PR。
-  const vendorSlot = displayAgentKind === 'claude-code' ? 'claudeCode' : displayAgentKind;
   // 手动压缩通道判定(#1927/#1933 review):真实 Claude Code → maker:input:compact;
   // 其余 agent 声明 manualCompact.supported(当前仅 pi)→ maker:compact-session;其余无入口。
   // 能力取**真实 agent**(displayAgentKind 在 pending switch 期间可能乐观指向目标 agent,
@@ -2498,10 +2489,6 @@ export function CCAgentSessionView({
     const cached = allCommandsRef.current;
     if (cached.length > 0) return cached;
     const agent = dbToMakerAgentKind(session?.agentKind);
-    // NEW_MAKER_DRAFT_CHANGED 现在已 fan-out cursor 槽(见 buildNewMakerDraftChangedPayload),
-    // 但远程 Cursor **会话内**的模型记忆镜像尚未接线,故仍保持空镜像降级 -- 关键是不读
-    // claudeCode 冒充。接线属独立范围,不在本 PR。
-    const vendorSlot = agent === 'claude-code' ? 'claudeCode' : agent;
     try {
       // device-link 远程会话同源:传 remoteDeviceId,fallback 快照也从被控端读(见上方 cache effect 说明)。
       return await loadAllCommands(

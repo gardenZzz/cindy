@@ -1,4 +1,3 @@
-import type { AgentKind } from '@cindy/maker-core';
 import { IOS_SIMULATOR_ROUTE_STATUS_CHANNEL } from '../../shared/iosSimulatorIpc.js';
 
 /**

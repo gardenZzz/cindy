@@ -41,7 +41,6 @@ import {
   parsePreRunHookTimeoutMs,
   resolveScheduleGenerationProviderId,
   resolveScheduleModelEfforts,
-  shouldFollowBoundSessionGenerationRoute,
   usesBoundSessionGenerationModel,
 } from '../lib/scheduleFormLogic';
 import type { RunMode, ScheduleFormState } from '../hooks/useScheduleForm';

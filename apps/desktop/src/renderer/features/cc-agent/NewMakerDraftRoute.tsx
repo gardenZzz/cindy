@@ -644,31 +644,6 @@ interface DraftTargetRequest {
   };
 }
 
-/**
- * 「这份草稿要跑在哪」的目标描述 —— 见组件内 applyDraftTarget。
- *
- * 刻意把 deviceId 与 workingDir 放在一起要求调用方**同时**给出:草稿的运行目标本来就是这个二元组,
- * 而所有需要连带更新的状态(mention chip、路径型附件、能力/供应商快照、远程运行配置、worktree
- * 三态、extraDirs)都能从「这个二元组的哪一半变了」推导出来。分开传就又回到了「某条路径记得改
- * 设备、忘了清项目」那类缺陷。
- */
-interface DraftTargetRequest {
-  /** 目标设备;null = 本机。 */
-  deviceId: string | null;
-  deviceName: string | null;
-  /** 目标工作区;null = 该设备上的「对话」(不绑项目)。 */
-  workingDir: string | null;
-  /**
-   * 已经 inline 拉到的被控端快照。只有「添加远程项目」那条路径有 —— 它为了验证设备可达,本来就
-   * 直接 invoke 过 capabilities / defaults,于是能立刻 seed,不必等 effect 再跑一轮隧道往返。
-   * 不给就把远程运行配置打回未加载,交给 seed effect 自己拉。
-   */
-  remoteSnapshot?: {
-    capabilities: AgentCapabilities;
-    defaults: RemoteDraftDefaults | null;
-  };
-}
-
 export function NewMakerDraftRoute() {
   const { t, i18n } = useTranslation();
   const { dataOwnerId } = useAuth();

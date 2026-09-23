@@ -340,6 +340,9 @@ const rendererConfig = {
       ...CODEMIRROR_OPTIMIZE_EXCLUDES,
       ...INTERNAL_PURE_PACKAGE_EXCLUDES,
     ],
+    // The diff highlighter runs in a lazily-created module Worker. Explicitly
+    // include its dependency so the first Review/Diff render does not trigger
+    // Vite's runtime dependency discovery and a full-page reload.
     include: ['@tiptap/react', 'highlight.js'],
     // @cindy/maker-core 顶层 re-export 了 import './x.md?raw' 的模块(system-prompt
     // 等),renderer 对 maker-core 的引用虽多为 import type,但 vite/esbuild 预打包仍会把
