@@ -29,6 +29,7 @@ export interface AgentIslandSessionSnapshot {
   projectName: string | null;
   detail: string;
   compactDetail: string;
+  workingPhase?: SessionActivitySnapshot['workingPhase'];
   messagePreview: AgentIslandActivityLine | null;
   phase: AgentIslandSessionPhase;
   agentKind: AgentKind | string;

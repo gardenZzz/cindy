@@ -2631,6 +2631,13 @@
         "modelCount": "{{count}} 個のモデルを設定済み",
         "modelsAutomatic": "モデル情報は自動取得されます。個別の設定はモデル一覧から変更できます。",
         "manualModel": "モデル ID（自動取得できない場合）"
+      },
+      "byok": {
+        "managed": "組織が接続とモデルを管理",
+        "refresh": "組織設定を更新",
+        "refreshFailed": "組織設定を更新できませんでした。しばらくしてから再試行してください。",
+        "pending": "認証情報を準備中",
+        "unavailable": "一時的に利用できません"
       }
     },
     "experimental": {
@@ -7885,6 +7892,7 @@
     },
     "permissionRequest": "{{name}} が確認をお願いしています",
     "remote": {
+      "unknown": "接続状態不明",
       "online": "オンライン",
       "offline": "オフライン",
       "thisDevice": "このコンピュータ",
@@ -9807,6 +9815,7 @@
       "reviewingChecks": "チェック結果を確認しています…",
       "replying": "返信中…",
       "processing": "処理中…",
+      "organizingConversation": "会話を整理しています…",
       "thinking": "考え中…",
       "generating": "生成中…",
       "editingFiles": "ファイルを編集中…",
@@ -11022,7 +11031,7 @@
       },
       "scheduleMenu": {
         "intervalSeconds": "Seconds（N 秒ごと）",
-        "intervalMinutes": "Minutes（N 分ごと）",
+        "intervalMinutes": "分（N 分ごと）",
         "interval": "Hourly（N 時間ごと）",
         "daily": "Daily（毎日）",
         "weekdays": "Weekdays（平日）",
@@ -11046,7 +11055,10 @@
         "minuteLabel": "分",
         "scheduleHourAria": "スケジュール時",
         "scheduleMinuteAria": "スケジュール分",
-        "openTimePickerAria": "時刻ピッカーを開く"
+        "intervalMinutesAria": "繰り返し間隔（分）",
+        "openTimePickerAria": "時刻ピッカーを開く",
+        "minuteIntervalHint": "1 時間を割り切れる分間隔のみ使用できます：1、2、3、4、5、6、10、12、15、20、30 分。60 分の場合は「1 時間ごと」を選択してください。",
+        "unsupportedMinuteInterval": "このタスクは {{count}} 分の旧 Cron 設定を使用しています。利用可能な間隔を選んで修正してください。"
       },
       "model": {
         "loading": "モデルを読み込み中…",
@@ -13334,6 +13346,7 @@
       "usingHint": "最新の個人版を使用しています。",
       "errors": {
         "busy": "タスク、テスト、ビルドが実行中です。終了してから切り替えまたは削除してください。",
+        "building": "個人版をビルド中です。完了を待つか、ビルドを停止してからバージョンを切り替えてください。",
         "incompatible": "データ構造が異なります。現在のオリジナル版から個人版を再度ビルドしてください。",
         "unavailable": "このバージョンを読み込めません。再度ビルドしてお試しください。",
         "launchFailed": "対象のバージョンを起動できませんでした。現在のバージョンは保持されています。",
@@ -13577,6 +13590,7 @@
       "getLatest": "最新ソースを同期",
       "taskTitle": "ソース更新時の競合を解決",
       "updateHint": "公式ソースを更新し、個人の変更を保持します。",
+      "buildingHint": "個人版をビルド中です。完了を待つか停止してからソースを同期してください。",
       "confirmTitle": "最新ソースに更新しますか？",
       "confirmDescription": "個人の変更は保持されます。競合が発生した場合は、解決用セッションを開始する前に確認します。",
       "conflictConfirm": {

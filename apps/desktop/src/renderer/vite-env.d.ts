@@ -2130,6 +2130,8 @@ interface ElectronAPI {
   ccSetDebugNet: (enabled: boolean) => Promise<{ ok: true }>;
   /** 网关凭据自动下发(model-access,类型见 shared/modelAccess.ts)。 */
   modelAccess: {
+    getByokStatus: () => Promise<import('../shared/modelAccess').ByokStatus>;
+    retryByok: () => Promise<import('../shared/modelAccess').ByokStatus>;
     getStatus: () => Promise<ModelAccessStatusPayload>;
     retry: () => Promise<ModelAccessStatusPayload>;
     /** 轮换密钥;失败 reject(IPC 错误经 extractIpcError 解码)。 */

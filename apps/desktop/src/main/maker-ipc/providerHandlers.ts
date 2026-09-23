@@ -18,6 +18,7 @@ import { setProviderPresentation, retainProviderPresentationAfterAuthChange } fr
 import type { CodexContextWindowInfo } from '@cindy/maker-core';
 import {
   PI_MODEL_APIS,
+  isByokProviderId,
   isLoopbackProviderUrl,
   isProviderRequestPath,
   runtimeCustomProviderId,
@@ -258,6 +259,8 @@ export interface ProviderHandlerDeps {
    * 是本机主页面时才放行副作用（PR #548 review）。
    */
   listProviders(opts?: { allowSideEffects?: boolean }): Promise<ProviderView[]>;
+  /** Synchronous catalog ownership check; injected to keep this IPC module free of Host cycles. */
+  isOrganizationManagedProviderId(providerId: string): boolean;
   /**
    * 「模型显示/隐藏」override 快照(renderer → main 镜像,生产 = getModelVisibilityMirrorSnapshot)。
    * PROVIDER_LIST 附带回传,供 device-link 控制端(手机)按被控端用户开关过滤模型列表;
@@ -1364,6 +1367,9 @@ export function registerProviderHandlers(
     if (!provider || provider.id === 'xd') {
       throwIpcError('INVALID_PARAMS', 'Provider does not support presentation overrides');
     }
+    if (provider.source === 'organization') {
+      throwIpcError('PERMISSION_DENIED', 'Enterprise connections are managed by your organization');
+    }
     if (value.action === 'rename' && typeof value.name === 'string' && value.name.trim() && value.name.length <= 128) {
       if (provider.source === 'builtin') {
         await setProviderPresentation(providerId, { name: value.name });
@@ -1664,6 +1670,9 @@ export function registerProviderHandlers(
       if (target.providerId === 'xd') {
         throwIpcError('INVALID_PARAMS', 'Cindy AI Gateway pricing is server-controlled');
       }
+      if (deps.isOrganizationManagedProviderId(target.providerId)) {
+        throwIpcError('PERMISSION_DENIED', 'Enterprise pricing is managed by your organization');
+      }
       if (desired.currency === 'CNY' && deps.getLedgerCurrency() === 'USD') {
         throwIpcError('INVALID_PARAMS', 'CNY price overrides cannot project into a USD ledger');
       }
@@ -1696,6 +1705,9 @@ export function registerProviderHandlers(
   registry.handle(MAKER_INVOKE.MODEL_PRICE_OVERRIDE_RESET, async (event, input: unknown) => {
     assertTrustedProviderMutationSender(event);
     const target = parsePriceTarget(input);
+    if (deps.isOrganizationManagedProviderId(target.providerId)) {
+      throwIpcError('PERMISSION_DENIED', 'Enterprise pricing is managed by your organization');
+    }
     const ownerAtIngress = captureProviderOwnerSession();
     return withProviderConfigMutation(target.providerId, () =>
       enqueuePriceMutation(async () => {
@@ -1871,6 +1883,9 @@ export function registerProviderHandlers(
     const options = parseCustomProviderUpdateOptions(optionsInput);
     if (!options) throwIpcError('INVALID_PARAMS', 'invalid custom provider create options');
     const config = input as CustomProviderConfig;
+    if (isByokProviderId(config.id) || deps.isOrganizationManagedProviderId(config.id)) {
+      throwIpcError('PERMISSION_DENIED', 'Enterprise connections are managed by your organization');
+    }
     if (config.id === MANAGED_OLLAMA_PROVIDER_ID) {
       throwIpcError(
         'PERMISSION_DENIED',
@@ -1944,6 +1959,9 @@ export function registerProviderHandlers(
     const options = parseCustomProviderUpdateOptions(optionsInput);
     if (!options) throwIpcError('INVALID_PARAMS', 'invalid custom provider update options');
     let config = input as CustomProviderConfig;
+    if (deps.isOrganizationManagedProviderId(config.id)) {
+      throwIpcError('PERMISSION_DENIED', 'Enterprise connections are managed by your organization');
+    }
     if (config.id === MANAGED_OLLAMA_PROVIDER_ID) {
       throwIpcError(
         'PERMISSION_DENIED',
@@ -2085,6 +2103,9 @@ export function registerProviderHandlers(
     if (!options) throwIpcError('INVALID_PARAMS', 'Invalid provider change options');
     if (typeof providerId !== 'string' || providerId.length === 0) {
       throwIpcError('INVALID_PARAMS', 'providerId required');
+    }
+    if (deps.isOrganizationManagedProviderId(providerId)) {
+      throwIpcError('PERMISSION_DENIED', 'Enterprise connections are managed by your organization');
     }
     const runtimeProviderId = runtimeCustomProviderId(providerId);
     const ownerAtIngress = captureProviderOwnerSession();
@@ -2311,6 +2332,9 @@ export function registerProviderHandlers(
     async (event, providerId: unknown, rawOptions?: unknown) => {
       assertTrustedProviderMutationSender(event);
       const id = requireProviderId(providerId);
+      if (deps.isOrganizationManagedProviderId(id)) {
+        throwIpcError('PERMISSION_DENIED', 'Enterprise connections are managed by your organization');
+      }
       const { ownerId } = requireProviderOAuthLoginOptions(rawOptions);
       const sender = providerOAuthRendererSender(event);
       if (ownerId && !sender) {
@@ -2388,6 +2412,9 @@ export function registerProviderHandlers(
     const options = parseCustomProviderUpdateOptions(optionsInput);
     if (!options) throwIpcError('INVALID_PARAMS', 'Invalid provider change options');
     const id = storedCustomProviderId(requireProviderId(providerId));
+    if (deps.isOrganizationManagedProviderId(id)) {
+      throwIpcError('PERMISSION_DENIED', 'Enterprise connections are managed by your organization');
+    }
     const owner = captureProviderOwnerSession();
     return withProviderConfigMutation(id, async (commitRouteMutation) => {
       assertProviderMutationOwner(owner);
@@ -2420,6 +2447,9 @@ export function registerProviderHandlers(
     const options = parseCustomProviderUpdateOptions(optionsInput);
     if (!options) throwIpcError('INVALID_PARAMS', 'Invalid provider change options');
     const id = requireProviderId(providerId);
+    if (deps.isOrganizationManagedProviderId(id)) {
+      throwIpcError('PERMISSION_DENIED', 'Enterprise connections are managed by your organization');
+    }
     const ownerAtIngress = captureProviderOwnerSession();
     let generation: symbol | null = null;
     try {

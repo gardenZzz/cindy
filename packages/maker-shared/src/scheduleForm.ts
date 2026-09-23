@@ -23,6 +23,9 @@ export const MOBILE_SCHEDULE_EFFORT_VALUES = [
   'ultra',
 ] as const;
 
+/** Minute steps that map to stable fixed slots across hour boundaries. */
+export const SUPPORTED_INTERVAL_MINUTES = [1, 2, 3, 4, 5, 6, 10, 12, 15, 20, 30] as const;
+
 export type MobileScheduleEffort = (typeof MOBILE_SCHEDULE_EFFORT_VALUES)[number];
 export type MobileScheduleRunMode = 'recurring' | 'manual';
 export type MobileScheduleSessionMode = 'fresh' | 'persistent' | 'bound';
@@ -41,7 +44,7 @@ export interface MobileScheduleDraft {
   timezone: string;
   intervalMinutes: string;
   /**
-   * 原任务的 intervalMs。表单只表达得了 1-59 分钟 / 整点小时,MCP 可以设出
+   * 原任务的 intervalMs。表单只表达得了能整除 60 的分钟间隔 / 整点小时,MCP 可以设出
    * 表单区间外的间隔(如 90 分钟),这时 intervalMinutes 折叠成 '' ——保存时
    * 必须能区分「表达不了」和「用户清空」,否则只改 prompt 也会静默清掉间隔
    * (copilot review 发现)。
@@ -703,7 +706,7 @@ function validateIntervalMinutes(
       'intervalMinutes',
       localizer,
       'devices.automations.presentation.validation.intervalUnsupported',
-      '分钟间隔只支持 1-59 分钟，或 1-23 小时的整点间隔',
+      '分钟间隔必须能整除 60：请选择 ' + SUPPORTED_INTERVAL_MINUTES.join('、') + ' 分钟，或 1-23 小时的整点间隔',
     );
   }
   return null;
@@ -718,7 +721,7 @@ function parseSupportedIntervalMinutes(value: string): number | null {
 
 function intervalMinutesToCronExpr(minutes: number): string | null {
   if (minutes === 1) return '* * * * *';
-  if (minutes >= 2 && minutes <= 59) return `*/${minutes} * * * *`;
+  if ((SUPPORTED_INTERVAL_MINUTES as readonly number[]).includes(minutes)) return `*/${minutes} * * * *`;
   if (minutes === 60) return '0 * * * *';
   if (minutes % 60 === 0) {
     const hours = minutes / 60;

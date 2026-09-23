@@ -114,6 +114,7 @@ function mountDb(): void {
 function makeDeps(over: Partial<ProviderHandlerDeps> = {}): ProviderHandlerDeps {
   return {
     listProviders: async () => [],
+    isOrganizationManagedProviderId: () => false,
     getModelVisibilityOverrides: () => ({}),
     refreshCatalog: vi.fn(async () => {}),
     codexCustomProviderConfigSignature,
@@ -2428,6 +2429,95 @@ describe('provider:custom:* CRUD handlers', () => {
       }),
     ).rejects.toThrow(/PERMISSION_DENIED/);
     expect(await listCustomProviders()).toEqual([]);
+  });
+
+  it('reserves an active enterprise connection across every local mutation surface', async () => {
+    mountDb();
+    const harness = new IpcHarness();
+    const managed = {
+      id: 'byok-reserved', name: 'Enterprise', source: 'organization' as const,
+      auth: { method: 'managed' as const }, access: { kind: 'managed' as const },
+      agents: [], models: {}, routing: {},
+    };
+    const deps = makeDeps({
+      listProviders: async () => [{ ...managed, connected: false } as ProviderView],
+      currentOwnerSession: () => ({ dataOwnerId: 'owner-a', generation: 1 }),
+    });
+    registerProviderHandlers(harness, deps);
+    const config = { ...validConfig, id: managed.id };
+    deps.isOrganizationManagedProviderId = (providerId) => providerId === managed.id;
+
+    try {
+      await expect(
+        harness.invoke(MAKER_INVOKE.PROVIDER_CUSTOM_CREATE, config),
+      ).rejects.toThrow(/PERMISSION_DENIED/);
+      await expect(
+        harness.invoke(MAKER_INVOKE.PROVIDER_CUSTOM_UPDATE, config),
+      ).rejects.toThrow(/PERMISSION_DENIED/);
+      await expect(
+        harness.invoke(MAKER_INVOKE.PROVIDER_CUSTOM_DELETE, config.id),
+      ).rejects.toThrow(/PERMISSION_DENIED/);
+      await expect(
+        harness.invoke(MAKER_INVOKE.PROVIDER_CUSTOM_DISCONNECT, config.id),
+      ).rejects.toThrow(/PERMISSION_DENIED/);
+      await expect(
+        harness.invoke(MAKER_INVOKE.PROVIDER_OAUTH_LOGIN, config.id),
+      ).rejects.toThrow(/PERMISSION_DENIED/);
+      await expect(
+        harness.invoke(MAKER_INVOKE.PROVIDER_OAUTH_LOGOUT, config.id),
+      ).rejects.toThrow(/PERMISSION_DENIED/);
+      await expect(
+        harness.invoke(MAKER_INVOKE.PROVIDER_PRESENTATION_SET, {
+          providerId: config.id,
+          action: 'rename',
+          name: 'Must not persist',
+          dataOwnerId: 'owner-a',
+          ownerGeneration: 1,
+        }),
+      ).rejects.toThrow(/PERMISSION_DENIED/);
+      const priceTarget = {
+        providerId: config.id,
+        agent: 'codex' as const,
+        modelId: 'managed-model',
+      };
+      await expect(
+        harness.invoke(MAKER_INVOKE.MODEL_PRICE_OVERRIDE_SET, priceTarget, {
+          currency: 'USD',
+          inputPerMtok: 1,
+          outputPerMtok: 2,
+        }),
+      ).rejects.toThrow(/PERMISSION_DENIED/);
+      await expect(
+        harness.invoke(MAKER_INVOKE.MODEL_PRICE_OVERRIDE_RESET, priceTarget),
+      ).rejects.toThrow(/PERMISSION_DENIED/);
+      expect(await listCustomProviders()).toEqual([]);
+      expect(deps.refreshCatalog).not.toHaveBeenCalled();
+      expect(deps.oauthLogin).not.toHaveBeenCalled();
+      expect(deps.oauthLogout).not.toHaveBeenCalled();
+      expect(deps.writeModelPriceOverride).not.toHaveBeenCalled();
+      expect(deps.clearModelPriceOverride).not.toHaveBeenCalled();
+    } finally {
+      deps.isOrganizationManagedProviderId = () => false;
+    }
+  });
+
+  it('keeps a legacy personal byok-prefixed Provider editable and removable', async () => {
+    mountDb();
+    const harness = new IpcHarness();
+    const deps = makeDeps();
+    registerProviderHandlers(harness, deps);
+    const legacy = { ...validConfig, id: 'byok-legacy-personal' };
+    await createCustomProvider(legacy);
+
+    await expect(harness.invoke(MAKER_INVOKE.PROVIDER_CUSTOM_UPDATE, {
+      ...legacy,
+      name: 'Updated legacy Provider',
+    })).resolves.toEqual({ ok: true });
+    expect((await getCustomProvider(legacy.id))?.name).toBe('Updated legacy Provider');
+    await expect(
+      harness.invoke(MAKER_INVOKE.PROVIDER_CUSTOM_DELETE, legacy.id),
+    ).resolves.toEqual({ ok: true });
+    expect(await getCustomProvider(legacy.id)).toBeNull();
   });
 
   it('reserves xai for new providers while preserving edits to an existing legacy row', async () => {

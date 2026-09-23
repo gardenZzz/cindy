@@ -389,6 +389,7 @@ import {
   deliverCindyVersionOpenEvents,
   finishCindyVersionStartup,
   isCindyVersionLaunchPending,
+  isCindyVersionSwitching,
   watchCindyVersionStartupResult,
 } from './cindy-make/versionStartup.js';
 import {
@@ -7649,8 +7650,10 @@ const registerIpcHandlers = () => {
       throwIpcError('PRECONDITION_FAILED', 'unavailable');
     }
   });
+  cindyMakeManager.setVersionSwitchingProbe(isCindyVersionSwitching);
   configureCindyVersions(
     () => cindyMakeTestController.hasActiveJobs() || cindyMakeManager.hasActiveWork(),
+    () => cindyMakeManager.isPersonalBuildRunning(),
   );
   ipcMain.handle('app:cindy-versions-state', async (event) => {
     assertTrustedAppRendererEvent(event);

@@ -112,6 +112,7 @@ import { localCliDisplayName, type LocalCliDetection } from '../../../shared/loc
 import { isBuiltinRefreshableProviderId } from '../../../shared/providerModelRefresh';
 import { applyProviderOrder } from '../../../shared/providerOrder';
 import type { AgentKind, CustomProviderConfig, ProviderView } from '@cindy/model-providers';
+import { isCustomRoutedProvider, isOrganizationManagedProvider } from '@cindy/model-providers';
 
 // ---------------------------------------------------------------------------
 // 工具
@@ -439,6 +440,83 @@ function useProviderManagement(provider?: ProviderView) {
   return { busy, rename, removeBuiltin };
 }
 
+function ManagedProviderHeader({
+  provider,
+  children,
+}: {
+  provider: ProviderView;
+  children?: ReactNode;
+}) {
+  const { t } = useTranslation();
+  const [busy, setBusy] = useState(false);
+  const busyRef = useRef(false);
+  const alive = useRef(true);
+  const [state, setState] = useState<'ready' | 'pending' | 'unavailable'>(
+    provider.agents.length ? 'ready' : 'pending',
+  );
+  useEffect(() => {
+    let disposed = false;
+    alive.current = true;
+    const refresh = () =>
+      void window.electronAPI.modelAccess
+        .getByokStatus()
+        .then((status) => {
+          if (!disposed) {
+            setState(
+              status.providers.find((item) => item.providerId === provider.id)?.state ??
+                'unavailable',
+            );
+          }
+        })
+        .catch(() => undefined);
+    refresh();
+    const timer = setInterval(refresh, 5_000);
+    return () => {
+      disposed = true;
+      alive.current = false;
+      clearInterval(timer);
+    };
+  }, [provider.id]);
+  const refresh = async () => {
+    if (busyRef.current) return;
+    busyRef.current = true;
+    setBusy(true);
+    try {
+      const status = await window.electronAPI.modelAccess.retryByok();
+      if (!alive.current) return;
+      setState(
+        status.providers.find((item) => item.providerId === provider.id)?.state ?? 'unavailable',
+      );
+      if (status.state === 'failed') toast.error(t('settings.providers.byok.refreshFailed'));
+    } catch {
+      if (alive.current) toast.error(t('settings.providers.byok.refreshFailed'));
+    } finally {
+      busyRef.current = false;
+      if (alive.current) setBusy(false);
+    }
+  };
+  return (
+    <DetailHeader
+      icon={providerIcon(provider, 18)}
+      title={provider.name}
+      subtitle={t('settings.providers.byok.managed')}
+      provider={provider}
+      status={
+        state === 'ready'
+          ? { kind: 'connected' }
+          : { kind: 'neutral', label: t(`settings.providers.byok.${state}`) }
+      }
+      primaryAction={{
+        label: t('settings.providers.byok.refresh'),
+        onClick: () => void refresh(),
+        disabled: busy,
+      }}
+    >
+      {children}
+    </DetailHeader>
+  );
+}
+
 function DetailHeader({
   children,
   icon,
@@ -487,7 +565,7 @@ function DetailHeader({
 }) {
   const { t } = useTranslation();
   const management = useProviderManagement(provider);
-  const canRename = !!provider && provider.id !== 'xd';
+  const canRename = !!provider && provider.id !== 'xd' && !isOrganizationManagedProvider(provider);
   const resolvedDelete =
     deleteAction ??
     (provider && supportsBuiltinConnectionManagement(provider)
@@ -2781,6 +2859,10 @@ export function ProvidersSection() {
         }
         continue;
       }
+      if (isOrganizationManagedProvider(p)) {
+        rows.push(p);
+        continue;
+      }
       if (
         p.source === 'user' &&
         (p.id === MANAGED_OLLAMA_PROVIDER_ID ||
@@ -3178,6 +3260,7 @@ export function ProvidersSection() {
 
   // 详情头部按供应商类型分派(鉴权逻辑与重构前一致)。
   const renderDetailHeader = (p: ProviderView, children: ReactNode): ReactNode => {
+    if (isOrganizationManagedProvider(p)) return <ManagedProviderHeader key={p.id} provider={p} children={children} />;
     if (p.id === 'xd')
       return <XdGatewayHeader children={children} provider={p} onChanged={refetch} />;
     if (p.id === 'anthropic')
@@ -3456,7 +3539,7 @@ export function ProvidersSection() {
                     )}
                   {!effectiveSelected.suspended &&
                     (providerHasModels(effectiveSelected) ||
-                      effectiveSelected.source === 'user' ||
+                      isCustomRoutedProvider(effectiveSelected) ||
                       (isBuiltinRefreshableProviderId(effectiveSelected.id) &&
                         !effectiveSelected.modelDiscoveryFailure) ||
                       effectiveSelected.id === MANAGED_OLLAMA_PROVIDER_ID) && (
@@ -3515,7 +3598,7 @@ export function ProvidersSection() {
                     )}
                   {!effectiveSelected.suspended &&
                     !providerHasModels(effectiveSelected) &&
-                    effectiveSelected.source !== 'user' &&
+                    !isCustomRoutedProvider(effectiveSelected) &&
                     effectiveSelected.id !== MANAGED_OLLAMA_PROVIDER_ID &&
                     (Boolean(effectiveSelected.modelDiscoveryFailure) ||
                       !isBuiltinRefreshableProviderId(effectiveSelected.id)) && (

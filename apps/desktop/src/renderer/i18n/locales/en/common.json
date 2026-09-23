@@ -2632,6 +2632,13 @@
         "modelCount": "{{count}} models configured",
         "modelsAutomatic": "Model details are imported automatically. Adjust individual models in the model list.",
         "manualModel": "Model IDs (if discovery is unavailable)"
+      },
+      "byok": {
+        "managed": "Managed by your organization",
+        "refresh": "Refresh enterprise settings",
+        "refreshFailed": "Enterprise settings could not be refreshed. Try again later.",
+        "pending": "Preparing credentials",
+        "unavailable": "Temporarily unavailable"
       }
     },
     "experimental": {
@@ -7887,6 +7894,7 @@
     },
     "permissionRequest": "{{name}} needs your go-ahead",
     "remote": {
+      "unknown": "Connection unknown",
       "online": "Online",
       "offline": "Offline",
       "thisDevice": "This computer",
@@ -9822,6 +9830,7 @@
       "reviewingChecks": "Reviewing check results…",
       "replying": "Replying…",
       "processing": "Working…",
+      "organizingConversation": "Organizing the conversation…",
       "thinking": "Thinking…",
       "generating": "Generating…",
       "editingFiles": "Editing files…",
@@ -11037,7 +11046,7 @@
       },
       "scheduleMenu": {
         "intervalSeconds": "Seconds (every N seconds)",
-        "intervalMinutes": "Minutes (every N minutes)",
+        "intervalMinutes": "Minutes (Every N Minutes)",
         "interval": "Hourly (every N hours)",
         "daily": "Daily (every day)",
         "weekdays": "Weekdays",
@@ -11061,7 +11070,10 @@
         "minuteLabel": "Minute",
         "scheduleHourAria": "Schedule hour",
         "scheduleMinuteAria": "Schedule minute",
-        "openTimePickerAria": "Open time picker"
+        "intervalMinutesAria": "Repeat Interval (Minutes)",
+        "openTimePickerAria": "Open time picker",
+        "minuteIntervalHint": "Only minute intervals that divide an hour are available: 1, 2, 3, 4, 5, 6, 10, 12, 15, 20, or 30 minutes. For 60 minutes, choose 1 hour.",
+        "unsupportedMinuteInterval": "This task uses the legacy {{count}}-minute Cron setting. Choose an available interval to correct it."
       },
       "model": {
         "loading": "Loading models…",
@@ -13351,6 +13363,7 @@
       "usingHint": "You are using the latest personal version.",
       "errors": {
         "busy": "Tasks, tests or builds are still running. Finish them before switching or deleting a version.",
+        "building": "Your personal version is being built. Wait for it to finish or stop the build before switching versions.",
         "incompatible": "The data structures differ. Rebuild your personal version from the current original version before switching.",
         "unavailable": "This version could not be read. Rebuild it and try again.",
         "launchFailed": "The target version could not start. The current version has been kept.",
@@ -13596,6 +13609,7 @@
       "getLatest": "Sync latest source",
       "taskTitle": "Resolve Source Update Conflicts",
       "updateHint": "Update official source and reapply your personal changes.",
+      "buildingHint": "A personal version is being built. Wait for it to finish or stop it before syncing source.",
       "confirmTitle": "Update to the latest source?",
       "confirmDescription": "Your personal changes will be kept. If conflicts occur, you will be asked before a resolution session starts.",
       "conflictConfirm": {

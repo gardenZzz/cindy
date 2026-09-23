@@ -71,6 +71,7 @@ const h = await vi.hoisted(async () => {
   closeSession: vi.fn(async () => undefined),
   getSession: vi.fn(() => null as {
     capabilities?: { manualCompact?: { supported?: boolean } };
+    isTurnRunning?: () => boolean;
     compactSession: (instructions?: string) => Promise<unknown>;
     setPermissionMode?: (mode: string) => Promise<void>;
   } | null),
@@ -2958,6 +2959,21 @@ describe('Bots list conversation projection', () => {
     });
     const single = await invoke('local-db:bots:get', 'bot-1');
     expect(single.lastMessagePreview).toBe('Two checks are still red.');
+  });
+
+  it('keeps public commentary out of local and remote preview reads while generating', async () => {
+    const sessionId = await canonicalFor('bot-1');
+    insertMessage(sessionId, { id: 'user', role: 'user', content: 'Question', createdAt: 1000 });
+    for (let n = 0; n < 8; n++) insertMessage(sessionId, { id: `progress-${n}`, role: 'assistant', content: 'Tool preamble', createdAt: 2000 + n });
+    h.getSession.mockReturnValue({ isTurnRunning: () => true, compactSession: vi.fn() });
+    const single = await invoke('local-db:bots:get', 'bot-1');
+    expect(single.lastMessagePreview).toBe('Question');
+    const { getBotRemoteResourceSource } = await import('../bots');
+    expect((await getBotRemoteResourceSource('bot-1')).lastMessagePreview).toBe('Question');
+    insertMessage(sessionId, { id: 'sealed', role: 'assistant', content: 'Final answer', agentMeta: { turnCompleted: true }, createdAt: 3000 });
+    expect((await getBotRemoteResourceSource('bot-1')).lastMessagePreview).toBe('Final answer');
+    h.getSession.mockReturnValue(null);
+    expect((await invoke('local-db:bots:get', 'bot-1')).lastMessagePreview).toBe('Final answer');
   });
 
   it('reports no conversation for a Bot whose canonical task is still empty', async () => {

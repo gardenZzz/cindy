@@ -72,6 +72,7 @@ import {
   findCatalogModel,
   storedCustomProviderId,
   isLocalOnlyProviderForAgent,
+  isOrganizationManagedProvider,
 } from '@cindy/model-providers';
 import { createId } from '@paralleldrive/cuid2';
 import {
@@ -5675,6 +5676,10 @@ export function registerMakerIpc(maker: Maker, options: RegisterMakerIpcOptions)
 
   registerProviderHandlers(createElectronIpcHandlerRegistry(), {
     listProviders: (opts) => getDesktopProviderService().listProviders(opts),
+    isOrganizationManagedProviderId: (providerId) =>
+      getActiveCatalog().providers.some(
+        (provider) => provider.id === providerId && isOrganizationManagedProvider(provider),
+      ),
     getModelVisibilityOverrides: async (providers, trusted) => {
       if (!trusted) await waitForModelVisibilityMirror();
       return getModelVisibilityMirrorSnapshot(providers, trusted);

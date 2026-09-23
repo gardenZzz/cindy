@@ -2631,6 +2631,13 @@
         "modelCount": "已配置 {{count}} 个模型",
         "modelsAutomatic": "模型资料自动获取。单个模型的设置在模型列表中调整。",
         "manualModel": "模型 ID（无法自动获取时填写）"
+      },
+      "byok": {
+        "managed": "由企业管理连接与模型",
+        "refresh": "刷新企业配置",
+        "refreshFailed": "企业配置暂时无法刷新，请稍后重试。",
+        "pending": "凭据准备中",
+        "unavailable": "暂时不可用"
       }
     },
     "experimental": {
@@ -7885,6 +7892,7 @@
     },
     "permissionRequest": "{{name}} 想请你确认一下",
     "remote": {
+      "unknown": "连接状态未知",
       "online": "在线",
       "offline": "离线",
       "thisDevice": "这台电脑",
@@ -9807,6 +9815,7 @@
       "reviewingChecks": "正在核对检查结果…",
       "replying": "正在回复…",
       "processing": "正在处理…",
+      "organizingConversation": "正在整理对话…",
       "thinking": "正在思考…",
       "generating": "正在生成…",
       "editingFiles": "正在编辑文件…",
@@ -11022,7 +11031,7 @@
       },
       "scheduleMenu": {
         "intervalSeconds": "Seconds（每 N 秒）",
-        "intervalMinutes": "Minutes（每 N 分钟）",
+        "intervalMinutes": "分钟（每 N 分钟）",
         "interval": "Hourly（每 N 小时）",
         "daily": "Daily（每天）",
         "weekdays": "Weekdays（工作日）",
@@ -11046,7 +11055,10 @@
         "minuteLabel": "分钟",
         "scheduleHourAria": "计划小时",
         "scheduleMinuteAria": "计划分钟",
-        "openTimePickerAria": "打开时间选择器"
+        "intervalMinutesAria": "重复间隔（分钟）",
+        "openTimePickerAria": "打开时间选择器",
+        "minuteIntervalHint": "仅支持能整除 60 的分钟间隔：1、2、3、4、5、6、10、12、15、20、30 分钟；60 分钟请选择“每 1 小时”。",
+        "unsupportedMinuteInterval": "该自动化使用了 {{count}} 分钟的旧 Cron 设置；请选择一个可用间隔来修正它。"
       },
       "model": {
         "loading": "加载模型中…",
@@ -13334,6 +13346,7 @@
       "usingHint": "正在使用最新个人版。",
       "errors": {
         "busy": "还有任务、测试或构建正在进行，请结束后再切换或删除版本。",
+        "building": "正在生成个人版，请等待完成或停止制作后再切换版本。",
         "incompatible": "数据结构不同，暂时不能切换到这份版本。请基于当前原版重新生成个人版。",
         "unavailable": "无法读取这份版本，请重新生成后重试。",
         "launchFailed": "未能启动目标版本，当前版本已保留。",
@@ -13577,6 +13590,7 @@
       "getLatest": "同步最新源码",
       "taskTitle": "处理源码更新冲突",
       "updateHint": "更新官方源码，并保留个人改动。",
+      "buildingHint": "个人版正在生成，完成或停止制作后才能同步源码。",
       "confirmTitle": "更新到最新源码？",
       "confirmDescription": "会保留你的个人改动。如有冲突，会先询问是否创建任务处理。",
       "conflictConfirm": {

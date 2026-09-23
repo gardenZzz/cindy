@@ -35,6 +35,7 @@
     "create": "新建"
   },
   "resources": {
+    "connectionUnknown": "連線狀態未知",
     "hostOffline": "離線",
     "titleFallback": "資源",
     "loading": "正在載入…",
@@ -597,6 +598,8 @@
       },
       "boundSessionA11y": "繫結任務 {{name}}",
       "intervalPlaceholder": "留空則使用 cron",
+      "intervalHint": "分鐘間隔請選擇 1、2、3、4、5、6、10、12、15、20 或 30 分鐘；整小時間隔請輸入 60 的倍數，範圍為 60–1380 分鐘（1–23 小時）。",
+      "intervalPreservedHint": "目前任務的精確間隔為每 {{duration}}；未編輯或清空前會保留。",
       "workspace": {
         "project": "專案",
         "dialogue": "對話"
@@ -734,7 +737,7 @@
         "workingDir": "請輸入專案目錄",
         "effort": "推理強度只能是 {{values}}",
         "intervalPositiveInteger": "間隔分鐘必須是正整數",
-        "intervalUnsupported": "分鐘間隔只支援 1–59 分鐘，或 1–23 小時的整點間隔"
+        "intervalUnsupported": "分鐘間隔必須可整除 60：請選擇 1、2、3、4、5、6、10、12、15、20 或 30 分鐘，或 1–23 小時的整點間隔"
       },
       "schedule": {
         "paused": "已暫停",
@@ -939,6 +942,7 @@
       "thinking": "正在思考…",
       "replying": "正在回覆…",
       "processing": "正在處理…",
+      "compacting": "正在整理對話…",
       "reading-memory": "正在讀取記憶…",
       "saving-memory": "正在儲存記憶…",
       "deleting-memory": "正在刪除記憶…",

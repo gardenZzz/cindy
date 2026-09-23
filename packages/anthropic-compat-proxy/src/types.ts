@@ -102,6 +102,16 @@ export interface RoutingDecision {
    * classifications and an HTTP status after the real upstream request starts.
    */
   forwardLifecycle?: ForwardLifecycleObserver;
+  /**
+   * Optional body rewrite bound to this route, including opaque multipart requests.
+   * Runs after the JSON transform chain (even when that chain is bypassed). A rejection
+   * fails the request locally; dispatch-generation and body-size checks still apply.
+   * contentType must describe the returned bytes, including any new multipart boundary.
+   */
+  transformRequestBody?: (
+    body: Buffer,
+    ctx: RequestTransformCtx,
+  ) => { body: Buffer; contentType?: string } | Promise<{ body: Buffer; contentType?: string }>;
 }
 
 /**

@@ -2631,6 +2631,13 @@
         "modelCount": "已設定 {{count}} 個模型",
         "modelsAutomatic": "模型資料自動取得。個別模型的設定請在模型清單調整。",
         "manualModel": "模型 ID（無法自動取得時填寫）"
+      },
+      "byok": {
+        "managed": "由企業管理連線與模型",
+        "refresh": "重新整理企業設定",
+        "refreshFailed": "暫時無法重新整理企業設定，請稍後再試。",
+        "pending": "憑證準備中",
+        "unavailable": "暫時無法使用"
       }
     },
     "experimental": {
@@ -7885,6 +7892,7 @@
     },
     "permissionRequest": "{{name}} 想請你確認一下",
     "remote": {
+      "unknown": "連線狀態未知",
       "online": "上線",
       "offline": "離線",
       "thisDevice": "這台電腦",
@@ -9807,6 +9815,7 @@
       "reviewingChecks": "正在核對檢查結果…",
       "replying": "正在回覆…",
       "processing": "正在處理…",
+      "organizingConversation": "正在整理對話…",
       "thinking": "正在思考…",
       "generating": "正在生成…",
       "editingFiles": "正在編輯檔案…",
@@ -11022,7 +11031,7 @@
       },
       "scheduleMenu": {
         "intervalSeconds": "Seconds（每 N 秒）",
-        "intervalMinutes": "Minutes（每 N 分鐘）",
+        "intervalMinutes": "分鐘（每 N 分鐘）",
         "interval": "Hourly（每 N 小時）",
         "daily": "Daily（每天）",
         "weekdays": "Weekdays（工作日）",
@@ -11046,7 +11055,10 @@
         "minuteLabel": "分鐘",
         "scheduleHourAria": "計劃小時",
         "scheduleMinuteAria": "計劃分鐘",
-        "openTimePickerAria": "開啟時間選擇器"
+        "intervalMinutesAria": "重複間隔（分鐘）",
+        "openTimePickerAria": "開啟時間選擇器",
+        "minuteIntervalHint": "僅支援可整除 60 的分鐘間隔：1、2、3、4、5、6、10、12、15、20、30 分鐘；60 分鐘請選擇「每 1 小時」。",
+        "unsupportedMinuteInterval": "目前任務使用了 {{count}} 分鐘的舊 Cron 設定；請選擇可用的間隔來修正。"
       },
       "model": {
         "loading": "載入模型中…",
@@ -13334,6 +13346,7 @@
       "usingHint": "正在使用最新個人版。",
       "errors": {
         "busy": "仍有任務、測試或建置正在進行，請結束後再切換或刪除版本。",
+        "building": "正在產生個人版，請等待完成或停止製作後再切換版本。",
         "incompatible": "資料結構不同，暫時無法切換至此版本。請以目前原版重新產生個人版。",
         "unavailable": "無法讀取此版本，請重新產生後再試。",
         "launchFailed": "無法啟動目標版本，目前版本已保留。",
@@ -13577,6 +13590,7 @@
       "getLatest": "同步最新原始碼",
       "taskTitle": "處理原始碼更新衝突",
       "updateHint": "更新官方原始碼，並保留個人改動。",
+      "buildingHint": "個人版正在產生，完成或停止製作後才能同步原始碼。",
       "confirmTitle": "更新到最新原始碼？",
       "confirmDescription": "會保留你的個人改動。如有衝突，會先詢問是否建立任務處理。",
       "conflictConfirm": {
