@@ -168,6 +168,71 @@ describe('enrichCursorModelFromConfigOptions', () => {
     expect(toCursorConfigEffortValue(effortOpt, 'max')).toBeNull();
   });
 
+  // Grok 4.7 / Gemini 3.8 起上游把推理强度改挂 `reasoning_effort`（实测
+  // cursor-agent 2026.09，set_config_option 回包原文）。不识别这个 id 时，探测照常
+  // 跑完、缓存里这两个模型永远 efforts:[]。
+  it('reads reasoning_effort option used by Grok 4.7 / Gemini 3.8', () => {
+    const models: CursorListedModel[] = [
+      { id: 'grok-4.7', displayName: 'Grok 4.7', contextWindow: 200_000, efforts: [], defaultEffort: null },
+      { id: 'gemini-3.8-flash', displayName: 'Gemini 3.8 Flash', contextWindow: 200_000, efforts: [], defaultEffort: null },
+    ];
+    const grokOptions = parseAcpConfigOptions([
+      {
+        id: 'reasoning_effort',
+        name: 'Reasoning Effort',
+        currentValue: 'xhigh',
+        options: [
+          { value: 'low', name: 'Low' },
+          { value: 'medium', name: 'Medium' },
+          { value: 'high', name: 'High' },
+          { value: 'xhigh', name: 'Extra High' },
+        ],
+      },
+      {
+        id: 'context',
+        name: 'Context',
+        currentValue: '256k',
+        options: [{ value: '256k', name: '256K' }, { value: '500k', name: '500K' }],
+      },
+      {
+        id: 'fast',
+        name: 'Fast',
+        currentValue: 'false',
+        options: [{ value: 'false', name: 'Off' }, { value: 'true', name: 'On' }],
+      },
+    ]);
+    enrichCursorModelFromConfigOptions(models, 'grok-4.7', grokOptions);
+    expect(models[0]).toMatchObject({
+      efforts: ['low', 'medium', 'high', 'xhigh'],
+      defaultEffort: 'xhigh',
+      supportsFastMode: true,
+      contextWindow: 256_000,
+    });
+
+    const geminiOptions = parseAcpConfigOptions([
+      {
+        id: 'reasoning_effort',
+        name: 'Reasoning Effort',
+        currentValue: 'high',
+        options: [
+          { value: 'low', name: 'Low' },
+          { value: 'medium', name: 'Medium' },
+          { value: 'high', name: 'High' },
+        ],
+      },
+    ]);
+    enrichCursorModelFromConfigOptions(models, 'gemini-3.8-flash', geminiOptions);
+    expect(models[1]).toMatchObject({
+      efforts: ['low', 'medium', 'high'],
+      defaultEffort: 'high',
+    });
+
+    // 回写同样走该模型自己的 id。
+    const effortOpt = findCursorEffortOption(grokOptions)!;
+    expect(effortOpt.id).toBe('reasoning_effort');
+    expect(toCursorConfigEffortValue(effortOpt, 'xhigh')).toBe('xhigh');
+  });
+
   it('clears effort when option absent', () => {
     const models: CursorListedModel[] = [
       {

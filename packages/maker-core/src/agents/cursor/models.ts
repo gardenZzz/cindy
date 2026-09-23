@@ -18,11 +18,12 @@ export const CURSOR_ACP_AUTO_MODEL_ID = 'default';
 export const CURSOR_PRODUCT_AUTO_MODEL_ID = 'auto';
 
 /**
- * 推理强度在上游有两个承载 id：Claude / Gemini 家族叫 `effort`，GPT / Kimi / GLM
- * 家族叫 `reasoning`（实测 cursor-agent 2026.07）。只认 `effort` 会让 GPT-5.x /
- * Codex / Kimi / GLM 这半边模型永远没有推理强度可选。
+ * 推理强度在上游有三个承载 id：Claude / Gemini 家族叫 `effort`，GPT / Kimi / GLM
+ * 家族叫 `reasoning`（实测 cursor-agent 2026.07），Grok 4.7 / Gemini 3.8 起改用
+ * `reasoning_effort`（实测 cursor-agent 2026.09，set_config_option 回包原文）。
+ * 少认一个 id，对应家族在选择器里就永远没有推理强度可选。
  */
-const CURSOR_EFFORT_CONFIG_IDS: readonly string[] = ['effort', 'reasoning'];
+const CURSOR_EFFORT_CONFIG_IDS: readonly string[] = ['effort', 'reasoning', 'reasoning_effort'];
 
 /**
  * 上游取值 → Cindy Effort。同一档位在不同模型上拼写不同（`extra-high` 与 `xhigh`、
@@ -173,7 +174,7 @@ export function toCursorEffort(value: string): Effort | null {
   return CURSOR_EFFORT_VALUES[value] ?? null;
 }
 
-/** 该模型承载推理强度的 configOption(`effort` 或 `reasoning`)；没有则 undefined。 */
+/** 该模型承载推理强度的 configOption(`effort` / `reasoning` / `reasoning_effort`)；没有则 undefined。 */
 export function findCursorEffortOption(
   configOptions: readonly AcpConfigOption[],
 ): AcpConfigOption | undefined {
