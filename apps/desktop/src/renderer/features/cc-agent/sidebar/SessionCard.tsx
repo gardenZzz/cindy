@@ -1,4 +1,6 @@
+import { SessionTaskMenu } from './SessionTaskMenu';
 import { TaskTagMenuSection, TaskTagEditor, TaskTagDots } from '@/features/task-tags/TaskTags';
+import { Button } from '@/components/ui/button';
 /**
  * SessionCard — sidebar-card-mode 下的单条会话卡片（SessionItem 的瀑布流形态）
  * ---------------------------------------------------------------------------
@@ -29,7 +31,7 @@ import type {
   ReactNode,
   RefObject,
 } from 'react';
-import { Archive, ChevronRight, EllipsisVertical, Undo } from 'lucide-react';
+import { Archive, ChevronRight, Crown, EllipsisVertical, Undo } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import { withSidebarNavigation, type SidebarNavigationProps } from './sidebarNavigation';
 
@@ -42,19 +44,15 @@ import { useAgentIslandActivity } from '@/state/agentIslandActivity';
 import { makerChatStore } from '@/lib/makerChatStore';
 import {
   DropdownMenu,
-  DropdownMenuContent,
   DropdownMenuItem,
-  DropdownMenuSeparator,
   DropdownMenuSub,
   DropdownMenuSubContent,
   DropdownMenuSubTrigger,
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
 import {
-  MENU_CONTENT_CLASS,
   MENU_ITEM_CLASS,
   MENU_ROW_CLASS,
-  MENU_SEPARATOR_CLASS,
   MENU_SUB_CONTENT_CLASS,
 } from './menuStyles';
 import { toast } from '@/lib/toast';
@@ -157,6 +155,7 @@ export const SessionCard = withSidebarNavigation<SessionCardProps>(function Sess
   isFirst = false,
   hideBottomDivider = false,
   navigationOnly = false,
+  sharedTaskRole,
 }: SessionCardProps & SidebarNavigationProps) {
   const { t } = useTranslation();
   const cindyMakeActivity = useCindyMakeActivity(session);
@@ -614,6 +613,22 @@ export const SessionCard = withSidebarNavigation<SessionCardProps>(function Sess
   const titlePrefixNode = (
     <>
       {statusIconNode}
+      {sharedTaskRole === 'owned' ? (
+        <>
+          <span className="inline-block w-1.5" aria-hidden />
+          <span
+            className="inline-flex h-[1em] w-3 items-center justify-center"
+            data-testid={`shared-task-role-slot-owned-${session.id}`}
+          >
+            <Crown
+              size={12}
+              strokeWidth={1.8}
+              className="text-[var(--warning-fg)]"
+              aria-label={t('sharedTask.roleHost')}
+            />
+          </span>
+        </>
+      ) : null}
       {showScheduleBindingBadge || showAutomationTimer ? (
         <span className={CARD_TITLE_META_SLOT_CLASS}>{renderAutomationMeta(10)}</span>
       ) : null}
@@ -915,7 +930,11 @@ export const SessionCard = withSidebarNavigation<SessionCardProps>(function Sess
             </div>
           )}
           {canQuickArchive && archivePending && (
-            <button
+            <Button
+              variant="secondary"
+              tone="danger-surface"
+              size="xxs"
+              compact
               ref={confirmPillRef}
               type="button"
               onClick={(e) => {
@@ -925,17 +944,11 @@ export const SessionCard = withSidebarNavigation<SessionCardProps>(function Sess
               }}
               onPointerDown={(e) => e.stopPropagation()}
               onDoubleClick={(e) => e.stopPropagation()}
-              className={cn(
-                'absolute right-[6px] top-[6px] z-20 flex h-[22px] w-max min-w-14 items-center justify-center rounded-full px-[9px]',
-                'whitespace-nowrap text-11 font-semibold',
-                'bg-[color-mix(in_srgb,hsl(var(--destructive))_15%,var(--surface-elevated))] text-[hsl(var(--destructive))]',
-                'hover:bg-[color-mix(in_srgb,hsl(var(--destructive))_25%,var(--surface-elevated))]',
-                'transition-colors focus:outline-none',
-              )}
+              className="absolute right-[6px] top-[6px] z-20 w-max min-w-14 whitespace-nowrap"
               aria-label={t('ccAgent.sidebar.sessionMenu.archived')}
             >
               {t('ccAgent.sidebar.sessionMenu.archived')}
-            </button>
+            </Button>
           )}
 
           {/* 卡片标题始终保留原来的流式盒子；编辑时只把原标题隐藏，并以绝对定位的
@@ -1085,108 +1098,14 @@ export const SessionCard = withSidebarNavigation<SessionCardProps>(function Sess
               }}
             />
           </DropdownMenuTrigger>
-          <DropdownMenuContent
-            align="start"
-            sideOffset={2}
-            onClick={(e) => e.stopPropagation()}
-            className={cn(MENU_CONTENT_CLASS, 'min-w-32 overflow-hidden')}
-          >
-            {isArchived ? (
-              <>
-                <DropdownMenuItem
-                  disabled={remoteWritesBlocked}
-                  onSelect={handleRenameSelect}
-                  className={MENU_ITEM_CLASS}
-                >
-                  {t('ccAgent.sidebar.sessionMenu.rename')}
-                </DropdownMenuItem>
-                <DropdownMenuItem
-                  disabled={remoteWritesBlocked}
-                  onSelect={handleUnarchiveSelect}
-                  className={MENU_ITEM_CLASS}
-                >
-                  {t('ccAgent.sidebar.sessionMenu.unarchive')}
-                </DropdownMenuItem>
-                {exportShareMenuItem}
-                {copySessionIdSubmenu}
-                {tagMenu}
-                <DropdownMenuSeparator className={MENU_SEPARATOR_CLASS} />
-                <DropdownMenuItem
-                  disabled={remoteWritesBlocked}
-                  onSelect={handleDeleteSelect}
-                  className={MENU_ITEM_CLASS}
-                >
-                  {t('ccAgent.sidebar.sessionMenu.delete')}
-                </DropdownMenuItem>
-              </>
-            ) : isEmpty ? (
-              <>
-                <DropdownMenuItem
-                  disabled={remoteWritesBlocked}
-                  onSelect={handleRenameSelect}
-                  className={MENU_ITEM_CLASS}
-                >
-                  {t('ccAgent.sidebar.sessionMenu.rename')}
-                </DropdownMenuItem>
-                {copySessionIdSubmenu}
-                {tagMenu}
-                <DropdownMenuSeparator className={MENU_SEPARATOR_CLASS} />
-                <DropdownMenuItem
-                  disabled={remoteWritesBlocked}
-                  onSelect={handleDeleteSelect}
-                  className={MENU_ITEM_CLASS}
-                >
-                  {t('ccAgent.sidebar.sessionMenu.delete')}
-                </DropdownMenuItem>
-              </>
-            ) : (
-              <>
-                <DropdownMenuItem
-                  disabled={remoteWritesBlocked}
-                  onSelect={handlePinSelect}
-                  className={MENU_ITEM_CLASS}
-                >
-                  {isPinned
-                    ? t('ccAgent.sidebar.sessionMenu.unpin')
-                    : t('ccAgent.sidebar.sessionMenu.pin')}
-                </DropdownMenuItem>
-                <DropdownMenuItem
-                  disabled={remoteWritesBlocked}
-                  onSelect={handleRenameSelect}
-                  className={MENU_ITEM_CLASS}
-                >
-                  {t('ccAgent.sidebar.sessionMenu.rename')}
-                </DropdownMenuItem>
-                {moveToProjectSubmenu}
-                <DropdownMenuSeparator className={MENU_SEPARATOR_CLASS} />
-                {copySessionIdSubmenu}
-                <DropdownMenuItem
-                  disabled={remoteWritesBlocked}
-                  onSelect={handleOpenInNewWindowSelect}
-                  className={MENU_ITEM_CLASS}
-                >
-                  {t('ccAgent.sidebar.sessionMenu.openInNewWindow')}
-                </DropdownMenuItem>
-                {exportShareMenuItem}
-                {tagMenu}
-                <DropdownMenuSeparator className={MENU_SEPARATOR_CLASS} />
-                <DropdownMenuItem
-                  disabled={remoteWritesBlocked}
-                  onSelect={handleArchiveSelect}
-                  className={MENU_ITEM_CLASS}
-                >
-                  {t('ccAgent.sidebar.sessionMenu.archived')}
-                </DropdownMenuItem>
-                <DropdownMenuItem
-                  disabled={remoteWritesBlocked}
-                  onSelect={handleDeleteSelect}
-                  className={MENU_ITEM_CLASS}
-                >
-                  {t('ccAgent.sidebar.sessionMenu.delete')}
-                </DropdownMenuItem>
-              </>
-            )}
-          </DropdownMenuContent>
+          <SessionTaskMenu key={`${session.deviceLinkDeviceId ?? ''}:${session.id}`}
+            session={session} open={menuPos !== null} sideOffset={2} writeBlocked={remoteWritesBlocked}
+            returnFocus={() => cardRef.current?.focus()}
+            onRename={handleRenameSelect} onPin={handlePinSelect}
+            onArchive={handleArchiveSelect} onUnarchive={handleUnarchiveSelect} onDelete={handleDeleteSelect}
+            onOpenInNewWindow={handleOpenInNewWindowSelect}
+            move={moveToProjectSubmenu} tags={tagMenu} copy={copySessionIdSubmenu} exportShare={exportShareMenuItem}
+          />
         </DropdownMenu>
       )}
 
@@ -1276,12 +1195,18 @@ function TimeActionsSlot({
         </div>
 
         {canQuickArchive && archivePending && (
-          <span
+          <Button
+            variant="secondary"
+            tone="danger-surface"
+            size="xxs"
+            compact
             aria-hidden
-            className="invisible col-start-1 row-start-1 inline-flex h-[22px] w-max min-w-14 items-center justify-center whitespace-nowrap rounded-full px-[9px] text-11 font-semibold"
+            disabled
+            tabIndex={-1}
+            className="invisible col-start-1 row-start-1 w-max min-w-14 whitespace-nowrap"
           >
             {t('ccAgent.sidebar.sessionMenu.archived')}
-          </span>
+          </Button>
         )}
         {yieldToOrdinalBadge && ordinalBadgeLabel ? (
           <span aria-hidden className="invisible col-start-1 row-start-1 inline-flex">
@@ -1289,7 +1214,11 @@ function TimeActionsSlot({
           </span>
         ) : null}
         {canQuickArchive && archivePending && (
-          <button
+          <Button
+            variant="secondary"
+            tone="danger-surface"
+            size="xxs"
+            compact
             ref={confirmPillRef}
             type="button"
             onClick={(e) => {
@@ -1299,17 +1228,11 @@ function TimeActionsSlot({
             }}
             onPointerDown={(e) => e.stopPropagation()}
             onDoubleClick={(e) => e.stopPropagation()}
-            className={cn(
-              'absolute right-0 top-1/2 z-20 flex h-[22px] w-max min-w-14 -translate-y-1/2 items-center justify-center rounded-full px-[9px]',
-              'whitespace-nowrap text-11 font-semibold',
-              'bg-[color-mix(in_srgb,hsl(var(--destructive))_15%,var(--surface-elevated))] text-[hsl(var(--destructive))]',
-              'hover:bg-[color-mix(in_srgb,hsl(var(--destructive))_25%,var(--surface-elevated))]',
-              'transition-colors focus:outline-none',
-            )}
+            className="absolute right-0 top-1/2 z-20 w-max min-w-14 -translate-y-1/2 whitespace-nowrap"
             aria-label={t('ccAgent.sidebar.sessionMenu.archived')}
           >
             {t('ccAgent.sidebar.sessionMenu.archived')}
-          </button>
+          </Button>
         )}
 
         {!navigationOnly && !archivePending && (

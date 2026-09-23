@@ -355,6 +355,8 @@ export const MAKER_INVOKE = {
   CURSOR_CANCEL_REFRESH: 'maker:cursor:cancel-refresh',
   /** 探测进度推送(已探 n / 总数),仅 main -> renderer。 */
   CURSOR_REFRESH_PROGRESS: 'maker:cursor:refresh-progress',
+  PI_KERNEL_STATE: 'maker:agent:pi-kernel-state',
+  PI_KERNEL_INSTALL: 'maker:agent:pi-kernel-install',
   // Agent 今日累计 (取代老 codex:usage:today) —— 走 host 的 readAgentTodayUsage
   USAGE_TODAY: 'maker:usage:today',
   USAGE_ACCOUNT: 'maker:usage:account',

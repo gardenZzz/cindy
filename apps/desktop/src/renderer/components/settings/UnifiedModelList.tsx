@@ -1,3 +1,4 @@
+import { Button } from '@/components/ui/button';
 import { localizedModelName, localizedBrandName, matchesModelName } from '@/lib/modelDisplayNames';
 import { modelManagementState } from './modelManagementState';
 /**
@@ -1117,35 +1118,25 @@ export function UnifiedModelList({
           }
           filters={
             showKindFilter ? (
-              <div
-                className="flex flex-wrap items-center gap-0.5 rounded-full p-0.5"
-                style={{ backgroundColor: 'var(--surface-elevated)' }}
-                role="group"
+              <SegmentedControl
                 aria-label={t('settings.providers.models.kindFilter.aria')}
-              >
-                {(['all', ...presentCategories] as Array<ModelCategory | 'chat' | 'all'>).map(
-                  (kind) => (
-                    <button
-                      key={kind}
-                      type="button"
-                      onClick={() => setKindFilter(kind)}
-                      aria-pressed={kindFilter === kind}
-                      className={cn(
-                        'h-6 rounded-full px-2.5 text-12 transition-colors',
-                        kindFilter === kind
-                          ? 'bg-[var(--surface-hover)] font-medium text-[var(--text-primary)]'
-                          : 'text-[var(--text-secondary)] hover:text-[var(--text-primary)]',
-                      )}
-                    >
-                      {kind === 'all'
-                        ? t('settings.providers.models.kindFilter.all')
-                        : kind === 'chat'
-                          ? t('settings.providers.models.kindFilter.chat')
-                          : t(CATEGORY_LABEL_KEY[kind])}
-                    </button>
-                  ),
-                )}
-              </div>
+                value={kindFilter}
+                onValueChange={setKindFilter}
+                height={28}
+                optionHeight={24}
+                optionClassName="px-2.5"
+                options={(
+                  ['all', ...presentCategories] as Array<ModelCategory | 'chat' | 'all'>
+                ).map((kind) => ({
+                  value: kind,
+                  label:
+                    kind === 'all'
+                      ? t('settings.providers.models.kindFilter.all')
+                      : kind === 'chat'
+                        ? t('settings.providers.models.kindFilter.chat')
+                        : t(CATEGORY_LABEL_KEY[kind]),
+                }))}
+              />
             ) : undefined
           }
           search={showSearch ? { value: query, onChange: setQuery } : undefined}
@@ -1295,15 +1286,17 @@ export function UnifiedModelList({
                       </span>
                     </button>
                     {!hasLockedDisabledRow && (
-                      <button
+                      <Button
+                        variant="secondary"
+                        size="xxs"
+                        compact
+                        tone="quiet"
                         type="button"
                         disabled={!selectionAvailable}
                         onClick={resetDisableOverrides}
-                        className="rounded-lg px-1.5 py-0.5 text-11 font-medium transition-colors hover:bg-[var(--surface-hover)]"
-                        style={{ color: 'var(--text-tertiary)' }}
                       >
                         {t('settings.providers.models.enableAllModels')}
-                      </button>
+                      </Button>
                     )}
                   </div>
                   {!collapsed &&
@@ -1350,28 +1343,30 @@ export function UnifiedModelList({
                             </span>
                           )}
                           {!paymentRequired && (
-                            <button
+                            <Button
+                              variant="secondary"
+                              size="xs"
+                              compact
                               type="button"
                               disabled={!selectionAvailable}
                               onClick={() => setRowDisabled(row, false)}
-                              className="ml-auto flex h-6 shrink-0 items-center rounded-full border px-2.5 text-12 font-medium transition-colors hover:bg-[var(--surface-hover)]"
-                              style={{
-                                borderColor: 'var(--settings-btn-secondary-border)',
-                                color: 'var(--settings-btn-secondary-text)',
-                              }}
+                              className="ml-auto shrink-0"
                             >
                               {t('settings.providers.models.enableModel')}
-                            </button>
+                            </Button>
                           )}
                           {provider.id === MANAGED_OLLAMA_PROVIDER_ID && (
-                            <button
+                            <Button
+                              variant="secondary"
+                              size="xs"
+                              tone="danger"
+                              compact
                               type="button"
                               onClick={() => void deleteInstalledModel(row)}
-                              className="flex h-6 shrink-0 items-center rounded-full px-2.5 text-12 font-medium transition-colors hover:bg-[var(--surface-hover)]"
-                              style={{ color: 'var(--error-fg)' }}
+                              className="shrink-0"
                             >
                               {t('settings.providers.local.deleteModel')}
-                            </button>
+                            </Button>
                           )}
                         </div>
                       );

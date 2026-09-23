@@ -302,6 +302,33 @@ describe('SessionCard visual cases', () => {
     expect(screen.getByText('等待插件设置')).toBeTruthy();
   });
 
+  it.each(['list', 'text'] as const)('shows the shared crown only for owners in %s rows', (variant) => {
+    const session = { ...sessionCardVisualCases[0].session, id: `shared-${variant}` };
+    const baseProps = {
+      session,
+      isActive: false,
+      isRunning: false,
+      hasAttentionNotification: false,
+      navigationOnly: true,
+      onClick: vi.fn(),
+      onRename: vi.fn(),
+      onAction: vi.fn(),
+      onTogglePin: vi.fn(),
+    };
+    const renderRow = (sharedTaskRole: 'owned' | 'joined') => render(variant === 'list'
+      ? createElement(SessionCard, { ...baseProps, sharedTaskRole, variant: 'list' })
+      : createElement(SessionItem, { ...baseProps, sharedTaskRole }));
+
+    const joined = renderRow('joined');
+    expect(joined.container.querySelector('[data-testid^="shared-task-role-slot-"]')).toBeNull();
+    joined.unmount();
+
+    const owned = renderRow('owned');
+    const ownerSlot = owned.container.querySelector(`[data-testid="shared-task-role-slot-owned-${session.id}"]`);
+    expect(ownerSlot).toBeTruthy();
+    expect(ownerSlot?.querySelector('svg')?.getAttribute('class')).toContain('text-[var(--warning-fg)]');
+  });
+
   it.each([
     { locale: 'en', resource: en },
     { locale: 'zh-CN', resource: zhCN },
@@ -910,19 +937,24 @@ describe('SessionCard visual cases', () => {
       expect(confirmPill.className).toContain('min-w-14');
       expect(confirmPill.className).toContain('whitespace-nowrap');
       expect(confirmPill.className).toContain('var(--surface-elevated)');
-      expect(confirmPill.className).not.toContain('transparent');
+      expect(confirmPill.className).not.toContain('[--button-face-bg:transparent]');
       if (variant === 'list') {
         // 让位容器是 time 最近的 div 祖先(time 嵌在 SessionInfoMeta span 内)。
         expect(container.querySelector('time')?.closest('div')?.className).toContain('invisible');
-        const confirmReserve = Array.from(container.querySelectorAll<HTMLElement>('span')).find(
+        const confirmReserve = Array.from(container.querySelectorAll<HTMLElement>('button[aria-hidden="true"]')).find(
           (node) =>
             node.getAttribute('aria-hidden') === 'true' &&
             node.className.includes('w-max') &&
             node.textContent === '归档',
         );
         expect(confirmReserve).toBeTruthy();
-        expect(confirmReserve?.className).toContain('px-[9px]');
-        expect(confirmReserve?.className).toContain('text-11');
+        // The reserved width must use the same primitive geometry as the visible pill.
+        for (const className of ['cindy-button', 'h-[22px]', 'px-3', 'text-13', 'font-medium', 'border', 'whitespace-nowrap', 'w-max', 'min-w-14']) {
+          expect(confirmReserve?.classList.contains(className)).toBe(true);
+          expect(confirmPill.classList.contains(className)).toBe(true);
+        }
+        expect(confirmReserve).toHaveProperty('disabled', true);
+        expect(confirmReserve).toHaveProperty('tabIndex', -1);
         expect(confirmReserve?.className).not.toContain('inline-block h-[22px] w-14');
       }
     },

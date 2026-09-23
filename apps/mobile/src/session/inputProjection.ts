@@ -127,6 +127,7 @@ export function buildQueuedTextMessage(
   clientId = createUuid(),
   options: {
     attachments?: readonly RemoteSerializedAttachment[];
+    planMode?: boolean;
     quotesEncoded?: boolean;
     agentReferences?: AgentInputReference[];
     pastedTextRanges?: Array<{ start: number; end: number; display: string }>;
@@ -182,6 +183,7 @@ export function buildQueuedTextMessage(
     },
     createOpts: {
       agentKind,
+      ...(options.planMode !== undefined ? { planMode: options.planMode } : {}),
       workingDir,
       model: session.model,
       effort,

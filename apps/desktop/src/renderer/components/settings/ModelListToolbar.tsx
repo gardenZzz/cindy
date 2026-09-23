@@ -14,6 +14,7 @@ import type { ReactNode } from 'react';
 import { useTranslation } from 'react-i18next';
 import { ChevronDown, RefreshCw, Search } from 'lucide-react';
 
+import { Button } from '@/components/ui/button';
 import { cn } from '@/lib/utils';
 import { Spinner } from '@/components/ui/spinner';
 import { Tip } from '@/components/ui/tooltip';
@@ -103,11 +104,7 @@ export function ModelListToolbar({
                 )}
                 style={{ color: 'var(--text-secondary)' }}
               >
-                {refresh.busy ? (
-                  <Spinner size={14} />
-                ) : (
-                  <RefreshCw size={14} />
-                )}
+                <Spinner icon={RefreshCw} size={14} spinning={refresh.busy ?? false} />
               </button>
             </span>
           </Tip>
@@ -115,13 +112,10 @@ export function ModelListToolbar({
         {menu && (
           <DropdownMenu>
             <DropdownMenuTrigger asChild>
-              <button
-                type="button"
-                className="flex h-7 shrink-0 items-center gap-1 rounded-full px-2 text-12 text-[var(--text-secondary)] hover:bg-[var(--surface-hover)]"
-              >
+              <Button variant="secondary" size="sm" compact type="button" className="shrink-0">
                 {t('settings.providers.models.manage.menu')}
                 <ChevronDown size={12} aria-hidden />
-              </button>
+              </Button>
             </DropdownMenuTrigger>
             <DropdownMenuContent align="end">{menu}</DropdownMenuContent>
           </DropdownMenu>

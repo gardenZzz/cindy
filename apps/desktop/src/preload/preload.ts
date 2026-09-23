@@ -2868,6 +2868,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
       origin: { kind: 'device'; deviceId: string } | { kind: 'ssh'; remoteHostId: string };
       workdir: string;
       absPath: string;
+      modifiedWindow?: { startMs: number; endMs: number | null };
     }): Promise<{ verdict: 'file' | 'directory' | 'nonfile' | 'unknown' }> =>
       ipcRenderer.invoke('maker:chat-file:stat', params),
   },
@@ -7321,6 +7322,13 @@ contextBridge.exposeInMainWorld('electronAPI', {
         ipcRenderer.invoke('maker:auth:logout', agentKind, ownerScope),
       onStateChanged: fanOutMakerAuthStateChanged,
       onLoginProgress: fanOutMakerAuthLoginProgress,
+    },
+
+    piKernel: {
+      getState: (check = false): Promise<import('../shared/piKernel').PiKernelState> =>
+        ipcRenderer.invoke('maker:agent:pi-kernel-state', check),
+      install: (request: import('../shared/piKernel').PiKernelInstallRequest): Promise<import('../shared/piKernel').PiKernelState> =>
+        ipcRenderer.invoke('maker:agent:pi-kernel-install', request),
     },
 
     // ── Agent 联合状态 (取代老 electronAPI.codex.binary.getStatus) ──────────
