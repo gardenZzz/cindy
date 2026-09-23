@@ -2346,6 +2346,8 @@
           "emptyState": "還沒有 Cursor 模型目錄。點擊「重新整理模型」拉取一次（需已登入 Cursor）。",
           "refreshCta": "重新整理模型",
           "refreshing": "已探 {{done}} / {{total}}",
+          "refreshStarting": "正在連線 Cursor 探測模型…",
+          "refreshingProgress": "正在探測模型檔位（已探 {{done}} / {{total}}）…",
           "refreshUnavailableInstalled": "需先安裝 cursor-agent",
           "refreshUnavailableAuth": "需先登入 Cursor",
           "autoHint": "兜底",

@@ -27,9 +27,10 @@
  * 而非空白;选择器仍有 Auto 兜底。
  */
 
+import type { ReactNode } from 'react';
 import { useMemo, useState } from 'react';
 import { useTranslation } from 'react-i18next';
-import { ChevronDown, RefreshCw } from 'lucide-react';
+import { ChevronDown } from 'lucide-react';
 
 import { cn } from '@/lib/utils';
 import { Switch } from '@/components/ui/switch';
@@ -181,15 +182,45 @@ export function CursorModelList({ onRefresh, onCancel, refresh }: CursorModelLis
   // (UnifiedModelList 持久化是按 category 跨供应商共享,Cursor 只有一页,页内 useState 够用)。
 
   const refreshLabel = refresh.running
-    ? t('settings.providers.cursor.models.refreshing', { done: refresh.done, total: refresh.total })
+    ? (refresh.total > 0
+        ? t('settings.providers.cursor.models.refreshing', { done: refresh.done, total: refresh.total })
+        : t('settings.providers.cursor.models.refreshStarting'))
     : t('settings.providers.cursor.models.refreshCta');
 
-  const refreshHint =
+  // 进度「文案」与进度「节点」分开:文案两处复用(工具行正文 / 空态),节点只给工具行
+  // —— 空态已经有带 spinner 的刷新 pill 和取消 pill,再塞一份 spinner + 取消链就是
+  // 两个 spinner、两个同名「取消刷新」按钮(读屏与 getByRole 都歧义)。
+  const refreshProgressText = refresh.total > 0
+    ? t('settings.providers.cursor.models.refreshingProgress', {
+        done: refresh.done,
+        total: refresh.total,
+      })
+    : t('settings.providers.cursor.models.refreshStarting');
+
+  const unavailableHint =
     refresh.unavailableReason === 'not-installed'
       ? t('settings.providers.cursor.models.refreshUnavailableInstalled')
       : refresh.unavailableReason === 'not-authenticated'
         ? t('settings.providers.cursor.models.refreshUnavailableAuth')
         : null;
+
+  /** 纯文本状态:刷新中给进度,否则给不可用原因(都没有则 null)。 */
+  const statusText = refresh.running ? refreshProgressText : unavailableHint;
+
+  // 工具行正文:刷新中直接外显进度,并带上**唯一**的取消入口(刷新按钮不再兼任取消)。
+  const refreshHint: ReactNode = refresh.running ? (
+    <span className="inline-flex items-center gap-1.5">
+      <Spinner size={11} />
+      <span>{refreshProgressText}</span>
+      <button
+        type="button"
+        onClick={onCancel}
+        className="ml-2 underline-offset-2 hover:text-[var(--text-primary)] hover:underline"
+      >
+        {t('settings.providers.cursor.models.cancelRefresh')}
+      </button>
+    </span>
+  ) : unavailableHint;
 
   const bulk = (action: 'show' | 'hide' | 'reset') => {
     const ids = toggleable.map((r) => r.model.id);
@@ -215,7 +246,7 @@ export function CursorModelList({ onRefresh, onCancel, refresh }: CursorModelLis
             label={refreshLabel}
             disabled={refresh.running || refreshDisabled}
             onClick={onRefresh}
-            icon={refresh.running ? <Spinner icon={RefreshCw} size={14} spinning /> : null}
+            icon={refresh.running ? <Spinner size={14} /> : null}
           />
           {refresh.running && (
             <PillButton
@@ -223,9 +254,11 @@ export function CursorModelList({ onRefresh, onCancel, refresh }: CursorModelLis
               onClick={onCancel}
             />
           )}
-          {refreshHint && (
+          {/* 空态取消由上面的 pill 承接:这里只出纯文本状态,不复用带 spinner +
+              取消链的 refreshHint 节点。 */}
+          {statusText && (
             <span className="text-12" style={{ color: 'var(--text-tertiary)' }}>
-              {refreshHint}
+              {statusText}
             </span>
           )}
         </div>
@@ -236,18 +269,19 @@ export function CursorModelList({ onRefresh, onCancel, refresh }: CursorModelLis
   return (
     <div className="flex flex-col">
       {/* 工具行与可路由供应商共用 ModelListToolbar;Cursor 单 agent,没有「排列」与
-          用途筛选,菜单里只留批量选择。刷新进行中时同一个按钮即取消入口。 */}
+          用途筛选,菜单里只留批量选择。刷新按钮在进行中只显示进度并禁用(与
+          UnifiedModelList 同口径):它曾经兼任取消入口,而正文与图标都看不出在忙,
+          用户以为没点上就补一下,第二下在几百毫秒内把刚起的后台探测直接取消
+          (实测 342~354ms)。取消唯一入口放在正文的文字链上。 */}
       <ModelListToolbar
         sticky
         selectedCount={selectedCount}
         hint={refreshHint ?? t('settings.providers.models.manage.hint')}
         refresh={{
-          onClick: refresh.running ? onCancel : onRefresh,
-          label: refresh.running
-            ? t('settings.providers.cursor.models.cancelRefresh')
-            : refreshLabel,
+          onClick: onRefresh,
+          label: refreshLabel,
           busy: refresh.running,
-          disabled: refreshDisabled,
+          disabled: refresh.running || refreshDisabled,
         }}
         menu={
           <>

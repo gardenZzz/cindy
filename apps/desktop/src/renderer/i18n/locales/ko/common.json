@@ -2346,6 +2346,8 @@
           "emptyState": "Cursor 모델 카탈로그가 아직 없습니다. \"모델 새로고침\"으로 가져오세요(Cursor 로그인 필요).",
           "refreshCta": "모델 새로고침",
           "refreshing": "탐색 {{done}} / {{total}}",
+          "refreshStarting": "Cursor에 연결하여 모델 탐색 중…",
+          "refreshingProgress": "모델 추론 강도 탐색 중 (탐색 {{done}} / {{total}})…",
           "refreshUnavailableInstalled": "먼저 cursor-agent 설치",
           "refreshUnavailableAuth": "먼저 Cursor 로그인",
           "autoHint": "대체",

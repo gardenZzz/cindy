@@ -16,6 +16,7 @@ import { ChevronDown, RefreshCw, Search } from 'lucide-react';
 
 import { cn } from '@/lib/utils';
 import { Spinner } from '@/components/ui/spinner';
+import { Tip } from '@/components/ui/tooltip';
 import {
   DropdownMenu,
   DropdownMenuTrigger,
@@ -26,7 +27,7 @@ export interface ModelListToolbarProps {
   /** 「已选 N 个」的 N;口径(是否算能力模型 / Auto 兜底行)由调用方决定。 */
   selectedCount: number;
   /** 标题下一行的说明;未连接 / 未登录等降级文案由调用方换。 */
-  hint: string;
+  hint: ReactNode;
   /**
    * #4466 统一模型滚动语义:供应商详情只留一个滚动区,工具行吸顶并带上
    * 卡片底色(`sticky top-0 z-10 bg-[var(--settings-theme-card-bg)]` +
@@ -37,10 +38,9 @@ export interface ModelListToolbarProps {
   /** 刷新入口;省略则不渲染图标按钮。 */
   refresh?: {
     onClick: () => void;
-    /** 同时用作 aria-label 与 title。 */
+    /** 同时用作 aria-label 与 Tip 悬浮提示。 */
     label: string;
-    /** 只控制转圈与 aria-busy;要不要在进行中禁用由 `disabled` 单独决定
-     *  —— Cursor 的刷新按钮在进行中就是取消入口,不能被 busy 顺手关掉。 */
+    /** 只控制转圈与 aria-busy;要不要在进行中禁用由 `disabled` 单独决定。 */
     busy?: boolean;
     disabled?: boolean;
   };
@@ -85,22 +85,32 @@ export function ModelListToolbar({
           </div>
           <p className="mt-0.5 text-11 text-[var(--text-tertiary)]">{hint}</p>
         </div>
+        {/* Tip 的 trigger 是 span 而不是 button:Chromium 不向 disabled 表单控件派发
+            指针事件,直接包 button 会让「刷新中」「需先安装 cursor-agent」这些恰好
+            处于 disabled 的提示永远不弹(原生 title 能弹,所以换 Tip 时不能照抄)。 */}
         {refresh && (
-          <button
-            type="button"
-            onClick={refresh.onClick}
-            disabled={refresh.disabled ?? false}
-            aria-busy={refresh.busy}
-            aria-label={refresh.label}
-            title={refresh.label}
-            className={cn(
-              'flex h-7 w-7 shrink-0 select-none items-center justify-center rounded-full transition-colors hover:bg-[var(--surface-hover)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--focus-ring-soft)]',
-              refresh.disabled && 'cursor-not-allowed opacity-60',
-            )}
-            style={{ color: 'var(--text-secondary)' }}
-          >
-            <Spinner icon={RefreshCw} size={14} spinning={refresh.busy ?? false} />
-          </button>
+          <Tip text={refresh.label} delay={200}>
+            <span className="inline-flex shrink-0">
+              <button
+                type="button"
+                onClick={refresh.onClick}
+                disabled={refresh.disabled ?? false}
+                aria-busy={refresh.busy}
+                aria-label={refresh.label}
+                className={cn(
+                  'flex h-7 w-7 shrink-0 select-none items-center justify-center rounded-full transition-colors hover:bg-[var(--surface-hover)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--focus-ring-soft)]',
+                  refresh.disabled && 'cursor-not-allowed opacity-60',
+                )}
+                style={{ color: 'var(--text-secondary)' }}
+              >
+                {refresh.busy ? (
+                  <Spinner size={14} />
+                ) : (
+                  <RefreshCw size={14} />
+                )}
+              </button>
+            </span>
+          </Tip>
         )}
         {menu && (
           <DropdownMenu>
