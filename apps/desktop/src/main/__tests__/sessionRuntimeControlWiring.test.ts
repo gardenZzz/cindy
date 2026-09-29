@@ -386,10 +386,10 @@ describe('session runtime control wiring', () => {
     // 档位/Fast(Fast 根本不在渠道默认里), 不是用户对目标模型的显式选择 ——
     // 目标模型不支持时轴收敛而不是拒(PR #5155 review P2)。
     expect(setModel).toContain(
-      'effortExplicit:\n            (internalOptions.source === \'user\' && internalOptions.configStaged !== true) ||\n            internalOptions.effortExplicit === true',
+      'effortExplicit:\n              (internalOptions.source === \'user\' && internalOptions.configStaged !== true) ||\n              internalOptions.effortExplicit === true',
     );
     expect(setModel).toContain(
-      'fastExplicit:\n            (internalOptions.source === \'user\' && internalOptions.configStaged !== true) ||\n            internalOptions.fastExplicit === true',
+      'fastExplicit:\n              (internalOptions.source === \'user\' && internalOptions.configStaged !== true) ||\n              internalOptions.fastExplicit === true',
     );
     expect(setModel).toContain("allowFixedEffortPlaceholder: internalOptions.source === 'user'");
     expect(axisValidation).toBeLessThan(setModel.indexOf('applyRuntimeSetModelChange({'));

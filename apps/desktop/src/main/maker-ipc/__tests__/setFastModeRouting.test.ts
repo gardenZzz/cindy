@@ -22,16 +22,16 @@ function extractSetFastModeHandler(source: string): string {
 }
 
 describe('maker:set-fast-mode live push routing', () => {
-  it('allows codex and cursor — claude-code stays no-op like main', () => {
+  it('allows codex, cursor and pi — claude-code stays no-op', () => {
     const handler = extractSetFastModeHandler(registerSource);
     // 旧门禁：if (sess.agentKind !== 'codex') return;
     expect(handler).not.toMatch(
       /if \(sess\.agentKind !== 'codex'\) \{\s*log\.debug\('set-fast-mode: agent does not implement fast mode/,
     );
     expect(handler).toContain("sess.agentKind !== 'cursor'");
-    // live push 条件必须是 codex|cursor；不得扩成三元 claude-code 放行
+    // live push 放行 codex / cursor / pi；不得把 claude-code 放进来
     expect(handler).toMatch(
-      /if \(sess\.agentKind !== 'codex' && sess\.agentKind !== 'cursor'\)/,
+      /if \(sess\.agentKind !== 'codex' && sess\.agentKind !== 'cursor' && sess\.agentKind !== 'pi'\)/,
     );
     expect(handler).not.toMatch(
       /if \([\s\S]*agentKind !== 'claude-code'[\s\S]*\) \{\s*log\.debug\('set-fast-mode: agent does not implement fast mode/,

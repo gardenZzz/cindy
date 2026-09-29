@@ -164,14 +164,15 @@ describe('MacAgentIslandNativeHost', () => {
     )?.[1];
 
     expect(source).toContain('case pi');
-    expect(vendorResolver).toContain('if kind == "pi" { return .pi }');
+    expect(source).toContain('if lower == "pi" { return .pi }');
+    expect(source).toContain('if lower.contains("cursor") { return .cursor }');
     expect(markImageResolver).toContain('case .pi:');
     expect(markImageResolver).toContain('svg = agentIslandPiMarkSVG');
     expect(source).toContain('private let agentIslandPiMarkSVG = """');
     expect(source).toContain('<path d="M3.6 6.6h16.8"/>');
     expect(source).toContain('<path d="M8.4 6.6v11.8"/>');
     expect(source).toContain('<path d="M15.6 6.6v9.6c0 1.5.9 2.2 2.4 2.2"/>');
-    expect(source).toContain('if lower == "pi" { return "Pi" }');
+    expect(source).toContain('case .pi: return "Pi"');
   });
 
   it('uses semantic icons for expanded terminal and interaction rows', () => {
