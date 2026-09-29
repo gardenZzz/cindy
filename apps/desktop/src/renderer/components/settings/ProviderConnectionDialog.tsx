@@ -32,7 +32,6 @@ import {
 import { SegmentedControl } from '@/components/ui/segmented-control';
 import { cn } from '@/lib/utils';
 import { toast } from '@/lib/toast';
-import { Spinner } from '@/components/ui/spinner';
 import { Button } from '@/components/ui/button';
 import { FormField } from '@/components/ui/form-field';
 import { Tip } from '@/components/ui/tooltip';
@@ -541,11 +540,6 @@ export function ProviderConnectionDialog({
   const imageGenerationHelpPointerSuppressionGenerationRef = useRef(0);
   const modelFetchInFlightRef = useRef(false);
   const dialogPanelRef = useRef<HTMLDivElement>(null);
-  const overlayRef = useRef<HTMLDivElement>(null);
-  // 同一次遮罩 pointerdown：window capture 先记下当时是否有子层，再让 Radix
-  // document capture 关菜单。React 的 overlay handler 用这份快照，避免 flushSync
-  // 清掉 childLayer 后误关表单。只读快照，不 preventDefault / stopPropagation。
-  const overlayPointerHadChildLayerRef = useRef(false);
   const saveButtonRef = useRef<HTMLButtonElement>(null);
   // 原生 window listener 的生命周期不跟着每次 render 重绑；layout effect 只把
   // 已提交的层状态写入 ref，既避开 passive effect 延迟，也不暴露被放弃的并发 render。
@@ -685,16 +679,6 @@ export function ProviderConnectionDialog({
     window.addEventListener('keydown', onKeyDown, { capture: true });
     return () => window.removeEventListener('keydown', onKeyDown, true);
   }, [dismissImageGenerationHelp, dismissTopmostLayer, showImageGenerationHelp]);
-
-  useEffect(() => {
-    const onPointerDown = (event: PointerEvent) => {
-      if (event.button !== 0) return;
-      if (event.target !== overlayRef.current) return;
-      overlayPointerHadChildLayerRef.current = childLayerRef.current != null;
-    };
-    window.addEventListener('pointerdown', onPointerDown, { capture: true });
-    return () => window.removeEventListener('pointerdown', onPointerDown, true);
-  }, []);
 
   useEffect(() => {
     const returnFocusElement =
@@ -2053,29 +2037,8 @@ export function ProviderConnectionDialog({
 
   return (
     <div
-      ref={overlayRef}
       data-custom-provider-dialog-scrim="true"
       className="fixed inset-0 z-[10000] flex items-center justify-center bg-[var(--overlay-modal)]"
-      onPointerDown={(event) => {
-        // pointerdown 时先按当前层级结算，避免 Popover 的 outside-dismiss 在随后
-        // click 前把状态改成 closed，令同一次手势继续误关底层表单。
-        // 只读子层快照，不 preventDefault / stopPropagation（Linux CI 上会弄崩 picker 打开）。
-        if (
-          event.button === 0 &&
-          event.target === event.currentTarget &&
-          !saving &&
-          !runtimeFill
-        ) {
-          const hadChildLayer =
-            overlayPointerHadChildLayerRef.current || childLayerRef.current != null;
-          overlayPointerHadChildLayerRef.current = false;
-          if (hadChildLayer) {
-            if (childLayerRef.current) dismissTopmostLayer();
-            return;
-          }
-          dismissTopmostLayer();
-        }
-      }}
       onKeyDown={(event) => {
         if (childLayer || runtimeFill || imageGenerationReloadConfirmation) return;
         if (event.key !== 'Tab') return;
@@ -2908,6 +2871,7 @@ export function ProviderConnectionDialog({
             <Dialog.Overlay className="fixed inset-0 z-[10002] bg-[var(--overlay-modal)] data-[state=open]:animate-confirm-overlay-in data-[state=closed]:animate-confirm-overlay-out" />
             <Dialog.Content
               aria-describedby="custom-provider-image-generation-reload-description"
+              onPointerDownOutside={(event) => event.preventDefault()}
               onOpenAutoFocus={(event) => {
                 event.preventDefault();
                 document.getElementById('custom-provider-image-generation-reload-primary')?.focus();
@@ -3006,19 +2970,6 @@ export function ModelPickerOverlay({
         (m) => m.id.toLowerCase().includes(q) || m.name.toLowerCase().includes(q),
       )
     : picker.models;
-  useEffect(() => {
-    const onPointerDown = (event: PointerEvent) => {
-      if (event.button !== 0) return;
-      const target = event.target;
-      if (target instanceof Node && contentRef.current?.contains(target)) return;
-      // Close only the picker and consume the gesture before it can reach the form beneath it.
-      event.preventDefault();
-      event.stopPropagation();
-      onClose();
-    };
-    window.addEventListener('pointerdown', onPointerDown, { capture: true });
-    return () => window.removeEventListener('pointerdown', onPointerDown, true);
-  }, [onClose]);
   const toggle = (id: string) => {
     const next = new Set(picker.selected);
     if (next.has(id)) next.delete(id);
@@ -3046,6 +2997,7 @@ export function ModelPickerOverlay({
         <Dialog.Content
           ref={contentRef}
           aria-describedby="custom-provider-model-picker-description"
+          onPointerDownOutside={(event) => event.preventDefault()}
           onEscapeKeyDown={(event) => {
             if (event.isComposing || event.keyCode === 229) event.preventDefault();
           }}

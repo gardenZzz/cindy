@@ -49,10 +49,10 @@ import {
   ORCA_WORKER_PERMISSION_MODES,
   type OrcaWorkerPermissionMode,
 } from '../../../shared/orca-worker-permission-mode';
+import { ORCA_PREDEFINED_WORKER_ROLES as PREDEFINED_ROLES } from '@cindy/maker-shared/orca-team';
 import { selectWorkerModels } from './workerModelAvailability';
 import type { AgentKind } from '@cindy/maker-core';
 
-const PREDEFINED_ROLES = ['developer', 'designer', 'reviewer', 'tester', 'merger'] as const;
 const AUTO_ONLY_WORKER_PERMISSION_MODES = ['auto'] as const;
 
 export interface CreateWorkerForm {
@@ -676,7 +676,7 @@ export function CreateWorkerPopover({
 
   return (
     <div className={cn('fixed inset-0 z-50 flex items-center justify-center', className)}>
-      <div className="absolute inset-0 bg-[var(--overlay-modal)]" onClick={onClose} />
+      <div className="absolute inset-0 bg-[var(--overlay-modal)]" />
       <div
         className="relative z-10 w-[500px] rounded-2xl border border-[var(--border-default)] bg-[var(--surface-elevated)] p-6"
         style={{ boxShadow: 'var(--shadow-menu)' }}

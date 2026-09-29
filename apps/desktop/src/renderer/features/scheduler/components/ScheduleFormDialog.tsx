@@ -37,6 +37,7 @@ import {
   buildHookCommandForScriptFile,
   canSubmitSessionBinding,
   isExplicitScheduleModelUnavailable,
+  missingRequiredTemplateParamLabel,
   needsBoundSessionGenerationRouteResolution,
   parsePreRunHookTimeoutMs,
   resolveScheduleGenerationProviderId,
@@ -531,13 +532,18 @@ export function ScheduleFormDialog({
     }
     let input = toInput(currentModelEfforts);
     if (selectedTemplate && !promptDirty) {
+      const missingLabel = missingRequiredTemplateParamLabel(selectedTemplate, paramValues);
+      if (missingLabel) {
+        toast.warning(t('scheduler.editor.validation.templateParamRequired', { label: missingLabel }));
+        return;
+      }
       try {
         input = {
           ...input,
           prompt: applyTemplateParams(selectedTemplate.prompt ?? '', paramValues, selectedTemplate.parameters),
         };
-      } catch (e) {
-        toast.warning(e instanceof Error ? e.message : String(e));
+      } catch {
+        toast.warning(t('scheduler.editor.validation.templateApplyFailed'));
         return;
       }
     }

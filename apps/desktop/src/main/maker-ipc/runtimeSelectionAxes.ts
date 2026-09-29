@@ -117,7 +117,7 @@ export async function applyRuntimeSelectionAxesWithRecovery(
     }
     // Cursor 与 Codex 同样支持 Fast：漏掉 cursor 时 setModel 只会重发切换前的
     // mutableFastMode，UI/DB 显示新值而当前 ACP 会话仍用旧值，直到会话重建。
-    if (applyFastMode && (input.session.agentKind === 'codex' || input.session.agentKind === 'cursor')) {
+    if (applyFastMode && (input.session.agentKind === 'codex' || input.session.agentKind === 'cursor' || input.session.agentKind === 'pi')) {
       await input.session.setFastMode(input.fastMode);
       input.assertCanCommit?.();
     }

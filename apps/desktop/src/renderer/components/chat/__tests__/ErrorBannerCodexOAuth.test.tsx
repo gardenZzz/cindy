@@ -524,6 +524,9 @@ describe('ErrorBanner OpenAI connection recovery', () => {
       />,
     );
 
+    expect(screen.getByText('chat.errorBanner.replyFailed')).toBeTruthy();
+    expect(screen.queryByText('token_revoked')).toBeNull();
+    fireEvent.click(screen.getByText('chat.errorBanner.networkShowRaw'));
     expect(screen.getByText('token_revoked')).toBeTruthy();
     expect(screen.queryByRole('button', { name: 'chatgptAuthRecovery.relogin' })).toBeNull();
     expect(screen.getByRole('button', { name: 'chat.errorBanner.retry' })).toBeTruthy();
@@ -543,6 +546,9 @@ describe('ErrorBanner OpenAI connection recovery', () => {
       />,
     );
 
+    expect(screen.getByText('chat.errorBanner.replyFailed')).toBeTruthy();
+    expect(screen.queryByText('token_revoked')).toBeNull();
+    fireEvent.click(screen.getByText('chat.errorBanner.networkShowRaw'));
     expect(screen.getByText('token_revoked')).toBeTruthy();
     expect(screen.queryByRole('button', { name: 'chatgptAuthRecovery.relogin' })).toBeNull();
     expect(screen.getByRole('button', { name: 'chat.errorBanner.retry' })).toBeTruthy();
@@ -578,6 +584,9 @@ describe('ErrorBanner OpenAI connection recovery', () => {
   ])('does not reconnect the controller for a $label failure', (props) => {
     render(<ErrorBanner {...props} retryText="retry this turn" onRetry={vi.fn()} />);
 
+    expect(screen.getByText('chat.errorBanner.replyFailed')).toBeTruthy();
+    expect(screen.queryByText(props.error)).toBeNull();
+    fireEvent.click(screen.getByText('chat.errorBanner.networkShowRaw'));
     expect(screen.getByText(props.error)).toBeTruthy();
     expect(screen.queryByRole('button', { name: 'chatgptAuthRecovery.relogin' })).toBeNull();
     expect(screen.getByRole('button', { name: 'chat.errorBanner.retry' })).toBeTruthy();
@@ -1004,6 +1013,9 @@ describe('ErrorBanner OpenAI connection recovery', () => {
       />,
     );
 
+    expect(screen.getByText('chat.errorBanner.replyFailed')).toBeTruthy();
+    expect(screen.queryByText(rawError)).toBeNull();
+    fireEvent.click(screen.getByText('chat.errorBanner.networkShowRaw'));
     expect(screen.getByText(rawError)).toBeTruthy();
     expect(screen.queryByText('chat.errorBanner.codexUsageLimit')).toBeNull();
     expect(
@@ -1041,6 +1053,9 @@ describe('ErrorBanner OpenAI connection recovery', () => {
       />,
     );
 
+    expect(screen.getByText('chat.errorBanner.replyFailed')).toBeTruthy();
+    expect(screen.queryByText("You've hit your Claude session limit")).toBeNull();
+    fireEvent.click(screen.getByText('chat.errorBanner.networkShowRaw'));
     expect(screen.getByText("You've hit your Claude session limit")).toBeTruthy();
     expect(screen.queryByText('chat.errorBanner.codexUsageLimit')).toBeNull();
   });

@@ -409,7 +409,9 @@ export function createLiziMcpProviders(
       toClaudeSdkConfig: (ctx) => ({
         type: 'sdk',
         name: 'cindy_helper',
-        instance: createXdtHelperMcpServer(opts.xdtHelper!, {
+        instance: createXdtHelperMcpServer({ ...opts.xdtHelper!,
+          ...(opts.xdtHelper!.botRoutines ? { botRoutines: { ...opts.xdtHelper!.botRoutines, scheduler: opts.scheduler } } : {}),
+        }, {
           agentKind: toMcpAgentKind(ctx.agentKind),
           workingDir: ctx.workingDir,
           ...(ctx.getSessionContext ? { getSessionContext: ctx.getSessionContext } : {}),

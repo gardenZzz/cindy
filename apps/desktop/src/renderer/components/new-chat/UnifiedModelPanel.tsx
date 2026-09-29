@@ -31,6 +31,7 @@ import { UnifiedModelRail } from './UnifiedModelRail';
 import { useUnifiedRowActions } from './useUnifiedRowActions';
 import { UnifiedModelRow } from './UnifiedModelRow';
 import { ModelSourceUsageProvider } from './ModelSourceDetails';
+import type { ProviderUsageScope } from './useProviderWeeklyQuota';
 import {
   anchorKey,
   favoriteMatchesSelection,
@@ -138,8 +139,8 @@ export interface UnifiedModelPanelProps {
   effortLabelOf: (agent: AgentKind, effort: Effort) => string;
   listMaxHeight?: number;
   interactionDisabled?: boolean;
-  /** Only local directories may read this desktop’s subscription accounts. */
-  localProviderUsage?: boolean;
+  /** Whose subscription accounts the directory may show: this desktop or its linked device. */
+  providerUsage?: ProviderUsageScope | null;
   /** 保留付费模型为锁定展示行，并把点击交给统一付费提示。 */
   includePaymentRequired?: boolean;
   paymentRequiredLabel?: string;
@@ -297,7 +298,7 @@ export function UnifiedModelPanel({
   effortLabelOf,
   listMaxHeight,
   interactionDisabled = false,
-  localProviderUsage = false,
+  providerUsage = null,
   includePaymentRequired = false,
   paymentRequiredLabel,
   paymentRequiredUnlockLabel,
@@ -994,7 +995,7 @@ export function UnifiedModelPanel({
       style={{ height: `${listMaxHeight ?? 428}px` }}
     >
       <UnifiedModelRail
-        localProviderUsage={localProviderUsage}
+        providerUsage={providerUsage}
         items={railItems}
         active={effectiveRail}
         onSelect={setRail}
@@ -1275,7 +1276,7 @@ export function UnifiedModelPanel({
     </div>
   );
   return (
-    <ModelSourceUsageProvider providers={providers} enabled={localProviderUsage}>
+    <ModelSourceUsageProvider providers={providers} scope={providerUsage}>
       {panelContent}
     </ModelSourceUsageProvider>
   );

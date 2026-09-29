@@ -112,6 +112,8 @@ export function providerRouteRequiresExplicitSelection(
 
 /** 同一次 provider registry 快照派生出的可用性与默认模型路由，避免两次读取产生竞态。 */
 export interface OrcaWorkerProviderRoutingContext {
+  /** SSH catalogs own both admission and defaults; never mix controller capabilities. */
+  remoteCodexModels?: OrcaWorkerModelCapabilities[];
   availability: Record<AgentKind, OrcaWorkerProviderSnapshot[]>;
   resolveDefaultProviderIdForModel(agent: AgentKind, model: string): string | null;
 }
@@ -231,7 +233,7 @@ export interface OrcaWorkerCreationDeps {
    * availability 只保留已连接 provider 的最小视图；显式 model 的默认来源解析复用
    * model-providers 的 effectiveSourceIdForModel，避免在创建服务里复制供应商优先级。
    */
-  getProviderRoutingContext(): Promise<OrcaWorkerProviderRoutingContext>;
+  getProviderRoutingContext(agent?: AgentKind, remoteHostId?: string | null): Promise<OrcaWorkerProviderRoutingContext>;
   readClaudeApiKey(): string | null;
   reserveWorkerCreation(input: {
     reservationId: string;
@@ -674,11 +676,15 @@ export function createOrcaWorkerCreationService(deps: OrcaWorkerCreationDeps): O
         limit: limitSnapshot(settings.workerHardLimit, activeCount),
       };
     }
-    const availableModels = deps.getAvailableModels(params.agent);
+    const lead = await deps.getLeadSessionRow(params.leadSessionId);
+    if (!lead) {
+      return { ok: false, errorCode: 'NOT_FOUND', message: `lead session ${params.leadSessionId} not found` };
+    }
     // cursor 不走供应商路由(见 isProviderRoutedAgent):来源解析 / 路由 preflight 整段跳过,
     // 显式 model 只按 capabilities 清单校验。
     const providerRouted = isProviderRoutedAgent(params.agent);
     if (!providerRouted && params.model) {
+      const availableModels = deps.getAvailableModels(params.agent);
       const validModels = availableModels.map((model) => model.id);
       if (!validModels.includes(params.model)) {
         return {
@@ -697,7 +703,8 @@ export function createOrcaWorkerCreationService(deps: OrcaWorkerCreationDeps): O
       && params.providerId.trim().length > 0
         ? params.providerId.trim()
         : null;
-    const providerRouting = await deps.getProviderRoutingContext();
+    const providerRouting = await deps.getProviderRoutingContext(params.agent, lead.remoteHostId);
+    const availableModels = providerRouting.remoteCodexModels ?? deps.getAvailableModels(params.agent);
     const providerAvailability = providerRouting.availability;
     const agentProviders = providerAvailability[params.agent] ?? [];
     const explicitModelResolution = providerRouted && params.model !== undefined
@@ -737,11 +744,6 @@ export function createOrcaWorkerCreationService(deps: OrcaWorkerCreationDeps): O
       };
     }
 
-    const lead = await deps.getLeadSessionRow(params.leadSessionId);
-    if (!lead) {
-      return { ok: false, errorCode: 'NOT_FOUND', message: `lead session ${params.leadSessionId} not found` };
-    }
-
     let workingDir = lead.workingDir ?? '';
     if (params.workingDir !== undefined) {
       const requested = typeof params.workingDir === 'string' ? params.workingDir : '';
@@ -763,7 +765,10 @@ export function createOrcaWorkerCreationService(deps: OrcaWorkerCreationDeps): O
     // workingDir), ensureRemoteReadyForSessionStart 对 pi 已支持 silent install +
     // pi-manager 预上传, orca_worker_bridge 工具面经 SSH remote-forward 隧道注入。
     // 与 CC/Codex remote worker 同构;此闸会让 remote pi lead 完全无法使用 pi worker。
-    const defaults = deps.getWorkerDefaults(params.agent);
+    const defaults: OrcaWorkerDefaultsSnapshot = providerRouting.remoteCodexModels
+      ? { model: lead.agentKind === 'codex' && availableModels.some((model) => model.id === lead.model)
+          ? lead.model : availableModels[0]?.id, providerId: 'openai' }
+      : deps.getWorkerDefaults(params.agent);
     const workerDefaultProviderId =
       typeof defaults.providerId === 'string' && defaults.providerId.trim()
         ? defaults.providerId.trim()

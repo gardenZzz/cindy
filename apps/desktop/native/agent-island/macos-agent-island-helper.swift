@@ -1712,8 +1712,7 @@ private let agentIslandCursorMarkSVG = """
 <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24">
   <path fill="black" d="M11.503.131 1.891 5.678a.84.84 0 0 0-.42.726v11.188c0 .3.162.575.42.724l9.609 5.55a1 1 0 0 0 .998 0l9.61-5.55a.84.84 0 0 0 .42-.724V6.404a.84.84 0 0 0-.42-.726L12.497.131a1.01 1.01 0 0 0-.996 0M2.657 6.338h18.55c.263 0 .43.287.297.515L12.23 22.918c-.062.107-.229.064-.229-.06V12.335a.59.59 0 0 0-.295-.51l-9.11-5.257c-.109-.063-.064-.23.061-.23"/>
 </svg>
-"""
-private let agentIslandPiMarkSVG = """
+"""private let agentIslandPiMarkSVG = """
 <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24">
   <g fill="none" stroke="black" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round">
     <path d="M3.6 6.6h16.8"/>
@@ -3991,8 +3990,7 @@ func expandedStatusText(for session: AgentIslandSession, strings: AgentIslandStr
 }
 
 func sourceLabel(for agentKind: String) -> String {
-  if let vendor = agentIslandSessionVendor(forAgentKind: agentKind) { return vendor.displayName }
-  return agentKind.isEmpty ? "Agent" : agentKind
+  if let vendor = agentIslandSessionVendor(forAgentKind: agentKind) { return vendor.displayName }  return agentKind.isEmpty ? "Agent" : agentKind
 }
 
 func elapsedLabel(startedAt: Double, updatedAt: Double) -> String {
@@ -4102,8 +4100,7 @@ func agentIslandSessionVendor(forAgentKind agentKind: String) -> AgentIslandSess
 }
 
 func agentIslandSessionVendor(for session: AgentIslandSession) -> AgentIslandSessionVendor {
-  agentIslandSessionVendor(forAgentKind: session.agentKind) ?? .cc
-}
+  agentIslandSessionVendor(forAgentKind: session.agentKind) ?? .cc}
 
 final class AgentIslandVendorMarkImageStore {
   static let shared = AgentIslandVendorMarkImageStore()
@@ -4114,10 +4111,10 @@ final class AgentIslandVendorMarkImageStore {
     if let cached = cache[vendor] { return cached }
     let svg: String
     switch vendor {
+    case .cc: svg = agentIslandClaudeMarkSVG
     case .codex: svg = agentIslandCodexMarkSVG
     case .cursor: svg = agentIslandCursorMarkSVG
     case .pi: svg = agentIslandPiMarkSVG
-    case .cc: svg = agentIslandClaudeMarkSVG
     }
     guard let data = svg.data(using: .utf8), let image = NSImage(data: data) else {
       return nil
@@ -4140,8 +4137,8 @@ struct AgentIslandSessionVendorIcon: View {
   }
 
   private var markSize: CGFloat {
-    // codex 花形与 cursor 实心立方体都撑满 24 视框,收 1pt 才与像素脸 / π 等重。
-    vendor == .codex || vendor == .cursor ? 12 : 13
+    // cc 像素脸保持 13；其余标（含撑满视框的 codex / cursor）收成 12。
+    vendor == .cc ? 13 : 12
   }
 
   var body: some View {

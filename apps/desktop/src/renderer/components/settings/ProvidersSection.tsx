@@ -39,6 +39,7 @@ import {
 import { cn } from '@/lib/utils';
 import { useProviders } from '@/hooks/useProviders';
 import { useAgentCapabilities } from '@/hooks/useAgentCapabilities';
+import { LocalModelCatalogNotice } from '@/components/new-chat/LocalModelCatalogNotice';
 import { isChatGptConnectionConnected, useCodexAuth } from '@/hooks/useCodexAuth';
 import { codexRecoveryActionKey, codexRecoveryDescriptionKey } from '@/hooks/codexAuthRecovery';
 import { useApiKey } from '@/hooks/useApiKey';
@@ -1100,26 +1101,67 @@ function XaiHeader({
   const { confirm } = useConfirmDialog();
   const [busy, setBusy] = useState(false);
   const [loggingIn, setLoggingIn] = useState(false);
+  const [deviceLogin, setDeviceLogin] = useState(false);
+  const [deviceCode, setDeviceCode] = useState<{
+    verificationUrl: string;
+    userCode: string;
+    expiresAt: number;
+  } | null>(null);
+  const loginAttempt = useRef(0);
+  useEffect(
+    () => () => {
+      loginAttempt.current += 1;
+    },
+    [],
+  );
   const connected = provider?.connected ?? false;
 
-  const handleLogin = useCallback(async () => {
-    setLoggingIn(true);
-    try {
-      const r = await window.electronAPI.maker.xaiOAuthLogin();
-      if (r.ok) {
-        toast.success(t('settings.connections.xai.toast.loggedIn'));
-        onChanged();
-      } else if (r.reason === 'login_cancelled') {
-        /* 用户取消,不弹错 */
-      } else {
-        toast.error(t('settings.connections.xai.toast.loginFailed'));
+  const handleLogin = useCallback(
+    async (method: 'browser' | 'device') => {
+      const attempt = ++loginAttempt.current;
+      setLoggingIn(true);
+      setDeviceLogin(method === 'device');
+      setDeviceCode(null);
+      const unsubscribe =
+        method === 'device'
+          ? window.electronAPI.maker.onProviderOAuthProgress((progress) => {
+              if (
+                attempt === loginAttempt.current &&
+                progress.phase === 'device-code' &&
+                progress.providerId === 'xai'
+              )
+                setDeviceCode({
+                  verificationUrl: progress.verificationUrl,
+                  userCode: progress.userCode,
+                  expiresAt: progress.expiresAt,
+                });
+            })
+          : undefined;
+      try {
+        const r = await window.electronAPI.maker.xaiOAuthLogin(method);
+        if (attempt !== loginAttempt.current) return;
+        if (r.ok) {
+          toast.success(t('settings.connections.xai.toast.loggedIn'));
+          onChanged();
+        } else if (r.reason === 'login_cancelled') {
+          /* 用户取消,不弹错 */
+        } else {
+          toast.error(t('settings.connections.xai.toast.loginFailed'));
+        }
+      } catch {
+        if (attempt === loginAttempt.current)
+          toast.error(t('settings.connections.xai.toast.loginFailed'));
+      } finally {
+        unsubscribe?.();
+        if (attempt === loginAttempt.current) {
+          setLoggingIn(false);
+          setDeviceLogin(false);
+          setDeviceCode(null);
+        }
       }
-    } catch {
-      toast.error(t('settings.connections.xai.toast.loginFailed'));
-    } finally {
-      setLoggingIn(false);
-    }
-  }, [onChanged, t]);
+    },
+    [onChanged, t],
+  );
 
   const handleLogout = useCallback(async () => {
     try {
@@ -1160,10 +1202,13 @@ function XaiHeader({
         ),
         onClick: () => {
           if (loggingIn) {
+            loginAttempt.current += 1;
             void window.electronAPI.maker.xaiOAuthCancel();
             setLoggingIn(false);
+            setDeviceLogin(false);
+            setDeviceCode(null);
           } else {
-            void handleLogin();
+            void handleLogin('browser');
           }
         },
       };
@@ -1171,6 +1216,17 @@ function XaiHeader({
   return (
     <DetailHeader
       children={children}
+      detail={
+        !connected && (!loggingIn || deviceLogin) ? (
+          deviceLogin ? (
+            <OAuthDeviceCodeCard deviceCode={deviceCode} />
+          ) : (
+            <Button variant="secondary" size="md" onClick={() => void handleLogin('device')}>
+              {t('settings.connections.xai.deviceLogin')}
+            </Button>
+          )
+        ) : undefined
+      }
       icon={<ProviderLogoMark providerId="xai" size={18} />}
       title={provider?.name ?? t('settings.providers.xai.title')}
       subtitle={providerSubtitleForDisplay(provider, t('settings.providers.xai.modelLabel'), {
@@ -1205,6 +1261,7 @@ function GenericOAuthHeader({
   const confirmProviderChange = useProviderChangeConfirmation();
   const [busy, setBusy] = useState(false);
   const [loggingIn, setLoggingIn] = useState(false);
+  const [xaiDeviceLogin, setXaiDeviceLogin] = useState(false);
   const connected = provider.connected;
   const loginAttempt = useRef(0);
   useEffect(
@@ -1214,19 +1271,22 @@ function GenericOAuthHeader({
     [],
   );
   const deviceFlow = provider.auth.oauth?.flow === 'device-code';
+  const xaiDeviceFlow = provider.auth.native === 'xai';
   const { deviceCode, browserUrl, clearDeviceCode, beginOwnedLogin, cancelOwnedLogin } =
     useProviderOAuthDeviceCode(provider.id, {
-      observeProgress: deviceFlow || provider.auth.native === 'codex',
+      observeProgress: deviceFlow || xaiDeviceFlow || provider.auth.native === 'codex',
     });
 
-  const handleLogin = useCallback(async () => {
+  const handleLogin = useCallback(async (method: 'browser' | 'device' = 'browser') => {
     const attempt = ++loginAttempt.current;
     clearDeviceCode();
     setLoggingIn(true);
+    setXaiDeviceLogin(method === 'device');
     const ownedLogin = beginOwnedLogin();
     try {
       const r = await window.electronAPI.maker.providerOAuthLogin(provider.id, {
         ownerId: ownedLogin.ownerId,
+        ...(xaiDeviceFlow ? { method } : {}),
       });
       if (attempt !== loginAttempt.current) return;
       if (r.ok) {
@@ -1234,6 +1294,8 @@ function GenericOAuthHeader({
         onChanged();
       } else if (r.reason === 'login_cancelled') {
         /* 用户取消,不弹错 */
+      } else if (r.reason === 'claude_account_retired') {
+        toast.error(t('settings.providers.claudeAccountRetired'));
       } else {
         toast.error(
           t('settings.providers.genericOAuth.toast.loginFailed', { name: provider.name }),
@@ -1246,9 +1308,12 @@ function GenericOAuthHeader({
         );
     } finally {
       ownedLogin.finish();
-      if (attempt === loginAttempt.current) setLoggingIn(false);
+      if (attempt === loginAttempt.current) {
+        setLoggingIn(false);
+        setXaiDeviceLogin(false);
+      }
     }
-  }, [beginOwnedLogin, clearDeviceCode, onChanged, provider.id, provider.name, t]);
+  }, [beginOwnedLogin, clearDeviceCode, onChanged, provider.id, provider.name, t, xaiDeviceFlow]);
 
   const handleLogout = useCallback(async () => {
     try {
@@ -1304,6 +1369,7 @@ function GenericOAuthHeader({
               cancelOwnedLogin();
               clearDeviceCode();
               setLoggingIn(false);
+              setXaiDeviceLogin(false);
             } else {
               void handleLogin();
             }
@@ -1311,10 +1377,14 @@ function GenericOAuthHeader({
           disabled: busy,
         };
   const detail =
-    loggingIn && deviceFlow ? (
+    loggingIn && (deviceFlow || xaiDeviceLogin) ? (
       <OAuthDeviceCodeCard deviceCode={deviceCode} />
     ) : loggingIn && browserUrl ? (
       <OAuthBrowserLink url={browserUrl} />
+    ) : !connected && !loggingIn && xaiDeviceFlow ? (
+      <Button variant="secondary" size="md" onClick={() => void handleLogin('device')}>
+        {t('settings.connections.xai.deviceLogin')}
+      </Button>
     ) : undefined;
 
   return (
@@ -2735,7 +2805,7 @@ export function ProvidersSection() {
   const { dataOwnerId } = useAuth();
   const { confirm } = useConfirmDialog();
   const confirmProviderChange = useProviderChangeConfirmation();
-  const { providers, providerOrder, ownerGeneration, loading, refetch } = useProviders();
+  const { providers, providerOrder, ownerGeneration, loading, error: catalogError, refetch } = useProviders();
   // OpenAI 的 reconnect-required 是 useCodexAuth 独有状态(目录 connected 此时为 false):
   // 该状态下 OpenAI 行必须留在左栏,否则「重新连接」入口不可达,用户被迫从向导重发现。
   const codexAuth = useCodexAuth();
@@ -3325,6 +3395,7 @@ export function ProvidersSection() {
           猜多了下方空一条(叠上外层 pb-32 就是那 128px),猜少了则溢出。设置页右栏本身
           已是 h-full min-h-0 的 flex 列(providers 与 import / ghosts 同属内部滚动一档),
           所以这里 flex-1 就是真实可用高度。min-h-0 允许小窗口收缩,左右栏各自内部滚动。 */}
+      {catalogError && <LocalModelCatalogNotice failure={catalogError} onRetry={refetch} />}
       {!loading && (
         <div
           className="flex min-h-0 flex-1 overflow-hidden rounded-xl border"
@@ -3410,7 +3481,7 @@ export function ProvidersSection() {
                 </>
               )}
             </div>
-            <div
+            <div id="settings-search-settings-providers-addProvider"
               className="border-t p-2"
               style={{ borderColor: 'var(--settings-theme-card-border)' }}
             >
