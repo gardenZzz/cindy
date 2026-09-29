@@ -297,6 +297,7 @@ function harness() {
     silentStopTurnLeaseGate: { turnLeaseIdForEvent: vi.fn(() => 'instance:1') },
     agentInputCoordinatorHolder: {
       getActiveInputClientId: vi.fn((): string | null => null),
+      getActiveInputClientIds: vi.fn((): string[] => []),
       getQueueControlSnapshot: vi.fn(() => ({ pendingQueue: [] as unknown[] })),
       onTurnEvent: vi.fn(),
       noteSuppressedTerminalError: vi.fn(),
@@ -1581,4 +1582,16 @@ describe('Bot adapters in the shared event pipeline', () => {
     }));
     expect(h.deps.attemptBotCompactRuntimeRefresh).toHaveBeenCalledWith(h.session, 'event:done');
   });
+});
+
+it('captures task completion inputs before queue advancement and binds only a successful final', async () => {
+  const h = harness();
+  h.deps.agentInputCoordinatorHolder.getActiveInputClientIds.mockReturnValue(['bot-delegation-completion:a', 'human']);
+  h.deps.agentInputCoordinatorHolder.onTurnEvent.mockImplementation(() => {
+    h.deps.agentInputCoordinatorHolder.getActiveInputClientIds.mockReturnValue(['bot-delegation-completion:next']);
+  });
+  effects.fn('consumeLastTopLevelAssistantPersistId').mockReturnValueOnce('summary');
+  h.emit(event('done', { status: 'completed', result: 'Summary' }));
+  expect(effects.fn('markAssistantTurnCompleted')).toHaveBeenCalledWith('task', 'summary', undefined, ['bot-delegation-completion:a']);
+  await h.dispose();
 });

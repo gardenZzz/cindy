@@ -43,6 +43,7 @@ vi.mock('expo-network', () => ({ addNetworkStateListener: (listener: typeof netw
 vi.mock('expo-secure-store', () => ({
   getItemAsync: vi.fn(async () => null), setItemAsync: vi.fn(async () => {}), deleteItemAsync: vi.fn(async () => {}),
 }));
+vi.mock('expo-updates', () => ({ updateId: null, runtimeVersion: null, isEmbeddedLaunch: true }));
 vi.mock('@react-native-async-storage/async-storage', () => ({ default: {
   getItem: vi.fn(async () => null), setItem: vi.fn(async () => {}), removeItem: vi.fn(async () => {}),
   getAllKeys: vi.fn(async () => []), multiRemove: vi.fn(async () => {}),

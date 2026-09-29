@@ -2871,6 +2871,7 @@ export function MessageStream({
         streaming: isSessionStreaming,
         isLive: (row) => row.isStreaming === true,
         pendingHandoff: handoff?.pending,
+        isLocalMessage: (row) => row.isLocalSystemCard === true,
         isLocalUser: (row) =>
           row.role === 'user' &&
           (row.isPendingPersist === true ||
@@ -6549,6 +6550,7 @@ const MessageItem = memo(function MessageItem({
             modelMismatch={message.modelMismatch}
             ghostReplyPending={message.ghostReplyPending}
             simplifiedBotConversation={simplifiedBotConversation}
+            botTaskResults={message.turnCompleted === true ? message.botTaskResults : undefined}
           />
         </>,
       );

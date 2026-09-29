@@ -151,6 +151,15 @@ export const UNIFIED_COMPACT_PANEL_WIDTH_CLASS =
  */
 export type ModelTagDensity = 'full' | 'subscription' | 'hidden';
 
+/** 改深度的附加信息。 */
+export interface EffortChangeOptions {
+  /**
+   * 由统一面板发起:面板已保证同一时刻只提交一笔,调用方不必为防并发写入而锁住 selector。
+   * 其余入口(平铺选择器、快捷键)缺省为 false,仍按原样锁定。
+   */
+  serializedByPanel?: boolean;
+}
+
 export function modelTagDensityForWidth(width: number | null): ModelTagDensity {
   if (width === null || width > UNIFIED_COMPACT_PANEL_MAX_WIDTH_PX) return 'full';
   if (width >= 370) return 'subscription';
@@ -642,7 +651,10 @@ interface ModelSelectorProps {
    * 调用方视为落了)。统一面板的三个「先应用、后清存储」入口(恢复推荐 / 删选中收藏 /
    * 编辑选中收藏)靠它决定要不要收尾;其余调用方照旧无视返回值。
    */
-  onEffortChange: (effort: Effort) => void | boolean | Promise<void | boolean>;
+  onEffortChange: (
+    effort: Effort,
+    options?: EffortChangeOptions,
+  ) => void | boolean | Promise<void | boolean>;
   /**
    * per-session 来源选择(B · Provider-first)。
    *   - currentProviderId:本会话当前显式选定的供应商 id(null = 跟随默认路由)。
@@ -831,7 +843,10 @@ interface ModelSelectorContentProps {
    * 调用方视为落了)。统一面板的三个「先应用、后清存储」入口(恢复推荐 / 删选中收藏 /
    * 编辑选中收藏)靠它决定要不要收尾;其余调用方照旧无视返回值。
    */
-  onEffortChange: (effort: Effort) => void | boolean | Promise<void | boolean>;
+  onEffortChange: (
+    effort: Effort,
+    options?: EffortChangeOptions,
+  ) => void | boolean | Promise<void | boolean>;
   fastMode?: boolean;
   /** 语义同 onEffortChange(含返回值口径)。 */
   onFastModeChange?: (enabled: boolean) => void | boolean | Promise<void | boolean>;
@@ -3110,7 +3125,13 @@ function ModelSelectorContentView({
               }
               onSessionFavoriteAnchorChange?.(null);
             }}
-            {...(onEffortChange ? { onEffortChangeLive: onEffortChange } : {})}
+            {...(onEffortChange
+              ? {
+                  // 统一面板自己保证同一时刻只提交一笔(在途点击排队),调用方无需再锁 selector。
+                  onEffortChangeLive: (effort: Effort) =>
+                    onEffortChange(effort, { serializedByPanel: true }),
+                }
+              : {})}
             {...(onFastModeChange ? { onFastModeChangeLive: onFastModeChange } : {})}
             panelElement={paneElement}
             {...(overlayContentClassName !== undefined

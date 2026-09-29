@@ -1,3 +1,4 @@
+import { readBotTaskResults } from '@cindy/maker-shared/botCollaboration';
 import { remotePluginSetupErrorCode, type PluginSetupCommandError } from './pluginSetupCommandError';
 export type { PluginSetupCommandError } from './pluginSetupCommandError';
 import { emitTaskTagCatalog } from '@/features/task-tags/taskTagEvents';
@@ -381,6 +382,7 @@ export interface AskUserQuestionItem {
 export interface ChatMessage {
   /** Private Bot reply provenance, projected from persisted/live agent metadata. */
   botPrivateReply?: boolean;
+  botTaskResults?: import('@cindy/maker-shared/botCollaboration').BotCollaborationMeta[];
   clientId: string;
   /** Server message id when this row came from history; used as a pagination cursor. */
   id?: string;
@@ -489,6 +491,8 @@ export interface ChatMessage {
   // Legacy single-question fields (kept for history compat)
   askUserOptions?: Array<{ label: string; description?: string }>;
   askUserPageIndicator?: string;
+  /** Renderer-only command result; history reads must retain it at its local position. */
+  isLocalSystemCard?: boolean;
   /**
    * F-CMD: local-only system card (not persisted)。
    * 例外:'goal-complete' 不是 ephemeral —— 它由 mapServerMessages 从持久化的
@@ -15928,6 +15932,7 @@ function insertSystemCard(
           isStreaming: false,
           systemCardType: cardType,
           systemCardData: data,
+          isLocalSystemCard: cardType !== 'cindy-make' && cardType !== 'cindy-make-doctor',
           createdAt: new Date().toISOString(),
         },
       ],
@@ -18602,6 +18607,8 @@ function mapServerMessages(serverMsgs: Message[]): ChatMessage[] {
       role: m.role,
       content: typeof m.content === 'string' ? m.content : JSON.stringify(m.content),
       ...(m.agentMeta?.botPrivateReply === true ? { botPrivateReply: true } : {}),
+      ...(m.role === 'assistant' && m.agentMeta?.turnCompleted === true
+        ? { botTaskResults: readBotTaskResults(m.agentMeta.botTaskResults) } : {}),
       // tool_result 消息也带 toolUseId(DB 列),让 MessageStream 能按 id 配对
       ...(m.role === 'tool_result' && typeof m.toolUseId === 'string' && m.toolUseId.length > 0
         ? { toolUseId: m.toolUseId }

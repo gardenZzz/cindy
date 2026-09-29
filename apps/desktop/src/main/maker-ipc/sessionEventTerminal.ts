@@ -205,6 +205,7 @@ export function finishSessionTerminalEvent(
           session.id,
           turnBoundaryAssistantPersistId,
           nativeForkAnchor ? { nativeForkAnchor } : undefined,
+          ...(prepared.botTaskResultInputIds?.length ? [prepared.botTaskResultInputIds] : []),
         );
       }
     }

@@ -251,7 +251,7 @@ function InteractionPanelContent({
     gap: touchLayout.cardGap,
     padding: touchLayout.cardPadding,
   };
-  if (isSharedTaskPeer(deviceId)) {
+  if (isSharedTaskPeer(deviceId) && !['permission', 'ask_user_question', 'plan_review'].includes(kind)) {
     return (
       <View style={[styles.root, fillAvailableHeight && styles.rootFill, rootLayoutStyle]} testID="interaction.panel">
         <PendingTaskHeader

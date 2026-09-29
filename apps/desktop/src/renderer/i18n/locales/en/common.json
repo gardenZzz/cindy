@@ -63,6 +63,7 @@
     "estimateFailed": "Could not count files. Check the source computer’s connection and version, then close and try again."
   },
   "sharedTask": {
+    "selfJoin": "You started this shared task, so you don’t need to join. Open it from “Shared by Me”.",
     "manageSharing": "Manage Sharing",
     "manageMembers": "Manage Members…",
     "cancelSharing": "Stop Sharing",
@@ -1286,7 +1287,7 @@
         "chatAttachmentsClearFailed": "Could not clean up the message attachment cache. Try again.",
         "dbSlimmingBackupDirectoryDialogTitle": "Choose database cleanup backup folder",
         "dbSlimmingLabel": "Database cleanup",
-        "dbSlimmingDescription": "Scan history in soft-deleted and archived tasks not updated for the selected period, with an option to include active tasks. After confirmation, Cindy restarts and compacts the database before opening it. Files and generated media on disk are not deleted.",
+        "dbSlimmingDescription": "Scan history in soft-deleted and archived tasks not updated for the selected period, with an option to include unarchived tasks. After confirmation, Cindy restarts and compacts the database before opening it. Files and generated media on disk are not deleted.",
         "dbSlimmingScanButton": "Scan database",
         "dbSlimmingScanLoading": "Scanning the database…",
         "dbSlimmingScanResultTitle": "Database scan results",
@@ -1296,12 +1297,12 @@
         "dbSlimmingArchiveAgeOption1": "1 month",
         "dbSlimmingArchiveAgeOption3": "3 months",
         "dbSlimmingArchiveAgeOption6": "6 months",
-        "dbSlimmingIncludeActiveLabel": "Clean Active Tasks",
-        "dbSlimmingIncludeActiveDescription": "Also clean active tasks older than the selected period and remove them from the task list",
-        "dbSlimmingIncludeActiveConfirmTitle": "Include active tasks in database cleanup?",
-        "dbSlimmingIncludeActiveConfirmDescription": "An active task may still be running even when it is older than the selected period. Cleanup does not wait for it to stop, and messages it adds after the scan may also be removed. When enabled, active, archived, and soft-deleted tasks not updated for the selected period will be cleaned. History will be removed from eligible active tasks and their Agent context will be reset; ordinary task entries will also be removed from the list, while teammates’ main tasks remain. A database backup can restore task and message data; without one, that data cannot be restored either. Records used to review or undo file changes from those messages are not included in the database backup and cannot be restored.",
-        "dbSlimmingIncludeActiveConfirmButton": "Include active tasks",
-        "dbSlimmingIncludeActiveCancelButton": "Keep active tasks",
+        "dbSlimmingIncludeActiveLabel": "Clean Unarchived Tasks",
+        "dbSlimmingIncludeActiveDescription": "Also clean unarchived tasks older than the selected period and remove them from the task list",
+        "dbSlimmingIncludeActiveConfirmTitle": "Include unarchived tasks in database cleanup?",
+        "dbSlimmingIncludeActiveConfirmDescription": "An unarchived task may still be running even when it is older than the selected period. Cleanup does not wait for it to stop, and messages it adds after the scan may also be removed. When enabled, unarchived, archived, and soft-deleted tasks not updated for the selected period will be cleaned. History will be removed from eligible unarchived tasks and their Agent context will be reset; ordinary task entries will also be removed from the list, while teammates’ main tasks remain. A database backup can restore task and message data; without one, that data cannot be restored either. Records used to review or undo file changes from those messages are not included in the database backup and cannot be restored.",
+        "dbSlimmingIncludeActiveConfirmButton": "Include unarchived tasks",
+        "dbSlimmingIncludeActiveCancelButton": "Keep unarchived tasks",
         "dbSlimmingBackupLabel": "Back up database before cleanup",
         "dbSlimmingBackupDefaultLocation": "Database folder (keeps only the latest cleanup backup)",
         "dbSlimmingUseDefaultDirectoryButton": "Use default folder",
@@ -1312,7 +1313,7 @@
         "dbSlimmingBackupMissing": "The latest cleanup backup could not be found.",
         "dbSlimmingBackupOpenFailed": "Could not open the cleanup backup location. Try again.",
         "dbSlimmingReportTasks": "Will clean {{deleted}} soft-deleted tasks and {{archived}} archived tasks",
-        "dbSlimmingReportTasksWithActive": "Will clean {{active}} active tasks, {{deleted}} soft-deleted tasks, and {{archived}} archived tasks",
+        "dbSlimmingReportTasksWithActive": "Will clean {{active}} unarchived tasks, {{deleted}} soft-deleted tasks, and {{archived}} archived tasks",
         "dbSlimmingReportMessages": "Estimated message content to clean: {{count}} messages (about {{size}})",
         "dbSlimmingReportSpace": "Database: {{database}}; temporary space needed: at least {{temporary}}; available: {{free}}",
         "dbSlimmingSpaceUnknown": "unknown",
@@ -9863,6 +9864,29 @@
       }
     },
     "systemCard": {
+      "help": {
+        "title": "Available Commands",
+        "builtInCommands": "Built-in Commands",
+        "projectCommands": "Project Commands",
+        "empty": "No commands available."
+      },
+      "cost": {
+        "title": "Session Cost",
+        "tokensUsed": "Tokens Used (This Turn)"
+      },
+      "pwd": {
+        "title": "Working Directory",
+        "notSet": "(not set)"
+      },
+      "status": {
+        "title": "Session Status",
+        "agent": "Agent",
+        "model": "Model",
+        "effort": "Effort",
+        "permissionMode": "Permission Mode",
+        "running": "Running",
+        "idle": "Idle"
+      },
       "context": {
         "title": "Context Usage",
         "loading": "Loading…",
@@ -10867,14 +10891,89 @@
         "clickToOpen": "Click to open the PR in your browser",
         "guidance": {
           "login": {
-            "hint": "Click to have the agent sign you in",
-            "aria": "PR #{{number}} status unavailable: have the agent sign in to GitHub",
-            "prompt": "Please sign me in to the GitHub CLI: run `gh auth login -h github.com -w`, tell me the one-time device code and URL it shows, and after I authorize in the browser, confirm with `gh auth status` that the login succeeded."
+            "hint": "Click to connect GitHub",
+            "aria": "PR #{{number}} status unavailable: connect GitHub"
           },
           "install": {
-            "hint": "Click to have the agent install it and sign you in",
-            "aria": "PR #{{number}} status unavailable: have the agent install and sign in to GitHub CLI",
-            "prompt": "Please install the GitHub CLI (gh; `brew install gh` on macOS, `winget install GitHub.cli` on Windows), then run `gh auth login -h github.com -w` to sign in, tell me the one-time device code and URL it shows, and after I authorize in the browser, confirm with `gh auth status` that the login succeeded."
+            "hint": "Click to connect GitHub",
+            "aria": "PR #{{number}} status unavailable: connect GitHub"
+          }
+        },
+        "setup": {
+          "install": "Install and continue",
+          "connect": "Sign in to GitHub",
+          "cancel": "Cancel",
+          "retry": "Try again",
+          "done": "Done",
+          "openBrowser": "Open GitHub to authorize",
+          "deviceCode": "Device code",
+          "copyCode": "Copy code",
+          "copied": "Copied",
+          "copyFailed": "Could not copy. Select and copy the code manually.",
+          "openFailed": "Could not open your browser. Open github.com/login/device manually.",
+          "stages": {
+            "install": {
+              "title": "Install GitHub CLI",
+              "description": "Install GitHub CLI to connect your GitHub account."
+            },
+            "login": {
+              "title": "Connect GitHub",
+              "description": "Connect your GitHub account. GitHub CLI will be installed if needed."
+            },
+            "checking": {
+              "title": "Checking connection…",
+              "description": "Checking your GitHub sign-in."
+            },
+            "downloading": {
+              "title": "Downloading GitHub CLI…",
+              "description": "Installation will start when the download finishes."
+            },
+            "installing": {
+              "title": "Installing GitHub CLI…",
+              "description": "Download complete."
+            },
+            "preparing": {
+              "title": "Preparing sign-in…",
+              "description": "Getting a one-time device code."
+            },
+            "authorizing": {
+              "title": "Sign in to GitHub",
+              "description": "Copy this code, then enter it on GitHub to authorize."
+            },
+            "connected": {
+              "title": "GitHub connected",
+              "description": "You can close this window and continue."
+            },
+            "cancelled": {
+              "title": "Connection cancelled",
+              "description": "You can try again whenever you are ready."
+            },
+            "unavailable": {
+              "title": "Progress unavailable",
+              "description": "Could not read the current progress. Try again."
+            },
+            "error": {
+              "title": "Connection not completed"
+            }
+          },
+          "errors": {
+            "unsupported": "This operating system or processor is not supported yet.",
+            "install": "Installation failed. Check your connection and available disk space, then try again.",
+            "login": "Sign-in failed or was denied. Try again to get a new code.",
+            "timeout": "The code expired. Try again to get a new code."
+          },
+          "account": {
+            "checking": "Checking GitHub connection…",
+            "connected": "Connected · @{{login}}",
+            "missing": "Connect GitHub to get started.",
+            "auth": "Authorization has expired. Sign in again or replace the fallback token below.",
+            "network": "Could not reach GitHub. Check your network and retry.",
+            "forbidden": "GitHub could not verify this connection. Check permissions or rate limits, then retry.",
+            "gh-cli": "Using this computer’s GitHub login",
+            "token": "Using fallback token",
+            "recheck": "Check connection",
+            "summary": "Manage GitHub repositories, issues, pull requests, and Actions.",
+            "otherMethods": "Other connection methods"
           }
         },
         "unresolved": "Unresolved review threads: {{count}}"

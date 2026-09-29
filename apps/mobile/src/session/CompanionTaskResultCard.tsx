@@ -101,8 +101,9 @@ function useResultFileContext(deviceId: string, childSessionId: string | null | 
 }
 
 /** Frozen result data; legacy receipts may read the existing task title only. */
-export function CompanionTaskResultCard({ meta, deviceId, parentSessionId, renderMarkdown }: {
+export function CompanionTaskResultCard({ meta, deviceId, parentSessionId, renderMarkdown, attached = false }: {
   meta: BotCollaborationMeta;
+  attached?: boolean;
   deviceId: string;
   parentSessionId?: string;
   /** The conversation's own Markdown renderer, so links, code and file chips read like a reply. */
@@ -124,7 +125,7 @@ export function CompanionTaskResultCard({ meta, deviceId, parentSessionId, rende
   const title = result.title?.trim() || row?.title?.trim() || meta.objective.trim().split('\n')[0] || t('devices.companions.backgroundTask');
   const statusColor = result.status === 'completed' ? colors.statusDone
     : result.status === 'cancelled' ? colors.textTertiary : colors.statusError;
-  return <View style={styles.card} testID="companion.taskResult">
+  return <View style={[styles.card, attached && styles.attached]} testID="companion.taskResult">
     <View style={styles.header}>
       <Text numberOfLines={2} style={styles.title}>{title}</Text>
       <View style={styles.status}>
@@ -162,6 +163,7 @@ export function CompanionTaskResultCard({ meta, deviceId, parentSessionId, rende
 const makeStyles = (colors: ThemeColors) => StyleSheet.create({
   card: { marginVertical: spacing.sm, borderWidth: StyleSheet.hairlineWidth, borderColor: colors.border,
     backgroundColor: colors.surfaceElevated, borderRadius: radius.container, padding: spacing.md, gap: spacing.xs },
+  attached: { width: '100%', maxWidth: 440, alignSelf: 'flex-start', marginVertical: 0, padding: spacing.sm },
   header: { flexDirection: 'row', alignItems: 'flex-start', gap: spacing.sm },
   status: { flexDirection: 'row', alignItems: 'center', gap: spacing.xs, flexShrink: 0 },
   statusDot: { width: 6, height: 6, borderRadius: radius.pill },

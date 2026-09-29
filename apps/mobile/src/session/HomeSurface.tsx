@@ -3014,7 +3014,9 @@ function HomeScreenContent({ active = true, onModeChange, width, onDismiss, newS
           handleChromeMenuClosed();
         }}
         onOpenSearch={() => {
-          setSearchOpen(true);
+          // 搜索框 autoFocus 要等菜单窗口完全卸载(onClosed)后再挂载:Android 的
+          // Dialog 还在退场时底层 Activity 没有窗口焦点,首次聚焦和软键盘请求会丢。
+          pendingMenuActionRef.current = () => setSearchOpen(true);
           setChromeMenuCloseInstant(false);
           setChromeMenuOpen(false);
         }}

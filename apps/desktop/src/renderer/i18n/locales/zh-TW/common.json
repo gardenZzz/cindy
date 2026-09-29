@@ -63,6 +63,7 @@
     "estimateFailed": "無法統計檔案。請檢查任務所在電腦的連線和版本，然後關閉重試。"
   },
   "sharedTask": {
+    "selfJoin": "這是你發起的共享任務，無需加入。請從「我發起的」開啟",
     "manageSharing": "共享管理",
     "manageMembers": "管理成員…",
     "cancelSharing": "取消共享",
@@ -1286,7 +1287,7 @@
         "chatAttachmentsClearFailed": "無法清理訊息附件快取，請重試",
         "dbSlimmingBackupDirectoryDialogTitle": "選擇資料庫清理備份目錄",
         "dbSlimmingLabel": "資料庫清理",
-        "dbSlimmingDescription": "掃描超過所選時間未更新的軟刪除和已封存任務歷史，可選擇同時納入活躍任務。確認後重新啟動 Cindy，在資料庫開啟前清理並壓縮。不會刪除磁碟附件或生成媒體。",
+        "dbSlimmingDescription": "掃描超過所選時間未更新的軟刪除和已封存任務歷史，可選擇同時納入未封存任務。確認後重新啟動 Cindy，在資料庫開啟前清理並壓縮。不會刪除磁碟附件或生成媒體。",
         "dbSlimmingScanButton": "掃描資料庫",
         "dbSlimmingScanLoading": "正在掃描資料庫，請稍候…",
         "dbSlimmingScanResultTitle": "資料庫掃描結果",
@@ -1296,12 +1297,12 @@
         "dbSlimmingArchiveAgeOption1": "1 個月",
         "dbSlimmingArchiveAgeOption3": "3 個月",
         "dbSlimmingArchiveAgeOption6": "6 個月",
-        "dbSlimmingIncludeActiveLabel": "清理活躍任務",
-        "dbSlimmingIncludeActiveDescription": "同時清理超過所選時間的活躍任務，並從任務列表移除",
-        "dbSlimmingIncludeActiveConfirmTitle": "將活躍任務納入資料庫清理？",
-        "dbSlimmingIncludeActiveConfirmDescription": "活躍任務即使超過所選時間，也可能仍在執行。清理不會等待任務停止，任務在掃描後繼續產生的訊息也可能被清除。啟用後，超過所選時間的活躍、已封存和軟刪除任務都會被清理。符合範圍的活躍任務歷史訊息和 Agent 上下文將被清除；一般任務項目也將從列表移除，夥伴主任務仍會保留。資料庫備份可以復原任務和訊息資料；不建立備份時，這些資料也無法復原。用於審查或撤銷這些訊息所產生檔案變更的記錄不包含在資料庫備份中，無法復原。",
-        "dbSlimmingIncludeActiveConfirmButton": "納入活躍任務",
-        "dbSlimmingIncludeActiveCancelButton": "保留活躍任務",
+        "dbSlimmingIncludeActiveLabel": "清理未封存任務",
+        "dbSlimmingIncludeActiveDescription": "同時清理超過所選時間的未封存任務，並從任務列表移除",
+        "dbSlimmingIncludeActiveConfirmTitle": "將未封存任務納入資料庫清理？",
+        "dbSlimmingIncludeActiveConfirmDescription": "未封存任務即使超過所選時間，也可能仍在執行。清理不會等待任務停止，任務在掃描後繼續產生的訊息也可能被清除。啟用後，超過所選時間的未封存、已封存和軟刪除任務都會被清理。符合範圍的未封存任務歷史訊息和 Agent 上下文將被清除；一般任務項目也將從列表移除，夥伴主任務仍會保留。資料庫備份可以復原任務和訊息資料；不建立備份時，這些資料也無法復原。用於審查或撤銷這些訊息所產生檔案變更的記錄不包含在資料庫備份中，無法復原。",
+        "dbSlimmingIncludeActiveConfirmButton": "納入未封存任務",
+        "dbSlimmingIncludeActiveCancelButton": "保留未封存任務",
         "dbSlimmingBackupLabel": "清理前備份資料庫",
         "dbSlimmingBackupDefaultLocation": "資料庫所在目錄（只保留最近一次清理備份）",
         "dbSlimmingUseDefaultDirectoryButton": "使用預設目錄",
@@ -1312,7 +1313,7 @@
         "dbSlimmingBackupMissing": "找不到最近一次清理備份",
         "dbSlimmingBackupOpenFailed": "無法開啟清理備份位置，請重試",
         "dbSlimmingReportTasks": "將清理軟刪除任務 {{deleted}} 個、封存任務 {{archived}} 個",
-        "dbSlimmingReportTasksWithActive": "將清理活躍任務 {{active}} 個、軟刪除任務 {{deleted}} 個、封存任務 {{archived}} 個",
+        "dbSlimmingReportTasksWithActive": "將清理未封存任務 {{active}} 個、軟刪除任務 {{deleted}} 個、封存任務 {{archived}} 個",
         "dbSlimmingReportMessages": "預計清理 {{count}} 則訊息內容（約 {{size}}）",
         "dbSlimmingReportSpace": "資料庫 {{database}}；暫存空間至少需要 {{temporary}}；目前可用 {{free}}",
         "dbSlimmingSpaceUnknown": "未知",
@@ -9740,7 +9741,7 @@
       "promptSend": "傳送",
       "promptCancel": "取消"
     },
-    "toolResultCompacted": "Full tool output was released (original size {{size}})",
+    "toolResultCompacted": "完整工具輸出已釋放（原始大小 {{size}}）",
     "agentActionRow": {
       "noContent": "無可展示內容",
       "fileChange": {
@@ -9856,6 +9857,29 @@
       }
     },
     "systemCard": {
+      "help": {
+        "title": "可用命令",
+        "builtInCommands": "內建命令",
+        "projectCommands": "專案命令",
+        "empty": "暫無可用命令"
+      },
+      "cost": {
+        "title": "任務用量",
+        "tokensUsed": "本輪 Token 用量"
+      },
+      "pwd": {
+        "title": "工作目錄",
+        "notSet": "（未設定）"
+      },
+      "status": {
+        "title": "任務狀態",
+        "agent": "Agent",
+        "model": "模型",
+        "effort": "推理強度",
+        "permissionMode": "權限模式",
+        "running": "執行中",
+        "idle": "閒置"
+      },
       "context": {
         "title": "上下文用量",
         "loading": "正在載入…",
@@ -10852,14 +10876,89 @@
         "clickToOpen": "點擊在瀏覽器開啟 PR",
         "guidance": {
           "login": {
-            "hint": "點擊讓 Agent 幫你登入",
-            "aria": "PR #{{number}} 狀態不可用：讓 Agent 登入 GitHub",
-            "prompt": "請幫我登入 GitHub CLI：執行 `gh auth login -h github.com -w`，把出現的一次性裝置碼和網址告訴我；我在瀏覽器完成授權後，你再用 `gh auth status` 確認登入成功。"
+            "hint": "點擊連接 GitHub",
+            "aria": "PR #{{number}} 狀態不可用：連接 GitHub"
           },
           "install": {
-            "hint": "點擊讓 Agent 幫你安裝並登入",
-            "aria": "PR #{{number}} 狀態不可用：讓 Agent 安裝並登入 GitHub CLI",
-            "prompt": "請幫我安裝 GitHub CLI（gh，macOS 用 `brew install gh`，Windows 用 `winget install GitHub.cli`），然後執行 `gh auth login -h github.com -w` 登入，把出現的一次性裝置碼和網址告訴我；我在瀏覽器完成授權後，你再用 `gh auth status` 確認登入成功。"
+            "hint": "點擊連接 GitHub",
+            "aria": "PR #{{number}} 狀態不可用：連接 GitHub"
+          }
+        },
+        "setup": {
+          "install": "安裝並繼續",
+          "connect": "登入 GitHub",
+          "cancel": "取消",
+          "retry": "重試",
+          "done": "完成",
+          "openBrowser": "開啟 GitHub 授權",
+          "deviceCode": "一次性裝置碼",
+          "copyCode": "複製裝置碼",
+          "copied": "已複製",
+          "copyFailed": "無法複製，請手動選取並複製裝置碼。",
+          "openFailed": "無法開啟瀏覽器，請手動前往 github.com/login/device。",
+          "stages": {
+            "install": {
+              "title": "安裝 GitHub CLI",
+              "description": "安裝 GitHub CLI，以連接你的 GitHub 帳號。"
+            },
+            "login": {
+              "title": "連接 GitHub",
+              "description": "連接你的 GitHub 帳號；尚未安裝 GitHub CLI 時會自動安裝。"
+            },
+            "checking": {
+              "title": "正在檢查連接…",
+              "description": "正在確認 GitHub 登入狀態。"
+            },
+            "downloading": {
+              "title": "正在下載 GitHub CLI…",
+              "description": "下載完成後會自動安裝。"
+            },
+            "installing": {
+              "title": "正在安裝 GitHub CLI…",
+              "description": "下載已完成。"
+            },
+            "preparing": {
+              "title": "正在準備登入…",
+              "description": "正在取得一次性裝置碼。"
+            },
+            "authorizing": {
+              "title": "登入 GitHub",
+              "description": "複製下方裝置碼，在 GitHub 頁面輸入並授權。"
+            },
+            "connected": {
+              "title": "GitHub 已連接",
+              "description": "可以關閉此視窗，繼續使用。"
+            },
+            "cancelled": {
+              "title": "已取消連接",
+              "description": "準備好後可以重新連接。"
+            },
+            "unavailable": {
+              "title": "無法讀取進度",
+              "description": "暫時無法取得目前進度，請重試。"
+            },
+            "error": {
+              "title": "連接未完成"
+            }
+          },
+          "errors": {
+            "unsupported": "暫不支援此作業系統或處理器。",
+            "install": "安裝失敗，請檢查網路和磁碟空間後重試。",
+            "login": "登入失敗或授權遭拒，請重試取得新裝置碼。",
+            "timeout": "裝置碼已過期，請重試取得新裝置碼。"
+          },
+          "account": {
+            "checking": "正在檢查 GitHub 連接…",
+            "connected": "已連接 · @{{login}}",
+            "missing": "連接 GitHub 後即可使用。",
+            "auth": "授權已失效，請重新登入或更換下方備用 Token。",
+            "network": "暫時無法連接 GitHub，請檢查網路後重試。",
+            "forbidden": "GitHub 暫時無法驗證此連接，請檢查權限或請求額度後重試。",
+            "gh-cli": "目前使用本機 GitHub 登入",
+            "token": "目前使用備用 Token",
+            "recheck": "檢查連接",
+            "summary": "管理 GitHub 儲存庫、Issues、PR 和 Actions。",
+            "otherMethods": "其他連線方式"
           }
         },
         "unresolved": "{{count}} 條未解決的 review 評論"

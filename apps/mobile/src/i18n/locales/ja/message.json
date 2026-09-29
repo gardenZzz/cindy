@@ -133,7 +133,7 @@
     "viewToolInput": "完全な入力を表示",
     "loadingToolInput": "完全な入力を読み込み中",
     "retryToolInput": "入力を読み込めませんでした。再試行",
-    "toolResultCompacted": "Full tool output was released (original size {{size}})",
+    "toolResultCompacted": "ツールの完全な出力は解放されました（元のサイズ：{{size}}）",
     "mermaidEmpty": "空の Mermaid 図。",
     "diffEditCount": "{{n}} 件の編集"
   },

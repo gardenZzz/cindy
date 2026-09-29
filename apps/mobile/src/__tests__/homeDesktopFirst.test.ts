@@ -795,4 +795,22 @@ describe('home menu presentation', () => {
     expect(drawer).toContain('Gesture.Pan()');
     expect(drawer).not.toContain('ComposerSheet');
   });
+
+  it('keeps the Android drawer in its own window above the resident home list', () => {
+    const drawer = readSource('src/session/HomeChromeDrawer.tsx');
+    // Wide layouts mount the home list in a root layer after the routes; an in-route
+    // overlay cannot rise above it, so Android presents the drawer as a Dialog window.
+    expect(drawer).not.toContain('if (Platform.OS !== "ios") return overlay;');
+    expect(drawer).toMatch(/<Modal[\s\S]*?onRequestClose=\{requestClose\}[\s\S]*?transparent[\s\S]*?\{content\}\s*<\/Modal>/);
+    expect(drawer).toContain('statusBarTranslucent');
+    expect(drawer).toContain('navigationBarTranslucent');
+    expect(drawer).not.toContain('BackHandler');
+  });
+
+  it('mounts the drawer search only after the Android dialog fully unmounts', () => {
+    const home = readSource('src/session/HomeSurface.tsx');
+    // 退场期间 Dialog 仍占着窗口焦点,搜索框 autoFocus 挂早了首次聚焦和软键盘
+    // 会丢;搜索动作和其它菜单动作一样延后到 onClosed 再执行。
+    expect(home).toContain('pendingMenuActionRef.current = () => setSearchOpen(true);');
+  });
 });

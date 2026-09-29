@@ -586,6 +586,8 @@ export interface AgentInputCoordinatorDeps {
 interface ActiveTurn {
   /** Retained after steering receipt cleanup until this turn ends. */
   latestSteeringClientId?: string;
+  /** Display provenance only; never changes input scheduling or execution. */
+  replyInputClientIds?: string[];
   item: AgentInputQueuedMessage | null;
   delivery: AgentInputDelivery;
   messageUuid: string;
@@ -1097,6 +1099,16 @@ export class AgentInputCoordinator {
       && vendorGeneration !== active.vendorTurnGeneration) return null;
     // A human steering a private reply takes ownership of the resulting output.
     return active.latestSteeringClientId ?? active.item?.clientId ?? null;
+  }
+
+  /** Inputs consumed by this native turn, excluding queued work and stale generations. */
+  getActiveInputClientIds(sessionId: string, vendorGeneration?: number): string[] {
+    const active = this.states.get(sessionId)?.activeTurn;
+    if (!active || (vendorGeneration !== undefined && active.vendorTurnGeneration !== null
+      && vendorGeneration !== active.vendorTurnGeneration)) return [];
+    const item = active.item;
+    return [...new Set([...(active.replyInputClientIds ?? []),
+      item?.clientId, item?.retrySourceClientId, item?.supersedesUserClientId].filter((id): id is string => !!id))];
   }
 
   getProjection(sessionId: string): AgentInputProjection {
@@ -2433,6 +2445,9 @@ export class AgentInputCoordinator {
       steerVendorTurnGeneration !== null &&
       this.deps.getTurnGeneration?.(sessionId) === steerVendorTurnGeneration;
     accepted.activeTurn = {
+      // Only accepted steering participates. Pending/rejected delivery cannot claim an unrelated final.
+      replyInputClientIds: sameVendorTurn
+        ? this.getActiveInputClientIds(sessionId, steerVendorTurnGeneration ?? undefined) : undefined,
       item,
       delivery: 'steer',
       messageUuid,

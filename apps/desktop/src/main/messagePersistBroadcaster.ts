@@ -1,3 +1,4 @@
+import { readTaskResultsForReply } from './botTaskReplyResults.js';
 /**
  * messagePersistBroadcaster — 把 agent 消息的持久化从 renderer 收口到 main 单点。
  * ---------------------------------------------------------------------------
@@ -537,11 +538,18 @@ function markAssistantTurnBoundary(
   clientId: string | undefined,
   completed: boolean,
   metaPatch?: Pick<AgentMeta, 'nativeForkAnchor'>,
+  taskResultInputIds?: readonly string[],
 ): Promise<boolean> {
   if (!sessionId || !clientId) return Promise.resolve(false);
   return enqueueDurableWrite(`turn-boundary:${sessionId}:${clientId}:${completed}`, async (ownerScope) => {
+    const botTaskResults = completed && taskResultInputIds?.length
+      ? await readTaskResultsForReply(sessionId, clientId, taskResultInputIds).catch(() => {
+        log.warn('Could not attach teammate results; standalone receipts remain available');
+        return [];
+      }) : [];
     const patched = await patchMessageAgentMetaWithResult(sessionId, clientId, {
       ...metaPatch,
+      ...(botTaskResults.length ? { botTaskResults } : {}),
       turnCompleted: completed,
     });
     if (!patched) return false;
@@ -558,8 +566,9 @@ export function markAssistantTurnCompleted(
   sessionId: string,
   clientId: string | undefined,
   metaPatch?: Pick<AgentMeta, 'nativeForkAnchor'>,
+  taskResultInputIds?: readonly string[],
 ): Promise<boolean> {
-  return markAssistantTurnBoundary(sessionId, clientId, true, metaPatch);
+  return markAssistantTurnBoundary(sessionId, clientId, true, metaPatch, taskResultInputIds);
 }
 
 /**
