@@ -2738,7 +2738,7 @@
         "pending": "凭据准备中",
         "unavailable": "暂时不可用"
       },
-      "claudeAccountRetired": "独立 Claude 账号已停用。请改用「使用 Claude Code 登录」连接 Claude 订阅，这个账号可以删除。"
+      "claudeAccountRetired": "Cindy 已不再支持通过这条旧版 Claude 连接登录订阅，不影响你的 Claude 账号和订阅。请改用「使用 Claude Code 登录」连接订阅"
     },
     "experimental": {
       "title": "实验性功能",
@@ -8335,13 +8335,13 @@
       "automations": "自动化",
       "paused": "导入后仍停用",
       "itemAttention": "需要处理",
-      "takeover": "检查通过后，由伙伴接管自动化",
+      "takeover": "导入后检查并接管自动化",
       "takeoverNote": "数据连接验证通过后才暂停原任务。取消所需依赖时，原任务继续运行。",
       "submit": "导入",
       "back": "上一步",
       "open": "打开伙伴",
       "running": "正在导入并检查连接…",
-      "complete": "导入完成",
+      "complete": "导入已保存",
       "attention": "部分内容需要处理，详见下方。",
       "error": "未能完成导入，可按原选择重试。",
       "keptAtSource": "尚未完成接管",
@@ -8356,7 +8356,31 @@
       "credentialFailed": "凭证未能安全保存。",
       "scriptMissing": "缺少这项任务所需的脚本。",
       "sourceCommand": "找不到原 Agent 的控制命令。",
-      "readFailed": "尚未验证这项任务实际需要的数据查询。"
+      "readFailed": "尚未验证这项任务实际需要的数据查询。",
+      "search": "搜索",
+      "selectAll": "全选",
+      "previous": "上一页",
+      "next": "下一页",
+      "chatSetup": "已保存可导入的资料，可以开始交流了。部分内容还需要登录或检查，你方便时我们再继续。接管前，原来的自动化保持原状。",
+      "chatReady": "资料已经导入，可以开始交流了。",
+      "partial": "部分内容未完整导入",
+      "details": "查看导入详情",
+      "partlySaved": "仅部分保存",
+      "savedNeedsSetup": "已保存，尚未启用或完成设置",
+      "notSaved": "未保存",
+      "databaseDriver": "数据库驱动无法加载，请更新或修复 Cindy 后重试。",
+      "databaseUnavailable": "无法读取来源数据库，原数据未改动。修复后可重试。",
+      "fileTooLarge": "文件或本次资料超过读取上限，未截断导入。",
+      "memoryMetadata": "记忆摘要或标题不符合存储要求。",
+      "memoryWrite": "记忆写入或完整性检查失败，可重试。",
+      "memoryChanged": "已保存的记忆发生变化，未覆盖。",
+      "attachmentUnsupported": "此附件格式暂不支持，原文件保留在来源。",
+      "diskFull": "磁盘空间不足，释放空间后可重试。",
+      "permissionDenied": "没有权限读取或保存此项，修复权限后可重试。",
+      "setupDeferred": "可在伙伴对话中继续登录与验证。",
+      "automationInvalid": "自动化定义无法转换，尚未创建。",
+      "itemFailed": "此项未完成，可重试并查看导入详情。",
+      "chatPartial": "伙伴已创建，但部分资料未完整保存。以下项目仍需处理；其他内容和对话可以正常使用。"
     }
   },
   "common": {
