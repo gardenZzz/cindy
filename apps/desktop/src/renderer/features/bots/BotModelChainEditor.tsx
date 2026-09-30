@@ -42,6 +42,7 @@ export function BotModelChainEditor({
   label,
   onRestoreDefault,
   onNavigateToProviders,
+  allowFallbacks = true,
 }: {
   value: BotModelRoute[];
   onChange: (next: BotModelRoute[]) => void;
@@ -53,6 +54,7 @@ export function BotModelChainEditor({
   label?: string;
   onRestoreDefault?: () => void;
   onNavigateToProviders?: () => void;
+  allowFallbacks?: boolean;
 }) {
   const { t } = useBotTranslation();
   const { availableVendors, loaded } = useAvailableAgents(deviceId);
@@ -177,7 +179,7 @@ export function BotModelChainEditor({
           0,
         )}
       </div>
-      <details
+      {allowFallbacks && <details
         className="mt-1 text-12 text-[var(--text-tertiary)]"
         onToggle={(event) => setExpanded(event.currentTarget.open)}
       >
@@ -277,7 +279,7 @@ export function BotModelChainEditor({
             ) : null}
           </div>
         ) : null}
-      </details>
+      </details>}
     </div>
   );
 }

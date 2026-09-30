@@ -70,6 +70,7 @@ import type { MobileHtmlPreview } from '@/session/mobileHtmlPreview';
 import { prepareMobileHtmlPreview, type PrepareMobileHtmlPreview } from '@/session/mobileHtmlPreview';
 import { useHtmlSnapshot } from '@/session/useHtmlSnapshot';
 import { MainWindowActionButton } from '@/components/MobilePrimitives';
+import { FileBrowserSegmentedControl } from '@/session/FileBrowserSegmentedControl';
 import { MarkdownFileReader } from '@/session/MarkdownFileReader';
 import { RemoteMediaPlayerWebView } from '@/session/mediaPlayerWebView';
 import {
@@ -1156,19 +1157,21 @@ function TextPreviewPage({
       {/* HTML 的模式切换在浮动浏览器菜单中;Markdown 保留原有胶囊。 */}
       {canRenderRich && richKind !== 'html' ? (
         <View style={styles.mdToggleRow}>
-          {([['rendered', t('files.preview.mdRendered')], ['source', t('files.preview.mdSource')]] as const).map(([value, label]) => (
-            <Pressable
-              accessibilityLabel={t('files.preview.mdViewA11y', { view: label })}
-              key={value}
-              onPress={() => setRichView(value)}
-              style={[styles.mdTogglePill, richView === value && styles.mdTogglePillActive]}
-              testID={`filePreview.richView.${value}`}
-            >
-              <Text style={[styles.mdToggleLabel, richView === value && styles.mdToggleLabelActive]}>
-                {label}
-              </Text>
-            </Pressable>
-          ))}
+          <FileBrowserSegmentedControl<'rendered' | 'source'>
+            accessibilityLabel={t('files.preview.mdViewA11y', { view: richView === 'rendered' ? t('files.preview.mdRendered') : t('files.preview.mdSource') })}
+            onChange={setRichView}
+            options={(['rendered', 'source'] as const).map((value) => {
+              const label = t(value === 'rendered' ? 'files.preview.mdRendered' : 'files.preview.mdSource');
+              return {
+                value,
+                label,
+                accessibilityLabel: t('files.preview.mdViewA11y', { view: label }),
+                testID: `filePreview.richView.${value}`,
+              };
+            })}
+            testID="filePreview.richView"
+            value={richView}
+          />
         </View>
       ) : null}
       {showRendered ? (
@@ -1352,14 +1355,14 @@ function ImagePreviewPage({
         <View style={styles.imageStateWrap} testID="filePreview.imageError">
           <GenericGlyph name={item.name} />
           <Text style={styles.hintText}>{t('files.preview.fetchOriginalFailed', { detail: failure })}</Text>
-          <Pressable
-            accessibilityLabel={t('files.preview.a11yRetryOriginal')}
-            onPress={() => setAttempt((n) => n + 1)}
-            style={({ pressed }) => [styles.retryBtn, pressed && styles.pressed]}
-            testID="filePreview.imageRetry"
-          >
-            <Text style={styles.retryLabel}>{t('files.preview.retry')}</Text>
-          </Pressable>
+          <MainWindowActionButton
+            action={{
+              accessibilityLabel: t('files.preview.a11yRetryOriginal'),
+              label: t('files.preview.retry'),
+              onPress: () => setAttempt((n) => n + 1),
+              testID: 'filePreview.imageRetry',
+            }}
+          />
         </View>
       ) : (
         <View style={styles.imageStateWrap} testID="filePreview.imageLoading">
@@ -1521,23 +1524,9 @@ const makeStyles = (colors: ThemeColors) => {
     truncText: { color: colors.textSecondary, fontSize: typeScale.footnote, lineHeight: lineHeight.caption },
     textPage: { flex: 1 },
     mdToggleRow: {
-      flexDirection: 'row',
-      gap: spacing.sm,
       paddingHorizontal: spacing.lg,
       paddingVertical: spacing.sm,
     },
-    mdTogglePill: {
-      alignItems: 'center',
-      borderColor: colors.border,
-      borderRadius: radius.pill,
-      borderWidth: StyleSheet.hairlineWidth,
-      justifyContent: 'center',
-      minHeight: 28,
-      paddingHorizontal: spacing.md,
-    },
-    mdTogglePillActive: { backgroundColor: colors.surfaceChip, borderColor: colors.borderStrong },
-    mdToggleLabel: { color: colors.textSecondary, fontSize: typeScale.caption, lineHeight: lineHeight.caption },
-    mdToggleLabelActive: { color: colors.textPrimary, fontWeight: fontWeight.medium },
     codeList: { flex: 1 },
     codeContent: { paddingHorizontal: spacing.lg, paddingVertical: spacing.md },
     codeLine: { flexDirection: 'row', gap: spacing.sm + 2 },
@@ -1574,16 +1563,6 @@ const makeStyles = (colors: ThemeColors) => {
       textAlign: 'center',
       width: '100%',
     },
-    retryBtn: {
-      alignItems: 'center',
-      borderColor: colors.borderStrong,
-      borderRadius: radius.pill,
-      borderWidth: StyleSheet.hairlineWidth,
-      justifyContent: 'center',
-      minHeight: 40,
-      paddingHorizontal: spacing.xl,
-    },
-    retryLabel: { color: colors.textPrimary, fontSize: typeScale.bodySmall, lineHeight: lineHeight.bodySmall, fontWeight: fontWeight.medium },
     pdfView: { flex: 1 },
     bigPage: {
       alignItems: 'center',

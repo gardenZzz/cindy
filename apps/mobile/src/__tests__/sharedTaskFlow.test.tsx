@@ -63,8 +63,9 @@ vi.mock('@/components/MobilePrimitives', () => ({
   MainWindowActionButton: ({ action }: { action: { label: string; disabled?: boolean; busy?: boolean; onPress(): void } }) => createElement('button', { disabled: action.disabled || action.busy, onClick: action.onPress }, action.label),
   MainWindowRowButton: ({ children, onPress, accessibilityLabel }: { children?: ReactNode; onPress(): void; accessibilityLabel?: string }) => createElement('button', { onClick: onPress, 'aria-label': accessibilityLabel }, children),
   MainWindowOptionButton: ({ label, onPress }: { label: string; onPress(): void }) => createElement('button', { onClick: onPress }, label),
+  MainWindowEmptyState: ({ title, copy, children }: { title: string; copy: string; children?: ReactNode }) => createElement('section', null, title, copy, children),
 }));
-vi.mock('@/platform/chrome/SimpleStackHeader', () => ({ SimpleStackHeader: ({ title, onBack }: { title: string; onBack(): void }) => createElement('header', null, title, createElement('button', { onClick: onBack }, 'back')), simpleScreenSafeAreaEdges: () => [] }));
+vi.mock('@/platform/chrome/SimpleStackHeader', () => ({ SimpleStackHeader: ({ title, onBack }: { title: string; onBack(): void }) => createElement('header', null, title, createElement('button', { onClick: onBack }, 'back')), simpleScreenSafeAreaEdges: () => [], simpleScrollInsetProps: {}, simpleScrollScreenSafeAreaEdges: () => [] }));
 vi.mock('@/theme', () => ({ useTheme: () => ({ colors: {} }), useThemedStyles: () => ({}) }));
 let element: HTMLDivElement;
 let root: Root;
