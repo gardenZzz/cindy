@@ -21,8 +21,10 @@ import { ensureManagedLlamaCppProvider } from '../local-model-runtime/managedLla
 import { setBotRemoteMessageService } from './botRemoteMessageReceiver.js';
 import { handleListDevices, defaultDeps as deviceDirectoryDeps } from '../device-link/ipc.js';
 import { getHostSourceDevice, getSelfDeviceId, remoteBackgroundInvoke, remoteInvoke as invokeBotPeer } from '../device-link/index.js';
+import { describeProviderShareDevice } from '../device-link/providerShareGuest.js';
 import { readDeviceProviderViews } from '../remote-agent/controller/deviceCatalog.js';
 import { checkDeviceRoute } from '../remote-agent/controller/deviceRouteCheck.js';
+import { isProviderShareAgentDeviceId } from '../../shared/providerShare.js';
 import {
   isRemoteProviderInvocationAllowed,
   setRemoteProviderInvocationEnabled,
@@ -1680,6 +1682,35 @@ export function noteSilentStopUserSend(sessionId: string): void {
  */
 export function noteSilentStopSessionReset(sessionId: string): void {
   resetAutomaticRecoveryForExplicitStop(sessionId);
+}
+
+/** 统一明确停止的实现(coordinator 就绪后由注册流程装上)。 */
+let explicitStopImpl: ((sessionId: string) => Promise<void>) | null = null;
+
+/**
+ * 用户明确喊停的统一入口 —— 与桌面 Stop 同一套清理, 顺序固定:
+ *   1. 撤自动续跑与退避簿记(resetAutomaticRecoveryForExplicitStop);
+ *   2. 取消上下文溢出恢复;
+ *   3. 发起 Goal 暂停(同步摘掉 listener / timer, 落盘与中止并行);
+ *   4. coordinator.stop: 撤已排期续跑、清队列、中止当前一轮(唯一的一次 abort)并清理
+ *      待决交互;
+ *   5. 等 Goal 落盘与队列快照落盘。Goal 落盘失败在中止**之后**才抛 INTERNAL —— 与桌面
+ *      Stop 同一顺序, 存储错误不能挡住用户的喊停。
+ *
+ * 外部渠道(个人 IM `/stop`、官方 hook `task.cancel`)与伙伴群聊 / 委派的停止都走这里,
+ * 不再各自拼一份(见 docs/dev-rules/im-turn-flow.md 不变量 9)。调用方不要再自己
+ * `session.abort()` —— 重复中止会向 vendor 发两次 interrupt。
+ *
+ * 注册前(启动早期 / 单测)退回最小语义: 撤自动续跑 + 暂停 Goal + 中止当前一轮。
+ */
+export async function stopSessionTurnExplicitly(sessionId: string): Promise<void> {
+  if (explicitStopImpl) {
+    await explicitStopImpl(sessionId);
+    return;
+  }
+  resetAutomaticRecoveryForExplicitStop(sessionId);
+  const goalPause = pauseGoalBeforeExplicitStop(sessionId);
+  await Promise.all([goalPause, getMaker().getSession(sessionId)?.abort()]);
 }
 
 /**
@@ -4102,6 +4133,7 @@ export interface SchedulerQueuedPromptRequest {
 export type SchedulerEnqueueResult = { clientId: string } | { duplicate: true } | { retry: true };
 
 interface SchedulerQueueBridge {
+  ensureQueueRestored(sessionId: string): Promise<boolean>;
   isSessionBusy(sessionId: string): boolean;
   hasQueuedPrompt(sessionId: string, scheduleId: string): boolean;
   enqueuePrompt(req: SchedulerQueuedPromptRequest): Promise<SchedulerEnqueueResult>;
@@ -4117,6 +4149,11 @@ const schedulerQueuedPromptPreparations = new Map<string, {
   onPreparing: () => Promise<void>;
   onPreparationFailed?: (error: unknown) => void;
 }>();
+
+export async function ensureSchedulerQueueRestored(sessionId: string): Promise<boolean> {
+  // 桥未就绪时不能把未知队列当成空闲；让 runner 沿用恢复待定的顺延路径。
+  return schedulerQueueBridgeHolder?.ensureQueueRestored(sessionId) ?? false;
+}
 
 export function isSchedulerTargetSessionBusy(sessionId: string): boolean {
   return schedulerQueueBridgeHolder?.isSessionBusy(sessionId) ?? false;
@@ -7229,14 +7266,26 @@ export function registerMakerIpc(maker: Maker, options: RegisterMakerIpcOptions)
     model: string,
     providerId: string | null,
   ): Promise<void> {
-    const rejection = await checkDeviceRoute(
+    const checked = await checkDeviceRoute(
       () => readDeviceProviderViews(remoteBackgroundInvoke, deviceId),
       agent,
       providerId,
       model,
     );
-    if (!rejection) return;
+    if (!checked) return;
+    // 分享来的供应商连不上(分享者电脑离线，或分享在服务端已暂停而 relay 只回离线)：用分享专属
+    // 文案，不让受邀者去「那台电脑」上操作。
+    const rejection = checked === 'unreachable' && isProviderShareAgentDeviceId(deviceId)
+      ? 'REMOTE_AGENT_SHARE_UNAVAILABLE'
+      : checked;
     log.warn('remote agent selection rejected', { agent, model, providerId, rejection });
+    if (rejection.startsWith('REMOTE_AGENT_SHARE_')) {
+      // 分享来的供应商：给出分享专属原因(device-link 控制端同样降级为 PRECONDITION_FAILED)。
+      throwIpcError(
+        isDeviceLinkInvoke() ? 'PRECONDITION_FAILED' : rejection as 'REMOTE_AGENT_SHARE_PAUSED' | 'REMOTE_AGENT_SHARE_REMOVED' | 'REMOTE_AGENT_SHARE_UNAVAILABLE',
+        'the shared provider is not available; the model was not changed',
+      );
+    }
     // device-link 控制端降级为 PRECONDITION_FAILED(不把新 code 变成跨版本 wire 契约)。
     const code = rejection === 'unreachable' ? 'REMOTE_AGENT_DEVICE_UNREACHABLE' : 'REMOTE_AGENT_MODEL_UNAVAILABLE';
     throwIpcError(
@@ -7250,6 +7299,8 @@ export function registerMakerIpc(maker: Maker, options: RegisterMakerIpcOptions)
   /** 分隔条展示用的电脑名：null = 任务所在电脑(本机)，其他按设备目录最近一次的名字。 */
   function describeAgentDevice(deviceId: string | null): string | null {
     if (!deviceId) return getHostSourceDevice().name ?? null;
+    const shared = describeProviderShareDevice(deviceId);
+    if (shared) return shared;
     try {
       return readLastKnownDeviceNames()[deviceId] ?? null;
     } catch {
@@ -10604,14 +10655,7 @@ export function registerMakerIpc(maker: Maker, options: RegisterMakerIpcOptions)
         onAccepted,
       }),
     prepareAttachments: botGroupAttachments.prepare,
-    abortLane: async (sessionId) => {
-      await inputCoordinator.ensureQueueRestored(sessionId);
-      resetAutomaticRecoveryForExplicitStop(sessionId);
-      contextOverflowRolloverHolder?.cancelRecovery(sessionId);
-      await pauseGoalBeforeExplicitStop(sessionId);
-      inputCoordinator.stop(sessionId);
-      await awaitAgentInputQueueSnapshotPersistence(sessionId);
-    },
+    abortLane: (sessionId) => stopSessionTurnExplicitly(sessionId),
     closeLanes: async (sessionIds) => {
       await Promise.all(sessionIds.map((id) => maker.closeSession(id).catch(() => undefined)));
     },
@@ -10771,14 +10815,7 @@ export function registerMakerIpc(maker: Maker, options: RegisterMakerIpcOptions)
       }),
     discardDelegationQueuedInputs: (sessionId, delegationId) =>
       discardDelegationQueuedInputs(inputCoordinator, sessionId, delegationId, awaitAgentInputQueueSnapshotPersistence),
-    abortSession: (async (sessionId) => {
-      await inputCoordinator.ensureQueueRestored(sessionId);
-      resetAutomaticRecoveryForExplicitStop(sessionId);
-      contextOverflowRolloverHolder?.cancelRecovery(sessionId);
-      await pauseGoalBeforeExplicitStop(sessionId);
-      inputCoordinator.stop(sessionId);
-      await awaitAgentInputQueueSnapshotPersistence(sessionId);
-    }),
+    abortSession: (sessionId) => stopSessionTurnExplicitly(sessionId),
     closeSession: (sessionId) => maker.closeSession(sessionId),
     broadcastSessionCreated,
     onChanged: (payload) => {
@@ -15213,6 +15250,9 @@ export function registerMakerIpc(maker: Maker, options: RegisterMakerIpcOptions)
       }
       assertCurrentInputGeneration(sessionId, readExpectedInputGeneration(sendOpts));
       sess = readCurrentSteerSession();
+      // 同轮插话也属于新输入。必须在 vendor await 前通知，旧轮可能先于 steer ack 结束。
+      // 共用入口同时覆盖 INPUT_STEER、队列提升和旧 STEER IPC。
+      publishUiSessionIntervention(sessionId);
       await sess.steer(steerPayload as never, {
         logTitle: meta?.title,
         messageUuid: so.messageUuid,
@@ -16463,6 +16503,15 @@ export function registerMakerIpc(maker: Maker, options: RegisterMakerIpcOptions)
     getPersistedClientIds: getPersistedInputClientIds,
   });
   agentInputCoordinatorHolder = inputCoordinator;
+  explicitStopImpl = async (sessionId) => {
+    await inputCoordinator.ensureQueueRestored(sessionId);
+    resetAutomaticRecoveryForExplicitStop(sessionId);
+    contextOverflowRolloverHolder?.cancelRecovery(sessionId);
+    // 与桌面 Stop 同序: Goal 暂停同步摘掉续跑源后, 中止先发出, 再等落盘(失败此时才抛)。
+    const goalPause = pauseGoalBeforeExplicitStop(sessionId);
+    inputCoordinator.stop(sessionId);
+    await Promise.all([goalPause, awaitAgentInputQueueSnapshotPersistence(sessionId)]);
+  };
   setSharedTaskQueueReader((sessionId, clientId) => {
     const item = inputCoordinator.getProjection(sessionId).pendingQueue.find((pending) => pending.clientId === clientId);
     return item ? { sessionId, authorAccountId: item.sharedTaskAuthor?.accountId ?? '', state: 'pending', attachments: item.files } : undefined;
@@ -16499,6 +16548,10 @@ export function registerMakerIpc(maker: Maker, options: RegisterMakerIpcOptions)
         inputCoordinator.shouldQueueNewTurn(sessionId) ||
         isSessionTurnDispatchBoundaryBusy(sessionTurnActivityTracker, sessionId, sess)
       );
+    },
+    ensureQueueRestored: async (sessionId) => {
+      await inputCoordinator.ensureQueueRestored(sessionId).catch(() => undefined);
+      return inputCoordinator.isQueueRestored(sessionId);
     },
     hasQueuedPrompt: (sessionId, scheduleId) =>
       inputCoordinator.hasQueuedItemWhere(

@@ -18,6 +18,8 @@ export interface SessionMeta {
   permissionMode?: PermissionMode;
   fastMode?: boolean;
   /** Cursor thinking 开关；缺省/非 cursor 为 false。 */
+  /** Initial plan selection, persisted with the task rather than after creation. */
+  planMode?: boolean;
   /** Persist the host-owned Review purpose atomically with session creation. */
   reviewMode?: true;
   createdAt: number;

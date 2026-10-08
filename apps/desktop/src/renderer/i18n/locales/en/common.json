@@ -194,6 +194,212 @@
     "closeAllLabel": "Stop All Sharing",
     "closeAllDescription": "Guests will lose access. Task history is kept."
   },
+  "providerShare": {
+    "entry": {
+      "manage": "Manage Sharing",
+      "manageWithPending_one": "Manage Sharing · {{count}} pending request",
+      "manageWithPending_other": "Manage Sharing · {{count}} pending requests",
+      "disabledInvocation": "Turn on “Allow remote use” to share this provider",
+      "disabledRemoteControl": "Allow remote control in Remote Connection settings to share this provider",
+      "remoteControlOff": "This computer doesn’t allow remote control yet, so its providers can’t be used remotely or shared.",
+      "openRemoteControl": "Open Remote Connection Settings",
+      "descriptionOff": "When on, your other computers and the people you share with can use this provider’s models. While it’s off, existing shares are paused, not deleted."
+    },
+    "manage": {
+      "title": "Share {{provider}}",
+      "description": "People you share with can pick {{provider}} models in their own sessions. The Agent runs on this computer and usage counts toward your {{provider}}; their files and commands still run on their own computer.",
+      "descriptionWithDevice": "People you share with can pick {{provider}} models in their own sessions. The Agent runs on this computer ({{device}}) and usage counts toward your {{provider}}; their files and commands still run on their own computer.",
+      "createLink": "Create Share Link",
+      "loading": "Loading sharing…",
+      "notReady": "Sharing isn’t available right now. Make sure you’re signed in and online; it will retry automatically.",
+      "loadFailed": "Couldn’t load sharing details. Try again in a moment.",
+      "gateRemoteControl": "This computer doesn’t allow remote control, so existing shares are paused and you can’t create new links.",
+      "gateInvocation": "“Allow remote use” is off for this provider, so existing shares are paused and you can’t create new links.",
+      "pending": {
+        "title": "Pending",
+        "applying": "requested access",
+        "requestedAt": "Requested {{time}}",
+        "expiresHint": "Expires if not handled within 24 hours"
+      },
+      "members": {
+        "title": "People You Share With",
+        "rangeAria": "Usage period",
+        "range": {
+          "7d": "Last 7 Days",
+          "month": "This Month",
+          "all": "All Time"
+        },
+        "statusActive": "Active",
+        "statusRunning_one": "Active · {{count}} session running",
+        "statusRunning_other": "Active · {{count}} sessions running",
+        "statusPaused": "Paused",
+        "joined": "Joined {{date}}",
+        "lastUsed": "Last used {{time}}",
+        "neverUsed": "Not used yet",
+        "tokens": "{{tokens}} tokens",
+        "amount": "≈ {{amount}}",
+        "pause": "Pause Sharing",
+        "resume": "Resume Sharing",
+        "remove": "Remove",
+        "removeAria": "Remove sharing with {{name}}",
+        "expandAria": "Expand {{name}}’s Model Usage",
+        "collapseAria": "Collapse {{name}}’s Model Usage",
+        "empty": "You haven’t shared with anyone yet. Create a share link and send it; once they request access and you approve, they’ll appear here.",
+        "table": {
+          "model": "Model",
+          "turns": "Messages",
+          "input": "Input",
+          "output": "Output",
+          "amount": "Est. Cost"
+        },
+        "noUsage": "No usage in this period",
+        "estimateNote": "Amounts are estimated from local unit prices and don’t reflect the provider’s actual bill."
+      },
+      "removeConfirm": {
+        "title": "Remove Sharing with {{name}}?",
+        "description": "{{name}} will immediately lose access to {{provider}}, and any running sessions will stop. To share again, you’ll need a new link. Usage records are kept.",
+        "confirm": "Remove Share"
+      }
+    },
+    "toast": {
+      "approved": "Shared {{provider}} with {{name}}",
+      "rejected": "Declined {{name}}’s request; the link no longer works",
+      "paused": "Paused sharing with {{name}}; running sessions were stopped",
+      "resumed": "Resumed sharing with {{name}}",
+      "removed": "Removed sharing with {{name}}"
+    },
+    "link": {
+      "title": "{{provider}} Share Link Created",
+      "description": "Send the link to the person you want to share with. They’ll see what sharing means first, then send you a request; sharing starts once you approve it on this computer.",
+      "fieldLabel": "Share link",
+      "copy": "Copy Link",
+      "copied": "Copied",
+      "oneTime": "Works once",
+      "expiresIn": "Expires in {{time}}",
+      "expired": "Expired",
+      "regenerateHint": "You can create a new one after it expires",
+      "generating": "Creating link…",
+      "back": "Back to Sharing",
+      "regenerate": "Create New Link",
+      "regenerated": "New link created",
+      "copyFailed": "Couldn’t copy the link. Select it and copy it manually."
+    },
+    "pairing": {
+      "label": "Pairing code",
+      "ariaLabel": "Pairing code {{digits}}"
+    },
+    "approve": {
+      "title": "{{name}} Requested Access to {{provider}}",
+      "requestedAt": "Requested {{time}} with your share link",
+      "pairingHint": "Before approving, you can ask them over the channel you sent the link through: “What pairing code do you see?” Approve if it matches.",
+      "callout": "Once approved, {{name}} can use {{provider}} models in their own sessions. The Agent runs on this computer and usage counts toward your {{provider}}. You can pause or remove access anytime in “Share {{provider}}”.",
+      "calloutUnknown": "If you don’t recognize this person, decline; the link stops working once declined.",
+      "approve": "Approve Sharing",
+      "reject": "Decline Request",
+      "later": "Decide Later"
+    },
+    "apply": {
+      "loading": "Reading share link…",
+      "askTitle": "{{name}} Wants to Share {{provider}} with You",
+      "providerOnDevice": "{{provider}} · {{device}}",
+      "factRuns": "The Agent runs on {{name}}’s computer with {{provider}}",
+      "factRunsDetail": "Usage counts toward {{name}}’s {{provider}}, and {{name}} can see your usage",
+      "factFiles": "Your project files and commands still run on your own computer",
+      "factFilesDetail": "Your session permissions still apply",
+      "factPrivacy": "Chat content and files the Agent reads pass through and are saved on {{name}}’s computer",
+      "factPrivacyDetail": "{{name}} only sees your nickname and avatar",
+      "factApproval": "After you send the request, it takes effect only once {{name}} approves",
+      "factApprovalDetail": "{{name}} can pause or remove this share at any time",
+      "send": "Send Request",
+      "cancel": "Cancel",
+      "waitTitle": "Waiting for {{name}} to approve…",
+      "waitTitleGeneric": "Waiting for approval…",
+      "waitDescription": "{{name}} may ask for the pairing code you see; just tell them these 4 digits. If their computer is offline, they’ll see your request once it’s back online. Requests expire if not handled within 24 hours.",
+      "waitDescriptionGeneric": "They may ask for the pairing code you see; just tell them these 4 digits. If their computer is offline, they’ll see your request once it’s back online. Requests expire if not handled within 24 hours.",
+      "close": "Close Window",
+      "withdraw": "Withdraw Request",
+      "withdrawn": "Request withdrawn; the link no longer works",
+      "doneTitle": "{{name}} Shared {{provider}} with You",
+      "doneTitleGeneric": "Your Request Was Approved",
+      "doneDescription": "Find “{{label}}” among the remote providers in the model list.",
+      "doneDescriptionGeneric": "Find it among the remote providers in the model list.",
+      "newTask": "New Session",
+      "later": "Maybe Later",
+      "usedTitle": "This Share Link No Longer Works",
+      "usedDescription": "Share links work once and expire 5 minutes after they’re created. This one was already used or has expired; ask {{name}} for a new link.",
+      "usedDescriptionGeneric": "Share links work once and expire 5 minutes after they’re created. This one was already used or has expired; ask the person who shared it for a new link.",
+      "selfTitle": "This Is Your Own Provider",
+      "selfDescription": "Your other computers can use it directly; no request needed.",
+      "memberTitle": "You Already Have This Share",
+      "memberDescription": "Find it among the remote providers in the model list; no need to request it again.",
+      "regionTitle": "Cross-Region Sharing Isn’t Available",
+      "regionDescription": "This link comes from Cindy’s service in another region. Requests across regions aren’t supported yet.",
+      "invalidTitle": "This Isn’t a Valid Share Link",
+      "invalidDescription": "Check that the whole link was copied, or ask for it again.",
+      "rejectedTitle": "{{name}} Declined Your Request",
+      "rejectedTitleGeneric": "Your Request Was Declined",
+      "rejectedDescription": "This link no longer works. To use the provider, ask for a new link.",
+      "expiredTitle": "Request Expired",
+      "expiredDescription": "The request wasn’t handled within 24 hours, so the link no longer works. Ask for a new link to try again.",
+      "errorTitle": "Couldn’t Open This Share Link",
+      "retry": "Try Again",
+      "toastApproved": "{{name}} shared {{provider}} with you",
+      "toastApprovedGeneric": "Your share request was approved",
+      "toastRejected": "{{name}} declined your share request",
+      "toastRejectedGeneric": "Your share request was declined",
+      "toastExpired": "Your share request expired; the link no longer works"
+    },
+    "received": {
+      "title": "Providers Shared with Me",
+      "enterLink": "Enter Share Link…",
+      "fromOwner": "Shared by {{name}}",
+      "providerOnDevice": "{{provider}} · {{device}}",
+      "statusActive": "Active",
+      "statusPaused": "Paused",
+      "hostOffline": "Their computer is offline",
+      "hostUnavailable": "Their Cindy needs an update",
+      "leave": "Leave",
+      "leaveAria": "Leave {{provider}} shared by {{name}}",
+      "leaveConfirm": {
+        "title": "Leave {{provider}} Shared by {{name}}?",
+        "description": "To use it again after leaving, you’ll need a new link from them. Sessions using it can switch to another model.",
+        "confirm": "Leave Share"
+      },
+      "left": "Left {{provider}} shared by {{name}}",
+      "pasteDialog": {
+        "title": "Enter Share Link",
+        "description": "Paste the provider share link you received. You’ll see the details before deciding whether to send a request.",
+        "label": "Share link",
+        "placeholder": "Paste the link here",
+        "empty": "Paste a share link first",
+        "open": "Open Link",
+        "cancel": "Cancel"
+      },
+      "detailNote": "The agent runs on {{name}}'s computer, using their sign-in and quota. To use it, choose it in the model list when you start a task.",
+      "modelsTitle": "Available Models",
+      "modelsLoading": "Loading the models they shared…",
+      "modelsRefused": "The owner’s computer isn’t allowing this share right now. It may not allow remote control, “Allow remote use” may be off for this provider, or their Cindy may still be starting. Try again shortly, or ask them to check both settings.",
+      "modelsFailedWithCode": "Couldn’t read the models they made available. Try again shortly. (Error code: {{code}})",
+      "retryModels": "Reload Models",
+      "modelsEmpty": "They haven't made any models available yet.",
+      "pausedNote": "They've paused this share. You can use it again once they resume it.",
+      "offlineNote": "Their computer is offline. You can use it again once it is back online.",
+      "needsUpdateNote": "They need to update Cindy before you can use this share."
+    },
+    "picker": {
+      "deviceName": "{{device}} · Shared by {{owner}}",
+      "unavailable": "Unavailable share",
+      "hostOutdated": "The Cindy version on the owner’s computer is too old to list these models. Ask them to update Cindy, then try again."
+    },
+    "notification": {
+      "requestTitle": "New Share Request",
+      "requestBody": "{{name}} requested access to your shared {{provider}}",
+      "approvedTitle": "Share Request Approved",
+      "approvedBody": "{{name}} shared {{provider}} with you",
+      "rejectedTitle": "Share Request Declined",
+      "rejectedBody": "{{name}} declined to share {{provider}}"
+    }
+  },
   "privacyExit": {
     "status": "This computer is being remotely controlled through Cindy",
     "hint": "Click or press any key to disconnect…",
@@ -419,7 +625,17 @@
     "RIGHT_SIDEBAR_STATE_TOO_LARGE": "Tab content is too large to add",
     "RIGHT_SIDEBAR_UNKNOWN_KIND": "This tab type is unavailable",
     "REMOTE_AGENT_DEVICE_UNREACHABLE": "Model not changed: the computer that would run the Agent can’t be reached. Make sure it’s online and allows remote control, then try again.",
-    "REMOTE_AGENT_MODEL_UNAVAILABLE": "Model not changed: that computer doesn’t have this model, or hasn’t turned on “Allow remote use” for this provider. Pick another model."
+    "REMOTE_AGENT_MODEL_UNAVAILABLE": "Model not changed: that computer doesn’t have this model, or hasn’t turned on “Allow remote use” for this provider. Pick another model.",
+    "PROVIDER_SHARE_LINK_USED": "This share link has already been used. Links work once; ask the person who shared it for a new one.",
+    "PROVIDER_SHARE_LINK_EXPIRED": "This share link has expired. Links are valid for 5 minutes; ask the person who shared it for a new one.",
+    "PROVIDER_SHARE_SELF": "This is your own provider. Your other computers can use it directly.",
+    "PROVIDER_SHARE_ALREADY_MEMBER": "You already have this share; no need to request it again.",
+    "PROVIDER_SHARE_IDENTITY_INVALID": "Couldn’t verify your account. Sign in again, then try again.",
+    "PROVIDER_SHARE_NOT_HOST_DEVICE": "This share can only be managed on the computer that hosts the provider.",
+    "PROVIDER_SHARE_CROSS_REGION_DISABLED": "Cross-region sharing isn’t available yet. This link comes from Cindy’s service in another region.",
+    "REMOTE_AGENT_SHARE_PAUSED": "Model not changed: the owner has paused this share for you. Pick another model.",
+    "REMOTE_AGENT_SHARE_REMOVED": "Model not changed: this share is no longer available (the owner removed it or you left). Pick another model.",
+    "REMOTE_AGENT_SHARE_UNAVAILABLE": "Model not changed: the shared provider is temporarily unavailable (the owner's computer is offline or sharing is turned off for now). Try again later or pick another model."
   },
   "providerError": {
     "AUTH_INVALID": "Invalid or expired API key (401). Check the key and try again",
@@ -2501,6 +2717,13 @@
           "connectionRequired": "Connect to use these models. Your selections are saved."
         }
       },
+      "remote": {
+        "rowLabel": "{{provider}} · {{device}}",
+        "statusReady": "Available",
+        "detailNote": "The agent runs on {{device}}, using that computer’s sign-in and quota. To use it, choose it in the model list when you start a task. To change this provider, go to Settings → Providers on that computer.",
+        "modelsTitle": "Available Models",
+        "modelsEmpty": "This provider has no models available on that computer yet."
+      },
       "genericOAuth": {
         "subtitle": "Subscription account",
         "reopenLoginPage": "Reopen sign-in page",
@@ -2546,8 +2769,8 @@
         "suspendedBanner": "This provider is disabled. Credentials are kept; enable it to use its models again.",
         "remoteAccess": {
           "label": "Allow remote use",
-          "description": "When on, other computers on your account can use this provider's models to run an Agent on this computer, using this computer's sign-in and quota.",
-          "ariaLabel": "Allow other computers on this account to use this provider",
+          "description": "When on, your other computers and the people you share with can use this provider’s models. The Agent runs on this computer, using this computer’s sign-in and quota.",
+          "ariaLabel": "Allow your other computers and the people you share with to use this provider",
           "writeFailed": "Couldn't save the remote access setting. Please try again."
         },
         "moreActionsAria": "More Actions"
@@ -3298,7 +3521,13 @@
         "permission": "Show or switch the permission mode",
         "settings": "Show project and agent settings",
         "ctr": "Remotely control a desktop session",
-        "exctr": "Exit remote control"
+        "exctr": "Exit remote control",
+        "workspace": "Switch project workspace",
+        "unbind": "Clear the current project mapping",
+        "effort": "Choose reasoning effort",
+        "agent": "Choose an Agent",
+        "status": "Show link status",
+        "unlink": "Unlink Telegram"
       },
       "behavior": {
         "title": "Reactions & quoting",
@@ -8324,6 +8553,7 @@
         "planDoneGeneric": "Work split finished"
       },
       "notice": {
+        "memberJoined": "{{name}} joined the group",
         "memberFailed": "{{name}} couldn’t reply this time",
         "memberTimeout": "{{name}} took too long to reply and was skipped this time",
         "memberUnavailable": "{{name}} is unavailable and didn’t speak this time",
@@ -8428,6 +8658,7 @@
         "copied": "Invitation link copied",
         "createLink": "Create invitation link",
         "accept": "Accept and join",
+        "openGroup": "Open group",
         "previewInvite": "Preview invitation",
         "invalidInvite": "This invitation is invalid, used or expired. Request a new link.",
         "notAllowed": "This account does not have permission. Check your account or contact the group owner.",
@@ -10503,7 +10734,10 @@
       "REMOTE_AGENT_BUSY": "Too many sessions are running on the other computer. End some of them and try again.",
       "REMOTE_AGENT_UNSUPPORTED": "This Agent isn't available on the other computer. Install or sign in to it there, or pick another Agent.",
       "REMOTE_AGENT_INVALID": "Something went wrong talking to the computer running the Agent. Try again; if it keeps happening, update Cindy on both computers.",
-      "REMOTE_AGENT_PROVIDER_NOT_ALLOWED": "That computer hasn’t allowed remote use of this provider. On that computer, turn on “Allow remote use” in Settings → Providers, or pick another model."
+      "REMOTE_AGENT_PROVIDER_NOT_ALLOWED": "That computer hasn’t allowed remote use of this provider. On that computer, turn on “Allow remote use” in Settings → Providers, or pick another model.",
+      "REMOTE_AGENT_SHARE_PAUSED": "The owner has paused this share for you, so these models can’t be used until it’s resumed. Switch to another model to continue.",
+      "REMOTE_AGENT_SHARE_REMOVED": "This share is no longer available (the owner removed it or you left). Switch to another model to continue.",
+      "REMOTE_AGENT_SHARE_UNAVAILABLE": "The shared provider is temporarily unavailable. The owner's computer may be offline, or sharing is turned off for now. Try again later, or switch to another model to continue."
     },
     "generatedFiles": {
       "title": "Files created this message",
@@ -13322,6 +13556,7 @@
     "addUnavailable": "This session can’t be opened in the current split. Open a session in the main area and try again."
   },
   "extraDirs": {
+    "retryRemotePlugins": "Remote plugins failed to load. Retry",
     "menuAria": "Composer actions",
     "tooltipEmpty": "More actions",
     "tooltipCount": "{{count}} additional directories",
@@ -13808,6 +14043,7 @@
       "failedTitle": "Plan change failed",
       "failedBody": "The plan change did not complete. Your current plan is unchanged.",
       "requestFailed": "The plan change request couldn’t be completed. Refresh your subscription status and try again.",
+      "renewalPrepaid": "Your next billing period is already paid. Wait until the current period ends before upgrading.",
       "quoteRejected": "This plan isn’t available for your current subscription. Choose another plan.",
       "chooseAnotherPlan": "Choose Another Plan",
       "resyncHint": "The result could not be confirmed yet. Checking the latest status again…",

@@ -146,6 +146,7 @@ export {
   appendAutoReviewUserIntent,
   normalizeAutoReviewUserIntent,
   type AutoReviewUserIntent,
+  type AutoReviewUserReferences,
   getAutoReviewActionTextLength,
   getAutoReviewDelegateHardCeilingMs,
   isAutoReviewConfirmUndeliveredNotice,

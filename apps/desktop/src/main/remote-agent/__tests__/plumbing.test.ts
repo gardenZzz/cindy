@@ -2,6 +2,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 
+import { MAIN_OWNED_SEND_CONTEXT } from '@cindy/maker-core';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import WebSocket from 'ws';
 
@@ -174,6 +175,30 @@ describe('wire payloads', () => {
       writeAttachment: async () => '',
     });
     expect(decoded.turnPermissionPolicy?.forceConfirmToolCall('Read', {})).toBe(true);
+  });
+
+  it('carries Auto-review references in Main context and re-projects them on decode', async () => {
+    const callbacks = { onTranscriptUserEntry: async () => {}, onInteractionStateChange: () => {}, writeAttachment: async () => '' };
+    const autoReviewReferences = { attachments: { images: 1, files: 0 }, quotedMessages: [{ author: '群友', text: '[图片]', attachmentCount: 1 }] };
+    const encoded = await encodeSendOptions({
+      [MAIN_OWNED_SEND_CONTEXT]: { origin: { kind: 'im', channel: 'telegram' }, rawChannelText: '这啥情况', autoReviewReferences },
+    }, async () => Buffer.alloc(0));
+    const decoded = await decodeSendOptions(JSON.parse(JSON.stringify(encoded.wire)), callbacks);
+    expect(decoded[MAIN_OWNED_SEND_CONTEXT]).toEqual({
+      origin: { kind: 'im', channel: 'telegram' }, rawChannelText: '这啥情况', autoReviewReferences,
+    });
+
+    // Malformed or oversized peer data is bounded, never forwarded as-is; older peers omit it.
+    const tampered = await decodeSendOptions({ cindy: { mainOwned: {
+      origin: { kind: 'im', channel: 'telegram' }, rawChannelText: 'x',
+      autoReviewReferences: { attachments: { images: 'all' }, quotedMessages: [{ text: 'y'.repeat(10_000), extra: 'grant' }] },
+    } } }, callbacks);
+    const references = tampered[MAIN_OWNED_SEND_CONTEXT]?.autoReviewReferences;
+    expect(references?.attachments).toBeUndefined();
+    expect(references?.quotedMessages?.[0]?.text.length).toBeLessThanOrEqual(600);
+    expect(references?.quotedMessages?.[0]).not.toHaveProperty('extra');
+    const legacy = await decodeSendOptions({ cindy: { mainOwned: { origin: { kind: 'im', channel: 'telegram' }, rawChannelText: 'x' } } }, callbacks);
+    expect(legacy[MAIN_OWNED_SEND_CONTEXT]).toEqual({ origin: { kind: 'im', channel: 'telegram' }, rawChannelText: 'x' });
   });
 });
 

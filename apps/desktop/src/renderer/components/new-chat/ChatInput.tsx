@@ -192,8 +192,10 @@ import {
   findGhostByCommand,
   parseGhostCommandWord,
 } from '@/cindy-brain/ghostCommand';
-import { filterGhostsForWorkdir } from '@/cindy-brain/ghostWorkdirFilter';
+import { filterGhostsForWorkdir, getWorkdirDisabledGhostIds } from '@/cindy-brain/ghostWorkdirFilter';
 import { useInstalledGhosts } from '@/cindy-brain/useInstalledGhosts';
+import { useRemoteComposerGhosts } from '@/cindy-brain/useRemoteComposerGhosts';
+import { projectGhostComposerEntries, type GhostCommandSource } from '../../../shared/ghostComposer';
 import {
   attachGhostMediaToSession,
   getGhostMediaUriFromDataTransfer,
@@ -3048,23 +3050,29 @@ export function ChatInput({
   // 反映;plugin 不自己查 listSync,同步 IPC 不进 keystroke 热路径)。
   // 目录级禁用同判(ghostWorkdirFilter):被禁用的意识胶囊不亮——渲染层
   // 绝不比发送层乐观;禁用变更会广播 ghosts:changed,清单引用变化时重滤。
-  const installedGhosts = useInstalledGhosts();
+  const installedGhosts = useInstalledGhosts(deviceLinkDeviceId === null);
   const installedGhostsRef = useRef(installedGhosts);
   installedGhostsRef.current = installedGhosts;
+  const trigger: TriggerState = editor ? detectTrigger(editor) : { kind: 'none' };
+  const remoteComposerGhosts = useRemoteComposerGhosts(
+    deviceLinkDeviceId,
+    workingDir,
+    syntheticAtAnchor !== null ||
+      trigger.kind === 'at' ||
+      (trigger.kind === 'slash' && trigger.sigil === '$'),
+    remoteReconnectEpoch,
+  );
   const pluginsForMenu = useMemo(
-    () =>
-      installedGhosts.filter(
-        (ghost) =>
-          !ghost.retirement &&
-          (ghost.manifest.id !== 'cindy-mivo' ||
-            !installedGhosts.some((candidate) => candidate.manifest.id === 'xd-mivo')),
-      ),
-    [installedGhosts],
+    () => deviceLinkDeviceId
+      ? remoteComposerGhosts.ghosts
+      : deviceLinkDeviceId === null
+        ? projectGhostComposerEntries(installedGhosts, [...getWorkdirDisabledGhostIds(workingDir)])
+        : [],
+    [deviceLinkDeviceId, remoteComposerGhosts.ghosts, installedGhosts, workingDir],
   );
-  const ghostsForCommand = useMemo(
-    () => filterGhostsForWorkdir(installedGhosts, workingDir),
-    [installedGhosts, workingDir],
-  );
+  const composerGhostsRef = useRef(pluginsForMenu);
+  composerGhostsRef.current = pluginsForMenu;
+  const ghostsForCommand = pluginsForMenu;
   const pluginAvailableIds = useMemo(
     () =>
       new Set(ghostsForCommand.filter((ghost) => ghost.enabled).map((ghost) => ghost.manifest.id)),
@@ -3073,12 +3081,6 @@ export function ChatInput({
   // 统一建议面板的插件条目(旧 `+` 菜单口径的并集):可用项可选,无指令或
   // Host 入口或未生效项保留展示但置灰(entry 级 disabled + 原因)。
   const pluginSuggestions = useMemo<ComposerPluginSuggestion[]>(() => {
-    // device-link 会话的插件运行在被控端；控制端清单既不代表远端已安装
-    // 状态，选择后也无法用本地 InstalledGhost 解析并插入命令。fail-closed：
-    // 仅 deviceLinkDeviceId === null（已确认本机）才展示；undefined（所有权
-    // 尚未解析）与 string（远程）一律隐藏，避免 bootstrap/重连窗口期把控制端
-    // 本地插件项泄漏进可能落为远程的会话。
-    if (deviceLinkDeviceId !== null) return [];
     return pluginsForMenu.map((ghost) => {
       const hasCommand = !!ghost.manifest.command;
       const hasComposerEntry = hasCommand;
@@ -3104,7 +3106,7 @@ export function ChatInput({
               disabledReason: t(
                 !pluginAvailableIds.has(ghost.manifest.id)
                   ? 'extraDirs.pluginDisabled'
-                  : ghost.manifest.skill
+                  : ghost.hasSkill
                     ? 'extraDirs.pluginAgentInvoked'
                     : 'extraDirs.pluginNoCommand',
               ),
@@ -4248,7 +4250,6 @@ export function ChatInput({
   );
 
   // ── Slash / At panel state ─────────────────────────────────────────
-  const trigger: TriggerState = editor ? detectTrigger(editor) : { kind: 'none' };
 
   // Slash commands — palette refactor 后改成 loadAllCommands 一次性拉三源(desktop +
   // agent-builtin + agent-skill); 内部并发, mergeCommands 按优先级合并去重。
@@ -4648,6 +4649,13 @@ export function ChatInput({
         },
       });
     }
+    if (remoteComposerGhosts.failed) {
+      actions.push({
+        id: 'retry-plugins',
+        label: t('extraDirs.retryRemotePlugins'),
+        run: remoteComposerGhosts.reload,
+      });
+    }
     return actions;
   }, [
     collaboration,
@@ -4662,6 +4670,8 @@ export function ChatInput({
     planModeEntry,
     remoteHostId,
     runNewGoalAction,
+    remoteComposerGhosts.failed,
+    remoteComposerGhosts.reload,
     t,
     deviceLinkDeviceId,
     writableDirs,
@@ -5033,7 +5043,7 @@ export function ChatInput({
       if (selectedItem.type === 'file-picker') return;
       if (selectedItem.type === 'plugin-command') {
         if (!selectedItem.pluginId) return;
-        const ghost = installedGhostsRef.current.find(
+        const ghost = composerGhostsRef.current.find(
           (candidate) => candidate.manifest.id === selectedItem.pluginId,
         );
         if (!ghost?.enabled) return;
@@ -5048,7 +5058,7 @@ export function ChatInput({
           .run();
 
         if (ghost.manifest.command) {
-          placeGhostAtComposerStart(editor, ghost, installedGhostsRef.current);
+          placeGhostAtComposerStart(editor, ghost, composerGhostsRef.current);
         }
 
         closeAtPanel();
@@ -5173,6 +5183,7 @@ export function ChatInput({
       // 语音发送等所有入口，确保 host 已登记切换意图后才允许 maker:send。
       if (sessionId && hasPendingAgentSendDispatch(sessionId)) return;
       const sourceSessionId = sessionId;
+      const sourceRemoteGhosts = deviceLinkDeviceId ? composerGhostsRef.current : null;
       const sourceStorageKey = storageKey;
       const sendInFlightKey = sourceStorageKey ?? sourceSessionId ?? '__draft__';
       if (dispatchSendInFlightKeysRef.current.has(sendInFlightKey)) return;
@@ -5536,9 +5547,8 @@ export function ChatInput({
         const mentionsToSend = mentions.length > 0 ? mentions : undefined;
         // 意识 $指令展开(C3d 双触发):`$画图 ...` 开头且命中已唤醒意识时,
         // 追加"必须走 cindy 总机"的机器指令;未命中原样发送。
-        // 读取 useInstalledGhosts 的最新窗口级快照。ghosts:changed 会原子更新
-        // 该快照;发送路径无需同步 IPC,仍按当前工作目录执行同一禁用判定。
-        const eligibleGhosts = filterGhostsForWorkdir(
+        // 远控沿用发送开始时的目标设备快照；本机仍读取最新窗口清单并检查目录禁用。
+        const eligibleGhosts: GhostCommandSource[] = sourceRemoteGhosts ?? filterGhostsForWorkdir(
           installedGhostsRef.current,
           workingDirRef.current,
         );
@@ -5570,7 +5580,7 @@ export function ChatInput({
         }
         let recentUsageMarked = false;
         const markRecentPluginUsage = () => {
-          if (!usedGhost || recentUsageMarked) return;
+          if (!usedGhost || recentUsageMarked || sourceRemoteGhosts) return;
           recentUsageMarked = true;
           void window.electronAPI.ghosts.markUsed(usedGhost.manifest.id).catch((error) => {
             log.warn(

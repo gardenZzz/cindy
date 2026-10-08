@@ -581,6 +581,7 @@ import {
 import { closeSharedTasksBeforeLogout } from './device-link/sharedTaskRuntime.js';
 import { closeSharedTasksBeforeAccountHandover } from './device-link/sharedTaskAccountBoundary.js';
 import { registerSharedTaskIpc } from './device-link/sharedTaskIpc.js';
+import { registerProviderShareIpc } from './device-link/providerShareRuntime.js';
 import {
   getUpdateRelaunchControllers,
   hasInFlightRemoteInvokes,
@@ -968,7 +969,7 @@ import {
   findOpenShareFileInArgv,
   setDeepLinkMainWindow,
   focusMainWindow as activateMainWindow,
-  takePendingDeepLink,
+  takePendingDeepLinkFromRenderer,
 } from './deepLink.js';
 import { createMakeTestWindowBehavior } from './cindy-make/testWindowBehavior.js';
 import { registerFolderContextMenu } from './folderContextMenu.js';
@@ -2948,9 +2949,7 @@ ipcMain.on('app-locale:get-preferred-system-locale-sync', (event) => {
 // renderer 侧 MainLayout mount 后主动拉一次冷启动期间缓存的 deep link /
 // --open-folder payload。pull-on-mount 路径专用,take 一次清空,重复调安全。
 // 详见 deepLink.ts 的 pending buffer 段。
-ipcMain.handle('deep-link:take-pending', () => {
-  return takePendingDeepLink();
-});
+ipcMain.handle('deep-link:take-pending', takePendingDeepLinkFromRenderer);
 
 ipcMain.handle('app-menu:set-locale', (_event, locale: unknown): { ok: true } => {
   currentApplicationMenuLocale = resolveApplicationMenuLocale(
@@ -9493,6 +9492,7 @@ app.on('ready', async () => {
     },
   );
   registerSharedTaskIpc(isSharedTaskAvailable, () => getDeviceLinkStatus() === 'online');
+  registerProviderShareIpc();
   registerFilePeerIpc();
   registerRemoteDesktopIpc(isGlobalVoiceInputOverlaySender, {
     name: getControllerName,

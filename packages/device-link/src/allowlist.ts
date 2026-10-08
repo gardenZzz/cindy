@@ -261,6 +261,9 @@ const CORE_INVOKE_CHANNELS: readonly string[] = [
   // 模型供应商目录(只读):远程会话的模型选择器据此 1:1 镜像被控端的「供应商+模型」结构。
   // 被控端 dispatch 在返回前剥离 routing 等执行字段(见 device-link/dispatch.ts),只回显示用字段。
   'maker:provider:list',
+  // 供应商分享(只读):被控电脑收到的、别人分享给它的供应商目录(经被控电脑代读，手机读不到
+  // 另一个账号的电脑)。只回显示用字段，供手机模型列表的远程供应商区域使用。
+  'maker:provider-share:received-catalogs', // PROVIDER_SHARE_RECEIVED_CATALOGS_CHANNEL
   // Git safety 设置(只读):远程 Codex Rewind 入口必须按被控端是否会创建 safety snapshot
   // 决定显隐。SET/RESET 不放行,控制端不能改被控端全局偏好。
   'maker:git-safety:get',
@@ -519,6 +522,8 @@ const EXTENDED_INVOKE_CHANNELS: readonly string[] = [
   'maker:list-customizations',
   'maker:scan-at-resources',
   // —— 插件列表(只读)——
+  // Public composer metadata only; no paths, secrets, lifecycle writes or shared guests.
+  'ghosts:composer-list',
   'maker:plugins:list',
   // 单个插件的启停状态(只读)。与 maker:plugins:list 同类,差别只在它不跳过
   // HOSTED_ELSEWHERE 插件、且按 id 精确查。准入三条:handler 只读 settings + 项目

@@ -71,6 +71,10 @@
   UI 标注，或涉及两个版本关系的对外文案前，必须先读
   `docs/product-rules/region-and-editions.md`：**无限定词身份归 Global，未显式指定
   区域一律落在 `global`，只标注中国大陆版**。
+- 新增或修改供应商分享（把远程供应商分享给其他账号）、分享链接、分享申请与审批、
+  分享管理页，或受邀者使用分享供应商的任何路径前，必须先读
+  `docs/product-rules/provider-sharing.md`；它为远程 Agent 通道新增跨账号授权，并允许
+  中国大陆版与 Global 互享，与共享任务是两套独立授权。
 - 新增或修改任何界面、组件、布局、样式、动效或 UI 文案前，必须先读权威设计规范
   `docs/design-rules/DESIGN.md`；设计文档索引见
   `docs/design-rules/cindy-design-system.md`。
@@ -88,6 +92,9 @@
   的术语照用，不自造译法；表里没有或拿不准的，在 `i18n/glossary.json` 加
   `status: "proposed"` 条目再讨论。门禁为 `pnpm check:i18n-glossary`，规则见
   `docs/dev-rules/engineering-conventions.md` §5.1。
+- 修改个人 IM 渠道（`apps/desktop/src/main/im/**`）或官方 hook（`hook-control/**`）的
+  找/建任务、命令、排队与插话、输入拼装、事件观察、交互、收尾或停止逻辑前，必须先读
+  `docs/dev-rules/im-turn-flow.md`（入口账本、状态清单、不变量与迁移批次）。
 - 新增或修改**任一 Telegram bot 的用户可见行为**（命令、消息呈现、收口策略、群行为、
   权限口径、附件与表情）前，必须先读能力台账 `docs/product-rules/telegram-bot-parity.md`：
   两个 bot 是两套架构，差异可以有但必须登记在表里；表里标「有意不同」的行**不要去

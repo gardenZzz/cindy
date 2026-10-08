@@ -66,6 +66,12 @@ const mocks = vi.hoisted(() => ({
   clearPendingTurnChangeSets: vi.fn(),
   noteSilentStopUserSend: vi.fn(),
   noteSilentStopSessionReset: vi.fn(),
+  // 与生产同语义的最小替身: 统一停止按 id 取**当前** runtime 并中止(唯一的一次 abort)。
+  stopSessionTurnExplicitly: vi.fn(async (sessionId: string): Promise<void> => {
+    await (mocks.getMaker() as { getSession(id: string): { abort(): Promise<void> } | undefined })
+      .getSession(sessionId)
+      ?.abort();
+  }),
   onSilentStopSettled: vi.fn(() => vi.fn()),
   installDesktopInteractionListener: vi.fn(),
   takePendingInteractionsForSession: vi.fn(),
@@ -157,6 +163,7 @@ vi.mock('../../../maker-ipc/register', () => ({
   takePendingInteractionsForSession: mocks.takePendingInteractionsForSession,
   noteSilentStopUserSend: mocks.noteSilentStopUserSend,
   noteSilentStopSessionReset: mocks.noteSilentStopSessionReset,
+  stopSessionTurnExplicitly: mocks.stopSessionTurnExplicitly,
   onSilentStopSettled: mocks.onSilentStopSettled,
 }));
 
@@ -444,6 +451,8 @@ interface TurnOverrides {
   groupHistoryAccess?: GroupHistoryAccessScope;
   prePersistedUserMessage?: { sessionId: string; clientId: string };
   onEarlyReject?: (reason: string, text: string) => Promise<boolean> | boolean;
+  attachments?: ImRunAgentTurnArgs['attachments'];
+  replyContext?: ImRunAgentTurnArgs['replyContext'];
 }
 
 async function runDefaultTurn(onTurnComplete = vi.fn(), overrides: TurnOverrides = {}) {
@@ -461,7 +470,8 @@ async function startDefaultTurn(onTurnComplete = vi.fn(), overrides: TurnOverrid
     ...(overrides.agentText ? { agentText: overrides.agentText } : {}),
     ...(overrides.channelNoteSource ? { channelNoteSource: overrides.channelNoteSource } : {}),
     contextSnapshot: overrides.contextSnapshot,
-    attachments: [],
+    attachments: overrides.attachments ?? [],
+    ...(overrides.replyContext ? { replyContext: overrides.replyContext } : {}),
     onTurnComplete,
     ...(overrides.onRouteResolved ? { onRouteResolved: overrides.onRouteResolved } : {}),
     ...(overrides.protectedContent === true ? { protectedContent: true } : {}),
@@ -833,6 +843,52 @@ describe('turnRunner send outcome policy (feishu adapter characterization)', () 
     expect(sendOptions?.[MAIN_OWNED_SEND_CONTEXT]).toEqual({
       origin: { kind: 'im', channel: 'feishu', taskId: 'msg-user' },
       rawChannelText: 'pi install npm:context-mode',
+    });
+  });
+
+  describe('Auto-review references', () => {
+    const quotedScreenshot = {
+      attachments: [{ kind: 'image' as const, absPath: '/media/quoted.png', originalName: 'quoted.png', mimeType: 'image/png' }],
+      replyContext: { author: '群友', text: '[图片]', attachmentCount: 1 },
+    };
+    const expected = {
+      attachments: { images: 1, files: 0 },
+      quotedMessages: [{ author: '群友', text: '[图片]', attachmentCount: 1 }],
+    };
+
+    it('stamps the replied-to message and attachments beside the raw channel text', async () => {
+      const h = setupSession(async () => ({ accepted: true }));
+      await runDefaultTurn(vi.fn(), {
+        text: '这啥情况',
+        agentText: '<reply_context>\n[群友] [图片]\n</reply_context>\n这啥情况',
+        ...quotedScreenshot,
+      });
+      expect(h.send.mock.calls[0]?.[1]?.[MAIN_OWNED_SEND_CONTEXT]).toEqual({
+        origin: { kind: 'im', channel: 'feishu', taskId: 'msg-user' },
+        rawChannelText: '这啥情况',
+        autoReviewReferences: expected,
+      });
+    });
+
+    it('keeps the same references when a SESSION_RUNNING race requeues the message', async () => {
+      vi.useFakeTimers();
+      try {
+        const err = Object.assign(new Error('SESSION_RUNNING'), { code: 'SESSION_RUNNING' });
+        const h = setupSession(async () => ({ accepted: true }));
+        h.send.mockRejectedValueOnce(err);
+        await runDefaultTurn(vi.fn(), { text: '这啥情况', ...quotedScreenshot });
+        await flushMicrotasks();
+        await vi.advanceTimersByTimeAsync(600);
+        expect(h.send).toHaveBeenCalledTimes(2);
+        expect(h.send.mock.calls[1]?.[1]?.[MAIN_OWNED_SEND_CONTEXT]).toMatchObject({
+          rawChannelText: '这啥情况',
+          autoReviewReferences: expected,
+        });
+        h.emit({ type: 'done', data: {} });
+        await vi.runOnlyPendingTimersAsync();
+      } finally {
+        vi.useRealTimers();
+      }
     });
   });
 
@@ -3243,7 +3299,10 @@ describe('turnRunner send outcome policy (feishu adapter characterization)', () 
       userId: 'ou_user',
     });
     expect(result.stopped).toBe(true);
-    expect(mocks.noteSilentStopSessionReset).toHaveBeenCalledWith('feishu-session');
+    // 与桌面 Stop 同一套清理: 统一停止入口负责撤续跑守卫与唯一的一次 abort,
+    // turnRunner 自己不再直接 abort(重复中止会向 vendor 发两次 interrupt)。
+    expect(mocks.noteSilentStopSessionReset).not.toHaveBeenCalled();
+    expect(mocks.stopSessionTurnExplicitly).toHaveBeenCalledWith('feishu-session');
     expect(h.abort).toHaveBeenCalledTimes(1);
 
     const settleCb = (mocks.onSilentStopSettled.mock.calls[0] as unknown[])[1] as (

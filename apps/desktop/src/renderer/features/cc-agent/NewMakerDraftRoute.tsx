@@ -62,6 +62,8 @@ import {
 } from '@/components/new-chat/AddRemoteProjectDialog';
 import { useHasAnyRemoteTarget } from '@/hooks/useHasAnyReadyRemoteHost';
 import { useSelectableDevices } from '@/hooks/useControllableDevices';
+import { useProviderShareAgentDevices } from '@/features/provider-share/useProviderShareAgentDevices';
+import { isProviderShareAgentDeviceId } from '../../../shared/providerShare';
 import { useProviderOnboarding } from '@/hooks/useProviderOnboarding';
 import { HomeZeroModelAction } from './HomeZeroModelAction';
 import { resolveDeviceLinkSubmission } from './deviceLinkCreateArgs';
@@ -196,9 +198,6 @@ import {
 import { filterGhostsForWorkdir } from '@/cindy-brain/ghostWorkdirFilter';
 import type { Effort, PermissionMode } from '@/lib/userPreferences.types';
 import {
-  categorizeByFilename,
-  categorizeFile,
-  extractExt,
   type AttachedFile,
   type MentionedResource,
 } from '@/lib/fileTypes';
@@ -907,26 +906,6 @@ export function NewMakerDraftRoute() {
       text: stripLocalMentionChips(composerDraft.text),
     });
   }, []);
-  /**
-   * 丢掉路径型(非图片)附件 —— 触发条件是**文件系统变了**,即换设备。
-   *
-   * 与 chip 相反,附件存的是**绝对**路径(useAttachments 落 `raw.path`)。所以同一台机器上换项目
-   * 它们仍然有效,不该丢;只有跨设备(远程→远程、远程→本机,方向无关)那条绝对路径才会失效 ——
-   * attachment-path-passthrough 之后非图片附件只把 path 透传给模型(agent 自己用 Read 读),
-   * 而 rehomeDraftAttachments 只重整图片、非图片原样返回,于是要么读不到,要么读到同路径下一个
-   * 毫不相关的文件(后者更糟,用户不会发现)。图片走 xdt-image:// 缓存、不依赖对端文件系统,不受影响。
-   *
-   * 这两件事原先合在一个 cleanupCrossFilesystemDraftContext 里、由同一个条件驱动,于是必然有一边
-   * 是错的:按设备触发就漏掉同机换项目的 chip(上面那条 P1),按项目触发又会在同机换项目时误丢
-   * 用户的附件。拆开之后各自绑住自己真正的解析基准。
-   */
-  const dropPathBackedAttachments = useCallback(() => {
-    const stranded = attachmentState.attachments.filter((f) => f.category !== 'image');
-    if (stranded.length === 0) return;
-    for (const f of stranded) attachmentState.removeFile(f.id);
-    // 只有附件给 toast:chip 是可见的文字、重打一次就有,附件从托盘里无声消失只会被当成 bug。
-    toast.info(t('newChat.deviceSwitcher.attachmentsDropped', { count: stranded.length }));
-  }, [attachmentState, t]);
   const effectiveWorkingDir = draft.workingDir;
   const effectiveRemoteHostId = draft.remoteHostId;
   const isRemoteProjectDraft = effectiveWorkingDir != null && effectiveRemoteHostId != null;
@@ -947,15 +926,20 @@ export function NewMakerDraftRoute() {
    * 模型 = Agent 在那台运行)。只有已允许远程调用的供应商会投影出来;没有可用供应商的
    * 设备不会占模型列表的位置。当前落点即使掉线也保留,让用户看得到、换得回来。
    */
+  // 供应商分享：别人分享给我的供应商(`share:<id>`)同样是落点，只并进模型选择器，不进设备切换器。
+  const { devices: providerShareDevices } =
+    useProviderShareAgentDevices([effectiveAgentDeviceId]);
   const remoteAgentDevices = useMemo(
-    () =>
-      selectableDevices
+    () => [
+      ...selectableDevices
         .filter(
           (device) =>
             device.online || device.deviceId === effectiveAgentDeviceId,
         )
         .map(({ deviceId, name }) => ({ deviceId, name })),
-    [selectableDevices, effectiveAgentDeviceId],
+      ...providerShareDevices,
+    ],
+    [selectableDevices, providerShareDevices, effectiveAgentDeviceId],
   );
   /**
    * 模型目录所在的电脑:任务建到远程设备时是那台;Agent 在另一台电脑运行时也是那台(模型、
@@ -1068,85 +1052,6 @@ export function NewMakerDraftRoute() {
     wtBranchPreferenceErrorRef.current = false;
     setWtBranchPreferenceError(false);
   }, []);
-  /**
-   * 远程草稿的附件闸门:**先选设备、之后再拖进来的**路径型附件同样进不了对端(Codex review P1)。
-   *
-   * 换设备时的 cleanupCrossFilesystemDraftContext 只能清掉「切换那一刻已经在托盘里」的,管不到
-   * 之后新加的;而 rehomeDraftAttachments 只重整图片、非图片原样返回,于是那条**控制端**绝对路径
-   * 会随首条消息发到对端 —— 要么读不到,要么读到同路径下一个毫不相关的文件。两者一起才构成
-   * 「远程草稿绝不携带控制端路径附件」这条不变量,少一半就等于留着一条口子。
-   *
-   * 为什么是拒绝而不是「传上去」:把文件送到对端需要一个能在对端写字节的通道,而 device-link
-   * 的 invoke allowlist 里没有、也不该为此加一个写通道 —— 那是权限边界变更,不属于本 PR。
-   * 所以在用户动作发生的那一刻就明确拒绝并说明,而不是等发送时静默丢掉(那才像 bug)。
-   * 图片不受影响:它们走 xdt-image:// 缓存,由 rehomeDraftAttachments 正常搬运。
-   *
-   * 包一层而不是改 useAttachments:这条限制只属于「创建页 + 远程草稿」这个语境,
-   * 会话中途与本机草稿都不该被它影响。ChatInput 与本路由自己的拖拽 / 粘贴入口共用这一份,
-   * 免得又出现「只堵了一半」。
-   */
-  const guardedAttachmentState = useMemo(() => {
-    if (!isDeviceLinkDraft) return attachmentState;
-    return {
-      ...attachmentState,
-      addFiles: async (fileList: FileList | readonly File[]) => {
-        const incoming = Array.from(fileList);
-        // 判据必须与下游**同口径**(Codex review 第 29 轮 P1)。原来这里用 `f.type.startsWith('image/')`,
-        // 而 useAttachments 的分类**完全不看 MIME** —— 它先 extractExt(name) → categorizeFile,
-        // 扩展名认不出来才 peekFileHeader 按魔数推断。于是 Electron 给空 / 通用 `File.type` 时
-        // (某些平台与拖拽源就是如此,重命名过的图片更是必然),一张 useAttachments 明明能正确识别的
-        // 图片会被这道闸门拦掉,而且**只在远程草稿下**如此:用户切回本机就能加,现象极难理解。
-        //
-        // 所以改成「只拒绝**明确**是非图片的」:
-        //   · 分类为 image → 放行;
-        //   · 扩展名 / 文件名认不出类别(category 为 null)→ 也放行 —— 交给 useAttachments 的文件头
-        //     推断,推断出非图片会被下方的收敛式不变量 effect 移除并 toast;
-        //   · 分类为明确的非图片(pdf / text / …)→ 就地拒绝并说明。
-        //
-        // 这也让两道防线的分工彻底清楚:闸门是 **best-effort 的即时反馈**(用户动作那一刻就知道为什么),
-        // 收敛器才是**权威不变量**(不论从哪条路进来,远程草稿里绝不留下路径型附件)。闸门宁可放过、
-        // 绝不误拒;真正的兜底不靠它。
-        const definitelyNonImage = (f: File): boolean => {
-          const ext = extractExt(f.name);
-          const category = ext ? categorizeFile(ext) : categorizeByFilename(f.name);
-          if (!category) return false; // 未知 → 不在这里下结论
-          return category !== 'image';
-        };
-        const rejected = incoming.filter(definitelyNonImage);
-        const passed = incoming.filter((f) => !definitelyNonImage(f));
-        if (rejected.length > 0) {
-          toast.warning(
-            t('newChat.deviceSwitcher.attachmentsRemoteUnsupported', { count: rejected.length }),
-          );
-        }
-        if (passed.length > 0) await attachmentState.addFiles(passed);
-      },
-    };
-  }, [isDeviceLinkDraft, attachmentState, t]);
-  /**
-   * 「远程草稿绝不携带控制端路径附件」的**收敛器** —— 兜住所有按路径逐个堵会漏掉的入口。
-   *
-   * 为什么单靠上面那个 addFiles 闸门不够(Codex review P1):`useAttachments.addFiles` 对未知扩展名
-   * 的文件要先 await `peekFileHeader` 猜类型,附件是在那次 IPC 回来之后才进 state 的。于是存在这条
-   * 时序 —— 本机草稿下拖入一个未知扩展名文件 → 在 IPC 往返期间切到远程设备 → 切换时的清理找不到它
-   * (还没进 state)→ IPC 回来后它被追加进去,而那次调用握的是**切换前**取到的真 addFiles,绕过了
-   * 闸门。下一次发送就把控制端绝对路径发给对端。
-   *
-   * 这个 hook 在本 PR 的 review 里已经按「入口」被抓漏三次(切换时清理 → 加时闸门 → 这条在途摄入),
-   * 所以这次不再补第四个入口,改成维护**不变量**:只要远程草稿里出现了非图片附件,不论它从哪条路
-   * 进来的,都移除并说明。之后任何新入口都自动被覆盖。
-   *
-   * 与另两处的关系(别当成重复删掉任何一个):闸门让用户在动作发生那一刻就得到明确拒绝、文件根本
-   * 不进 state;切换时的同步清理让附件在下一帧之前就消失、且顺带处理 mention chip;这条是最后一道
-   * 网,只在前两者都没拦住时才动。
-   */
-  useEffect(() => {
-    if (!isDeviceLinkDraft) return;
-    const stranded = attachmentState.attachments.filter((f) => f.category !== 'image');
-    if (stranded.length === 0) return;
-    for (const f of stranded) attachmentState.removeFile(f.id);
-    toast.info(t('newChat.deviceSwitcher.attachmentsDropped', { count: stranded.length }));
-  }, [isDeviceLinkDraft, attachmentState.attachments, attachmentState.removeFile, t]);
   // 零可用模型引导卡:device-link 草稿不出(连接态在被控端,本机替它连不上)。
   const providerOnboarding = useProviderOnboarding();
   const showProviderOnboardingCard = providerOnboarding.visible && !isDeviceLinkDraft;
@@ -2110,9 +2015,12 @@ export function NewMakerDraftRoute() {
     : supportsFastMode
       ? resolveDraftFast(calibratedDraftModel)
       : false;
-  // 计划模式草稿态:仅本地草稿支持(device-link 远程草稿 v1 不透传,入口也不显示;
-  // 创建后进会话仍可经运行时隧道切换)。
-  const effectivePlanMode = isDeviceLinkDraft ? false : chatPrefs.planMode === true;
+  // 远程开关仅属于这台设备的当前引擎，不读写控制端的本机偏好。
+  const remotePlanKey = `${effectiveDeviceLinkDeviceId ?? ''}:${capabilityAgentKind}`;
+  const [remoteDraftPlan, setRemoteDraftPlan] = useState<{ key: string; enabled: boolean } | null>(null);
+  const effectivePlanMode = isDeviceLinkDraft
+    ? capabilities?.planMode?.supported === true && remoteDraftPlan?.key === remotePlanKey && remoteDraftPlan.enabled
+    : chatPrefs.planMode === true;
 
   // 选中模型 + effort:device-link 用镜像 holder(deviceLinkInitial,被控端草稿值已按 capabilities
   // 校准);本地草稿用 chatPrefs(逐字节不变)。device-link 在 holder seed 完成前(等隧道 / 能力)
@@ -2364,9 +2272,8 @@ export function NewMakerDraftRoute() {
       });
       const workingDirChanged = req.workingDir !== draft.workingDir;
 
-      // chip 绑 workingDir;附件绑设备。两者条件不同,见各自函数的注释。
+      // 引用绑定目标目录；控制端附件由出站上传层搬运，切换设备时保留。
       if (deviceChanged || workingDirChanged) stripProjectRelativeMentions();
-      if (deviceChanged) dropPathBackedAttachments();
 
       // 作废那三个无 TTL 快照 —— 但**不是**「指向设备就做」(Codex review 第 30 轮 P1,我上一轮
       // 收敛时写错的条件)。evict 不是幂等清理,而是一次**有副作用的状态转移**:它 notify
@@ -2489,7 +2396,6 @@ export function NewMakerDraftRoute() {
       draft.workingDir,
       capabilityAgentKind,
       stripProjectRelativeMentions,
-      dropPathBackedAttachments,
     ],
   );
 
@@ -2872,13 +2778,16 @@ export function NewMakerDraftRoute() {
     [isDeviceLinkDraft, patchActivePrefs],
   );
   // 计划模式草稿开关:写当前 vendor prefs(发送建会话时经 planModeEnabled 落库)。
-  // device-link 远程草稿不显示入口(onPlanModeChange 不下发),这里只处理本地。
+  // 远程草稿随创建参数提交，不修改被控端的新建默认值。
   const handlePlanModeChange = useCallback(
     (enabled: boolean) => {
-      if (isDeviceLinkDraft) return;
+      if (isDeviceLinkDraft) {
+        setRemoteDraftPlan({ key: remotePlanKey, enabled });
+        return;
+      }
       patchActivePrefs({ planMode: enabled });
     },
-    [isDeviceLinkDraft, patchActivePrefs],
+    [isDeviceLinkDraft, remotePlanKey, patchActivePrefs],
   );
   // 用户在草稿里切来源 → 记进当前 vendor 的 prefs(切 vendor / 重启后由 initialProviderId 回填,
   // 发送时也以此为准)。null = 清除显式选择,回落默认路由。与 model/effort 同口径。
@@ -3198,8 +3107,13 @@ export function NewMakerDraftRoute() {
 
   // 运行 Agent 的电脑同理：被解除配对 / 撤销远程控制后不再可选，回到「Agent 在本机」。
   // 任务本来就在本机，项目、附件与草稿都不用动。
+  // 分享来的供应商(`share:<id>`)不在设备列表里，也不自动回落：已收到的分享由同区域与跨区域
+  // 两路分别加载，任一路还没到或暂时失败时列表并不完整，不能据此判定分享已不在。草稿保留原
+  // 选择，发送时由主进程给出「已暂停 / 已不可用」的原因，用户可换模型。
   useEffect(() => {
-    if (!effectiveAgentDeviceId || !selectableDevicesLoaded) return;
+    if (!effectiveAgentDeviceId) return;
+    if (isProviderShareAgentDeviceId(effectiveAgentDeviceId)) return;
+    if (!selectableDevicesLoaded) return;
     if (selectableDevices.some((d) => d.deviceId === effectiveAgentDeviceId)) return;
     log.warn('[new-maker] selected agent computer is no longer selectable, running the agent here');
     patchDraft({ agentDeviceId: null, agentDeviceName: null });
@@ -3911,6 +3825,7 @@ export function NewMakerDraftRoute() {
                 effort,
                 permissionMode,
                 fastMode: effectiveFastMode,
+                planModeEnabled: effectivePlanMode,
                 providerId,
               },
               deviceProviders,
@@ -4033,6 +3948,7 @@ export function NewMakerDraftRoute() {
               makerChatStore.setSessionRuntime(remoteSessionId, {
                 agentKind: createArgs.agentKind,
                 fastMode: createArgs.fastMode,
+                planModeEnabled: createArgs.planMode ?? false,
                 sessionProviderId: createArgs.providerId ?? null,
               });
               const preNavDraft = getComposerDraft(NEW_MAKER_DRAFT_KEY);
@@ -5029,6 +4945,7 @@ export function NewMakerDraftRoute() {
               effort: draftInitialEffort,
               permissionMode: chatInitialPermissionMode,
               fastMode: effectiveFastMode,
+              planModeEnabled: effectivePlanMode,
               providerId: chatInitialProviderId,
             },
             deviceProviders,
@@ -5401,6 +5318,7 @@ export function NewMakerDraftRoute() {
       draftInitialEffort,
       chatInitialPermissionMode,
       effectiveFastMode,
+      effectivePlanMode,
       effectiveRemoteHostId,
       effectiveExtraDirs,
       chatInitialProviderId,
@@ -5450,15 +5368,15 @@ export function NewMakerDraftRoute() {
   // 点击后走安装引导、不会立即填入,只显示建议本身。插件清单变化时随之重算。
   // 可用插件表按插件清单与工作目录缓存:filterGhostsForWorkdir 会同步查询目录禁用表,
   // 不能在每次渲染 / 每条建议上重复调用。
-  const installedGhosts = useInstalledGhosts();
+  const installedGhosts = useInstalledGhosts(!isDeviceLinkDraft);
   const usableSuggestionGhosts = useMemo(
     () =>
       new Map(
-        filterGhostsForWorkdir(installedGhosts, effectiveWorkingDir)
+        (isDeviceLinkDraft ? [] : filterGhostsForWorkdir(installedGhosts, effectiveWorkingDir))
           .filter((g) => g.enabled)
           .map((g) => [g.manifest.id, g]),
       ),
-    [effectiveWorkingDir, installedGhosts],
+    [isDeviceLinkDraft, effectiveWorkingDir, installedGhosts],
   );
   const suggestionComposerText = useCallback(
     (suggestion: HomeTaskSuggestion) => {
@@ -5666,7 +5584,7 @@ export function NewMakerDraftRoute() {
           if (droppedItems.files.length > 0) {
             e.preventDefault();
             e.stopPropagation();
-            guardedAttachmentState.addFiles(droppedItems.files);
+            attachmentState.addFiles(droppedItems.files);
           }
           if (droppedItems.unclassified.length > 0) {
             // Do not synchronously consume item-less entries: a single
@@ -5677,7 +5595,7 @@ export function NewMakerDraftRoute() {
               classifyPath: (path) =>
                 window.electronAPI.localDb.sessionShare.classifyPath({ path }),
             }).then(({ files }) => {
-              if (files.length > 0) guardedAttachmentState.addFiles(files);
+              if (files.length > 0) attachmentState.addFiles(files);
             });
           }
         }}
@@ -5858,7 +5776,7 @@ export function NewMakerDraftRoute() {
                     initialPermissionMode={chatInitialPermissionMode}
                     initialProviderId={chatInitialProviderId}
                     planModeEnabled={effectivePlanMode}
-                    onPlanModeChange={isDeviceLinkDraft ? undefined : handlePlanModeChange}
+                    onPlanModeChange={handlePlanModeChange}
                     fastMode={effectiveFastMode}
                     onFastModeChange={handleFastModeChange}
                     onWorkingDirChange={handleWorkingDirChange}
@@ -5947,7 +5865,7 @@ export function NewMakerDraftRoute() {
                     }
                     narrowToolbar={isDraftToolbarNarrow}
                     paletteMaxHeight={240}
-                    attachmentState={guardedAttachmentState}
+                    attachmentState={attachmentState}
                     draftKey={NEW_MAKER_DRAFT_KEY}
                     focusOnStorageKeyChange
                     // 「+」始终显示(与对话界面一致):无项目裸态也可加引用目录,作为本次对话的上下文。
