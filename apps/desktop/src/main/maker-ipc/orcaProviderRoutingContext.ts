@@ -61,6 +61,7 @@ export function deviceWorkerRoutingContext(views: ProviderView[], agent: AgentKi
   const availability = {
     'claude-code': availabilityFor('claude-code'),
     codex: availabilityFor('codex'),
+    cursor: availabilityFor('cursor'),
     pi: availabilityFor('pi'),
   };
   const models = deviceRoutableModels(views, agent);

@@ -3375,7 +3375,7 @@ function ModelSelectorContentView({
               }
               if (relocate) {
                 const agent = vendorKeyToAgentKind(rowConfig.engine);
-                if (!agent) return false;
+                if (!agent || !providerId) return false;
                 return relocateRow(
                   {
                     providerId,
@@ -3415,7 +3415,7 @@ function ModelSelectorContentView({
               }
               if (relocate) {
                 const agent = vendorKeyToAgentKind(rowConfig.engine);
-                if (!agent) return false;
+                if (!agent || !providerId) return false;
                 return relocateRow(
                   {
                     providerId,

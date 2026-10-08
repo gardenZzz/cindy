@@ -196,6 +196,9 @@ export function createGhostErrandRunner(deps: GhostErrandRunnerDeps): GhostErran
     }
     if (sessionId && (!row || !sessionMatchesConfig(row, execution, permissionMode, effectiveDir))) sessionId = null;
     if (!sessionId) {
+      if (execution.agentKind === 'cursor') {
+        return failure('SESSION_UNAVAILABLE', '插件任务不支持 Cursor');
+      }
       const ghostName = deps.getGhostName(request.ghostId);
       try {
         sessionId = await deps.createSession({

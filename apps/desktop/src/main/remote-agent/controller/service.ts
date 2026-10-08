@@ -123,6 +123,9 @@ export function createDeviceAgentStarter(deps: DeviceAgentServiceDeps) {
         }
       }
     }
+    if (input.agentKind === 'cursor') {
+      throw new Error('Cursor cannot run its agent on another computer');
+    }
     return startRemoteAgentSession(input.agentKind, opts, {
       invoke: poller.invoke,
       poller,

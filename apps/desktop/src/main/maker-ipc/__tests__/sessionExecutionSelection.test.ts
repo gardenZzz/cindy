@@ -8,6 +8,7 @@ const routing = {
   availability: {
     codex: [{ id: 'openai', name: 'OpenAI', models: [caller.model] }],
     pi: [{ id: 'xd', name: 'Cindy AI', models: [panel.model] }],
+    cursor: [],
     'claude-code': [{ id: 'xd', name: 'Cindy AI', models: [panel.model] }, { id: 'glm', name: 'GLM', models: ['glm-5.3'] }],
   },
   resolveDefaultProviderIdForModel: (agent: string, model: string) =>

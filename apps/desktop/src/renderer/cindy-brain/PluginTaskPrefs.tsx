@@ -159,7 +159,7 @@ export function PluginTaskPrefs({
             return save({
               ...config,
               agentKind: engine,
-              providerId,
+              providerId: providerId ?? undefined,
               model: modelId,
               effort: TASK_EFFORTS.has(effort ?? '') ? effort : undefined,
               fastMode: fast,

@@ -11199,8 +11199,11 @@ export function registerMakerIpc(maker: Maker, options: RegisterMakerIpcOptions)
       try {
         const execution = await resolveSessionExecution(selection, sourceSessionId);
         assertPlugin(pluginId);
-        if (!execution.providerId) return routeUnavailable();
-        return { ...execution, agentKind: execution.agentKind === 'claude-code' ? 'cc' : execution.agentKind,
+        const pluginAgent = execution.agentKind === 'claude-code' ? 'cc' : execution.agentKind;
+        if (!execution.providerId || (pluginAgent !== 'cc' && pluginAgent !== 'codex' && pluginAgent !== 'pi')) {
+          return routeUnavailable();
+        }
+        return { ...execution, agentKind: pluginAgent,
           providerId: execution.providerId, effort: execution.effort ?? '' };
       } catch (error) {
         throw new PluginTaskError('ROUTE_UNAVAILABLE', error instanceof Error ? error.message : '任务模型不可用，请重新选择');
@@ -11293,11 +11296,14 @@ export function registerMakerIpc(maker: Maker, options: RegisterMakerIpcOptions)
         // A queued input will execute the accepted next-send route. Keep its
         // receipt stable as a deferred model/Harness switch reaches that boundary.
         const selected = runtime?.pendingMutation?.profile ?? runtime?.effective;
+        const selectedKind = selected
+          ? (selected.agentKind === 'claude-code' ? 'cc' : selected.agentKind)
+          : row.agentKind;
+        if (selectedKind !== 'cc' && selectedKind !== 'codex' && selectedKind !== 'pi') return null;
         const resolvedConfig: PluginTaskRoute = selected
-          ? { agentKind: selected.agentKind === 'claude-code' ? 'cc' : selected.agentKind,
-            providerId: selected.providerId ?? '', model: selected.model,
+          ? { agentKind: selectedKind, providerId: selected.providerId ?? '', model: selected.model,
             effort: selected.effort ?? '', fastMode: selected.fastMode }
-          : { agentKind: row.agentKind as PluginTaskRoute['agentKind'], providerId: row.providerId ?? '', model: row.model, effort: row.effort, fastMode: row.fastMode };
+          : { agentKind: selectedKind, providerId: row.providerId ?? '', model: row.model, effort: row.effort, fastMode: row.fastMode };
         const revision = Number.parseInt(pluginTaskConfigHash('sha256').update(JSON.stringify([resolvedConfig, row.permissionMode, row.planModeEnabled, row.workingDir, row.status, row.orcaRole])).digest('hex').slice(0, 12), 16);
         return { taskId, title: row.title, status: row.status, revision, resolvedConfig, workingDir: row.workingDir ?? undefined, permissionMode: row.permissionMode, planModeEnabled: !!row.planModeEnabled };
       },
@@ -11812,11 +11818,13 @@ export function registerMakerIpc(maker: Maker, options: RegisterMakerIpcOptions)
       const config = readPluginTaskConfig(params.ghostId);
       const execution = await resolveSessionExecution(config, params.sourceSessionId);
       assertOwner();
+      const pluginAgent = execution.agentKind === 'claude-code' ? 'cc' : execution.agentKind;
+      if (pluginAgent !== 'cc' && pluginAgent !== 'codex' && pluginAgent !== 'pi') return null;
       const sessionId = await createPluginDraftSession({
         ...params,
         shouldContinue: () => { assertOwner(); return (params.shouldContinue?.() ?? true)
           && JSON.stringify(readPluginTaskConfig(params.ghostId)) === JSON.stringify(config); },
-        defaults: { ...execution, effort: execution.effort ?? '', permissionMode: clampPluginTaskPermissionMode(config.permissionMode), agentKind: execution.agentKind === 'claude-code' ? 'cc' : execution.agentKind },
+        defaults: { ...execution, effort: execution.effort ?? '', permissionMode: clampPluginTaskPermissionMode(config.permissionMode), agentKind: pluginAgent },
         notifySessionCreated: (info) => notifyGhostSessionEvent('created', info),
       });
       if (!sessionId) return null;

@@ -162,7 +162,7 @@ export interface MakerSessionAgentSwitchHandlerDeps {
    */
   assertAgentDeviceRouteUsable?(
     deviceId: string,
-    agent: 'claude-code' | 'codex' | 'pi',
+    agent: AgentKind,
     model: string,
     providerId: string | null,
   ): Promise<void>;

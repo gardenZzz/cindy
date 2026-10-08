@@ -32,6 +32,7 @@ export type VendorIconKind = 'cc' | 'codex' | 'cursor' | 'pi';
 const REMOTE_SIGNAL_ANCHOR: Record<VendorIconKind, { x: number; y: number }> = {
   cc: { x: 0.95, y: 0.13 },
   codex: { x: 0.9, y: 0.1 },
+  cursor: { x: 0.88, y: 0.12 },
   pi: { x: 0.83, y: 0.36 },
 };
 
