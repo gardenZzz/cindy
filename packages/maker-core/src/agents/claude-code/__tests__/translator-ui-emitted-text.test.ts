@@ -201,7 +201,8 @@ describe('Claude Code translator uiEmittedText accounting and truncation fallbac
     pushAssistantText(queue, ctx, '主流。');
 
     await drain(queue);
-    expect(ctx.turn.uiEmittedText).toBe('子代理。主流。');
+    // 子代理文本按 upstream #5549 隔离不进根 uiEmittedText，仅主流文本计入
+    expect(ctx.turn.uiEmittedText).toBe('主流。');
     expect(ctx.rt.streamStopTokenByKey.get('toolu-child:0')).toEqual({
       pending: '',
       emitted: true,
@@ -216,7 +217,8 @@ describe('Claude Code translator uiEmittedText accounting and truncation fallbac
     pushAssistantText(queue, ctx, '子代理。', 'toolu-child');
 
     await drain(queue);
-    expect(ctx.turn.uiEmittedText).toBe('主流。子代理。');
+    // 子代理文本按 upstream #5549 隔离不进根 uiEmittedText，仅主流文本计入
+    expect(ctx.turn.uiEmittedText).toBe('主流。');
     expect(ctx.rt.streamStopTokenByKey.get('__main__:0')).toEqual({
       pending: '',
       emitted: true,

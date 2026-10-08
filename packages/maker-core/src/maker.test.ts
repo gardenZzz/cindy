@@ -569,6 +569,21 @@ describe('Maker local Pi package generation fence', () => {
 });
 
 describe('Maker session creation singleflight', () => {
+  it('persists the durable resume id while exposing a distinct transient request id', async () => {
+    const storage = createStorage();
+    const handle = { ...createHandle({ id: 'sdk-source', agentKind: 'claude-code' }), requestSessionId: 'sdk-unaccepted-fork' };
+    const maker = new Maker({
+      agents: { 'claude-code': createAgent(async () => handle, 'claude-code') },
+      storage, logger: createLogger(),
+    });
+    const session = await maker.createSession({ id: 'fork-task', agentKind: 'claude-code', workingDir: '/fixture', model: 'grok-4.6' });
+    expect(session.sdkSessionId).toBe('sdk-source');
+    expect(session.requestSessionId).toBe('sdk-unaccepted-fork');
+    expect((await storage.get('fork-task'))?.sdkSessionId).toBe('sdk-source');
+    await maker.closeSession('fork-task');
+    expect((await storage.get('fork-task'))?.sdkSessionId).toBe('sdk-source');
+  });
+
   it('reports the effective runtime cwd when recovering an existing task elsewhere', async () => {
     const storage = createStorage();
     await storage.create({ id: 'recovered-cwd', agentKind: 'codex', workDir: '/original', title: 'Existing task', model: 'test-model' });
@@ -1362,14 +1377,14 @@ describe('Maker Cursor prewarm (claim-if-ready)', () => {
     const bootstrapReady = new Promise<void>((resolve) => {
       resolveBootstrap = resolve;
     });
-    const startSession = vi.fn(async (opts: { sessionId: string }) =>
+    const startSession = vi.fn(async (opts: { sessionId?: string }) =>
       createHandle({
         id: 'cursor-sdk',
         agentKind: 'cursor',
         model: 'auto',
         bootstrapReady,
         close: vi.fn(async () => {
-          closed.push(opts.sessionId);
+          closed.push(opts.sessionId ?? '');
         }),
       }),
     );
@@ -2047,16 +2062,20 @@ describe('Maker start-option lifecycle hooks', () => {
     expect(onStartCleanupSucceeded).not.toHaveBeenCalled();
   });
 
-  it.each([new TypeError('startup RPC failed'), 'non-Error startup failure'])(
-    'releases only the confirmed-stopped startup and preserves its original error: %s', async (startupError) => {
+  it.each((['codex', 'claude-code', 'pi'] as const).flatMap((kind) =>
+    [new TypeError('startup RPC failed'), 'non-Error startup failure'].map((error) => ({ kind, error }))))(
+    'releases only the confirmed-stopped $kind startup and permits a fresh task: $error', async ({ kind, error: startupError }) => {
       const otherStartup = {} as CreateSessionOptions;
       const leased = new Set<CreateSessionOptions>([otherStartup]);
       const onStartFailed = vi.fn(({ options, runtimeMayBeAlive }: SessionStartFailureContext) => {
         if (!runtimeMayBeAlive) leased.delete(options);
       });
       const onStartCleanupSucceeded = vi.fn();
+      const startSession = vi.fn()
+        .mockRejectedValueOnce(new AgentStartupStoppedError(startupError))
+        .mockResolvedValueOnce(createHandle({ id: 'fresh-sdk-session' }));
       const maker = new Maker({
-        agents: { pi: createAgent(vi.fn().mockRejectedValue(new AgentStartupStoppedError(startupError)), 'pi') },
+        agents: { [kind]: createAgent(startSession, kind) },
         storage: createStorage(), logger: createLogger(),
         lifecycleHooks: {
           prepareStartOptions: (_id, options) => { leased.add(options); },
@@ -2064,7 +2083,7 @@ describe('Maker start-option lifecycle hooks', () => {
         },
       });
       await expect(maker.createSession({
-        id: 'confirmed-exit', agentKind: 'pi', workingDir: '/repo', model: 'pi-model',
+        id: 'confirmed-exit', agentKind: kind, workingDir: '/repo', model: 'test-model',
       })).rejects.toBe(startupError);
       expect(onStartFailed).toHaveBeenCalledOnce();
       expect(onStartFailed).toHaveBeenCalledWith(expect.objectContaining({
@@ -2072,6 +2091,12 @@ describe('Maker start-option lifecycle hooks', () => {
       }));
       expect(leased).toEqual(new Set([otherStartup]));
       expect(onStartCleanupSucceeded).not.toHaveBeenCalled();
+      const replacement = await maker.createSession({
+        id: 'fresh-task', agentKind: kind, workingDir: '/repo', model: 'test-model',
+      });
+      expect(maker.getSession('fresh-task')).toBe(replacement);
+      expect(startSession).toHaveBeenCalledTimes(2);
+      await replacement.close();
     },
   );
 

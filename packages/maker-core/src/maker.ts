@@ -39,6 +39,7 @@ import type { PiRuntimeCapabilityManifest } from './types/pi-runtime-capabilitie
 import { piExplicitSkillRuntimePath } from './agents/pi/skill-runtime-provenance.js';
 import { fingerprintPiProjectSkillEntrypoint } from './agents/pi/project-resource-assembly.js';
 import { Session, generateSessionId, type SessionStartupPreferences } from './session.js';
+import { NotSupportedError } from './types/capabilities.js';
 import {
   AgentNotAuthenticatedError,
   AgentStartupCleanupPendingError,
@@ -120,6 +121,15 @@ export interface SessionLifecycleHooks {
 
 export interface MakerDeps {
   agents: Partial<Record<AgentKind, BaseAgent>>;
+  /**
+   * 可选：在同账号另一台电脑上启动 Agent(CreateSessionOptions.agentDeviceId)。返回的句柄由
+   * host 实现(对方运行 Agent、本机执行文件与命令)。缺省时这类会话无法创建。
+   */
+  startDeviceAgentSession?: (input: {
+    agentKind: AgentKind;
+    deviceId: string;
+    options: StartSessionOptions;
+  }) => Promise<AgentSessionHandle>;
   storage: SessionStorage;
   logger: Logger;
   /** 可选: session 生命周期副作用钩子 (host 层注入)。详见 SessionLifecycleHooks。 */
@@ -137,6 +147,11 @@ export interface MakerDeps {
    * 零干扰（见 docs/vision-bridge-design.md 层 B）。
    */
   visionBridge?: import('./types/vision-bridge.js').VisionBridgeHook;
+  /**
+   * 可选: Pi / Codex 工具循环疑似命中时的辅助模型复核入口。Claude Code 在 agent 内
+   * 检测,由 AgentDeps.toolLoopReviewer 注入同一实现。缺省 = 疑似即中断。
+   */
+  toolLoopReviewer?: import('./agents/shared/tool-loop-review.js').ToolLoopReviewer;
 }
 
 export interface CreateSessionOptions extends StartSessionOptions {
@@ -152,6 +167,12 @@ export interface CreateSessionOptions extends StartSessionOptions {
   visionBridge?: import('./types/vision-bridge.js').VisionBridgeHook;
   /** 可选：父会话 id，用于 fork / orchestration 等会话关系。 */
   parentSessionId?: string;
+  /**
+   * 可选：Agent 在同账号的另一台电脑上运行(那台电脑的设备 id)。任务、项目文件与命令留在本机，
+   * Agent 用那台电脑的程序、登录、供应商与网络。由 MakerDeps.startDeviceAgentSession 启动；
+   * 持久化到 SessionMeta.agentDeviceId，恢复时据此找回那台电脑。与 remoteHostId 互斥。
+   */
+  agentDeviceId?: string;
   /**
    * 可选：调用方提供的 sessionId(通常来自外部 DB row)。提供后:
    *   - storage 已有同 id 的 row → 跳过 create, 直接复用
@@ -192,11 +213,30 @@ interface PrewarmedSessionHandle {
 /** 未 claim 预热句柄的 TTL 兜底（ADR 0005 / T2 #77）。 */
 const PREWARM_TTL_MS = 60_000;
 
+/** Codex thread 归属键：SSH 主机或运行 Agent 的另一台电脑(两者的 thread 都不在本机)。 */
+function codexThreadOwnerKey(opts: { remoteHostId?: string; agentDeviceId?: string }): string | undefined {
+  return opts.remoteHostId ?? (opts.agentDeviceId ? `device:${opts.agentDeviceId}` : undefined);
+}
 function capabilitiesForSession(
   agentKind: AgentKind,
   base: Capabilities,
   remoteHostId?: string | null,
+  agentDeviceId?: string | null,
+  handle?: AgentSessionHandle,
 ): Capabilities {
+  if (agentDeviceId) {
+    // Agent 在另一台电脑上：对话在那台截断(handle 转发 commitRewindFiles)，文件由本机按保存点
+    // 回退。那台的 Cindy 不支持转发时不提供。
+    if (base.rewind.supported && typeof handle?.commitRewindFiles === 'function') return base;
+    return {
+      ...base,
+      rewind: {
+        supported: false,
+        reason: 'platform-limited',
+        message: 'Update Cindy on the computer running the agent to rewind this task',
+      },
+    };
+  }
   if (agentKind !== 'codex' || !remoteHostId) return base;
   return {
     ...base,
@@ -478,11 +518,15 @@ export class Maker {
   public readonly makerMemory: MakerMemoryManager | undefined;
   /** 视觉桥钩子（层 B）全局默认（可选）。见 MakerDeps.visionBridge。 */
   protected readonly visionBridge: import('./types/vision-bridge.js').VisionBridgeHook | undefined;
+  private readonly toolLoopReviewer: import('./agents/shared/tool-loop-review.js').ToolLoopReviewer | undefined;
+  private readonly startDeviceAgentSession: MakerDeps['startDeviceAgentSession'];
 
   constructor(deps: MakerDeps) {
     this.agents = deps.agents;
     this.storage = deps.storage;
+    this.startDeviceAgentSession = deps.startDeviceAgentSession;
     this.visionBridge = deps.visionBridge;
+    this.toolLoopReviewer = deps.toolLoopReviewer;
     // 不 child 自己名字 — host 传进来的 logger 通常已经命名(如 'maker'),
     // 再 child 'maker' 会变成 'maker/maker'。host 自己决定 root scope 名字。
     this.logger = deps.logger;
@@ -888,37 +932,66 @@ export class Maker {
           codexThreadClaim = this.claimCodexThread({
             sessionId: id,
             sessionInstanceId,
-            remoteHostId: startOpts.remoteHostId,
+            remoteHostId: codexThreadOwnerKey(startOpts),
             threadId: startOpts.resumeSessionId,
           });
         }
         agentStartAttempted = true;
-        handle = await agent.startSession({
-          ...startOpts,
-          sessionId: id,
-          sessionInstanceId,
-          // 强制由 Maker 注入持久化 CAS，不能信任外部 CreateSessionOptions 自带回调。
-          // Claude adapter 只在精确识别 invalid-resume 时调用；Cursor 只在 session/load
-          // 判定 resume 失效时调用（cursor/index.ts）；Codex 不消费该字段。
-          //
-          // 对所有 claude-code 会话装配(不止 resume):全新会话也可能在首个 turn 崩溃前
-          // 就把 SDK 回填、已落库的 sdk_session_id 变成幽灵 id(见 claude-code/index.ts
-          // 的 fresh-session self-reference 恢复),需要同一把 CAS 才能把它清掉,否则下一次
-          // send 会 resume 同一个不存在的会话反复失败。
-          //
-          // Cursor 没有 Claude 那种 fresh-session self-reference 恢复，消费点仅 resume
-          // 失效。但仍对**所有** cursor 会话注入（不只 resume）：否则生产路径拿不到
-          // 回调，invalid-resume 会无 CAS 地 fresh create，随后 Maker 的普通 update 会
-          // 无条件覆盖并发 actor 已写入的有效 sdk id。注入对全新 cursor 会话无害
-          // （未触发 resume 失败时不会调用）。
-          onInvalidResumeSession:
-            opts.agentKind === 'claude-code' ||
-            opts.agentKind === 'cursor' ||
-            opts.agentKind === 'pi'
-              ? (expectedSdkSessionId) =>
-                  this.invalidateAndClearSdkSessionId(id, expectedSdkSessionId)
-              : undefined,
-        });
+        if (startOpts.agentDeviceId) {
+          if (startOpts.remoteHostId) {
+            throw new Error('A session cannot run its agent on another computer and on an SSH host at the same time');
+          }
+          if (!this.startDeviceAgentSession) {
+            throw new NotSupportedError('remoteSession', {
+              supported: false,
+              reason: 'not-implemented',
+              message: 'Running the agent on another computer is not available in this host',
+            });
+          }
+          handle = await this.startDeviceAgentSession({
+            agentKind: opts.agentKind,
+            deviceId: startOpts.agentDeviceId,
+            options: {
+              ...startOpts,
+              sessionId: id,
+              sessionInstanceId,
+              onInvalidResumeSession:
+                opts.agentKind === 'claude-code' ||
+                opts.agentKind === 'cursor' ||
+                opts.agentKind === 'pi'
+                  ? (expectedSdkSessionId) =>
+                      this.invalidateAndClearSdkSessionId(id, expectedSdkSessionId)
+                  : undefined,
+            },
+          });
+        } else {
+          handle = await agent.startSession({
+            ...startOpts,
+            sessionId: id,
+            sessionInstanceId,
+            // 强制由 Maker 注入持久化 CAS，不能信任外部 CreateSessionOptions 自带回调。
+            // Claude adapter 只在精确识别 invalid-resume 时调用；Cursor 只在 session/load
+            // 判定 resume 失效时调用（cursor/index.ts）；Codex 不消费该字段。
+            //
+            // 对所有 claude-code 会话装配(不止 resume):全新会话也可能在首个 turn 崩溃前
+            // 就把 SDK 回填、已落库的 sdk_session_id 变成幽灵 id(见 claude-code/index.ts
+            // 的 fresh-session self-reference 恢复),需要同一把 CAS 才能把它清掉,否则下一次
+            // send 会 resume 同一个不存在的会话反复失败。
+            //
+            // Cursor 没有 Claude 那种 fresh-session self-reference 恢复，消费点仅 resume
+            // 失效。但仍对**所有** cursor 会话注入（不只 resume）：否则生产路径拿不到
+            // 回调，invalid-resume 会无 CAS 地 fresh create，随后 Maker 的普通 update 会
+            // 无条件覆盖并发 actor 已写入的有效 sdk id。注入对全新 cursor 会话无害
+            // （未触发 resume 失败时不会调用）。
+            onInvalidResumeSession:
+              opts.agentKind === 'claude-code' ||
+              opts.agentKind === 'cursor' ||
+              opts.agentKind === 'pi'
+                ? (expectedSdkSessionId) =>
+                    this.invalidateAndClearSdkSessionId(id, expectedSdkSessionId)
+                : undefined,
+          });
+        }
       } catch (error) {
         codexThreadClaim?.release();
         // A generic adapter error does not prove its process stopped. Preserve
@@ -951,7 +1024,7 @@ export class Maker {
           codexThreadClaim = this.claimCodexThread({
             sessionId: id,
             sessionInstanceId,
-            remoteHostId: startOpts.remoteHostId,
+            remoteHostId: codexThreadOwnerKey(startOpts),
             threadId: handle.id,
           });
         }
@@ -1038,6 +1111,7 @@ export class Maker {
           // remoteHostId: 远端 session 把目标机器持久化, 之后 resume / list 都能识别。
           // 本地 session 留 undefined (sqlite 落空), 跟历史行为兼容。
           remoteHostId: opts.remoteHostId,
+          ...(opts.agentDeviceId ? { agentDeviceId: opts.agentDeviceId } : {}),
           sdkSessionId: handle.id !== '<pending>' ? handle.id : undefined,
         });
         createdMetadata = true;
@@ -1175,7 +1249,13 @@ export class Maker {
       workDir: startOpts.workingDir,
       handle,
       hostStartupPreferences: opts.hostStartupPreferences,
-      capabilities: capabilitiesForSession(meta.agentKind, agent.capabilities, meta.remoteHostId),
+      capabilities: capabilitiesForSession(
+        meta.agentKind,
+        agent.capabilities,
+        meta.remoteHostId,
+        meta.agentDeviceId ?? startOpts.agentDeviceId,
+        handle,
+      ),
       logger: this.logger,
       permissionMode: startOpts.permissionMode,
       // 透传 remoteHostId 让 host 层在 hot path 上能 O(1) 判 local/remote
@@ -1183,6 +1263,7 @@ export class Maker {
       remoteHostId: meta.remoteHostId ?? null,
       // 层 B：视觉桥钩子（per-session 优先，否则全局默认；缺省不传 = 零干扰）。
       visionBridge: startOpts.visionBridge ?? this.visionBridge,
+      toolLoopReviewer: this.toolLoopReviewer,
     });
 
     // 当 SDK 回填 sdkSessionId 或 Cursor 初始模型回退时持久化。默认重放 startupEvents，
@@ -1210,7 +1291,7 @@ export class Maker {
               codexThreadClaim = this.claimCodexThread({
                 sessionId: id,
                 sessionInstanceId,
-                remoteHostId: startOpts.remoteHostId,
+                remoteHostId: codexThreadOwnerKey(startOpts),
                 threadId: evt.data,
               });
             }
@@ -1581,6 +1662,17 @@ export class Maker {
     if (this.agents[kind]) return false;
     this.agents[kind] = agent;
     return true;
+  }
+
+  /**
+   * 设备托管：同账号另一台电脑上的任务让 Agent 在本机运行。直接用本机的 agent 启动会话，
+   * 不建本机 Session 与持久化记录(任务、消息与状态都在对方电脑上)；opts.deviceHosted 必填。
+   */
+  async startHostedAgentSession(kind: AgentKind, opts: StartSessionOptions): Promise<AgentSessionHandle> {
+    if (this.shutdownStarted) throw new Error('Maker is shutting down; refusing to start a hosted session');
+    if (!opts.deviceHosted) throw new Error('hosted sessions require deviceHosted');
+    if (opts.remoteHostId) throw new Error('hosted sessions cannot target an SSH host');
+    return this.requireAgent(kind).startSession(opts);
   }
 
   /**

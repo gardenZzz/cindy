@@ -600,8 +600,8 @@ export function hasLocalContextWindowOverride(
     const entry = overrides[section][`${encodeURIComponent(providerId)}:${modelId}`];
     if (!entry || agent === 'cursor') return false;
     const member =
-      agent === 'pi'
-        ? !entry.agents || entry.agents.includes('pi')
+      section === 'patches' || agent === 'pi'
+        ? (!entry.agents || entry.agents.includes(agent))
         : entryMembershipAgents(entry, policyProviderId).includes(agent);
     return member && effectiveFields(entry, agent).contextWindow !== undefined;
   });
