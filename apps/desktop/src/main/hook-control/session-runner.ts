@@ -457,6 +457,9 @@ async function collectOutboundForFinalText(
   // never forward private Web citation delimiters to an external channel.
   const publicText = stripInternalWebCitations(texts.publicText);
   const wholeTurn = stripInternalWebCitations(texts.wholeTurn);
+  // Remote runtimes do not grant access to this host's files or media cache.
+  // The attachment collector's managed-image path is independent of file roots.
+  if (allowedFileRoots.length === 0) return { finalText: publicText };
   if (!hasOutboundRefs(wholeTurn) && extraImageAbsPaths.length === 0) {
     return { finalText: publicText };
   }
@@ -967,15 +970,19 @@ export function createMakerHookSessionRunner(deps: {
       // 就会让"续跑接回渠道"那条路径静默落后于本路径。
       // tool_result 旁路收集的出站图片 absPath(收口时随 turn.end 附件外发)
       const extraImageAbsPaths: string[] = [];
+      const allowedFileRoots = session.remoteHostId ? [] : [workingDir];
       const useTelegramProgressParity = req.source?.im === 'telegram';
       const observer = observeHookTurn(session, {
+        onTurnTerminal: req.onTurnTerminal,
         // Telegram 对齐个人 bot：过程消息累积展示整轮正文，done 先冲刷最后一帧。
         // Slack / X 保留只展示当前消息的旧行为，避免顺带改变其它车道。
         ...(req.onProgress ? { onProgress: req.onProgress } : {}),
         ...(useTelegramProgressParity
           ? { progressBodyMode: 'whole' as const, flushProgressOnDone: true }
           : {}),
-        onToolResult: (fullText) => collectOutboundImages(fullText, extraImageAbsPaths, log),
+        onToolResult: (fullText) => {
+          if (allowedFileRoots.length > 0) collectOutboundImages(fullText, extraImageAbsPaths, log);
+        },
         onSilentStopSettled,
         log,
       });
@@ -1203,10 +1210,11 @@ export function createMakerHookSessionRunner(deps: {
         : sendContentBase;
       // 落库形态: 有附件用 {text, images, files} 对象(createMessage safeStringify
       // 存 JSON, 读回 parseUserContent 提取 images/files); 无附件纯文本 string。
+      const userText = req.userText ?? req.source?.userText ?? req.prompt;
       const userMessageContent =
         imageRefs.length > 0 || fileRefs.length > 0
-          ? { text: req.prompt, images: imageRefs, files: fileRefs }
-          : req.prompt;
+          ? { text: userText, images: imageRefs, files: fileRefs }
+          : userText;
 
       const turnChangeAnchorClientId = randomUUID();
       let turnChangeSetStarted = false;
@@ -1264,7 +1272,7 @@ export function createMakerHookSessionRunner(deps: {
                   // clean channel message used for deterministic managed Pi
                   // package commands; only older servers that omit the field
                   // fall back to the decorated prompt.
-                  rawChannelText: req.source?.userText ?? req.prompt,
+                  rawChannelText: userText,
                   ...(autoReviewReferences ? { autoReviewReferences } : {}),
                 },
               }
@@ -1301,7 +1309,7 @@ export function createMakerHookSessionRunner(deps: {
                 sourceDescription: describeInteractionSource({
                   channelName: req.source?.im ?? req.origin.connectionName,
                   chatId: req.source?.channelName ?? req.title ?? req.source?.im ?? 'IM',
-                  text: req.source?.userText ?? '',
+                  text: req.userText ?? req.source?.userText ?? '',
                   interactionSource: {
                     senderName: req.source?.threadContext?.find((message) =>
                       message.messageId === req.source?.triggerMessageId && !!message.messageId)?.author,
@@ -1346,6 +1354,7 @@ export function createMakerHookSessionRunner(deps: {
                   ? {
                       hookSource: {
                         ...req.source,
+                        ...(req.source.userText !== undefined ? { contentFormat: 'user-text' } : {}),
                         // New messages only persist producer-supplied context.
                         // Legacy prompt projection belongs to the read path.
                         contextSnapshot: req.contextSnapshot ?? {},
@@ -1428,7 +1437,7 @@ export function createMakerHookSessionRunner(deps: {
       const collected = await collectOutboundForFinalText(
         turnTextsFor(observer),
         extraImageAbsPaths,
-        [workingDir],
+        allowedFileRoots,
         log,
       );
       let finalText = collected.finalText;
@@ -1489,10 +1498,12 @@ function beginContinuationWatch(
   }
   const startedAt = Date.now();
   const extraImageAbsPaths: string[] = [];
+  const allowedFileRoots = session.remoteHostId ? [] : [session.workDir];
   let claimed = false;
   let settled = false;
   const useTelegramProgressParity = req.source?.im === 'telegram';
   const observer = observeHookTurn(session, {
+    onTurnTerminal: req.onSettling,
     // 与 run() 同一呈现；Telegram 续跑同样累计正文并在 done 冲刷最后一帧。
     onProgress: (text) => {
       // 认领之前不发进度: 那时 server 还没把这条消息挂到新 requestId 上。
@@ -1501,7 +1512,9 @@ function beginContinuationWatch(
     ...(useTelegramProgressParity
       ? { progressBodyMode: 'whole' as const, flushProgressOnDone: true }
       : {}),
-    onToolResult: (fullText) => collectOutboundImages(fullText, extraImageAbsPaths, log),
+    onToolResult: (fullText) => {
+      if (allowedFileRoots.length > 0) collectOutboundImages(fullText, extraImageAbsPaths, log);
+    },
     onSilentStopSettled,
     log,
   });
@@ -1543,7 +1556,7 @@ function beginContinuationWatch(
       const collected = await collectOutboundForFinalText(
         turnTextsFor(observer),
         extraImageAbsPaths,
-        [session.workDir],
+        allowedFileRoots,
         log,
       );
       req.onEnd({

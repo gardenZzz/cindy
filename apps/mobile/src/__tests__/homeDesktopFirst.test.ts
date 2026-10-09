@@ -410,6 +410,7 @@ describe('mobile home desktop-first surface', () => {
     expect(agentMarkSource).toContain('CURSOR_AGENT_PATH');
     // resolved MobileVendorIcon uses vendorToAgentKind helper (toMakerAgentKind)
     expect(vendorIconSource).toContain('vendorToAgentKind(vendor)');
+    expect(vendorIconSource).toContain('<MobileAgentMark agentKind={agentKind} color={color} size={size} />');
     expect(vendorIconSource).not.toContain('viewBox="136 137 282 158"');
     expect(vendorIconSource).not.toContain('transform="translate(');
     expect(vendorIconSource).toContain('Easing.inOut(Easing.ease)');

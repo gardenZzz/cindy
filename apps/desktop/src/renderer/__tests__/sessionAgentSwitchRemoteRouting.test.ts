@@ -872,8 +872,21 @@ describe('ChatInput 的入口门控与调用路由', () => {
     );
     expect(source).toContain('resolveSessionAgentSwitchEntry');
     expect(source).not.toContain("vendorKey !== 'cursor'");
-    expect(source).toContain('ccCaps.capabilities?.supportsSessionAgentSwitchCas === true');
-    expect(source).toContain('codexCaps.capabilities?.supportsSessionAgentSwitchCas === true');
+    expect(source).toContain('hostCcCaps.capabilities?.supportsSessionAgentSwitch === true');
+    expect(source).toContain('hostCcCaps.capabilities.supportsSessionAgentSwitchCas === true');
+    expect(source).toContain('hostCodexCaps.capabilities?.supportsSessionAgentSwitch === true');
+    expect(source).toContain('hostCodexCaps.capabilities.supportsSessionAgentSwitchCas === true');
+    // 能力位读**任务所在的被控电脑**,不跟模型目录走(2026-10-09 review P1):Agent 在离线的
+    // 第三台电脑时目录读不到,入口不能因此消失,否则改不回被控电脑。
+    expect(source).toMatch(
+      /const hostCcCaps = useAgentCapabilities\(\s*deviceLinkDeviceId \? 'claude-code' : null,\s*deviceLinkDeviceId \?\? undefined,\s*\);/,
+    );
+    expect(source).toMatch(
+      /const hostCodexCaps = useAgentCapabilities\(\s*deviceLinkDeviceId \? 'codex' : null,\s*deviceLinkDeviceId \?\? undefined,\s*\);/,
+    );
+    expect(source).toContain(
+      "hostCcCaps.capabilities?.supportsSessionAgentSwitchCas === true ||\n    hostCodexCaps.capabilities?.supportsSessionAgentSwitchCas === true;",
+    );
     const hostSource = readFileSync(
       resolve(process.cwd(), 'src/main/maker-ipc/register.ts'),
       'utf8',
