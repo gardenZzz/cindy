@@ -179,6 +179,19 @@ describe('mobileSessionMessageCache', () => {
     expect(cached[1].content).toBe('second');
   });
 
+  it('merges list messages without losing earlier history and serializes rapid updates', async () => {
+    const { cacheSessionMessages, cacheSessionListMessage, getCachedSessionMessages } = await import('@/session/mobileSessionMessageCache');
+    await cacheSessionMessages('host-a', 'session-1', [makeMessage({ id: 'old', clientId: 'old', createdAt: isoAt(1) })]);
+    const content = '未截断的聊天正文。'.repeat(2000);
+    await Promise.all([
+      cacheSessionListMessage('host-a', 'session-1', makeMessage({ id: 'new', clientId: 'new', createdAt: isoAt(2), content: 'first' })),
+      cacheSessionListMessage('host-a', 'session-1', makeMessage({ id: 'new', clientId: 'new', createdAt: isoAt(2), content })),
+    ]);
+    const rows = await getCachedSessionMessages('host-a', 'session-1');
+    expect(rows.map(row => row.id)).toEqual(['old', 'new']);
+    expect(rows[1].content).toBe(content);
+  });
+
   it('returns [] for missing cache or blank ids', async () => {
     const { getCachedSessionMessages, cacheSessionMessages } = await import('@/session/mobileSessionMessageCache');
 
@@ -461,7 +474,7 @@ describe('mobileSessionMessageCache', () => {
       await import('@/session/mobileSessionMessageCache');
     const { remoteSessionStore } = await import('@/session/remoteSessionStore');
     remoteSessionStore.clear();
-    const sessions = Array.from({ length: 9 }, (_, index) => makeSession(`s${index}`));
+    const sessions = Array.from({ length: 13 }, (_, index) => makeSession(`s${index}`));
     remoteSessionStore.setDeviceSessions('host-a', 'Mac', sessions);
     const cached = makeMessage({ id: 'cached-s0', sessionId: 's0', createdAt: isoAt(1) });
     await cacheSessionMessages('host-a', 's0', [cached]);
@@ -469,7 +482,7 @@ describe('mobileSessionMessageCache', () => {
     for (const item of sessions) {
       remoteSessionStore.setMessages(
         item.id,
-        Array.from({ length: 100 }, (_, index) => makeMessage({
+        Array.from({ length: 80 }, (_, index) => makeMessage({
           id: `${item.id}-${index}`,
           sessionId: item.id,
           createdAt: isoAt(index),
@@ -617,7 +630,7 @@ describe('mobileSessionMessageCache', () => {
       await import('@/session/mobileSessionMessageCache');
     const { remoteSessionStore } = await import('@/session/remoteSessionStore');
     remoteSessionStore.clear();
-    const sessions = Array.from({ length: 9 }, (_, index) => makeSession(`s${index}`));
+    const sessions = Array.from({ length: 13 }, (_, index) => makeSession(`s${index}`));
     remoteSessionStore.setDeviceSessions('host-a', 'Mac', sessions);
     const cached = makeMessage({
       id: 'deleted-row',
@@ -629,7 +642,7 @@ describe('mobileSessionMessageCache', () => {
     for (const item of sessions) {
       remoteSessionStore.setMessages(
         item.id,
-        Array.from({ length: 100 }, (_, index) => makeMessage({
+        Array.from({ length: 80 }, (_, index) => makeMessage({
           id: `${item.id}-${index}`,
           sessionId: item.id,
           createdAt: isoAt(index),

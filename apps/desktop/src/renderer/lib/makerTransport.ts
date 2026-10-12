@@ -909,6 +909,7 @@ export interface RoutableOrcaWorkflows {
   archiveWorker: FullOrca['archiveWorker'];
   endTeam: FullOrca['endTeam'];
   getCollaborationSettings: FullOrca['getCollaborationSettings'];
+  listExecutionDevices: FullOrca['listExecutionDevices'];
 }
 
 /**
@@ -954,6 +955,7 @@ function remoteOrcaWorkflows(deviceId: string): RoutableOrcaWorkflows {
     getCollaborationSettings: t(
       'maker:collaboration-settings:get',
     ) as FullOrca['getCollaborationSettings'],
+    listExecutionDevices: t('maker:orca:execution-devices') as FullOrca['listExecutionDevices'],
   };
 }
 

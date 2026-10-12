@@ -111,10 +111,15 @@ Cindy 保底压缩是**一套**交接重建流程。装得进当前约束就不�
 （可剥的超大内联图）或 token 预算破了，都直接交接重建。Codex 索引历史归原生运行时
 所有，不再先尝试改写历史／剥图。决定函数见 `cindyContextCompression.ts`。
 字节预算目前只有 Codex 能测量。工具输出不另开一档：图片恢复的交接保留受长度限制、
-带调用关联的文本结果摘要，省略图片数据；其他交接继续沿用原有结果省略规则。
+带调用关联的文本结果摘要，省略图片数据；伙伴主对话及显式重启也保留这些结果，其他交接沿用原规则。
 可剥图不足一半的混合大尾巴有意不救。打开会话不触发；只在终态错误或下次发送时
 由 main 侧 claim。SSH 不承诺。不确定 fail closed。救援摘要不得依赖额外模型调用。
-Codex 图片历史重建后，普通用户任务可在同一任务内自动续接未完成工作。交接包含原请求
+伙伴 canonical 主对话在发送边界达到已知窗口的 90%，或本地 Codex 图片活尾巴实测超限时，
+复用同一持久交接提前重建；保留有界工具结果、按输入取消恢复，后台原生工作未结束时不换窗。
+权限依据为有效 Bot link 与 active Profile；其它任务保留原来的满窗门槛。
+伙伴下一次发送也识别已记录、明确来自压缩的空摘要／invalid-request 错误；不扩大原生 latch
+规则，不把普通空回复、网络、鉴权或额度错误当作压缩损坏。
+Codex 图片历史重建后，普通用户任务和伙伴主对话可在同一任务内自动续接未完成工作。交接包含原请求
 和本轮已有进展，新原生线程只接收隐藏的继续指令，不重放原用户请求或已完成的工具操作。
 结果不明确时先核实当前状态，不盲目重试；旧原生执行句柄不能跨线程恢复。
 每条用户输入最多自动恢复一次，沿用重建记录与输入身份去重；已有助手／工具消息只禁止
@@ -300,6 +305,18 @@ sessionRunningRetry 就停。每次因 replacement 关闭而重新入队都计�
 - 打算用 prompt 解决某个问题前先自问：这件事用代码能不能做？能就用代码。
 - 把本应由代码保证的确定性逻辑（格式校验、字段抽取、流程跳转、是否调用某个工具等）
   交给模型自由发挥，会引入不可复现的行为漂移，属于本规则明确禁止的做法。
+- 下游 harness 自带的能力与 Cindy 重叠、或结果只在厂商自家界面可见（如 Claude Code 的
+  `SendUserFile`／`Artifact`、claude.ai 连接器、Codex 的 `visualize` 插件）时，不靠 prompt
+  劝模型别用，而是在 host 能力路由表
+  （`apps/desktop/src/main/maker-host/capability-routing.ts`）加一条 `disabled` 路由，由各
+  harness 适配层从模型可见面移除：Claude 用 SDK `disallowedTools`、flag settings 的
+  `deniedMcpServers` 与 `skillOverrides`，Codex 用线程级 `plugins`／`mcp_servers`／
+  `skills.config`。各 harness 适配层用同一个判断函数决定能否执行某条路由并生成参数，
+  `findUnenforcedCapabilityRoutes`（`packages/maker-core/src/agents/capability-route-support.ts`）
+  直接复用这些判断；路由表里有执行不了的规则（来源类型不对、缺必填字段、Pi 等没有适配的
+  harness）会被测试拦下，不会静默失效。Claude 的 `skillOverrides` 与 `deniedMcpServers` 都只按名字
+  匹配，分不清来源，同名的用户／项目 Skill 或 MCP 会被一起关掉；路由表只写 harness 专属名字（如
+  `artifact-*`、带命名空间的插件 Skill、`claude.ai ` 前缀的账号连接器），`design` 这类通用名不关。
 - Cindy 的目标模式由 `goal-host` 统一管理续跑、预算与暂停／恢复。Codex 创建和恢复线程时
   使用会话级 `features.goals=false`，避免模型另建原生目标，形成绕过宿主调度与来源标记的
   第二套循环；不写用户的全局 Codex 配置。不能仅把无来源事件改判为目标事件，否则用户

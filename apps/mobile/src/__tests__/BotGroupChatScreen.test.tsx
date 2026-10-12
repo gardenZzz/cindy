@@ -2,7 +2,7 @@
 import { act, createElement as el, useEffect, useImperativeHandle, useRef, useState } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import type { BotGroupRemoteChatData } from '@cindy/maker-shared/botGroupChat';
+import { BOT_GROUP_RUNTIME_FAILURE_CODES, type BotGroupRemoteChatData } from '@cindy/maker-shared/botGroupChat';
 
 const h = vi.hoisted(() => ({
   chat: null as any,
@@ -333,6 +333,15 @@ describe('group timeline', () => {
     expect(all('botGroup.message.bot')).toHaveLength(0);
   });
 
+  it.each(BOT_GROUP_RUNTIME_FAILURE_CODES)('renders the runtime reason and recovery advice on mobile: %s', async runtimeFailureCode => {
+    await render(group({ messages: [message('failure', 1, { kind: 'notice', authorKind: 'system',
+      authorName: 'Bot', noticeCode: 'member-failed', runtimeFailureCode })] }));
+    const text = all('botGroup.notice')[0]?.textContent;
+    expect(text).toContain(`groupChat.notice.runtimeFailure.${runtimeFailureCode}(name=Bot)`);
+    expect(text).toContain('groupChat.notice.runtimeFailureSetupHint');
+    expect(text).not.toContain('groupChat.notice.memberFailed');
+  });
+
   it('renders messages, notices, round ends and plan ends like the desktop timeline', async () => {
     await render();
     expect(byId('botGroup.message.user')?.textContent).toBe('@咪咪 帮我做官网');
@@ -374,6 +383,39 @@ describe('group timeline', () => {
     expect(h.chat.act).toHaveBeenLastCalledWith('plan-edit', { planId: 'p1', position: 1, action: 'reassign', botId: 'xiaoman' });
     await click('botGroup.plan.stepMenu.0.action.remove');
     expect(h.chat.act).toHaveBeenLastCalledWith('plan-edit', { planId: 'p1', position: 0, action: 'remove' });
+  });
+
+  it.each([undefined, true, false])('renders human-signed plans as organizer cards with working actions and read-only old plans (isSelf=%s)', async (isSelf) => {
+    const data = group();
+    data.messages = data.messages.map(message => message.kind === 'plan'
+      ? { ...message, authorKind: 'user', authorBotId: null, authorName: 'Human creator', isSelf } : message);
+    await render(data);
+    expect(byId('botGroup.message.plan')?.textContent).toContain('咪咪');
+    expect(byId('botGroup.message.plan')?.textContent).not.toContain('Human creator');
+    await click('botGroup.plan.start');
+    expect(h.chat.act).toHaveBeenLastCalledWith('plan-start', { planId: 'p1' });
+    await click('botGroup.plan.dismiss');
+    expect(h.chat.act).toHaveBeenLastCalledWith('plan-dismiss', { planId: 'p1' });
+    data.plans[0]!.status = 'superseded';
+    data.openPlan = null;
+    await render(data);
+    expect(byId('botGroup.plan.finalNote')?.textContent).toBe('groupChat.plan.superseded');
+    expect(byId('botGroup.plan.start')).toBeNull();
+  });
+
+  it('removes a server human by actor identity without offering them as organizer', async () => {
+    const data = group({ serverBacked: true, supportsMemberRemoval: true });
+    data.members.push({ botId: 'person', actorId: 'actor-person', actorKind: 'human', name: 'Person', avatar: '', avatarColor: '', status: 'active' });
+    await render(data);
+    expect(byId('botGroup.plan.stepMenu.0.action.member:person')).toBeNull();
+    await click('botGroup.settingsButton');
+    expect(byId('botGroup.settings.memberMenu.person.action.organizer:person')).toBeNull();
+    await click('botGroup.settings.memberMenu.person.action.remove:person');
+    expect(h.chat.act).toHaveBeenLastCalledWith('remove-member', { actorId: 'actor-person' });
+    h.chat.act.mockRejectedValueOnce(new Error('PERMISSION_DENIED'));
+    await click('botGroup.settings.memberMenu.person.action.remove:person');
+    expect(node.textContent).toContain('groupChat.errors.permissionDenied');
+    expect(byId('botGroup.settings.member.person')).not.toBeNull();
   });
 
   it('keeps at least one step and names the host’s reason when an action is refused', async () => {

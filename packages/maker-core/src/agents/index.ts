@@ -52,7 +52,8 @@ export {
   resolveCursorToolIdleMs,
   type ToolIdleWatchdog,
 } from './cursor/toolIdleWatchdog.js';
-export { isCodexHistoryRecoveryRequired } from './codex/history-recovery.js';
+export { findUnenforcedCapabilityRoutes } from './capability-route-support.js';
+export { isCodexExplicitOnlyOverlayRoute } from './codex/capability-routing.js';export { isCodexHistoryRecoveryRequired } from './codex/history-recovery.js';
 export {
   CODEX_HISTORY_OVERSIZED_REASON,
   CODEX_LIVE_TAIL_OVERSIZED_BYTES,
@@ -162,7 +163,7 @@ export {
 export { toolAutoReviewAction } from './shared/auto-review-decision.js';
 export { AUTO_REVIEW_CONTINUATION_POLICY } from './shared/continuation-policy.js';
 export type { ReviewableAction } from './shared/auto-review.js';
-export { classifyShellCommand } from './shared/auto-review.js';
+export { classifyShellCommand, reviewAction, shellCommandReadsCredentials } from './shared/auto-review.js';
 export type {
   ToolLoopReviewDecision,
   ToolLoopReviewer,

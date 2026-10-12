@@ -58,6 +58,7 @@ import { isTerminalAgentErrorEvent, parseToolLoopErrorDetails, isTurnWatchdogLiv
 import type { ContextUsageData } from './types/context-usage.js';
 import type { PiRuntimeCapabilityManifest } from './types/pi-runtime-capabilities.js';
 import type {
+  AgentMcpServerToolsReport,
   AgentSessionHandle,
   PiModelSwitchPreview,
   AgentSessionTeardownOptions,
@@ -144,6 +145,12 @@ export const MANUAL_ABORT_RECOVERY_GRACE_MS = 15_000;
 const GRACEFUL_STOP_CONFIRMATION_TIMEOUT_MS = 5_000;
 
 /**
+ * Terminal error message when this host closes a session while its turn is still running.
+ * Hosts match it to tell a local close apart from the agent dying on its own.
+ */
+export const SESSION_CLOSED_MID_TURN_MESSAGE = 'Session closed before the current turn delivered a terminal event';
+
+/**
  * turn 零事件看门狗的计时分片长度。额度按片累加,片尾核对真实经过时间,
  * 借此把系统挂起(合盖睡眠)的那段排除掉 —— 见 armTurnStallSlice。
  */
@@ -187,6 +194,11 @@ export interface SessionOptions {
    * 是不可能存在于本地 fs 的, 没必要也不该 stat。
    */
   remoteHostId?: string | null;
+  /**
+   * 同账号另一台电脑（或 `share:` 分享来源）上运行 Agent 时的设备 id，与 remoteHostId 互斥。
+   * 主进程的发送边界用它判断供应商目录在对端：本机目录不能裁决这类会话的显式来源。
+   */
+  agentDeviceId?: string | null;
   /**
    * turn 零事件看门狗阈值(ms)。省略 = env / DEFAULT_TURN_STALL_MS；0 = 关闭。
    * 主要供测试注入短阈值，宿主正常不传。
@@ -436,6 +448,8 @@ export class Session {
   readonly capabilities: Capabilities;
   /** 见 SessionOptions.remoteHostId。 */
   readonly remoteHostId: string | null;
+  /** 见 SessionOptions.agentDeviceId。 */
+  readonly agentDeviceId: string | null;
 
   private readonly handle: AgentSessionHandle;
   private readonly logger: Logger;
@@ -577,6 +591,7 @@ export class Session {
     this.retainedStartupEvents = (opts.handle.startupEvents ?? []).map(redactEventForListeners);
     this.capabilities = opts.capabilities;
     this.remoteHostId = opts.remoteHostId ?? null;
+    this.agentDeviceId = opts.agentDeviceId ?? null;
     this.logger = opts.logger.child(`s:${this.id}`);
     this.permissionModeStateValue = {
       mode: opts.permissionMode ?? null,
@@ -1494,7 +1509,7 @@ export class Session {
       // close() fences late provider events before entering here. Settle the
       // owned product turn ourselves before listeners and its claim are lost.
       // Never retry: tools may already have performed external side effects.
-      this.settleUnfinishedTurn('Session closed before the current turn delivered a terminal event');
+      this.settleUnfinishedTurn(SESSION_CLOSED_MID_TURN_MESSAGE);
       this.clearTurnStallWatchdog();
       this.clearTerminalErrorDrain();
       this.cancelSendReservation(this.sendReservation);
@@ -1622,6 +1637,15 @@ export class Session {
       throw new NotSupportedError('contextUsage', { supported: false, reason: 'not-implemented' });
     }
     return this.handle.getContextUsage();
+  }
+
+  /**
+   * The engine's own view of one MCP server in this session. Null when the
+   * engine has no per-session MCP status entry; never starts or calls a server.
+   */
+  async readMcpServerTools(serverName: string): Promise<AgentMcpServerToolsReport | null> {
+    this.ensureActive();
+    return await this.handle.readMcpServerTools?.(serverName) ?? null;
   }
 
   /**
@@ -2104,6 +2128,11 @@ export class Session {
 
   getCurrentTurnId(): string | null {
     return this.handle.getCurrentTurnId?.() ?? null;
+  }
+
+  /** Product origin of the dispatched turn; Host owner-only actions refuse automated turns. */
+  getCurrentTurnOrigin(): SendOrigin | null {
+    return this.currentTurnOrigin;
   }
 
   /**

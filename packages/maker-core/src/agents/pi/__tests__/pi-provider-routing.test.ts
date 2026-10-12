@@ -46,6 +46,7 @@ const captured = vi.hoisted(() => ({
   remoteModels: new Map<string, string>(),
   refreshAckMode: 'ok' as 'ok' | 'invalid',
   hasRefreshCommand: true,
+  failThinkingLevel: null as null | 'reject' | 'throw',
   requestHandler: undefined as
     | undefined
     | ((command: Record<string, unknown>) => Promise<{
@@ -130,6 +131,12 @@ vi.mock("../rpc-client.js", () => {
         }
         if (command.type === 'refresh_models' || command.type === 'set_compaction_reserve_tokens') {
           return { success: false, error: `Unknown command: ${command.type}` };
+        }
+        if (command.type === 'set_thinking_level' && captured.failThinkingLevel === 'reject') {
+          return { success: false, error: 'mock reject' };
+        }
+        if (command.type === 'set_thinking_level' && captured.failThinkingLevel === 'throw') {
+          throw new Error('mock rpc timeout');
         }
         const response = captured.requestHandler
           ? await captured.requestHandler(command)
@@ -279,6 +286,7 @@ describe("Pi provider-aware model routing", () => {
     captured.remoteModels.clear();
     captured.refreshAckMode = 'ok';
     captured.hasRefreshCommand = true;
+    captured.failThinkingLevel = null;
     captured.requestHandler = undefined;
     agentHome = mkdtempSync(path.join(tmpdir(), "pi-provider-home-"));
     cwd = mkdtempSync(path.join(tmpdir(), "pi-provider-cwd-"));
@@ -338,6 +346,143 @@ describe("Pi provider-aware model routing", () => {
     expect(captured.requests.some(request => request.type === 'set_fast_mode')).toBe(false);
     await handle.close();
     expect(JSON.parse(query({ provider: 'relay', model: 'private-sol' })).fast).toBe(false);
+  });
+
+  it('re-asserts the session effort after a full-path model switch (pi resets it to the model default)', async () => {
+    const deps: AgentDeps = {
+      auth: {
+        getState: async () => ({ authenticated: true, identity: 'test', authSource: 'api-key' as const }),
+        triggerLogin: async () => ({ authenticated: true }),
+        logout: async () => {},
+        getAuthEnv: async () => ({}),
+      },
+      runtimeConfig: { endpoint: 'http://127.0.0.1:9' },
+      binaryPath: path.join(agentHome, 'pi'),
+      logger: noopLogger,
+      capabilityAdditions: {
+        availableModels: [
+          {
+            id: 'model-a',
+            displayName: 'Model A',
+            contextWindow: 200_000,
+            efforts: ['low', 'high', 'max'],
+            defaultEffort: 'high',
+          },
+          {
+            id: 'model-b',
+            displayName: 'Model B',
+            contextWindow: 200_000,
+            efforts: ['low', 'high', 'max'],
+            defaultEffort: 'high',
+          },
+        ],
+      },
+      resolvePiAgentHome: () => agentHome,
+      resolvePiNativeProviders: async () => ({
+        providers: [
+          { id: 'native-a', name: 'Native A', baseUrl: 'http://a.test', api: 'openai-completions', models: [{ id: 'model-a', reasoning: true, thinkingLevelMap: { low: 'low', medium: 'medium', high: 'high', max: 'max' } }] },
+          { id: 'native-b', name: 'Native B', baseUrl: 'http://b.test', api: 'openai-completions', models: [{ id: 'model-b', reasoning: true, thinkingLevelMap: { low: 'low', medium: 'medium', high: 'high', max: 'max' } }] },
+        ],
+        env: {},
+      }),
+    };
+    const agent = new PiAgent(deps);
+    const handle = await agent.startSession({
+      sessionId: 'model-switch-effort',
+      workingDir: cwd,
+      model: 'model-a',
+      providerId: 'native-a',
+      effort: 'max',
+    });
+    const thinkingCalls = () =>
+      captured.requests.filter((request) => request.type === 'set_thinking_level');
+    expect(thinkingCalls().at(-1)).toEqual({ type: 'set_thinking_level', level: 'max' });
+
+    // ① 带显式 effort 的跨模型切换：set_model 后下发该档。
+    const afterStartup = thinkingCalls().length;
+    await handle.setModel!('model-b', { providerId: 'native-b', effort: 'low' });
+    expect(thinkingCalls().slice(afterStartup)).toContainEqual({
+      type: 'set_thinking_level', level: 'low',
+    });
+
+    // ② 不带 effort 切回：恢复会话原档位（mutableEffort 已被①更新为 low）。
+    const beforeRestore = thinkingCalls().length;
+    await handle.setModel!('model-a', { providerId: 'native-a' });
+    expect(captured.requests.slice(beforeRestore)).toContainEqual({
+      type: 'set_model', provider: 'native-a', modelId: 'model-a',
+    });
+    expect(thinkingCalls().slice(beforeRestore)).toContainEqual({
+      type: 'set_thinking_level', level: 'low',
+    });
+
+    await handle.close();
+  });
+
+  it('effort 恢复失败不阻断已确认的模型切换，也不把被拒档位记成已生效', async () => {
+    const deps: AgentDeps = {
+      auth: {
+        getState: async () => ({ authenticated: true, identity: 'test', authSource: 'api-key' as const }),
+        triggerLogin: async () => ({ authenticated: true }),
+        logout: async () => {},
+        getAuthEnv: async () => ({}),
+      },
+      runtimeConfig: { endpoint: 'http://127.0.0.1:9' },
+      binaryPath: path.join(agentHome, 'pi'),
+      logger: noopLogger,
+      capabilityAdditions: {
+        availableModels: [
+          {
+            id: 'model-a',
+            displayName: 'Model A',
+            contextWindow: 200_000,
+            efforts: ['low', 'high', 'max'],
+            defaultEffort: 'high',
+          },
+          {
+            id: 'model-b',
+            displayName: 'Model B',
+            contextWindow: 200_000,
+            efforts: ['low', 'high', 'max'],
+            defaultEffort: 'high',
+          },
+        ],
+      },
+      resolvePiAgentHome: () => agentHome,
+      resolvePiNativeProviders: async () => ({
+        providers: [
+          { id: 'native-a', name: 'Native A', baseUrl: 'http://a.test', api: 'openai-completions', models: [{ id: 'model-a', reasoning: true, thinkingLevelMap: { low: 'low', medium: 'medium', high: 'high', max: 'max' } }] },
+          { id: 'native-b', name: 'Native B', baseUrl: 'http://b.test', api: 'openai-completions', models: [{ id: 'model-b', reasoning: true, thinkingLevelMap: { low: 'low', medium: 'medium', high: 'high', max: 'max' } }] },
+        ],
+        env: {},
+      }),
+    };
+    const agent = new PiAgent(deps);
+    const handle = await agent.startSession({
+      sessionId: 'model-switch-effort-restore-fail',
+      workingDir: cwd,
+      model: 'model-a',
+      providerId: 'native-a',
+      effort: 'max',
+    });
+
+    // ① set_thinking_level 超时/链路抛错：模型路由已确认，setModel 必须照常完成，
+    //    不能把已成功的切换变成失败（否则子代理快照收尾被跳过，pending 卡死委派）。
+    captured.failThinkingLevel = 'throw';
+    await expect(handle.setModel!('model-b', { providerId: 'native-b', effort: 'low' }))
+      .resolves.toBeUndefined();
+    expect(handle.getEffort!()).toBe('max');
+
+    // ② set_thinking_level 被拒：mutableEffort 不跟随未生效的目标档。
+    captured.failThinkingLevel = 'reject';
+    await handle.setModel!('model-a', { providerId: 'native-a', effort: 'low' });
+    expect(handle.getEffort!()).toBe('max');
+
+    // ③ 成功路径不受影响：恢复生效后 getEffort 报新档。
+    captured.failThinkingLevel = null;
+    await handle.setModel!('model-b', { providerId: 'native-b', effort: 'low' });
+    expect(handle.getEffort!()).toBe('low');
+
+    await handle.close();
   });
 
   it("uses providerId as the primary key when duplicate model ids exist", async () => {
@@ -3812,7 +3957,7 @@ describe("Pi provider-aware model routing", () => {
 
   it.each([
     { label: 'different live window', window: 400_000, action: 'rebuild' },
-    { label: 'matching live window', window: 128_000, action: 'hot' },
+    { label: 'matching live window', window: 128_000, action: 'rebuild' },
     { label: 'missing live window', window: undefined, action: 'rebuild' },
     { label: 'failed live catalog read', window: null, action: 'rebuild' },
   ] as const)('checks an inherited model before switching: $label', async ({ window, action }) => {
@@ -3835,11 +3980,16 @@ describe("Pi provider-aware model routing", () => {
         ? { sessionFile: '/mock/s.jsonl', model: { contextWindow: captured.runtimeProvider === 'pi-native' ? window : 200_000 } }
         : {} };
     };
-    const handle = await new PiAgent(deps).startSession({
+    const agent = new PiAgent(deps);
+    const handle = await agent.startSession({
       sessionId: 'inherited-window', workingDir: cwd, model: 'local-model', providerId: 'native-a',
     });
     const config = captured.env.PI_CODING_AGENT_DIR!;
     const before = ['models.json', 'settings.json'].map(file => readFileSync(path.join(config, file), 'utf8'));
+    const startupSettings = JSON.parse(before[1]) as {
+      compaction?: { modelOverrides?: Record<string, { reserveTokens?: number }> };
+    };
+    expect(startupSettings.compaction?.modelOverrides).not.toHaveProperty('pi-native/wire-model');
     captured.requests.length = 0;
     const preview = await handle.previewModelSwitch?.('catalog-alias', { providerId: 'native-account' });
     expect(preview).toMatchObject({ action, targetContextWindow: window ?? null, windowVerified: false });
@@ -3857,6 +4007,69 @@ describe("Pi provider-aware model routing", () => {
       expect(captured.closes).toBe(0);
     }
     await handle.close();
+    if (typeof window === 'number') {
+      const rebuilt = await agent.startSession({
+        sessionId: 'inherited-window', workingDir: cwd,
+        model: 'catalog-alias', providerId: 'native-account',
+      });
+      const rebuiltSettings = JSON.parse(readFileSync(
+        path.join(captured.env.PI_CODING_AGENT_DIR!, 'settings.json'), 'utf8',
+      )) as { compaction?: { modelOverrides?: Record<string, { reserveTokens?: number }> } };
+      expect(rebuiltSettings.compaction?.modelOverrides?.['pi-native/wire-model']?.reserveTokens)
+        .toBe(window * 0.25);
+      await rebuilt.close();
+    }
+  });
+
+  it('keeps a learned inherited window below a later Cindy working-window override', async () => {
+    let workingWindow: number | undefined;
+    const deps = byomDeps(async () => ({ providers: [
+      { id: 'native-a', name: 'Current', baseUrl: 'http://a.test', api: 'openai-completions',
+        models: [{ id: 'local-model', contextWindow: 200_000 }] },
+      { id: 'pi-native', sourceProviderId: 'native-account', name: 'Inherited', baseUrl: 'http://b.test',
+        inheritModels: true, modelIdAliases: { 'catalog-alias': 'catalog-model' },
+        models: [{ id: 'catalog-model', wireId: 'wire-model' }] },
+    ], env: {} }));
+    deps.runtimeConfig = { ...deps.runtimeConfig, piAutoCompactThresholdPct: 75 };
+    deps.resolveModelContextLimit = (provider, model) =>
+      provider === 'native-account' && (model === 'catalog-model' || model === 'catalog-alias')
+        ? workingWindow ?? null
+        : null;
+    captured.requestHandler = async (command) => {
+      if (command.type === 'get_available_models') return { success: true, data: { models: [
+        { provider: 'pi-native', id: 'wire-model', contextWindow: 400_000 },
+      ] } };
+      return { success: true, data: command.type === 'get_state'
+        ? { sessionFile: '/mock/s.jsonl', model: { contextWindow: captured.runtimeProvider === 'pi-native' ? 400_000 : 200_000 } }
+        : {} };
+    };
+
+    const agent = new PiAgent(deps);
+    const initial = await agent.startSession({
+      sessionId: 'learned-working-window', workingDir: cwd,
+      model: 'local-model', providerId: 'native-a',
+    });
+    expect(await initial.previewModelSwitch?.('catalog-alias', { providerId: 'native-account' }))
+      .toMatchObject({ action: 'rebuild', targetContextWindow: 400_000 });
+    await initial.close();
+
+    workingWindow = 150_000;
+    captured.initialProvider = undefined;
+    captured.initialModel = undefined;
+    captured.runtimeProvider = undefined;
+    captured.runtimeModel = undefined;
+    const rebuilt = await agent.startSession({
+      sessionId: 'learned-working-window', workingDir: cwd,
+      model: 'catalog-alias', providerId: 'native-account',
+    });
+    const rebuiltSettings = JSON.parse(readFileSync(
+      path.join(captured.env.PI_CODING_AGENT_DIR!, 'settings.json'), 'utf8',
+    )) as { compaction?: { modelOverrides?: Record<string, { reserveTokens?: number }> } };
+    expect(rebuiltSettings.compaction?.modelOverrides?.['pi-native/wire-model']?.reserveTokens)
+      .toBe(37_500);
+    expect(await rebuilt.previewModelSwitch?.('catalog-alias', { providerId: 'native-account' }))
+      .toMatchObject({ action: 'hot', targetContextWindow: 150_000 });
+    await rebuilt.close();
   });
 
   it('refreshes a managed adapter when the same model ID gets a new descriptor', async () => {

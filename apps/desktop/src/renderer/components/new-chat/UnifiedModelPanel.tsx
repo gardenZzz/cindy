@@ -1,4 +1,7 @@
 import { useRemoteModelFavorites } from '@/state/useRemoteModelFavorites';
+import { useProviderShareFavorites } from '@/state/providerShareFavorites';
+import { ensureProviderShareReceivedStarted } from '@/features/provider-share/providerShareStore';
+import { toast } from '@/lib/toast';
 import { matchesModelName } from '@/lib/modelDisplayNames';
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { Check, Loader2, TriangleAlert } from 'lucide-react';
@@ -43,7 +46,7 @@ import {
   withMenuLabels,
 } from '@/components/ui/menu-row';
 import { ModelSourceUsageProvider } from './ModelSourceDetails';
-import type { ProviderUsageScope } from './useProviderWeeklyQuota';
+import type { ProviderGroupUsageOf, ProviderUsageScope } from './useProviderWeeklyQuota';
 import {
   anchorKey,
   favoriteMatchesSelection,
@@ -149,11 +152,21 @@ export interface UnifiedModelPanelProps {
   /** 价格 / 折扣查询。**modelId 传该引擎的 wire id**(报价表按 wire id 索引)。 */
   priceOf: (providerId: string, modelId: string, agent: AgentKind) => ModelPricePresentation | null;
   providerLabel: (providerId: string) => string;
+  /**
+   * 分组标题与左栏提示用的名字；缺省同 providerLabel。供应商组在这里带上台数
+   * (「Anthropic · 供应商组 · 3 台电脑」，provider-groups.md §10)，每行的来源名不带。
+   */
+  providerHeading?: (providerId: string) => string;
   effortLabelOf: (agent: AgentKind, effort: Effort) => string;
   listMaxHeight?: number;
   interactionDisabled?: boolean;
   /** Whose subscription accounts the directory may show: this desktop or its linked device. */
   providerUsage?: ProviderUsageScope | null;
+  /**
+   * 供应商组那一项的用量读谁(provider-groups.md §10):任务正经组在某台运行时读那台,还没分到电脑时
+   * 不显示某一台的配额。缺省 = 都按目录归属读。
+   */
+  providerGroupUsage?: ProviderGroupUsageOf;
   /** 保留付费模型为锁定展示行，并把点击交给统一付费提示。 */
   includePaymentRequired?: boolean;
   paymentRequiredLabel?: string;
@@ -336,10 +349,12 @@ export function UnifiedModelPanel({
   agentFastModeCapable,
   priceOf,
   providerLabel,
+  providerHeading = providerLabel,
   effortLabelOf,
   listMaxHeight,
   interactionDisabled = false,
   providerUsage = null,
+  providerGroupUsage,
   includePaymentRequired = false,
   paymentRequiredLabel,
   paymentRequiredUnlockLabel,
@@ -362,9 +377,14 @@ export function UnifiedModelPanel({
 }: UnifiedModelPanelProps) {
   const { t } = useTranslation();
   const storedFavorites = useModelFavorites();
-  // 分享来的供应商(`share:<id>`)不是同账号的电脑，没有可同步的收藏：不去读，也不报同步失败。
-  const remoteFavorites = useRemoteModelFavorites(isProviderShareAgentDeviceId(deviceId) ? undefined : deviceId);
-  const favorites = selectionPolicy === 'official' ? NO_FAVORITES : deviceId ? remoteFavorites.items : storedFavorites;
+  const isSharedProvider = isProviderShareAgentDeviceId(deviceId);
+  const remoteFavorites = useRemoteModelFavorites(isSharedProvider ? undefined : deviceId);
+  const sharedFavorites = useProviderShareFavorites(deviceId, storedFavorites);
+  useEffect(() => {
+    if (isSharedProvider) ensureProviderShareReceivedStarted();
+  }, [isSharedProvider]);
+  const favorites = selectionPolicy === 'official' ? NO_FAVORITES
+    : isSharedProvider ? sharedFavorites.items : deviceId ? remoteFavorites.items : storedFavorites;
   // 引擎 override / 深度 / Fast 三份 store 的版本号:任一变化都要重算行三元组与浮层
   // (其它窗口的 storage 事件、device-link 推送同样经这两个版本号进来)。远程 Agent 的档位记忆
   // 是另一份 store,版本号并进 memoryVersion。
@@ -495,19 +515,22 @@ export function UnifiedModelPanel({
         : null,
     [remoteActiveDeviceId, remoteActiveProviderId],
   );
-  const effectiveRail = remoteRail ?? (query.trim() ? RAIL_ALL : rail);
+  const effectiveRail = isSharedProvider && rail.kind === 'favorites' && !query.trim()
+    ? rail : remoteRail ?? (query.trim() ? RAIL_ALL : rail);
   // 切到另一台电脑的途中(或读取失败)列表数据还不是那台的目录:列表区只显示状态,不出行。
   const remoteListPending = remoteRail !== null && !remoteSources?.ready;
   const handleRailSelect = useCallback(
     (item: UnifiedRailItem) => {
       if (item.kind === 'remote-provider') {
+        setRail(RAIL_ALL);
         remoteSources?.onActivate({ deviceId: item.deviceId, providerId: item.providerId });
         return;
       }
-      if (remoteSources?.active) remoteSources.onActivate(null);
+      // 分享收藏属于受邀者，但条目仍要在该分享的目录里解析与选用。
+      if (remoteSources?.active && !(isSharedProvider && item.kind === 'favorites')) remoteSources.onActivate(null);
       setRail(item);
     },
-    [remoteSources],
+    [remoteSources, isSharedProvider],
   );
 
   // ── 行配置合成 ────────────────────────────────────────────────────────────
@@ -891,7 +914,8 @@ export function UnifiedModelPanel({
     optimistic: optimisticConfig,
     runExternal,
   } = useUnifiedRowActions({
-    favoriteStore: deviceId ? remoteFavorites.store : undefined,
+    favoriteStore: isSharedProvider ? sharedFavorites.store : deviceId ? remoteFavorites.store : undefined,
+    onFavoriteError: () => toast.error(t('newChat.modelSelector.unified.favoritesSaveFailed')),
     interactionDisabled,
     isLiveRow,
     // 两笔实时写入(深度 + Fast)里第二笔失败时回滚第一笔用的原值,以及收藏 live 判定
@@ -993,7 +1017,7 @@ export function UnifiedModelPanel({
       : section.kind === 'recommended'
         ? t('newChat.modelSelector.unified.recommended')
       : section.group
-        ? providerLabel(section.group.providerId)
+        ? providerHeading(section.group.providerId)
         : '';
 
   const rows = sections.flatMap((section) => section.rows);
@@ -1085,11 +1109,12 @@ export function UnifiedModelPanel({
     >
       <UnifiedModelRail
         providerUsage={providerUsage}
+        {...(providerGroupUsage ? { providerGroupUsage } : {})}
         items={railItems}
         active={effectiveRail}
         onSelect={handleRailSelect}
         providers={providers}
-        providerLabel={providerLabel}
+        providerLabel={providerHeading}
         interactionDisabled={interactionDisabled || actionPending}
         {...(remoteSources
           ? {
@@ -1399,7 +1424,16 @@ export function UnifiedModelPanel({
     </div>
   );
   return (
-    <ModelSourceUsageProvider providers={providers} scope={providerUsage}>
+    <ModelSourceUsageProvider
+      providers={providers}
+      scope={providerUsage}
+      {...(providerGroupUsage
+        ? {
+            groupUsageOf: (providerId: string) =>
+              providerGroupUsage(remoteSources?.active?.deviceId ?? null, providerId),
+          }
+        : {})}
+    >
       {panelContent}
     </ModelSourceUsageProvider>
   );

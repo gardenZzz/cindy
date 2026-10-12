@@ -12,6 +12,7 @@ import {
   BOT_GROUP_MEMBER_LINK_REL,
   BOT_GROUP_REMOTE_COLLECTION_ID,
   BOT_GROUP_REMOTE_RESOURCE_KIND,
+  isBotGroupRuntimeFailureCode,
   type BotGroupAttachment,
   type BotGroupAttachmentCategory,
   type BotGroupErrorCode,
@@ -145,6 +146,10 @@ function parseMember(value: unknown): BotGroupMemberView | null {
   return {
     botId,
     name,
+    ...(id(record.actorId) ? { actorId: id(record.actorId)! } : {}),
+    ...(record.actorKind === 'human' || record.actorKind === 'bot' || record.actorKind === 'integration' ? { actorKind: record.actorKind } : {}),
+    ...(typeof record.isOwned === 'boolean' ? { isOwned: record.isOwned } : {}),
+    ...(typeof record.isSelf === 'boolean' ? { isSelf: record.isSelf } : {}),
     avatar: text(record.avatar, 4_096) ?? '',
     avatarColor: text(record.avatarColor, 64) ?? '',
     status: enumOf(record.status, MEMBER_STATUSES) ?? 'missing',
@@ -202,6 +207,7 @@ function parseMessage(value: unknown): BotGroupMessageView | null {
     content,
     mentions: parseMentions(record.mentions),
     noticeCode,
+    ...(isBotGroupRuntimeFailureCode(record.runtimeFailureCode) ? { runtimeFailureCode: record.runtimeFailureCode } : {}),
     planId: optionalId(record.planId),
     files: stringList(record.files, MAX_FILES, 1_024),
     // Older computers send no attachments.
@@ -327,6 +333,8 @@ export function parseBotGroupChatData(value: unknown): BotGroupRemoteChatData | 
   return {
     id: groupId,
     name,
+    serverBacked: record.serverBacked === true,
+    supportsMemberRemoval: record.supportsMemberRemoval === true,
     replyMode: record.replyMode === 'mentioned' ? 'mentioned' : 'all',
     speakingMode: record.speakingMode === 'sequential' ? 'sequential' : 'auto',
     members,
@@ -358,6 +366,17 @@ export function botGroupChatDataFromResource(resource: Pick<RemoteResource, 'blo
 
 /** Specific codes first: the transport code (INVALID_PARAMS / NOT_FOUND) wraps them. */
 const ERROR_CODES: readonly BotGroupErrorCode[] = [
+  'INVALID_ATTACHMENT',
+  'ATTACHMENT_UNAVAILABLE',
+  'ATTACHMENT_TOO_LARGE',
+  'MEDIA_UPLOAD_FAILED',
+  'AUTH_REQUIRED',
+  'CHAT_UNAVAILABLE',
+  'IMPORT_PENDING',
+  'REQUEST_TIMEOUT',
+  'PERMISSION_DENIED',
+  'SERVICE_ERROR',
+  'GROUP_ARCHIVED',
   'MEMBER_LIMIT',
   'MEMBER_UNAVAILABLE',
   'MENTION_UNAVAILABLE',

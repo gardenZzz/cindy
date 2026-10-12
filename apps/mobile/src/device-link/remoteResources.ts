@@ -4,6 +4,7 @@ import {
   REMOTE_RESOURCE_LIST_CHANNEL,
   REMOTE_RESOURCE_MANIFEST_CHANNEL,
   REMOTE_RESOURCE_PROTOCOL_VERSION,
+  parseRemoteResourceRef,
   resolveRemoteText,
   type RemoteActionInvokeResponse,
   type RemoteCollectionDescriptor,
@@ -44,6 +45,7 @@ const RICH_REMOTE_RESOURCE_PRIMITIVES: readonly string[] = [
   BOT_GROUP_CHAT_PRIMITIVE,
   'plugin-capabilities',
   'plugin-card-actions',
+  'teammate-todos',
 ];
 
 /** Routines remain a desktop feature; other portable collections stay available. */
@@ -134,11 +136,7 @@ function normalizeRemoteText(value: unknown, max = MAX_REMOTE_TEXT_CHARS): Remot
 }
 
 function normalizeRemoteRef(value: unknown): RemoteResourceRef | null {
-  const record = recordOf(value);
-  const collectionId = boundedString(record?.collectionId, MAX_REMOTE_ID_CHARS);
-  const kind = boundedString(record?.kind, MAX_REMOTE_ID_CHARS);
-  const id = boundedString(record?.id, MAX_REMOTE_ID_CHARS);
-  return collectionId && kind && id ? { collectionId, kind, id } : null;
+  return parseRemoteResourceRef(value);
 }
 
 function normalizeRemoteStatus(value: unknown): RemoteResourceStatus | null {
@@ -369,11 +367,13 @@ export async function getRemoteResource(
   ref: RemoteResourceRef,
   locale?: string,
   supportedPrimitives: readonly string[] = [],
+  query?: string,
 ): Promise<RemoteResource> {
   assertMobileRemoteCollectionSupported(ref.collectionId);
   const raw = await invoke<unknown>(target.deviceId, REMOTE_RESOURCE_GET_CHANNEL, [{
     client: { ...clientDescriptor(locale), primitives: [...MOBILE_REMOTE_RESOURCE_PRIMITIVES, ...supportedPrimitives] },
     ref,
+    ...(query ? {query} : {}),
   }]);
   const normalized = normalizeRemoteCollectionItem(raw, ref.collectionId);
   if (!normalized || normalized.ref.kind !== ref.kind || normalized.ref.id !== ref.id) {
@@ -440,7 +440,15 @@ function normalizeRemoteCollectionItem(
         return normalized ? [normalized] : [];
       })
     : [];
+  const rawOrder = collectionId === 'plugins' ? recordOf(item.pluginOrder) : null;
+  const addedAt = rawOrder?.addedAt;
+  const recentIndex = rawOrder?.recentIndex;
+  const pluginOrder = rawOrder ? {
+    ...(typeof addedAt === 'number' && Number.isSafeInteger(addedAt) && addedAt > 0 ? { addedAt } : {}),
+    ...(typeof recentIndex === 'number' && Number.isSafeInteger(recentIndex) && recentIndex >= 0 && recentIndex < 100 ? { recentIndex } : {}),
+  } : undefined;
   return { ref, display, links, revision,
+    ...(pluginOrder && Object.keys(pluginOrder).length ? { pluginOrder } : {}),
     ...(collectionId === 'plugins' ? { actions: normalizeRemoteActions(item.actions) } : {}),
   };
 }

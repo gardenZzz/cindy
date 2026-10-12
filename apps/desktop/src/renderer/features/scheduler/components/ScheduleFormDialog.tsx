@@ -26,7 +26,7 @@ import { applyTemplateParams } from '@cindy/maker-scheduler/template-engine';
 import { ScriptCapabilityMultiSelect } from './ScriptCapabilityMultiSelect';
 
 import {
-  getScheduleDefaultModel,
+  getScheduleDefaultRoute,
   rememberScheduleFormPrefs,
   useScheduleForm,
   deriveRunMode,
@@ -135,7 +135,7 @@ export function ScheduleFormDialog({
   const formApi = useScheduleForm(initial);
   const { form, setField, selectModelConfiguration, setDestination, setRunMode, selectBoundSession, applyTemplateAgentFields, reset, toInput, validate } = formApi;
   const caps = useAgentCapabilities(form.agentKind);
-  const { providers } = useProviders();
+  const { providers, loading: providersLoading } = useProviders();
   // "运行会话"三态(fresh / persistent / bound)与心跳形态派生值。
   // hasRealBinding = targetSessionId 为真实会话 id(B 已绑 / C 已选 / MCP 手绑),
   // 此时目录 / worktree / fastMode 由绑定会话决定,表单隐藏对应字段。
@@ -434,16 +434,24 @@ export function ScheduleFormDialog({
   }, [caps.capabilities, form.model]);
 
   // form.model 为空时回填默认模型（三级回退,所见即所存）。
-  // 覆盖历史遗留的空 model 任务（编辑打开时回填）；若不回填,提交后落库是
-  // 空字符串,runner 走自己 hardcode 的兜底 —— 两边一旦漂移就会出现
-  // "任务里看着选了 Opus 4.8、实际每次跑 4.7"（2026-06 实际踩坑）。
+  // 覆盖历史遗留的空 model 任务（编辑打开时回填）；第三级(新建任务默认)要等供应商
+  // 清单到位才能算出,算不出时保持留空,runner 按同一口径实时解析。
   // ⚠️ heartbeat 形态(targetSessionId 非空,含 '__pending__')必须跳过:
   // 空 model = "跟随会话"是有效语义,回填会把 MCP 建的跟随任务静默落成
   // 显式模型,下次 fire runner setModel 反向改掉绑定会话的模型。
   useEffect(() => {
     if (form.targetSessionId.trim()) return;
-    if (!form.model) setField('model', getScheduleDefaultModel(form.agentKind));
-  }, [form.model, form.agentKind, form.targetSessionId, setField]);
+    if (form.model) return;
+    // 默认路由限定在表单已选的来源内,模型与来源成对回填(已选来源保持不变)。
+    const route = getScheduleDefaultRoute(
+      form.agentKind,
+      providersLoading ? undefined : providers,
+      form.providerId,
+    );
+    if (!route.model) return;
+    setField('model', route.model);
+    if (route.providerId && !form.providerId.trim()) setField('providerId', route.providerId);
+  }, [form.model, form.agentKind, form.targetSessionId, form.providerId, setField, providers, providersLoading]);
 
   // 档位失配自动清除必须按 (生效来源, 模型) 判定。扁平 capabilities 在 Pi + 自定义 API
   // 同 id 时给的是跨来源交集(可能为空),据它清理会把 CLIProxyAPI 这类来源上明明支持的

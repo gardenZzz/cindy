@@ -118,3 +118,36 @@ Desktop 将服务端持久消息 `origin: "system"` 中的
 
 本次客户端回归使用离线 HTTP/WebSocket fixture、桌面与手机组件测试；不代表安装版、
 线上服务或真实双账号已经验收。普通项目任务与伙伴私聊不经过本次群提示投影。
+
+## 伙伴群聊故障回归（#5604 / #5605 / #5606）
+
+以下离线回归不代替含修复构建的现场验收：
+
+| 场景 | 自动回归 | 现场预期 |
+| --- | --- | --- |
+| 服务端安排卡署名为真人 | 双端 `BotGroupChatView.test.tsx` / `BotGroupChatScreen.test.tsx` | 卡片显示负责人、步骤和开始/不用了；旧安排只读。开始后完成第一步可继续，另一张安排可取消；运行中补充及等待时返工语义不变 |
+| 群里同时有真人、本机与外来伙伴 | `botGroupRemoteResourceProvider.test.ts`、Mobile `botGroupRemote.test.ts` / `BotGroupChatScreen.test.tsx` | 添加/移出伙伴不被既有真人挡住；真人按 actor ID 单独移出；真人不进入负责人/步骤候选，外来活跃伙伴仍可分工；无管理权限失败且名单不变 |
+| 附件准备、media POST、OSS PUT、complete 或消息提交失败 | `botGroupAttachments.test.ts`、`chatServerMedia.test.ts`、`chatServer.test.ts`、`chatServerErrors.test.ts` | 双端按原因显示提示；日志包含阶段、稳定错误码、可取得的 HTTP 状态，以及同次发送关联 trace。不得记录正文、文件名/路径、token、签名 URL |
+| 发送超过 15 秒，回执丢失后重试 | `chatServer.test.ts`、device-link `invokePolicy.test.ts`、Mobile `botGroupCopy.test.ts`，保留现有 composer 重试用例 | 群发送单独等待最多 180 秒；超时提示结果未确认，刷新确认后再重试；同一内容沿用 clientId，当前主机进程内在途/已成功请求复用回执，不重复消耗手机上传或提交消息 |
+
+现场使用无敏感内容的小 JPEG，分别验证电脑选图、手机 peer/OSS 引用、纯文字消息；
+记录 Desktop/Mobile 的版本与 sourceCommit、发生时间、群 ID、发送 trace 及服务器消息 ID。
+`Chat group send confirmed` 是主机收到提交回执，不能据它推断手机已经收到了回包。
+失败时按阶段关联服务器的认证、media prepare、OSS 签名/上传、complete 和消息提交记录；
+接口 `/ready` 正常或未认证 `/me` 返回 401 都不能证明对象存储已配置或附件链路正常。
+老群升级另看下一次重试的错误码及对应请求/上传阶段，保留源历史与导入水位，不以新发图成功代替历史完整性验收。
+
+回执缓存只在当前账号的主机进程内保留最近 128 次成功发送，进程重启/换账号后仍依赖服务器的
+operationId 幂等合同，不宣称具备跨重启持久发件箱。检查 Windows + Android 原现场和 iOS
+同源界面，分别记录 Light/Dark 是否目检；没有实际执行的项保持待验收。
+
+## 伙伴补全与附件 DEV 验收（2026-10-08）
+
+服务端启动加 `--local-media --data-dir=<独立目录>` 可启用磁盘对象存储：真实 PUT/GET
+传输字节、校验大小/类型、封存后重启可读。短期地址限本机和短时有效；不是生产 OSS 替代品。
+客户端只在未打包、显式隔离且 baseUrl 为 `http://127.0.0.1:3018` 时接受对应 HTTP 媒体地址，
+正式包仍仅允许 HTTPS，不转发账号令牌到媒体地址。
+
+隔离 DEV 已通过图片和文本文件发送、两位真实伙伴正确读取、分工开始/结果回流、等待换人继续、
+不用了后恢复普通讨论、修改提议与重启读回。完整验收范围与剩余缺项见
+[功能对照](chat-server-feature-parity.md)。不据此声称生产对象存储故障已经修复。

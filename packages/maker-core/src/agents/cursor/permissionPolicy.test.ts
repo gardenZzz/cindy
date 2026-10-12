@@ -600,7 +600,7 @@ describe('CursorAgent MCP approval policy (shared host classifier)', () => {
       outcome: { outcome: 'cancelled' },
     });
     // Avoid hanging the unresolved InteractionDecision promise.
-    resolveCard?.({ kind: 'permission', behavior: 'deny' });
+    resolveCard!({ kind: 'permission', behavior: 'deny' });
     await handle.close();
   });
 });
