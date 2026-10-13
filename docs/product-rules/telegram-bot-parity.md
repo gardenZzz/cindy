@@ -16,6 +16,14 @@ Cindy 有两个 Telegram bot，用户看到的是同一个产品：
 未指定连接仍解析默认来源。本项只调整官方 hook（及共用该入口的渠道），
 个人 bot 的独立默认配置与恢复策略不在此处改写。
 
+2026-10-13 目录来源判定边界（#5912）：目录来源只在与目录模型成对选择时才算「明确选中」。
+目录模型为空（继承 IM 默认）时，账号可用、未停用、但目录里根本不提供继承模型的残留来源
+按未指定连接忽略，按 IM 默认来源路由并记 warn。显式来源失效——账号断开／停用，或提供该
+模型但模型／运行路径被停用、退役——仍走失败提示、不换账号；路由不可用的错误附「设置 → IM
+机器人」重新选择模型的指引，失败原因写入主日志。服务端快照（主动推送与重连镜像）改动某目录
+的 Agent 或模型时，同键的配对来源一并清除；多个 Slack team 共用的 null-team 兜底来源不因
+单个 team 改路由被清，以免其它 team 静默改走默认来源。
+
 > 这张表存在的理由与 `botCommands.ts` 注册表一样：把「散落两个仓、谁也不知道差在哪」
 > 变成「表里显式登记」。**新增或修改任一 bot 的用户可见行为时，必须同步更新本表对应
 > 行**；差异可以有，但不能没人说得清。
@@ -74,7 +82,7 @@ App 完成未读与提醒统一由 `renderer/hooks/useSessionRunningStatus.ts` �
 | 执行中交互卡的**渲染与按钮排布**（官方需双方协商 `telegram-card-ops-v1`） | `packages/lizi-im/src/telegram/components.ts` 的 `layoutTelegramCard` + `cardLayout.ts` | 粗体标题 + markdown 正文 → HTML、正文上限 3800（`capRenderedText` 安全截断）、label ≤12 字两两并排——两侧同一份。**回调编码不同**：个人编成内存 ref token（`buildCardPayload`），官方由服务端铸 callback_data 并照旧回 `interaction.decision`（`hook-control/telegramCardOps.ts`）。卡片的**语义层**（选项、按钮文案来源、权限入参摘要）仍各自一份，见第三节「交互卡的语义与文案」。群里的卡改投 owner 私聊及其来源说明仍由服务端按现行规则决定。op 被明确拒绝时回落 `interaction.request`（服务端渲染） |
 | 官方 bot 的**命令菜单**（需双方协商 `telegram-commands-v1`） | `apps/desktop/src/main/im/shared/botCommands.ts` 的 `buildOfficialBotCommandMenus` | 官方菜单的命令集合、顺序、文案都取注册表（与个人菜单同一份 i18n key），desktop 按 en（默认）/ zh / ja / ko 各渲染一份经 `provider.commands.set` 下发，服务端只执行 `setMyCommands`，且只管理默认菜单与 zh / ja / ko（每次全量重写，缺席的语言写空，其它语言码含显式 `en` 一律忽略）；菜单只存服务端内存、不落库：desktop 每次握手都重发，服务端重启后到桌面重连前（以及设备离线期间）用服务端默认菜单。**语言口径沿用两侧既有差异**：官方按用户的 Telegram 语言，个人按桌面端语言。**命令分发不在这一行**：官方命令仍由服务端收入站并分发（1c 的别名差异照旧）。未协商时服务端用自己的 `TELEGRAM_COMMANDS` |
 | 渠道 `/stop` 的**明确停止** | `maker-ipc/register.ts` 的 `stopSessionTurnExplicitly` | 个人 IM 的 `/stop` / `!stop`（含微信，`im/shared/turnRunner.ts` 的 `stopActiveTurn`）与官方 hook 的 `task.cancel`（`hook-control/dispatcher.ts`，经 `stopSessionExplicitly` 注入）都走桌面 Stop 同一套清理：撤自动续跑与退避簿记、取消上下文溢出恢复、暂停 Goal、停输入队列并中止当前一轮。2026-10 之前两侧各少几步（个人不暂停 Goal、官方连自动续跑都不撤）。渠道侧只保留各自的排队收口（个人清 `sendQueue`，官方回 `turn.end(cancelled)`）。账号切换时的中止不是用户喊停，仍是普通 abort |
-| 新任务的**模型准入** | `im/shared/openChannelSession.ts` → `localDb/sessionOpening.ts` 的 `openSession` | 两侧（及共用 `sessionRepo` 的全部个人 IM 渠道）新建任务时都经桌面新建任务同一套准入：模型 / 来源 / 推理强度 / Fast 不被支持就拒绝建任务，不自动换模型；准入可能规范化来源与推理强度。**默认配置从哪读仍是有意不同**（第三节），这里只统一「读出来之后怎么校验」。复用 / 接管 / 复活既有任务不经过准入 |
+| 新任务的**模型准入** | `im/shared/openChannelSession.ts` → `localDb/sessionOpening.ts` 的 `openSession` | 两侧（及共用 `sessionRepo` 的全部个人 IM 渠道）新建任务时都经桌面新建任务同一套准入：模型 / 来源 / 推理强度 / Fast 不被支持就拒绝建任务，不自动换模型；准入可能规范化来源与推理强度。**默认配置从哪读仍是有意不同**（第三节），这里只统一「读出来之后怎么校验」；官方 hook 进准入前对残留目录来源的取舍见文首 2026-10-13 条。复用 / 接管 / 复活既有任务不经过准入 |
 | 群历史**检索实现** | `im/shared/groupHistorySearch.ts` | 真正执行查询的就是这一份：FTS（`hook_group_messages_fts` 的 MATCH）+ 中文 LIKE 兜底，**lane 条件写在 SQL 里**（MATCH 与 LIKE 用完全相同的 lane 条件，调用方没法先全局搜再事后过滤），加上结果映射（snippet / score / source）与上限（默认 8 条、最多 20 条、query 256 字）。两侧共用 |
 | 群历史检索的**逐 turn 授权租约** | `im/shared/groupHistoryAccess.ts` | 租约机制共用：`beginGroupHistoryAccess` 在 provider 真正开始这一轮之前登记作用域，终态 / 重排 / 失败时释放；`sessionInstanceId` 挡住「同一业务 session 重建后，旧 MCP 请求借用新实例权限」。**但产生 scope 的那一步各写各的**——个人是 `im/telegram/adapter.ts` 的 `groupHistoryAccessFor`，官方是 `hook-control/groupHistoryScope.ts` 的 `groupHistoryAccessForExternalKey`；群轮次两侧同为 lane-only，**私聊上给的不一样**，见第四节 2e。完整调用链：MCP 入口 `mcp-integrations/groupHistoryMcpServer.ts` 先 `readGroupHistoryAccess` 拿租约（拿不到直接 `NO_ACTIVE_TELEGRAM_SCOPE` 拒绝），再 `resolveTargetLane(scope, lane)` 定位，最后才调 `searchGroupHistory` |
 | 交互卡的**语义层**（`ask_user_question` / `plan_review` / 权限确认） | `im/shared/interactionCardModel.ts` | 选项集与决策模型两侧真跑同一份：至多 6 个选项（`MAX_OPTIONS`）、multiSelect 降级单选、只渲染第一问、plan 正文截断 1500（`MAX_PLAN_LEN`）、按钮文案的**产品级**上限 30（`BTN_LABEL_MAX`）、无选项降级时唯一按钮「继续」，以及 buttonId → 决策对象的构造与 header/body 拆分。**2026-08-19 起该模块另有一份全量视图**（顶层 `questions` 数组 + `needsAskMultiCard` 判定），只被支持卡片原地更新（`updateInteractiveCard`）的个人 IM 渠道消费——目前**仅飞书个人 bot**（`ui.cards.ask.multi` 打勾卡，多题/真多选，见 `cardBuilders.buildAskMultiCard`）；**本表对照的两个 Telegram bot 都不消费它**，上列 v1 规则对两侧与未提供 multi 文案的渠道仍逐字成立，看到飞书行为不同不要当漂移报官方那条链路由 `hook-control/interactions.ts` 直接 import 本模块（对 `@cindy/maker-core` 刻意只做 type-only 依赖，免得 hook 链路在运行期加载整个 barrel）。**渲染不在这里**——按钮文案来源、标题格式、省略号样式、尺寸上限都是各自渲染侧的事，见第三节 |
@@ -269,10 +277,26 @@ hook 侧既有的逐轮 `[渠道说明]`，两者措辞不同但都向模型说�
 
 适用范围：个人飞书/Lark、Telegram、Discord、微信、企业微信、钉钉，以及官方 Telegram、Slack；X 不参与。
 
-只回传自动执行的轮次：自动任务（scheduler `turnOrigin`），以及其它任务经 `send_to_session` 等
-发来的可见消息触发的回复。桌面里直接输入的消息、伙伴委派的内部协调输入都不回传。其它任务来信由
+只回传自动执行的轮次：自动任务（scheduler `turnOrigin`），其它任务经 `send_to_session` 等
+发来的可见消息触发的回复，以及 Agent 自己唤醒的轮次。桌面里直接输入的消息、伙伴委派的内部协调输入都不回传。其它任务来信由
 主进程在派发它的那次 `Session.send` 期间盖章（`maker-ipc/channelTurnSignal.ts`），随该轮的开始信号
 交给两条路径，只作用于这一轮；不改 maker-core 的 `SendOrigin`，以免插件钩子等把它当作非用户轮次。
+两条路径共用 `isRelayedChannelTurnSource` 一个判据。
+
+Agent 自己唤醒的轮次（2026-10-13 补齐）：Claude Code 的后台子代理、后台命令等完成后，CLI 自己注入
+`<task-notification>` 开新一轮，Cindy 这边没有任何 `Session.send`，旧版因此既没有开始信号也没有来源，
+被当作桌面输入留在桌面，只有原 IM 轮次还挂着的那一段（wake 任务的 continuation claim 让 IM 轮次等到第一次
+唤醒结束）随原轮次发出。现在 maker-core `Session` 在本代产品轮次已收口、没有预留中的发送时看到主代理的新
+输出（文本、思考、工具），就在该事件分发给监听者之前同步调用 `onProviderInitiatedTurn`；桌面以
+`provider-wake` 来源发出开始信号，回传与其它任务来信同一条发送、收口与清理路径。判据与引擎无关，
+Codex / Pi 目前没有此类自动唤醒。子代理事件（`agentMeta.parentUuid`）、后台事件、claim 挡住的续跑段都不算；
+产品轮次里接受过插话（steer）时，收口后第一个无发送的轮次一律归插话、不回传：插话赶不上原轮次时
+Claude 会把它当作新一轮执行，而 Cindy 分不出插话是否已被原轮次吸收，宁可漏传这一轮，也不把桌面输入的回复发到渠道。
+仍属原 IM 轮次（官方 hook 仍在观察、个人渠道队列里仍有 IM 轮次）时由该轮次一并发出，不另发后台结果。
+已知边界：唤醒轮次自身没有来源，跟在桌面输入或静默运行的自动任务之后被唤醒时同样回传；个人渠道只对已接好
+输出的渠道自有任务生效（重启后先在桌面发起、尚未经 IM 接线的任务，唤醒轮次留在桌面，不从中途开始转播），
+`/ctr` 接管任务仍只转播 scheduler 输出；唤醒后还没产生任何输出就直接失败的轮次（只有一个终止错误）与上一轮迟到的
+错误分不开，不识别为唤醒、不回传，失败留在桌面（与此前行为相同）。
 
 个人渠道通过 `im/shared/turnRunner.ts` 回传上述轮次的输出，无需先 `/ctr` 接管。自动任务保留任务名，
 其它来源直接显示回复正文，目的地沿用该任务原聊天和话题。正常 IM 入站轮次仍只发送一次；
@@ -296,7 +320,7 @@ bot 身份按入站使用的稳定 ID 校验；Discord 取 gateway application i
 
 官方 Telegram、Slack 复用已有 hook binding、轮次观察和附件收集；双方宣告 `session-result-v1`
 后，后台回传与任务派发共用渠道 key 判定，兼容既有 Slack 前缀、team-slack、旧频道和 DM key；X 不回传。
-轮次终态时按来源决定是否发送（scheduler 来源，或开始时盖了其它任务来信章）。结果用 `turn.end(background: true)` 发送，服务端在原私聊或话题新发消息。普通 IM 轮次和
+轮次终态时按来源决定是否发送（scheduler 来源，或开始时带其它任务来信 / Agent 自己唤醒的来源）。结果用 `turn.end(background: true)` 发送，服务端在原私聊或话题新发消息。普通 IM 轮次和
 已有 retry/reopen 轮次不另发一份。发送前复核账号代次、连接、目录授权与会话绑定；服务端
 再核对设备绑定、聊天归属及 `/new` 代次。Telegram 保存新消息 route，回复结果仍回到原 lane。
 

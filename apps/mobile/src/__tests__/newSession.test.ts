@@ -1747,6 +1747,48 @@ describe('new session model', () => {
     ]);
   });
 
+  // Remote path strings deliberately model the host OS, not the test runner's filesystem.
+  it.each([
+    ['slash direction', 'D:\\projects\\cindy', 'D:/projects/cindy'],
+    ['letter case', 'D:/projects/cindy', 'd:/PROJECTS/Cindy'],
+    ['trailing separator', 'D:\\projects\\cindy', 'D:\\projects\\cindy\\'],
+    ['combined variants', 'D:\\projects\\cindy', 'd:/PROJECTS/cindy/'],
+    ['drive root', 'D:\\', 'd:/'],
+    ['UNC share', '\\\\Server\\Share\\cindy', '//server/share/CINDY/'],
+    ['worktree', 'D:\\projects\\cindy', 'd:/PROJECTS/cindy/.cindy-worktrees/branch'],
+  ])('deduplicates equivalent remote Windows %s before sorting and limiting', (_name, original, variant) => {
+    const options = buildRecentWorkspaceOptions([
+      remoteSession('original', { workingDir: original, deviceLinkDeviceId: 'pc' }),
+      remoteSession('variant', {
+        workingDir: variant, deviceLinkDeviceId: 'pc', userSendAt: '2026-01-01T00:06:00.000Z',
+      }),
+      remoteSession('other', {
+        workingDir: 'D:/projects/other', deviceLinkDeviceId: 'pc', userSendAt: '2026-01-01T00:05:00.000Z',
+      }),
+      remoteSession('another-host', {
+        workingDir: variant, deviceLinkDeviceId: 'another-pc', userSendAt: '2026-01-01T00:07:00.000Z',
+      }),
+    ], 'pc', 2);
+
+    expect(options).toHaveLength(2);
+    expect(options[0]).toMatchObject({
+      workingDir: original, sessionCount: 2, lastActivityAt: '2026-01-01T00:06:00.000Z',
+    });
+    expect(options[1]).toMatchObject({ workingDir: 'D:/projects/other', sessionCount: 1 });
+  });
+
+  it('preserves remote POSIX case and literal backslashes while ignoring trailing slashes', () => {
+    const paths = ['/repo/App', '/repo/app', '/repo/app/', '/repo/weird\\name', '/repo/weird/name'];
+    const options = buildRecentWorkspaceOptions(paths.map((workingDir, index) =>
+      remoteSession(String(index), { workingDir }),
+    ));
+    expect(options).toHaveLength(4);
+    expect(options.find((option) => option.workingDir === '/repo/app')?.sessionCount).toBe(2);
+    expect(options.map((option) => option.workingDir)).toEqual(expect.arrayContaining([
+      '/repo/App', '/repo/weird\\name', '/repo/weird/name',
+    ]));
+  });
+
   it('excludes worker-only directories before limiting recent workspace picks', () => {
     const sessions = [
       ...Array.from({ length: 6 }, (_, index) => remoteSession(`worker-${index}`, {
@@ -2028,9 +2070,18 @@ describe('new session composer surface', () => {
     const browseHiddenToggleStyleStart = newSource.indexOf('browseHiddenToggle: {');
     const browseHiddenToggleStyleEnd = newSource.indexOf('browseCheckbox: {', browseHiddenToggleStyleStart);
     const browseHiddenToggleStyle = newSource.slice(browseHiddenToggleStyleStart, browseHiddenToggleStyleEnd);
-    const createStart = newSource.indexOf('const create = useCallback(async () => {');
-    const createEnd = newSource.indexOf('return (', createStart);
+    const createStart = newSource.indexOf('const createMessageSession = useCallback(async () => {');
+    const createEnd = newSource.indexOf('const createGoalSession = useCallback', createStart);
+    expect(createStart).toBeGreaterThan(-1);
+    expect(createEnd).toBeGreaterThan(createStart);
     const createSource = newSource.slice(createStart, createEnd);
+    const dispatchStart = newSource.indexOf('const create = useCallback(async () => {', createEnd);
+    expect(dispatchStart).toBeGreaterThan(createEnd);
+    const dispatchEnd = newSource.indexOf('const goalDraftCommand', dispatchStart);
+    expect(dispatchEnd).toBeGreaterThan(dispatchStart);
+    const dispatchSource = newSource.slice(dispatchStart, dispatchEnd);
+    expect(dispatchSource).toContain("if (parsed?.name !== 'goal' || pendingGoalSkillRef.current === 'goal')");
+    expect(dispatchSource).toContain('await createMessageSession();');
 
     expect(newSource).toContain("MobileComposerInputRow,");
     expect(sessionSource).toContain("MobileComposerInputRow,");
@@ -2549,10 +2600,11 @@ describe('submit guard catalog wiring (source locks)', () => {
     expect(newSource.match(/parseAck: parseDiscardPrecreatedAck,/g) ?? []).toHaveLength(2);
     // 真局部 slice(独立 review round-22 Standards P1:全文件 indexOf 命中 create 首个
     // 检查,Goal 检查删掉也照样绿)
-    const createSlice = newSource.slice(
-      newSource.indexOf('const create = useCallback'),
-      newSource.indexOf('const createGoalSession = useCallback'),
-    );
+    const createStart = newSource.indexOf('const createMessageSession = useCallback');
+    const goalStart = newSource.indexOf('const createGoalSession = useCallback');
+    expect(createStart).toBeGreaterThan(-1);
+    expect(goalStart).toBeGreaterThan(createStart);
+    const createSlice = newSource.slice(createStart, goalStart);
     const goalSlice = newSource.slice(newSource.indexOf('const createGoalSession = useCallback'));
     // 入口设备检查先于加锁(round-20 Standards P1 busy 泄漏):goal 的 setGoalBusy(true)
     // 前必须有该 return(create() 的检查在 try 内,finally 兜底,不要求此序)。

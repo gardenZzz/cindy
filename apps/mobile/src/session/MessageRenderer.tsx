@@ -25,7 +25,7 @@ import { mobileDebugEnabled, mobileDebugLog } from '@/debug/mobileDebugLog';
 import { errorText, resolvedUrlKind } from '@/debug/fileDiagnostics';
 import { createContext, Fragment, memo, useCallback, useContext, useEffect, useLayoutEffect, useMemo, useRef, useState, type ComponentProps, type Dispatch, type ReactNode, type SetStateAction } from 'react';
 import { useTranslation } from 'react-i18next';
-import { Image as ExpoImage } from 'expo-image';
+import { MessageLoadingImage, MessageImagePlaceholder } from './MessageLoadingImage';
 import {
   ArrowLeftRight,
   Bot,
@@ -766,6 +766,7 @@ export function MessageRenderer({
   busyAction,
   canLoadEarlier,
   emptyTestID,
+  emptyMessage,
   bottomOverlayHeight,
   contentBottomInset,
   isSessionStreaming,
@@ -805,6 +806,7 @@ export function MessageRenderer({
   /** Oldest loaded host cursor; synthetic cards must not mask successful history prepends. */
   loadEarlierProgressKey?: string | null;
   emptyTestID?: string;
+  emptyMessage?: string;
   /** 排队消息 inline 区(InlineQueueSection),渲染在最后一条消息之后、随内容滚动。 */
   queueFooter?: ReactNode;
   scrollResetKey?: string;
@@ -2822,7 +2824,7 @@ export function MessageRenderer({
         ]}
         ListEmptyComponent={syncingWhileEmpty
           ? <SyncingMessages />
-          : <EmptyMessages testID={emptyTestID} />}
+          : <EmptyMessages testID={emptyTestID} copy={emptyMessage} />}
         ListHeaderComponent={
           loadEarlierAction.visible ? (
             <MessageListActionButton
@@ -3276,12 +3278,12 @@ function ForkOriginMarker({ onOpenForkOrigin }: { onOpenForkOrigin?: () => void 
   );
 }
 
-function EmptyMessages({ testID }: { testID?: string }) {
+function EmptyMessages({ testID, copy }: { testID?: string; copy?: string }) {
   const styles = useThemedStyles(makeStyles);
   const { t } = useTranslation();
   return (
     <View style={styles.emptyCard} testID={testID ?? 'message.empty'}>
-      <Text style={styles.emptyTitle}>{t('message.renderer.emptyMessages')}</Text>
+      <Text style={styles.emptyTitle}>{copy ?? t('message.renderer.emptyMessages')}</Text>
     </View>
   );
 }
@@ -6506,7 +6508,7 @@ function renderInline(
           testID="message.markdownInlineImage"
         >
           <View style={size}>
-            <ExpoImage
+            <MessageLoadingImage
               accessibilityLabel={inline.alt || i18n.t('message.renderer.imageFallbackTitle')}
               contentFit="cover"
               recyclingKey={inline.url}
@@ -6766,7 +6768,7 @@ function PendingAttachmentImage({ layout, uri, sourceUri = uri, onError, onSize,
   );
   return (
     <View style={styles.attachmentImageWrap}>
-      <ExpoImage
+      <MessageLoadingImage
         source={{ uri }}
         recyclingKey={uri}
         contentFit="contain"
@@ -6941,7 +6943,7 @@ function MediaPreview({
             <Text style={styles.mediaHint} numberOfLines={2}>{fallbackDetail}</Text>
           </View>
         ) : thumbUri ? (
-          <ExpoImage
+          <MessageLoadingImage
             // 尺寸未知时先 contain 进最大框，解码后收敛到真实比例。
             contentFit="contain"
             recyclingKey={thumbUri}
@@ -6951,7 +6953,7 @@ function MediaPreview({
             style={[styles.attachmentImage, displaySize]}
           />
         ) : (
-          <View style={[styles.attachmentImagePending, displaySize]} testID="message.mediaThumbLoading" />
+          <MessageImagePlaceholder style={displaySize} />
         )}
       </MessageContentOpenButton>
     );
@@ -6973,7 +6975,7 @@ function MediaPreview({
         testID="message.mediaPreviewButton"
       >
         {uri ? (
-          <ExpoImage
+          <MessageLoadingImage
             contentFit="cover"
             recyclingKey={uri}
             source={{ uri }}
@@ -6981,7 +6983,7 @@ function MediaPreview({
             style={[styles.imagePreview, frameSize]}
           />
         ) : phase.kind === 'resolving' ? (
-          <View style={[styles.imagePreview, frameSize]} testID="message.mediaThumbLoading" />
+          <MessageImagePlaceholder style={[styles.imagePreview, frameSize]} />
         ) : (
           <View
             style={[styles.imagePreview, styles.imagePreviewFallback, frameSize]}

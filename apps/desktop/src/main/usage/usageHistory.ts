@@ -194,6 +194,7 @@ export interface UsageHistoryTask {
   title: string;
   model: string;
   providerId: string | null;
+  source?: string | null;
   contextTokens: number;
   contextWindow: number;
   /** unix ms */

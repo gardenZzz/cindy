@@ -51,8 +51,10 @@ Claude Code 在原有 per-sidechain 回调里检测所有模型；Pi / Codex 在
 这仍是有界启发式，不是任意长度循环的证明，也不以没有文件改动作为失败依据。
 
 节奏与复核：一次普通调用若距上一次普通调用开始已有至少 30 秒（`sleep` 后再查 CI、
-命令内自带等待或慢推理），视为在等外部进度的节奏轮询，不计入上述重复与窗口判据，
-只续接完全相同结果的连续段。上述判据命中只算“疑似”（`final: false`）：host 通过
+命令内自带等待或慢推理），或其结果距上一次普通结果到达已有至少 30 秒（模型一次发出
+多条等待命令、工具再逐条排队执行，发出时刻挨在一起但每条都真等了），视为在等外部进度
+的节奏轮询，不计入上述重复与窗口判据，只续接完全相同结果的连续段；同时发出又同时返回的
+快速重复照常计数。上述判据命中只算“疑似”（`final: false`）：host 通过
 `MakerDeps.toolLoopReviewer`（Pi / Codex）与 `AgentDeps.toolLoopReviewer`（Claude Code）
 注入同一个辅助模型复核入口，由 `agents/shared/tool-loop-review.ts` 的 `ToolLoopMonitor`
 在后台复核，Agent 不暂停。复核 continue → 接下来 20 次普通结果不再报疑似；stop、
@@ -71,7 +73,9 @@ Claude Code 在原有 per-sidechain 回调里检测所有模型；Pi / Codex 在
 的厂商令牌与私钥、截断私钥块、URL 内嵌凭证、命令行凭证参数、凭证类 HTTP 头，最后以
 含字母和数字的 32 位以上连续串兜底，宁可多删），再截断到每段 400 字符，最后改写分隔标签；
 顺序不能颠倒，否则跨截断点的凭证会留下认不出的前缀。走共享辅助模型链，回答只接受
-CONTINUE / STOP。
+CONTINUE / STOP。供应商分享的受邀者会话（Claude Code 在分享者电脑上运行）与分享者自己的
+任务一样，交分享者电脑的辅助模型链复核（2026-10-13 用户裁决，见 `provider-sharing.md` §9）；
+Pi / Codex 的检测在任务所在电脑的 Session 上，用的是受邀者自己的复核入口。
 回归见 `loop-guard.test.ts`、`tool-loop-review.test.ts`、`session.tool-loop.test.ts`、
 Claude Code 的 `upstream-idle-watchdog.test.ts` 与 desktop 的 `tool-loop-reviewer.test.ts`。
 
@@ -179,6 +183,15 @@ vitest run src/agents/codex/app-server/external-auth.native.test.ts`，覆盖分
 管理员 requirements 可能覆盖 CLI 临时凭证设置：客户端可阻止后续任务，但启动后的
 配置检查不能证明原生初始化阶段从未读取历史根中的认证；不得声称具备这一保证，
 也不得自行复制上游策略加载器或改写用户认证文件规避策略。
+原生线程的 `model_provider` 不能证明其 `agent_message` 密文的实际来源：
+独立子 Agent 可以经代理使用其他供应商，而原生身份仍继承父线程。恢复到 GPT API 时，
+不得仅凭父线程的订阅身份自动删除协作密文；普通提前闭流也不是解密失败的证据。
+遇到 `stream closed before response.completed` 的终态错误时，两端可提供显式的
+可读历史恢复入口，保留普通重试；复用 `fork-strip-encrypted`，保留原任务且不自动发消息。
+Desktop 与 Mobile 恢复进行期间只禁用来源任务的重试，不阻塞其他任务；原任务出现新输入或重新运行后，
+迟到的恢复结果不得自动跳转，旧操作完成时也不得释放其他任务或后续操作的等待状态。
+Desktop 回包还须核对浏览器当前路由，覆盖地址已切换但 React 尚未渲染新任务的窗口。
+旧格式包含加密 `agent_message` 时也走既有历史恢复标记，不由 legacy sanitizer 丢弃消息。
 普通加密推理失败继续使用现有 HTTP 透明重试；只有上游明确
 拒绝且请求里仅剩不可剥除的压缩块密文时，proxy 才标记
 `CINDY_ENCRYPTED_COMPACTION_INCOMPATIBLE`，交给既有 compact 失败恢复流程。
@@ -409,6 +422,15 @@ sessionRunningRetry 就停。每次因 replacement 关闭而重新入队都计�
   capability selection 与 auto-review intent。不得把无人值守只读边界重置成普通
   Auto，也不得用固定 wait 提示覆盖原请求的能力选择或审查意图。
   Claude wake continuation 与 Codex yield continuation 先分账，不抽公共模块。
+- **Provider 自己开的轮次要显式交给宿主。** 本代产品轮次已收口、没有预留中的 `Session.send`
+  时出现的主代理新输出（Claude Code 后台任务完成后 CLI 自行注入 `<task-notification>` 开的
+  新一轮）沿用上一代 generation、没有 `turnOrigin`，也不经过 `beforeProviderStart`。`Session`
+  在该轮首个事件分发给监听者之前同步调用 `SessionTurnLifecycleObserver.onProviderInitiatedTurn`，
+  每轮一次，终态后清除；子代理事件、后台事件、claim 挡住的续跑段不触发。同一产品轮次接受过
+  插话时，收口后第一个无发送的轮次归插话（分不出插话是否已被原轮次吸收，宁可漏报）。桌面用它把这类轮次回传到 IM（`maker-ipc/channelTurnSignal.ts`）；
+  回调必须同步决定，异步查询会从轮次中途开始观察；桌面侧与普通回传一样只在 IM 账号仍有效、渠道已连接时标记。
+  该轮沿用的 generation 已记过上一轮的 `done`，唤醒轮自己的终止 error 不按「done 之后的迟到 error」过滤，
+  照常按失败收口（唤醒输出之前到达的迟到 error 仍过滤）。回归见 `session.origin.test.ts`。
 
 ### Auto 模式的同范围自动跟进
 

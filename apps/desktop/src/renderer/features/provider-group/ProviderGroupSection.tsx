@@ -26,6 +26,7 @@ import { Select } from '@/components/ui/select';
 import { Switch } from '@/components/ui/switch';
 import { Tip } from '@/components/ui/tooltip';
 import { useOptionalAuthDeviceId } from '@/contexts/AuthContext';
+import { useProviders } from '@/hooks/useProviders';
 import { toast } from '@/lib/toast';
 import { cn } from '@/lib/utils';
 import { mapIpcErrorToI18nKey } from '@/utils/ipcError';
@@ -41,6 +42,8 @@ import {
 } from '../../../shared/providerGroup';
 import { providerShareComputerName, useProviderShareOwnerNameOf } from '../provider-share/providerShareNames';
 import { GroupMemberQuota, groupMemberQuotaTarget } from './GroupMemberQuota';
+import { GroupMemberDetailsButton, GroupMemberVersion } from './GroupMemberVersion';
+import { providerWeeklyQuotaSource } from '../../../shared/providerQuotaSource';
 import { ProviderGroupAddDialog } from './ProviderGroupAddDialog';
 import { useProviderGroup } from './useProviderGroup';
 
@@ -51,6 +54,9 @@ export function ProviderGroupSection({ providerId, providerName }: { providerId:
   const { t } = useTranslation();
   const { confirm } = useConfirmDialog();
   const group = useProviderGroup(providerId, { live: true });
+  const { providers } = useProviders();
+  const provider = providers.find((entry) => entry.id === providerId);
+  const supportsUsage = provider && providerWeeklyQuotaSource({ ...provider, connected: true, suspended: false }) === 'claude';
   const [addOpen, setAddOpen] = useState(false);
   const [saving, setSaving] = useState(false);
   const config = group.view?.config ?? null;
@@ -173,7 +179,7 @@ export function ProviderGroupSection({ providerId, providerName }: { providerId:
                 value={config.strategy}
                 onValueChange={(strategy: ProviderGroupStrategy) => void save({ ...config, strategy })}
                 aria-label={t('providerGroup.strategy.label')}
-                options={PROVIDER_GROUP_STRATEGIES.map((value) => ({
+                options={PROVIDER_GROUP_STRATEGIES.filter((value) => value !== 'usage' || supportsUsage || config.strategy === 'usage').map((value) => ({
                   value,
                   label: t(`providerGroup.strategy.${value}`),
                   disabled: saving,
@@ -266,7 +272,8 @@ function MemberRow({
       className={cn(!first && 'border-t border-[var(--settings-theme-card-border)]')}
     >
       <div className="flex flex-wrap items-center gap-3 px-4 py-3">
-        <button
+        <GroupMemberDetailsButton
+          status={status}
           type="button"
           aria-expanded={quotaOpen}
           aria-controls={quotaOpen ? quotaId : undefined}
@@ -283,6 +290,7 @@ function MemberRow({
           <span className={cn('flex min-w-0 flex-1 flex-col gap-0.5', member.paused && 'opacity-60')}>
             <span className="flex flex-wrap items-baseline gap-2 text-13">
               <span className="font-medium text-[var(--text-primary)]">{label}</span>
+              <GroupMemberVersion status={status} />
               {source && <span className="text-12 text-[var(--text-secondary)]">{source}</span>}
               <ChevronRight
                 aria-hidden="true"
@@ -313,7 +321,7 @@ function MemberRow({
               )}
             </span>
           </span>
-        </button>
+        </GroupMemberDetailsButton>
         <div className="flex shrink-0 items-center gap-1.5">
           <Select
             label={t('providerGroup.member.limitAria', { name: label })}

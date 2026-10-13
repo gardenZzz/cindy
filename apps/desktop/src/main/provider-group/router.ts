@@ -13,11 +13,14 @@
  */
 import { findCatalogModel, isModelSelectableForNewRoute } from '@cindy/model-providers';
 import type { AgentKind } from '@cindy/maker-core';
+import type { RemoteAgentCaps } from '@cindy/device-link';
 
 import type { ProviderGroupConfig, ProviderGroupMember, ProviderGroupView } from '../../shared/providerGroup.js';
 import type { ProviderGroupBinding } from './bindings.js';
 import type { ProviderGroupDirectory, ResolvedProviderGroupMember } from './directory.js';
 import { pickProviderGroupMember, type SchedulableMember } from './scheduler.js';
+import { createGuestSupportReader } from './sharedStatus.js';
+import { providerGroupUsageState } from './usage.js';
 
 /** 撞到用量上限但拿不到重置时刻时，默认冷却多久。 */
 export const PROVIDER_GROUP_DEFAULT_COOLDOWN_MS = 30 * 60_000;
@@ -39,6 +42,8 @@ export type ProviderGroupPersistedCooling = Record<string, Record<string, number
 
 export interface ProviderGroupRouterDeps {
   directory: ProviderGroupDirectory;
+  /** 仅详情页按需读取；分配与普通状态查询不探测远端能力。 */
+  readCaps?(member: ProviderGroupMember): Promise<RemoteAgentCaps>;
   readGroup(providerId: string): ProviderGroupConfig | null;
   listBindings(): Record<string, ProviderGroupBinding>;
   /** 这个任务现在是否正在运行一轮。 */
@@ -91,7 +96,7 @@ export type ProviderGroupPickResult =
 
 export interface ProviderGroupRouter {
   pick(input: ProviderGroupPickInput): Promise<ProviderGroupPickResult>;
-  view(providerId: string): Promise<ProviderGroupView>;
+  view(providerId: string, options?: string | { model?: string; includeGuestSupport?: boolean }): Promise<ProviderGroupView>;
   /** 经本组分到这台、正在运行的任务数。 */
   running(providerId: string, memberKey: string): number;
   markCooling(providerId: string, memberKey: string, until: number): void;
@@ -108,6 +113,7 @@ function coolKey(providerId: string, memberKey: string): string {
 }
 
 export function createProviderGroupRouter(deps: ProviderGroupRouterDeps): ProviderGroupRouter {
+  const guestSupportReader = deps.readCaps ? createGuestSupportReader(deps.readCaps) : null;
   const cooling = new Map<string, number>();
   try {
     for (const [providerId, members] of Object.entries(deps.coolingStore?.read() ?? {})) {
@@ -202,7 +208,8 @@ export function createProviderGroupRouter(deps: ProviderGroupRouterDeps): Provid
       const config = deps.readGroup(input.providerId);
       if (!config) return { kind: 'none' };
       const usable = (r: ResolvedProviderGroupMember) =>
-        offersModel(r, input.agentKind, input.model) && coolingUntil(input.providerId, r.member.key) === null;
+        offersModel(r, input.agentKind, input.model) && coolingUntil(input.providerId, r.member.key) === null
+        && !providerGroupUsageState(r.claudeUsage, input.model, deps.now()).limited;
       const ownLocal = (r: ResolvedProviderGroupMember) => input.localTask === true && r.member.kind === 'local';
       const paused = (r: ResolvedProviderGroupMember) => r.member.paused && !ownLocal(r);
       const local = input.localTask === true ? config.members.find((m) => m.kind === 'local') : undefined;
@@ -233,6 +240,7 @@ export function createProviderGroupRouter(deps: ProviderGroupRouterDeps): Provid
         running: memberRunning(input.providerId, r),
         limit: r.member.limit,
         weight: r.member.weight,
+        usagePercent: providerGroupUsageState(r.claudeUsage, input.model, deps.now()).usagePercent,
       }));
       const preferred = resolved.find((r) => ownLocal(r) && usable(r) && !input.exclude?.has(r.member.key));
       const key = preferred?.member.key ?? pickProviderGroupMember(schedulable, config.strategy, {
@@ -255,21 +263,31 @@ export function createProviderGroupRouter(deps: ProviderGroupRouterDeps): Provid
       return { kind: 'member', member: chosen.member, label: chosen.label, resolved };
     },
 
-    async view(providerId) {
+    async view(providerId, options) {
       const config = deps.readGroup(providerId);
       if (!config) return { providerId, config: null, members: [] };
       const resolved = await deps.directory.resolveMembers(providerId, config);
+      const viewOptions = typeof options === 'string' ? { model: options } : options;
+      const model = viewOptions?.model;
+      const readSupport = viewOptions?.includeGuestSupport ? guestSupportReader : null;
       return {
         providerId,
         config,
-        members: resolved.map((r) => {
-          const until = coolingUntil(providerId, r.member.key);
+        members: await Promise.all(resolved.map(async (r) => {
+          const guestSupport = readSupport
+            ? (r.member.kind === 'local' || r.state === 'ok' ? await readSupport(r.member) : 'unknown' as const)
+            : undefined;
+          const quota = providerGroupUsageState(r.claudeUsage, model, deps.now());
+          const remembered = coolingUntil(providerId, r.member.key);
+          const until = quota.limited && quota.resetAtMs === null ? null
+            : remembered === null ? quota.resetAtMs
+            : quota.resetAtMs === null ? remembered : Math.max(remembered, quota.resetAtMs);
           const count = memberRunning(providerId, r);
           const state = r.member.paused
             ? 'paused' as const
             : r.state !== 'ok'
               ? r.state
-              : until !== null
+              : until !== null || quota.limited
                 ? 'cooling' as const
                 : count >= r.member.limit
                   ? 'full' as const
@@ -279,6 +297,8 @@ export function createProviderGroupRouter(deps: ProviderGroupRouterDeps): Provid
             kind: r.member.kind,
             label: r.label,
             ...(r.ownerName ? { ownerName: r.ownerName } : {}),
+            ...(r.appVersion ? { appVersion: r.appVersion } : {}),
+            ...(guestSupport ? { guestSupport } : {}),
             state,
             ...(r.reason ? { reason: r.reason } : {}),
             running: count,
@@ -287,7 +307,8 @@ export function createProviderGroupRouter(deps: ProviderGroupRouterDeps): Provid
             paused: r.member.paused,
             ...(until !== null ? { coolingUntil: until } : {}),
           };
-        }),
+        })),
+        ...(model ? { model } : {}),
       };
     },
 

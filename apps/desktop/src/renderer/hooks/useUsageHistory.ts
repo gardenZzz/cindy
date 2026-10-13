@@ -117,6 +117,7 @@ export interface UsageHistoryTask {
   title: string;
   model: string;
   providerId: string | null;
+  source?: string | null;
   contextTokens: number;
   contextWindow: number;
   /** unix ms */
@@ -560,7 +561,7 @@ async function load(scopeKey: string, opts?: { forceRefresh?: boolean; resetPric
 }
 
 /** 影响「最耗 token 的任务」展示的任务字段。 */
-const TASK_META_KEYS = ['title', 'status', 'model', 'providerId'] as const;
+const TASK_META_KEYS = ['title', 'status', 'model', 'providerId', 'source'] as const;
 
 export type UsageHistoryWindow = number | 'all';
 

@@ -238,8 +238,8 @@ beforeEach(() => {
   root = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'cindy-group-relay-')));
 });
 
-afterEach(() => {
-  fs.rmSync(root, { recursive: true, force: true });
+afterEach(async () => {
+  await fs.promises.rm(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
 });
 
 let runSeq = 0;
